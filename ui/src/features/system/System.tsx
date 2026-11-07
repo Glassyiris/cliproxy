@@ -15,52 +15,19 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { PageFrame } from "../../app/PageFrame.tsx";
+import { useConfig } from "../../app/serverQueries.ts";
 import { useSession } from "../../app/Session.tsx";
+import { ReadError } from "../../components/ReadError.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
-import { ApiError, ConnectionError } from "../../lib/api/client.ts";
+import { ApiError } from "../../lib/api/client.ts";
 import type { Config } from "../../lib/api/config.ts";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
 import { repository } from "../../lib/repository.ts";
 import { layout } from "../../themes/site/layout.ts";
-import { useConfig, useLatestVersion } from "./queries.ts";
+import { useLatestVersion } from "./queries.ts";
 import { releaseStatus } from "./version.ts";
-
-const errorText = (error: unknown) =>
-  error instanceof ConnectionError
-    ? error.reason === "timeout"
-      ? t("app.connection.timeout")
-      : t("app.connection.unreachable")
-    : error instanceof Error
-      ? error.message
-      : String(error);
-
-/** A read that failed, or a route this server does not implement. */
-function ReadError({ error, what, retry }: { error: unknown; what: string; retry: () => void }) {
-  if (error instanceof ApiError && error.notImplemented)
-    return (
-      <Banner
-        status="info"
-        title={t("app.read.unavailable")}
-        description={t("app.read.unimplemented", {
-          method: error.method,
-          path: error.path,
-          status: error.status,
-        })}
-      />
-    );
-  return (
-    <Banner
-      status="error"
-      title={t("app.read.failed", { what })}
-      description={errorText(error)}
-      endContent={
-        <Button label={t("app.read.retry")} variant="secondary" size="sm" onClick={retry} />
-      }
-    />
-  );
-}
 
 const notReported = () => (
   <Text type="body" color="secondary">

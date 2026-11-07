@@ -39,6 +39,8 @@ export function createQuotaChecker(sources: QuotaSources) {
   const tried = new Map<string, number>();
   const listeners = new Set<() => void>();
   let queue: Promise<unknown> = Promise.resolve();
+  // Bumped by stop(): a queued check made before it is dropped.
+  let epoch = 0;
   const changed = () => listeners.forEach((l) => l());
 
   const plugin = (p: string) =>
@@ -117,9 +119,11 @@ export function createQuotaChecker(sources: QuotaSources) {
   function check(a: Credential) {
     const k = quotaKey(a);
     if (wait(a)) return queue;
+    const at = epoch;
     pending.set(k, "queued");
     changed();
     return (queue = queue.then(async () => {
+      if (at !== epoch) return;
       try {
         // Right before the request goes out, the account as it is now must still exist, be
         // checkable and be due; only then is the time stamped.
@@ -130,8 +134,10 @@ export function createQuotaChecker(sources: QuotaSources) {
         changed();
         await read(now);
       } finally {
-        pending.delete(k);
-        changed();
+        if (at === epoch) {
+          pending.delete(k);
+          changed();
+        }
       }
     }));
   }
@@ -154,6 +160,16 @@ export function createQuotaChecker(sources: QuotaSources) {
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => void listeners.delete(listener);
+    },
+    /**
+     * For sign-out: every queued check is dropped without reading the sources or sending. A
+     * check already sent still finishes, unannounced. Checks asked later run again, as React's
+     * StrictMode remounts the provider with the same checker.
+     */
+    stop() {
+      epoch++;
+      pending.clear();
+      changed();
     },
   };
 }

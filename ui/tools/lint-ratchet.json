@@ -7,7 +7,6 @@
   "@typescript-eslint/no-explicit-any": {
     "src/lib/compare.ts": 2,
     "src/lib/config-path.ts": 2,
-    "src/lib/credentials.test.ts": 3,
     "src/lib/json.ts": 1
   },
   "@typescript-eslint/no-floating-promises": {
@@ -15,15 +14,14 @@
   },
   "@typescript-eslint/no-unsafe-argument": {
     "src/lib/compare.ts": 3,
-    "src/lib/credentials.test.ts": 2,
-    "src/lib/credentials.ts": 7,
+    "src/lib/credentials.ts": 6,
     "src/lib/quota-windows.ts": 13
   },
   "@typescript-eslint/no-unsafe-assignment": {
     "src/lib/api/client.ts": 1,
     "src/lib/api/fake-server.test-support.ts": 1,
     "src/lib/api/proxy.ts": 1,
-    "src/lib/credentials.ts": 4,
+    "src/lib/credentials.ts": 1,
     "src/lib/quota-windows.ts": 11,
     "src/lib/quota.ts": 1,
     "src/lib/tool-setup.test.ts": 3

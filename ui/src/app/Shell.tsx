@@ -6,6 +6,7 @@
 
 import { LogOut, Plug } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState, type AnchorHTMLAttributes } from "react";
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { AppShell } from "@astryxdesign/core/AppShell";
 import { Center } from "@astryxdesign/core/Center";
 import { CommandPalette } from "@astryxdesign/core/CommandPalette";
@@ -32,7 +33,7 @@ import { QueryBoundary } from "./QueryBoundary.tsx";
 import { navGroups, routes, type PageRoute } from "./routes.ts";
 import { useSession } from "./Session.tsx";
 import { useDocumentTitle } from "./useDocumentTitle.ts";
-import { useHashRoute } from "./useHashRoute.ts";
+import { leaveOrAsk, useBlockedNavigation, useHashRoute } from "./useHashRoute.ts";
 
 /** SideNavItem's link, opening in a new tab: the item has no `target` of its own. */
 function NewTabLink(props: AnchorHTMLAttributes<HTMLAnchorElement>) {
@@ -150,12 +151,17 @@ function PageNav({ current }: { current: PageRoute }) {
             href={repository.url}
             as={NewTabLink}
           />
-          <SideNavItem label={t("app.nav.signOut")} icon={LogOut} onClick={signOut} />
+          {/* Asked like a page change; a sign-out the server forces (Session.tsx) is not. */}
+          <SideNavItem
+            label={t("app.nav.signOut")}
+            icon={LogOut}
+            onClick={() => leaveOrAsk(signOut)}
+          />
         </SideNavSection>
       }
     >
       {navGroups.map((group) => {
-        const pages = routes.filter((r) => r.group === group.id);
+        const pages = routes.filter((r) => r.group === group.id && !r.selects);
         if (!pages.length) return null;
         return (
           <SideNavSection key={group.id} title={group.title()}>
@@ -165,13 +171,29 @@ function PageNav({ current }: { current: PageRoute }) {
                 label={r.title()}
                 icon={r.icon}
                 href={`#${r.id}`}
-                isSelected={r === current}
+                isSelected={r === current || r.id === current.selects}
               />
             ))}
           </SideNavSection>
         );
       })}
     </SideNav>
+  );
+}
+
+/** Asked when a page change or sign-out would drop unsaved edits (the guard in useHashRoute.ts). */
+function DiscardChanges() {
+  const { isBlocked, stay, discard } = useBlockedNavigation();
+  return (
+    <AlertDialog
+      isOpen={isBlocked}
+      onOpenChange={(open) => !open && stay()}
+      title={t("app.unsaved.title")}
+      description={t("app.unsaved.description")}
+      actionLabel={t("app.unsaved.discard")}
+      cancelLabel={t("app.unsaved.keep")}
+      onAction={discard}
+    />
   );
 }
 
@@ -196,6 +218,7 @@ export function Shell() {
           <FocusHeading />
         </Suspense>
       </QueryBoundary>
+      <DiscardChanges />
     </AppShell>
   );
 }

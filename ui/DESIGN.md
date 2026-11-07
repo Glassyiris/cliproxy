@@ -166,7 +166,7 @@ built from the same template.
 | Detail | Astryx `LayoutPanel` + `MetadataList`; `BottomSheet` on phones |
 | Edits | Astryx `Dialog purpose="form"`; config edits show a diff and reread before write |
 | Quota windows | Astryx `ProgressBar` with label and reset time |
-| Traffic (20 × 10 min) | One local `TrafficStrip`: a single SVG path per row, neutral volume, red failures, accessible summary |
+| Traffic (20 × 10 min) | One local `TrafficStrip`, drawn like the `dashboard-alert-rail` template's `UptimeStrip`: one cell per bucket, neutral volume, red failures, accessible summary |
 | Notices | See below |
 
 ## Notifications
@@ -188,8 +188,8 @@ waiting, live usage). No page transitions, no row entrance stagger: a list that 
 
 ## Not doing
 
-- No KPI tile row, no chart library, no gradients, glass or glow. The System summary tiles are the
-  one exception: four facts about the build, not metrics, and they never change while shown.
+- No chart library, no gradients, glass or glow. KPI tile rows appear only on Overview, Usage
+  and System (System's four tiles are facts about the build, not metrics).
 - No top bar: the brand is the side nav's heading and the page title is the page's h1.
 - No custom selected-item decoration and no style overrides on Astryx navigation components, or
   on any component: the theme sets tokens only (gate: `check:ui`, a `components` block in a

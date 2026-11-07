@@ -5,7 +5,7 @@ import { otherSignals, quotaWindows, signalWindows } from "./quota-windows.ts";
 
 test("quota is percent used, not remaining; unknown payloads stay empty", () => {
   assert.deepEqual(quotaWindows("claude", { five_hour: { utilization: 37, resets_at: "later" }, seven_day: null }), [
-    { label: "Current session", used: 37, reset: "later" },
+    { label: { name: "session" }, used: 37, reset: "later" },
   ]);
   assert.equal(quotaWindows("codex", { rate_limit: { primary_window: { used_percent: 24, reset_at: 1000 } } })[0].used, 24);
   // Codex windows are named by their length; without one, by their slot.
@@ -17,11 +17,11 @@ test("quota is percent used, not remaining; unknown payloads stay empty", () => 
       },
     }).map((w) => [w.label, w.used, w.reset]),
     [
-      ["5-hour limit", 61, "2026-09-21T14:13:20.000Z"],
-      ["Weekly limit", 18, "2026-09-27T09:06:40.000Z"],
+      [{ name: "fiveHourLimit" }, 61, "2026-09-21T14:13:20.000Z"],
+      [{ name: "weeklyLimit" }, 18, "2026-09-27T09:06:40.000Z"],
     ],
   );
-  assert.equal(quotaWindows("codex", { rate_limit: { secondary_window: { used_percent: 3 } } })[0].label, "Secondary limit");
+  assert.deepEqual(quotaWindows("codex", { rate_limit: { secondary_window: { used_percent: 3 } } })[0].label, { name: "secondaryLimit" });
   assert.equal(quotaWindows("x", { groups: [{ displayName: "Pro", buckets: [{ remainingFraction: 0.25 }] }] })[0].used, 75);
   assert.deepEqual(quotaWindows("gemini", {}), []);
 });
@@ -43,11 +43,11 @@ test("Claude usage: the limits list, as Claude Code titles it", () => {
     extra_usage: { is_enabled: true, monthly_limit: 10000, used_credits: 1250, utilization: 12.5, currency: "USD" },
   };
   assert.deepEqual(quotaWindows("claude", withLimits), [
-    { label: "Current week (all models)", used: 31, reset: "2026-07-28T10:00:00+00:00" },
-    { label: "Current week (Fable only)", used: 64, reset: "2026-07-28T10:00:00+00:00" },
-    { label: "Current session", used: 44, reset: "2026-07-27T10:00:00+00:00" },
-    { label: "Current session", used: 7, reset: "" },
-    { label: "Extra usage", used: 12.5, reset: "", detail: "$12.50 of $100.00" },
+    { label: { name: "weekAll" }, used: 31, reset: "2026-07-28T10:00:00+00:00" },
+    { label: { name: "weekModel", model: "Fable" }, used: 64, reset: "2026-07-28T10:00:00+00:00" },
+    { label: { name: "session" }, used: 44, reset: "2026-07-27T10:00:00+00:00" },
+    { label: { name: "session" }, used: 7, reset: "" },
+    { label: { name: "extraUsage" }, used: 12.5, reset: "", extra: { spent: { amount: 12.5, currency: "USD" }, limit: { amount: 100, currency: "USD" } } },
   ]);
 });
 
@@ -62,13 +62,13 @@ test("Claude usage: legacy buckets when there is no limits list", () => {
       extra_usage: { is_enabled: true, monthly_limit: null, used_credits: 300, utilization: null, currency: "USD" },
     }),
     [
-      { label: "Current session", used: 12, reset: "2026-05-03T06:50Z" },
-      { label: "Current week (all models)", used: 70, reset: "2026-05-04T00:00Z" },
-      { label: "Current week (Sonnet only)", used: 38, reset: "2026-05-04T00:00Z" },
+      { label: { name: "session" }, used: 12, reset: "2026-05-03T06:50Z" },
+      { label: { name: "weekAll" }, used: 70, reset: "2026-05-04T00:00Z" },
+      { label: { name: "weekModel", model: "Sonnet" }, used: 38, reset: "2026-05-04T00:00Z" },
       // A real 0 is a real 0%; only null is hidden.
-      { label: "Current week (Opus only)", used: 0, reset: "2026-05-04T00:00Z" },
-      { label: "Other limit", used: 5, reset: "" },
-      { label: "Extra usage", used: null, reset: "", detail: "$3.00 spent, no limit" },
+      { label: { name: "weekModel", model: "Opus" }, used: 0, reset: "2026-05-04T00:00Z" },
+      { label: { name: "otherLimit" }, used: 5, reset: "" },
+      { label: { name: "extraUsage" }, used: null, reset: "", extra: { spent: { amount: 3, currency: "USD" }, limit: null } },
     ],
   );
 });
@@ -88,7 +88,7 @@ test("Claude usage: placeholders and skipped buckets never show, null is never 0
     cinder_cove: null,
     extra_usage: { is_enabled: false, monthly_limit: 5000, used_credits: 100, utilization: 2 },
   };
-  assert.deepEqual(quotaWindows("claude", placeholders), [{ label: "Current session", used: 23, reset: "2026-05-03T06:50Z" }]);
+  assert.deepEqual(quotaWindows("claude", placeholders), [{ label: { name: "session" }, used: 23, reset: "2026-05-03T06:50Z" }]);
   assert.deepEqual(quotaWindows("claude", { tangelo: null, iguana_necktie: null, omelette_promotional: null, limits: [] }), []);
 });
 
@@ -107,16 +107,16 @@ test("passive limits from Codex headers and Devin quota", () => {
     },
   });
   assert.deepEqual(codex, [
-    { label: "5-hour limit", used: 42.5, reset: "2026-10-02T14:00:00.000Z", source: "x-codex-primary-" },
+    { label: { name: "fiveHourLimit" }, used: 42.5, reset: "2026-10-02T14:00:00.000Z", source: "x-codex-primary-" },
     // Relative resets count from when the server observed them, not from now.
-    { label: "Weekly limit", used: 7, reset: "2026-10-02T13:00:00.000Z", source: "x-codex-secondary-" },
+    { label: { name: "weeklyLimit" }, used: 7, reset: "2026-10-02T13:00:00.000Z", source: "x-codex-secondary-" },
   ]);
   assert.deepEqual(signalWindows("codex", { signals: { "x-codex-primary-window-minutes": "300" } }), []);
   assert.deepEqual(
     signalWindows("devin", { signals: { daily_quota_remaining_percent: "87%", weekly_quota_remaining_percent: "100%", daily_quota_reset_at: "2026-10-03T00:00:00Z" } }),
     [
-      { label: "Daily", used: 13, reset: "2026-10-03T00:00:00Z", source: "daily_quota_" },
-      { label: "Weekly", used: 0, reset: "", source: "weekly_quota_" },
+      { label: { name: "daily" }, used: 13, reset: "2026-10-03T00:00:00Z", source: "daily_quota_" },
+      { label: { name: "weekly" }, used: 0, reset: "", source: "weekly_quota_" },
     ],
   );
   assert.deepEqual(signalWindows("claude", { signals: { "x-codex-primary-used-percent": "5" } }), []);
@@ -133,9 +133,9 @@ test("passive limits from Codex headers and Devin quota", () => {
     },
   };
   assert.deepEqual(signalWindows("claude", claude), [
-    { label: "Current session", used: 7, reset: "2026-10-02T15:00:00.000Z", source: "anthropic-ratelimit-unified-5h-" },
-    { label: "Current week (all models)", used: 63.4, reset: "2026-10-06T09:00:00.000Z", source: "anthropic-ratelimit-unified-7d-" },
-    { label: "Extra usage", used: 25, reset: "", source: "anthropic-ratelimit-unified-overage-" },
+    { label: { name: "session" }, used: 7, reset: "2026-10-02T15:00:00.000Z", source: "anthropic-ratelimit-unified-5h-" },
+    { label: { name: "weekAll" }, used: 63.4, reset: "2026-10-06T09:00:00.000Z", source: "anthropic-ratelimit-unified-7d-" },
+    { label: { name: "extraUsage" }, used: 25, reset: "", source: "anthropic-ratelimit-unified-overage-" },
   ]);
   assert.deepEqual(otherSignals(claude, signalWindows("claude", claude)).map(([k]) => k), ["anthropic-ratelimit-unified-representative-claim"]);
   const off = { signals: { "anthropic-ratelimit-unified-overage-utilization": "0", "anthropic-ratelimit-unified-overage-disabled-reason": "org_level_disabled" } };
@@ -146,9 +146,9 @@ test("passive limits from Codex headers and Devin quota", () => {
   assert.deepEqual(bad("Infinity", "1793474400"), []);
   assert.deepEqual(bad("", "1793474400"), []);
   assert.deepEqual(bad(" ", "1793474400"), []);
-  assert.deepEqual(bad("0.3", "Infinity"), [{ label: "Current session", used: 30, reset: "", source: "anthropic-ratelimit-unified-5h-" }]);
-  assert.deepEqual(bad("0.3", "1e300"), [{ label: "Current session", used: 30, reset: "", source: "anthropic-ratelimit-unified-5h-" }]);
-  assert.deepEqual(bad("0.3", "17934744junk"), [{ label: "Current session", used: 30, reset: "", source: "anthropic-ratelimit-unified-5h-" }]);
+  assert.deepEqual(bad("0.3", "Infinity"), [{ label: { name: "session" }, used: 30, reset: "", source: "anthropic-ratelimit-unified-5h-" }]);
+  assert.deepEqual(bad("0.3", "1e300"), [{ label: { name: "session" }, used: 30, reset: "", source: "anthropic-ratelimit-unified-5h-" }]);
+  assert.deepEqual(bad("0.3", "17934744junk"), [{ label: { name: "session" }, used: 30, reset: "", source: "anthropic-ratelimit-unified-5h-" }]);
 });
 
 test("signals not drawn as a window stay visible", () => {
@@ -171,5 +171,5 @@ test("signals not drawn as a window stay visible", () => {
     "retry-after",
   ]);
   // Windows from a live check carry no source, so every signal shows beside them.
-  assert.equal(keys([{ label: "5-hour", used: 1, reset: "" }]).length, 6);
+  assert.equal(keys([{ label: { text: "5-hour" }, used: 1, reset: "" }]).length, 6);
 });

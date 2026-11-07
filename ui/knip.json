@@ -9,7 +9,19 @@
     "tools/perf/adapters/*.mjs",
     // The sources `astryx theme build` compiles into site.* and site-main.*, which the app imports.
     "src/themes/site/siteTheme.ts",
-    "src/themes/site/siteMainTheme.ts"
+    "src/themes/site/siteMainTheme.ts",
+    // ponytail: P2a lands the shared parts before the pages that use them (PAGE-MAP "Build
+    // order"), so they are entries until then. Delete a line when the first page importing that
+    // module lands; one still listed after P2 is dead code.
+    "src/app/QuotaProvider.tsx",
+    "src/app/useAction.ts",
+    "src/app/useHashRoute.ts",
+    "src/app/useKeyTest.ts",
+    "src/components/ConfigEditor.tsx",
+    "src/components/MissingActions.tsx",
+    "src/components/QuotaWindow.tsx",
+    "src/components/TrafficStrip.tsx",
+    "src/lib/download.ts"
   ],
   "project": ["src/**/*.{ts,tsx}", "tools/**/*.mjs"],
   // ponytail: P1a wrote the API layer and the pure lib before any page calls it, so these
@@ -23,7 +35,12 @@
     "src/lib/config-path.ts": ["exports"],
     "src/lib/credentials.ts": ["exports", "types"],
     "src/lib/quota-windows.ts": ["exports"],
-    "src/lib/quota.ts": ["exports"]
+    "src/lib/quota.ts": ["exports"],
+    // ponytail: these modules have importers, but these exports wait for their P2 pages:
+    // useCredentials, usePlugins, useApiKeyUsage, useConfigWrite; lampStatus, stateWord.
+    // Delete a line when its last export gets a caller.
+    "src/app/serverQueries.ts": ["exports"],
+    "src/components/StatusLamp.tsx": ["exports"]
   },
   "ignoreDependencies": [
     // ponytail: no source imports this yet; the first virtualized list (Accounts, P2) brings it.

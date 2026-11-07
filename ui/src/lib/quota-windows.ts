@@ -1,17 +1,41 @@
 import type { Data } from "./json.ts";
-import { span } from "./time.ts";
+
+/**
+ * A window's title. Built-in ones are names the dashboard translates, titled as the provider's
+ * own CLI titles them; plugin groups and Kimi limits bring their own text from the server.
+ */
+export type WindowLabel =
+  | {
+      name:
+        | "session"
+        | "weekAll"
+        | "otherLimit"
+        | "extraUsage"
+        | "fiveHourLimit"
+        | "weeklyLimit"
+        | "primaryLimit"
+        | "secondaryLimit"
+        | "daily"
+        | "weekly";
+    }
+  | { name: "weekModel"; model: string }
+  | { name: "lengthLimit"; seconds: number }
+  | { text: string };
+
+type Money = { amount: number; currency: string };
 
 /**
  * One usage window. `used` is percent used, or null when the limit has no ceiling (an
- * uncapped extra-usage budget) and only `detail` applies. `source` is the signal-name
- * prefix a passive window was read from.
+ * uncapped extra-usage budget) and only `extra` applies. `source` is the signal-name
+ * prefix a passive window was read from. `extra` is Claude's extra-usage spend and its monthly
+ * limit, null when there is none.
  */
 export type Window = {
-  label: string;
+  label: WindowLabel;
   used: number | null;
   reset: string;
   source?: string;
-  detail?: string;
+  extra?: { spent: Money; limit: Money | null };
 };
 const clamp = (n: number) => Math.round(Math.max(0, Math.min(100, n)) * 10) / 10;
 /** Normalised plugin groups first; then the built-in Claude, Codex and Kimi usage payloads. */
@@ -23,9 +47,11 @@ export function quotaWindows(p: string, payload: Data): Window[] {
         const left = b.remainingFraction ?? b.remaining_fraction;
         if (typeof left === "number")
           out.push({
-            label: [g.displayName || g.display_name, b.window || b.description]
-              .filter(Boolean)
-              .join(" · "),
+            label: {
+              text: [g.displayName || g.display_name, b.window || b.description]
+                .filter(Boolean)
+                .join(" · "),
+            },
             used: clamp((1 - left) * 100),
             reset: b.resetTime || b.reset_time || "",
           });
@@ -39,7 +65,7 @@ export function quotaWindows(p: string, payload: Data): Window[] {
         out.push({
           label: codexWindow(
             Number(v.limit_window_seconds),
-            k === "primary_window" ? "Primary limit" : "Secondary limit",
+            k === "primary_window" ? "primaryLimit" : "secondaryLimit",
           ),
           used: clamp(v.used_percent),
           reset: v.reset_at
@@ -52,7 +78,7 @@ export function quotaWindows(p: string, payload: Data): Window[] {
     for (const [k, v] of Object.entries<Data>(payload.usages || {}))
       if (v?.limit > 0)
         out.push({
-          label: k.replaceAll("_", " "),
+          label: { text: k.replaceAll("_", " ") },
           used: clamp((Number(v.used) / Number(v.limit)) * 100),
           reset: String(v.reset_time || ""),
         });
@@ -67,24 +93,17 @@ const percent = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? c
  * omelette_promotional, seven_day_omelette, seven_day_cowork, seven_day_oauth_apps); they
  * are skipped. cinder_cove has no known title and shows as "Other limit" when set.
  */
-const claudeBuckets: [string, string][] = [
-  ["five_hour", "Current session"],
-  ["seven_day", "Current week (all models)"],
-  ["seven_day_sonnet", "Current week (Sonnet only)"],
-  ["seven_day_opus", "Current week (Opus only)"],
-  ["cinder_cove", "Other limit"],
+const claudeBuckets: [string, WindowLabel][] = [
+  ["five_hour", { name: "session" }],
+  ["seven_day", { name: "weekAll" }],
+  ["seven_day_sonnet", { name: "weekModel", model: "Sonnet" }],
+  ["seven_day_opus", { name: "weekModel", model: "Opus" }],
+  ["cinder_cove", { name: "otherLimit" }],
 ];
-function money(minor: number, places: number, currency: string): string {
-  const amount = minor / 10 ** places;
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency || "USD",
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(places)} ${currency}`;
-  }
-}
+const money = (minor: number, places: number, currency: string): Money => ({
+  amount: minor / 10 ** places,
+  currency,
+});
 
 /**
  * Anthropic's /api/oauth/usage, rendered the way Claude Code's /usage renders it. When the
@@ -104,14 +123,14 @@ export function claudeWindows(payload: Data): Window[] {
         const used = percent(l?.percent);
         if (String(l?.group) !== g || used === null) continue;
         const model = l.scope?.model?.display_name;
-        const label =
+        const label: WindowLabel | null =
           l.kind === "session"
-            ? "Current session"
+            ? { name: "session" }
             : l.kind === "weekly_all"
-              ? "Current week (all models)"
+              ? { name: "weekAll" }
               : l.kind === "weekly_scoped" && model
-                ? `Current week (${model} only)`
-                : "";
+                ? { name: "weekModel", model: String(model) }
+                : null;
         if (label) out.push({ label, used, reset: l.resets_at || "" });
       }
   } else
@@ -130,24 +149,24 @@ export function claudeWindows(payload: Data): Window[] {
         ? null
         : (percent(extra.utilization) ?? (cap > 0 ? clamp((extra.used_credits / cap) * 100) : 0));
     out.push({
-      label: "Extra usage",
+      label: { name: "extraUsage" },
       used,
       reset: "",
-      detail: cap === null ? `${spent} spent, no limit` : `${spent} of ${money(cap, places, cur)}`,
+      extra: { spent, limit: cap === null ? null : money(cap, places, cur) },
     });
   }
   return out;
 }
 
 /** A Codex rate-limit window by its length, as the Codex CLI names them. */
-const codexWindow = (seconds: number, fallback: string) =>
+const codexWindow = (seconds: number, fallback: "primaryLimit" | "secondaryLimit"): WindowLabel =>
   seconds === 18_000
-    ? "5-hour limit"
+    ? { name: "fiveHourLimit" }
     : seconds === 604_800
-      ? "Weekly limit"
+      ? { name: "weeklyLimit" }
       : seconds > 0
-        ? `${span(seconds * 1000)} limit`
-        : fallback;
+        ? { name: "lengthLimit", seconds }
+        : { name: fallback };
 
 /**
  * Limits the server observed passively, without asking the provider: Codex rate-limit
@@ -168,7 +187,7 @@ export function signalWindows(p: string, quota: Data | undefined): Window[] {
       const resetAt = Number(g("reset-at")),
         after = Number(g("reset-after-seconds"));
       out.push({
-        label: codexWindow(minutes * 60, w === "primary" ? "Primary limit" : "Secondary limit"),
+        label: codexWindow(minutes * 60, w === "primary" ? "primaryLimit" : "secondaryLimit"),
         used: clamp(used),
         reset:
           resetAt > 0
@@ -182,11 +201,11 @@ export function signalWindows(p: string, quota: Data | undefined): Window[] {
   else if (p === "claude")
     // Claude's anthropic-ratelimit-unified-* headers: utilization is a 0 to 1 fraction and
     // reset is Unix seconds. Labels match claudeWindows, so either source looks the same.
-    for (const [w, label] of [
-      ["5h", "Current session"],
-      ["7d", "Current week (all models)"],
-      ["overage", "Extra usage"],
-    ]) {
+    for (const [w, name] of [
+      ["5h", "session"],
+      ["7d", "weekAll"],
+      ["overage", "extraUsage"],
+    ] as const) {
       // Only fully numeric, finite values count: "0.5junk" and "Infinity" are not readings.
       const source = `anthropic-ratelimit-unified-${w}-`,
         num = (k: string) => (sig[source + k]?.trim() ? Number(sig[source + k]) : NaN),
@@ -194,7 +213,7 @@ export function signalWindows(p: string, quota: Data | undefined): Window[] {
         reset = new Date(num("reset") * 1000);
       if (!Number.isFinite(used) || sig[source + "disabled-reason"]) continue;
       out.push({
-        label,
+        label: { name },
         used: clamp(used * 100),
         reset: reset.getTime() > 0 ? reset.toISOString() : "",
         source,
@@ -205,7 +224,7 @@ export function signalWindows(p: string, quota: Data | undefined): Window[] {
       const left = parseFloat(sig[`${w}_quota_remaining_percent`]);
       if (!Number.isNaN(left))
         out.push({
-          label: w === "daily" ? "Daily" : "Weekly",
+          label: { name: w === "daily" ? "daily" : "weekly" },
           used: clamp(100 - left),
           reset: sig[`${w}_quota_reset_at`] || "",
           source: `${w}_quota_`,

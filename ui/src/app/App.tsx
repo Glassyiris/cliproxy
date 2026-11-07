@@ -20,13 +20,20 @@ import {
   storePalette,
   type ThemeMode,
 } from "./preferences.ts";
+import { QuotaProvider } from "./QuotaProvider.tsx";
 import { queryClient } from "./queryClient.ts";
 import { SessionProvider, useSession } from "./Session.tsx";
 import { Shell } from "./Shell.tsx";
 import { SignIn } from "./SignIn.tsx";
 
 function Gate() {
-  return useSession().signedIn ? <Shell /> : <SignIn />;
+  return useSession().signedIn ? (
+    <QuotaProvider>
+      <Shell />
+    </QuotaProvider>
+  ) : (
+    <SignIn />
+  );
 }
 
 type ShownPalette = { name: Palette; theme: DefinedTheme };

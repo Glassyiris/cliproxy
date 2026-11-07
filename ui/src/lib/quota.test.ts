@@ -84,3 +84,32 @@ test("a refused token keeps its status code next to the last known limits", asyn
   assert.ok(reading && "windows" in reading && reading.windows[0].used === 50);
   assert.equal(checker.reading(list[0])?.code, 401);
 });
+
+test("a stopped checker drops its queue: no source read and no request after stop", async () => {
+  const list = [account("e"), account("f")];
+  let reads = 0;
+  const checker = createQuotaChecker({
+    plugins: () => [],
+    credentials: () => (reads++, list),
+  });
+  const ok = () => Response.json({ status_code: 200, header: {}, body: "{}" });
+  let answer!: () => void;
+  const before = server.sent.length;
+  // The first request waits for the test; any later one is answered at once.
+  server.answer = () =>
+    server.sent.length > before + 1
+      ? ok()
+      : new Promise<Response>((r) => {
+          answer = () => r(ok());
+        });
+  checker.check(list[0]);
+  const done = checker.check(list[1]);
+  while (server.sent.length === before) await new Promise((r) => setTimeout(r, 1));
+  checker.stop();
+  const readsAtStop = reads;
+  answer();
+  await done;
+  assert.equal(server.sent.length, before + 1, "the queued check sends nothing");
+  assert.equal(reads, readsAtStop, "the queued check reads no source");
+  assert.equal(checker.pending(list[1]), undefined);
+});
