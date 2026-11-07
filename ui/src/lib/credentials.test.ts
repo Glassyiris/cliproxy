@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { accountRow, buckets, credState, level, sumBuckets, type Bar, type Limits } from "./credentials.ts";
+import { accountRow, buckets, credName, credState, level, sumBuckets, type Bar, type Limits } from "./credentials.ts";
 import type { Window, WindowLabel } from "./quota-windows.ts";
 
 const now = Date.parse("2026-10-02T12:00:00Z");
@@ -112,4 +112,11 @@ test("account rows: status words, honest unknowns, low, last used and weekly ord
   const refused = row({ status: "error", status_message: "401 unauthorized" }, checked([w(session, 41)], 3 * 3_600_000));
   assert.deepEqual([refused.state.state, refused.sub, refused.stale, refused.attention], ["signIn", { kind: "tokenRefused" }, true, true]);
   assert.deepEqual(used(refused.session), [41, 3 * 3_600_000]);
+});
+
+test("credential name: a provider key is masked, never shown in full", () => {
+  const key = "sk-ant-api03-0123456789abcdef";
+  assert.equal(credName({ account_type: "api_key", account: key, name: "claude-key.json" }), "sk-…cdef");
+  assert.equal(credName({ account_type: "oauth", account: "me@example.com", name: "x.json" }), "me@example.com");
+  assert.equal(credName({ account_type: "api_key", label: "Team key", account: key }), "Team key");
 });

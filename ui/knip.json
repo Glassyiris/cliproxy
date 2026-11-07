@@ -30,7 +30,7 @@
   // code and should go.
   "ignoreIssues": {
     "src/lib/api/**": ["files", "exports", "types"],
-    "src/lib/client-keys.ts": ["files"],
+    "src/lib/client-keys.ts": ["files", "exports"],
     "src/lib/first-run.ts": ["files"],
     "src/lib/config-path.ts": ["exports"],
     "src/lib/credentials.ts": ["exports", "types"],

@@ -1,3 +1,4 @@
+import { mask } from "./client-keys.ts";
 import type { Data } from "./json.ts";
 import type { Window, WindowLabel } from "./quota-windows.ts";
 import { spanParts } from "./time.ts";
@@ -22,7 +23,10 @@ const names: Record<string, string> = {
 };
 export const label = (id: string) => names[id] || id;
 export const provider = (a: Data) => String(a.provider || a.type || "unknown").replace("anthropic", "claude");
-export const credName = (a: Data) => String(a.email || a.label || a.account || a.name);
+// An api_key credential's `account` is the provider key itself.
+const account = (a: Data): unknown =>
+  a.account_type === "api_key" && a.account ? mask(String(a.account)) : a.account;
+export const credName = (a: Data) => String(a.email || a.label || account(a) || a.name);
 
 /**
  * One state per credential. `state` names the lamp's word: "Disabled", "Limited until <until> ·
