@@ -5,9 +5,16 @@
 //   components in use, as JSX attributes or object properties: only under src/themes/. Spacing
 //   scale props (gap, padding) take scale steps and stay legal; "100%" and full-viewport lengths
 //   fill their container and are not sizes.
-// - CSS files and CSS imports: only src/themes/ and the entry src/main.tsx (imports only).
+// - CSS files and CSS imports: only src/themes/ and the entry src/main.tsx (imports only). Under
+//   src/themes/, CSS other than the generated site.css and site-main.css selects only html, body
+//   and :root (with attribute selectors) and has no transition, animation or @keyframes.
 // - transition/animation/keyframes and animation libraries: only under src/components/motion/.
 // - Raw <div> and <span>: Astryx has Stack, HStack, Grid, Center, Layout and Text (0.7.11).
+// - Raw <svg> and <path>: icons are Astryx's semantic names or lucide components passed to Icon; the
+//   brand mark in src/components/BrandMark.tsx is the one drawn glyph.
+// - registerIcons: no app icon registry; the theme's registry is the only one (Astryx default).
+// - A `components` block in a theme source under src/themes/: the theme sets tokens only, and
+//   component styles come from Astryx and the neutral theme it extends.
 // - No module or directory named util, common, helper, shared or misc.
 //
 // Tests and the i18n catalogs are skipped: tests hold fixtures and the catalogs hold prose.
@@ -23,6 +30,7 @@ const srcDir = join(ui, "src");
 const ENTRY = "src/main.tsx";
 const THEMES = "src/themes/";
 const MOTION = "src/components/motion/";
+const ICONS = "src/components/BrandMark.tsx";
 
 const RAW_COLOR =
   /#(?:[\da-f]{8}|[\da-f]{6}|[\da-f]{3,4})\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\s*\(|(?:^|[\s,(])(?:white|black)(?=$|[\s,)])/i;
@@ -51,6 +59,9 @@ const SIZE_PROPERTY = new Set([
 // A length anywhere in the value, so `min(60rem, 100%)` is caught as well as `60rem`.
 const LENGTH = /(?:^|[^\w.])-?(?:\d+\.?\d*|\.\d+)(?:[a-z]+|%)?(?![\w.])/i;
 const FILL_ANYWHERE = /\b100(?:%|[dls]?v[hw]|v(?:min|max|[bi]))(?![\w.])|\b0(?![\w.%])/g;
+// What `astryx theme build` writes; every other CSS file under src/themes/ is hand-written.
+const GENERATED_CSS = new Set(["src/themes/site/site.css", "src/themes/site/site-main.css"]);
+const PAGE_SELECTOR = /^(?:html|body|:root)(?:\[[^\]]+\])*$/;
 const BANNED_NAME = /^(?:utils?|common|helpers?|shared|misc)$/i;
 const TEST_FILE = /\.test(?:-support)?\.tsx?$/;
 
@@ -141,6 +152,32 @@ function checkJsx(node, fail) {
     fail("style", node, "no style attribute; use StyleX with theme tokens");
 }
 
+function checkGlyph(node, fail) {
+  if (!ts.isJsxOpeningElement(node) && !ts.isJsxSelfClosingElement(node)) return;
+  const name = node.tagName.getText();
+  if (name === "svg" || name === "path")
+    fail(
+      "icons",
+      node,
+      `<${name}> is drawn only in ${ICONS}; use a semantic name or a lucide component`,
+    );
+}
+
+function checkRegistry(node, fail) {
+  if (ts.isIdentifier(node) && node.text === "registerIcons")
+    fail(
+      "icons",
+      node,
+      "registerIcons is banned; use the theme's semantic names or lucide components",
+    );
+}
+
+function checkThemeSource(node, fail) {
+  const named = ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node);
+  if (named && propertyName(node) === "components")
+    fail("theme", node, "the theme sets tokens only; no component style block");
+}
+
 function checkNames(relativePath, fail) {
   const segments = relativePath.split("/").slice(1);
   const names = segments.map((segment, index) =>
@@ -148,6 +185,21 @@ function checkNames(relativePath, fail) {
   );
   const bad = names.find((name) => BANNED_NAME.test(name));
   if (bad) fail("naming", null, `"${bad}" is a banned module or directory name`);
+}
+
+// Hand-written theme CSS styles the page behind the app and nothing else: component looks come
+// from Astryx and the theme tokens, and motion comes from the shared motion module.
+function checkHandCss(text, fail) {
+  const css = text.replace(/\/\*[\s\S]*?\*\//g, "");
+  if (MOTION_TEXT.test(css))
+    fail("css", null, "no transition, animation or @keyframes in theme CSS");
+  for (const [, prelude] of css.matchAll(/(?:^|[;{}])([^;{}]*)\{/g)) {
+    const head = prelude.trim();
+    if (head.startsWith("@")) continue;
+    for (const selector of head.split(",").map((part) => part.trim()))
+      if (!PAGE_SELECTOR.test(selector))
+        fail("css", null, `theme CSS may select only html, body and :root, not "${selector}"`);
+  }
 }
 
 function checkFile(file, errors) {
@@ -162,13 +214,18 @@ function checkFile(file, errors) {
   checkNames(relativePath, fail);
   if (file.endsWith(".css")) {
     if (!inThemes) fail("css", null, "CSS files live only in src/themes/");
+    else if (!GENERATED_CSS.has(relativePath)) checkHandCss(readFileSync(file, "utf8"), fail);
     return;
   }
   if (TEST_FILE.test(file) || relativePath.startsWith("src/i18n/")) return;
   const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   ast = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, kind);
+  const themeSource = inThemes && !file.endsWith(".d.ts") && /\.tsx?$/.test(file);
   const visit = (node) => {
     checkImport(node, fail, { relativePath, inMotion });
+    if (relativePath !== ICONS) checkGlyph(node, fail);
+    checkRegistry(node, fail);
+    if (themeSource) checkThemeSource(node, fail);
     if (!inMotion) checkMotion(node, fail);
     if (!inThemes) {
       checkJsx(node, fail);
@@ -193,5 +250,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-ui ok: ${files.length} source files (colours, px, tokens, sizes, style, layout, css, motion, names)`,
+  `check-ui ok: ${files.length} source files (colours, px, tokens, sizes, style, layout, css, motion, names, icons, theme)`,
 );

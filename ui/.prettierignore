@@ -7,15 +7,18 @@ package-lock.json
 scripts
 *.md
 index.html
-# Written by `astryx theme build` and the palette generator; `astryx theme build --check`
-# compares them byte for byte, so they keep the generator's formatting.
+# Written by `astryx theme build`; `astryx theme build --check` compares them byte for byte, so
+# they keep the generator's formatting.
 src/themes/site/site.css
 src/themes/site/site.js
 src/themes/site/site.d.ts
 src/themes/site/site.css.d.ts
 src/themes/site/site.variants.d.ts
-src/themes/site/sitePalette.generated.ts
-src/themes/site/sitePalette.generated.receipt.json
+src/themes/site/site-main.css
+src/themes/site/site-main.js
+src/themes/site/site-main.d.ts
+src/themes/site/site-main.css.d.ts
+src/themes/site/site-main.variants.d.ts
 # ponytail: files written before this gate and not yet formatted. The three src/lib files have
 # a function that formatting pushes over the 80-line limit; split it, format the file, then
 # delete its line. The tools are outside the dashboard work's write scope.

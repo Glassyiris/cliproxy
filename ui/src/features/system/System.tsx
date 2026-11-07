@@ -1,23 +1,31 @@
 import type { ReactNode } from "react";
+import { Folder, GitCommitHorizontal, Globe, LayoutDashboard, Route, Tag } from "lucide-react";
+import type { UseQueryResult } from "@tanstack/react-query";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Divider } from "@astryxdesign/core/Divider";
-import { Layout, LayoutContent, LayoutHeader, VStack } from "@astryxdesign/core/Layout";
+import { Card } from "@astryxdesign/core/Card";
+import { Grid } from "@astryxdesign/core/Grid";
+import { useClipboard } from "@astryxdesign/core/hooks";
+import { Icon, type IconProps } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { HStack, Section, VStack } from "@astryxdesign/core/Layout";
+import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { Timestamp } from "@astryxdesign/core/Timestamp";
+import { PageFrame } from "../../app/PageFrame.tsx";
 import { useSession } from "../../app/Session.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
-import { ApiError, ConnectionError, base } from "../../lib/api/client.ts";
+import { ApiError, ConnectionError } from "../../lib/api/client.ts";
 import type { Config } from "../../lib/api/config.ts";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
+import { notify } from "../../lib/notify.ts";
+import { repository } from "../../lib/repository.ts";
 import { layout } from "../../themes/site/layout.ts";
 import { useConfig, useLatestVersion } from "./queries.ts";
 import { releaseStatus } from "./version.ts";
-
-// ponytail: shown, not requested. client.ts keeps its endpoint private; export it there to drop this.
-const managementApi = `${new URL(base).pathname.replace(/\/$/, "")}/v8/management`;
 
 const errorText = (error: unknown) =>
   error instanceof ConnectionError
@@ -54,181 +62,276 @@ function ReadError({ error, what, retry }: { error: unknown; what: string; retry
   );
 }
 
-const code = (value: string) => <Text type="code">{value}</Text>;
-const setting = (config: Config, path: string) => {
-  const value: unknown = readPath(config, path);
-  if (value === undefined || value === "") return t("system.facts.serverDefault");
-  return code(typeof value === "string" ? value : JSON.stringify(value));
-};
+const notReported = () => (
+  <Text type="body" color="secondary">
+    {t("system.facts.notReported")}
+  </Text>
+);
+const valueSkeleton = () => (
+  <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
+);
 
-function ConfigFacts({ config }: { config: Config | undefined }) {
-  const value = (render: (c: Config) => ReactNode) =>
-    config ? (
-      render(config)
-    ) : (
-      <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
-    );
+/** The label row of a tile: icon and text, as the detail-page template's header metadata. */
+function TileLabel({ icon, label }: { icon: IconProps["icon"]; label: string }) {
   return (
-    <>
-      <MetadataListItem label={t("system.facts.configLayout")}>
-        {value((c) =>
-          c["config-version"]
-            ? t("system.facts.configVersion", { version: c["config-version"] })
-            : t("system.facts.legacyLayout"),
-        )}
-      </MetadataListItem>
-      <MetadataListItem label={t("system.facts.routingStrategy")}>
-        {value((c) => setting(c, "routing/strategy"))}
-      </MetadataListItem>
-      <MetadataListItem label={t("system.facts.authDirectory")}>
-        {value((c) => setting(c, "oauth/auth-dir"))}
-      </MetadataListItem>
-      {/* The config cannot show the effective policy: MANAGEMENT_PASSWORD allows remote access too. */}
-      <MetadataListItem label={t("system.facts.remoteManagement")}>
-        {value((c) =>
-          readPath(c, "management/allow-remote", false)
-            ? t("system.facts.remoteAllowed")
-            : t("system.facts.remoteLocal"),
-        )}
-      </MetadataListItem>
-    </>
+    <HStack gap={1} vAlign="center">
+      <Icon icon={icon} size="sm" color="secondary" />
+      <Text type="supporting" color="secondary">
+        {label}
+      </Text>
+    </HStack>
   );
 }
 
-function Facts() {
-  const { version, commit, built } = useSession();
-  const config = useConfig();
-  // The server sends "none" and "unknown" when it was built without these values.
-  const builtAt = Date.parse(built);
-  return (
-    <VStack gap={4}>
-      {config.isError ? (
-        <ReadError
-          error={config.error}
-          what={t("system.facts.config")}
-          retry={() => void config.refetch()}
-        />
-      ) : null}
-      <MetadataList aria-busy={config.isPending && !config.isError}>
-        <MetadataListItem label={t("system.facts.managementApi")}>
-          {code(managementApi)}
-        </MetadataListItem>
-        <MetadataListItem label={t("system.facts.version")}>
-          {version ? code(version) : t("system.facts.notReported")}
-        </MetadataListItem>
-        <MetadataListItem label={t("system.facts.commit")}>
-          {commit && commit !== "none" ? code(commit) : t("system.facts.notReported")}
-        </MetadataListItem>
-        <MetadataListItem label={t("system.facts.built")}>
-          {Number.isNaN(builtAt)
-            ? t("system.facts.notReported")
-            : t("system.facts.builtAt", { built: builtAt })}
-        </MetadataListItem>
-        {config.isError ? null : <ConfigFacts config={config.data} />}
-        {/* Where this page's code comes from: it runs with the management key. */}
-        <MetadataListItem label={t("system.facts.dashboard")}>
-          {t("system.facts.builtIn")}
-        </MetadataListItem>
-      </MetadataList>
-    </VStack>
-  );
-}
-
-function Updates() {
-  const { version } = useSession();
-  const latest = useLatestVersion();
-  const disabled =
-    latest.error instanceof ApiError && latest.error.code === "update_check_disabled";
-  const release = latest.data === undefined ? undefined : releaseStatus(latest.data, version);
-  return (
-    <VStack gap={4} hAlign="start">
-      <Button
-        label={t("system.updates.check")}
-        variant="secondary"
-        isLoading={latest.isFetching}
-        isDisabled={disabled}
-        onClick={() => void latest.refetch()}
-      />
-      {disabled ? (
-        <Text role="status">
-          {t("system.updates.disabled", { setting: "CLIPROXY_NO_UPDATE_CHECK=1" })}
-        </Text>
-      ) : latest.isError ? (
-        <ReadError
-          error={latest.error}
-          what={t("system.updates.release")}
-          retry={() => void latest.refetch()}
-        />
-      ) : latest.data !== undefined ? (
-        <VStack gap={1} role="status">
-          <StatusLamp
-            status={release === "current" ? "ready" : "info"}
-            label={
-              release === "current"
-                ? t("system.updates.upToDate")
-                : release === "available"
-                  ? t("system.updates.available")
-                  : t("system.updates.cannotCompare")
-            }
-          />
-          <Text>
-            {t("system.updates.latest", { version: latest.data || t("system.updates.unknown") })}
-          </Text>
-        </VStack>
-      ) : null}
-    </VStack>
-  );
-}
-
-function Section({
-  title,
-  description,
+function Tile({
+  icon,
+  label,
   children,
 }: {
-  title: string;
-  description: string;
+  icon: IconProps["icon"];
+  label: string;
   children: ReactNode;
 }) {
   return (
-    <VStack gap={4}>
+    <Card padding={4}>
       <VStack gap={1}>
-        <Heading level={2}>{title}</Heading>
-        <Text type="supporting">{description}</Text>
+        <TileLabel icon={icon} label={label} />
+        {children}
       </VStack>
-      {children}
-    </VStack>
+    </Card>
+  );
+}
+
+function CommitValue({ commit }: { commit: string }) {
+  const { copy, isCopied } = useClipboard({ announce: t("system.facts.commitCopied") });
+  return (
+    <HStack gap={1} vAlign="center">
+      <Text type="code" weight="semibold">
+        {commit.slice(0, 7)}
+      </Text>
+      <IconButton
+        label={t("system.facts.copyCommit")}
+        tooltip={t("system.facts.copyCommit")}
+        size="sm"
+        variant="ghost"
+        icon={<Icon icon={isCopied ? "check" : "copy"} size="sm" />}
+        onClick={() =>
+          void copy(commit).then((ok) => ok || notify("error", t("system.facts.copyFailed")))
+        }
+      />
+    </HStack>
+  );
+}
+
+function Summary({ config }: { config: UseQueryResult<Config> }) {
+  const { version, commit, built } = useSession();
+  // The server sends "none" and "unknown" when it was built without these values.
+  const builtAt = Number.isNaN(Date.parse(built)) ? "" : built;
+  const configVersion = config.data?.["config-version"];
+  return (
+    <Grid
+      columns={{ minWidth: layout.summaryTileMin, max: 4, repeat: "fit" }}
+      gap={4}
+      aria-label={t("system.facts.summary")}
+    >
+      <Tile icon={Tag} label={t("system.facts.version")}>
+        {version ? (
+          <Text type="code" weight="semibold">
+            {version}
+          </Text>
+        ) : (
+          notReported()
+        )}
+      </Tile>
+      <Tile icon={GitCommitHorizontal} label={t("system.facts.commit")}>
+        {commit && commit !== "none" ? <CommitValue commit={commit} /> : notReported()}
+      </Tile>
+      <Tile icon="calendar" label={t("system.facts.built")}>
+        {builtAt ? (
+          <Timestamp value={builtAt} format="relative" type="body" color="primary" />
+        ) : (
+          notReported()
+        )}
+      </Tile>
+      <Tile icon="wrench" label={t("system.facts.configLayout")}>
+        {config.isPending && !config.isError ? (
+          valueSkeleton()
+        ) : config.isError ? (
+          notReported()
+        ) : (
+          <Text type="body" weight="semibold">
+            {configVersion
+              ? t("system.facts.configVersion", { version: configVersion })
+              : t("system.facts.legacyLayout")}
+          </Text>
+        )}
+      </Tile>
+    </Grid>
+  );
+}
+
+const setting = (config: Config, path: string) => {
+  const value: unknown = readPath(config, path);
+  if (value === undefined || value === "") return t("system.config.serverDefault");
+  return <Text type="code">{typeof value === "string" ? value : JSON.stringify(value)}</Text>;
+};
+
+function RemoteManagement({ config }: { config: Config }) {
+  // The config cannot show the effective policy: MANAGEMENT_PASSWORD allows remote access too.
+  if (readPath(config, "management/allow-remote", false))
+    return <StatusLamp status="ready" label={t("system.config.remoteAllowed")} />;
+  return (
+    <HStack gap={2} vAlign="center" wrap="wrap">
+      <StatusLamp status="disabled" label={t("system.config.remoteLocal")} />
+      <Text type="supporting" color="secondary">
+        {t("system.config.remoteLocalNote")}
+      </Text>
+    </HStack>
+  );
+}
+
+function Configuration({ config }: { config: UseQueryResult<Config> }) {
+  const value = (render: (c: Config) => ReactNode) =>
+    config.data ? render(config.data) : valueSkeleton();
+  return (
+    <Section padding={4}>
+      <VStack gap={4}>
+        <Heading level={2}>{t("system.config.heading")}</Heading>
+        {config.isError ? (
+          <ReadError
+            error={config.error}
+            what={t("system.config.config")}
+            retry={() => void config.refetch()}
+          />
+        ) : (
+          <MetadataList aria-busy={config.isPending}>
+            <MetadataListItem
+              label={t("system.config.routingStrategy")}
+              icon={<Icon icon={Route} size="sm" />}
+            >
+              {value((c) => setting(c, "routing/strategy"))}
+            </MetadataListItem>
+            <MetadataListItem
+              label={t("system.config.authDirectory")}
+              icon={<Icon icon={Folder} size="sm" />}
+            >
+              {value((c) => setting(c, "oauth/auth-dir"))}
+            </MetadataListItem>
+            <MetadataListItem
+              label={t("system.config.remoteManagement")}
+              icon={<Icon icon={Globe} size="sm" />}
+            >
+              {value((c) => (
+                <RemoteManagement config={c} />
+              ))}
+            </MetadataListItem>
+            {/* Where this page's code comes from: it runs with the management key. */}
+            <MetadataListItem
+              label={t("system.config.dashboard")}
+              icon={<Icon icon={LayoutDashboard} size="sm" />}
+            >
+              {t("system.config.builtIn")}
+            </MetadataListItem>
+          </MetadataList>
+        )}
+      </VStack>
+    </Section>
+  );
+}
+
+/** The outcome of the last update check, as one banner under the page header. */
+function ReleaseResult({ latest }: { latest: UseQueryResult<string> }) {
+  const { version } = useSession();
+  const error = latest.error;
+  if (error instanceof ApiError && error.code === "update_check_disabled")
+    return (
+      <Banner
+        status="info"
+        title={t("system.updates.disabled", { setting: "CLIPROXY_NO_UPDATE_CHECK=1" })}
+      />
+    );
+  // The server answers 502 invalid_response when the repository has no release to redirect to.
+  if (error instanceof ApiError && error.code === "invalid_response")
+    return (
+      <Banner
+        status="info"
+        title={t("system.updates.noRelease")}
+        description={t("system.updates.noReleaseDetail", {
+          repository: repository.name,
+        })}
+      />
+    );
+  if (latest.isError)
+    return (
+      <ReadError
+        error={error}
+        what={t("system.updates.release")}
+        retry={() => void latest.refetch()}
+      />
+    );
+  if (latest.data === undefined) return null;
+  const tag = latest.data || t("system.facts.notReported");
+  const status = releaseStatus(latest.data, version);
+  if (status === "current")
+    return (
+      <Banner
+        status="success"
+        title={t("system.updates.upToDate")}
+        description={t("system.updates.latest", { version: tag })}
+      />
+    );
+  if (status === "available")
+    return (
+      <Banner
+        status="info"
+        title={t("system.updates.available", { version: tag })}
+        endContent={
+          <Link href={`${repository.url}/releases`} target="_blank" isExternalLink>
+            {t("system.updates.releases")}
+          </Link>
+        }
+      />
+    );
+  return (
+    <Banner
+      status="info"
+      title={t("system.updates.cannotCompare")}
+      description={t("system.updates.compareDetail", {
+        version: tag,
+        server: version || t("system.facts.notReported"),
+      })}
+    />
   );
 }
 
 export default function System() {
+  const config = useConfig();
+  const latest = useLatestVersion();
   return (
-    <Layout
-      height="fill"
-      contentWidth={layout.pageWidth}
-      header={
-        <LayoutHeader hasDivider>
-          <VStack gap={1}>
-            <Heading level={1}>{t("system.page.title")}</Heading>
-            <Text type="supporting">{t("system.page.description")}</Text>
-          </VStack>
-        </LayoutHeader>
+    <PageFrame
+      title={t("system.page.title")}
+      meta={
+        <Text type="supporting" color="secondary">
+          {t("system.page.description")}
+        </Text>
       }
-      content={
-        <LayoutContent padding={4}>
-          <VStack gap={6}>
-            <Section title={t("system.facts.heading")} description={t("system.facts.description")}>
-              <Facts />
-            </Section>
-            <Divider />
-            <Section
-              title={t("system.updates.heading")}
-              description={t("system.updates.description")}
-            >
-              <Updates />
-            </Section>
-          </VStack>
-        </LayoutContent>
+      actions={
+        <Button
+          label={t("system.updates.check")}
+          variant="primary"
+          isLoading={latest.isFetching}
+          onClick={() => void latest.refetch()}
+        />
       }
-    />
+    >
+      <VStack role="status">
+        <ReleaseResult latest={latest} />
+      </VStack>
+      <Summary config={config} />
+      <Configuration config={config} />
+      <Text type="supporting" color="secondary">
+        {t("system.page.note")}
+      </Text>
+    </PageFrame>
   );
 }

@@ -1,10 +1,13 @@
 import { createContext, use } from "react";
 import type { ProviderMessagesByLocale } from "@astryxdesign/core/i18n";
 import { isLocale, type Locale } from "../lib/i18n.ts";
+import { defaultPalette, isPalette, type Palette } from "../themes/site/index.ts";
 
-// The only two choices this dashboard keeps across reloads. index.html reads the same keys before
-// first paint and sets <html data-theme> and <html lang>, which the app then starts from.
+// The only three choices this dashboard keeps across reloads. index.html reads the same keys
+// before first paint and sets <html data-theme>, <html data-palette> and <html lang>, which the
+// app then starts from.
 const THEME_KEY = "cliproxy-theme";
+const PALETTE_KEY = "cliproxy-palette";
 const LOCALE_KEY = "cliproxy-locale";
 
 export type ThemeMode = "system" | "light" | "dark";
@@ -12,6 +15,11 @@ export type ThemeMode = "system" | "light" | "dark";
 export function initialMode(): ThemeMode {
   const mode = document.documentElement.dataset.theme;
   return mode === "light" || mode === "dark" ? mode : "system";
+}
+
+export function initialPalette(): Palette {
+  const palette = document.documentElement.dataset.palette;
+  return isPalette(palette) ? palette : defaultPalette;
 }
 
 export function initialLocale(): Locale {
@@ -30,6 +38,9 @@ function store(key: string, value: string | null) {
 
 export const storeMode = (mode: ThemeMode) => store(THEME_KEY, mode === "system" ? null : mode);
 
+export const storePalette = (palette: Palette) =>
+  store(PALETTE_KEY, palette === defaultPalette ? null : palette);
+
 export function storeLocale(locale: Locale) {
   store(LOCALE_KEY, locale);
   document.documentElement.lang = locale;
@@ -46,8 +57,10 @@ export async function astryxMessages(locale: Locale): Promise<ProviderMessagesBy
 
 export type Preferences = {
   mode: ThemeMode;
+  palette: Palette;
   locale: Locale;
   setMode: (mode: ThemeMode) => void;
+  setPalette: (palette: Palette) => void;
   setLocale: (locale: Locale) => void;
 };
 

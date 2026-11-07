@@ -4,10 +4,11 @@ import {
   InternationalizationProvider,
   type ProviderMessagesByLocale,
 } from "@astryxdesign/core/i18n";
-import { Theme } from "@astryxdesign/core/theme";
+import { Theme, type DefinedTheme } from "@astryxdesign/core/theme";
 import { ToastViewport } from "@astryxdesign/core/Toast";
-import { setLocale as selectLocale, type Locale } from "../lib/i18n.ts";
-import { siteTheme } from "../themes/site/index.ts";
+import { setLocale as selectLocale, t, type Locale } from "../lib/i18n.ts";
+import { notify } from "../lib/notify.ts";
+import { defaultPalette, loadPalette, siteTheme, type Palette } from "../themes/site/index.ts";
 import { ToastBridge } from "./Notices.tsx";
 import {
   astryxMessages,
@@ -16,6 +17,7 @@ import {
   PreferencesContext,
   storeLocale,
   storeMode,
+  storePalette,
   type ThemeMode,
 } from "./preferences.ts";
 import { queryClient } from "./queryClient.ts";
@@ -27,9 +29,19 @@ function Gate() {
   return useSession().signedIn ? <Shell /> : <SignIn />;
 }
 
+type ShownPalette = { name: Palette; theme: DefinedTheme };
+
 /** Providers, in order: data, Astryx strings, theme, preferences, toasts, session. */
-export function App({ messages: initialMessages }: { messages: ProviderMessagesByLocale }) {
+export function App({
+  messages: initialMessages,
+  palette: initialPalette,
+}: {
+  messages: ProviderMessagesByLocale;
+  palette: ShownPalette;
+}) {
   const [mode, setMode] = useState<ThemeMode>(initialMode);
+  const [palette, setPalette] = useState(initialPalette);
+  const wantedPalette = useRef(palette.name);
   const [locale, setLocale] = useState<Locale>(initialLocale);
   const [messages, setMessages] = useState(initialMessages);
   // Only the latest locale the user picked may commit; an older load that resolves later is dropped.
@@ -39,10 +51,25 @@ export function App({ messages: initialMessages }: { messages: ProviderMessagesB
 
   const preferences = {
     mode,
+    palette: palette.name,
     locale,
     setMode(next: ThemeMode) {
       setMode(next);
       storeMode(next);
+    },
+    // A palette shows once its theme is in; one that fails to load leaves the default shown.
+    setPalette(next: Palette) {
+      wantedPalette.current = next;
+      void loadPalette(next).then((theme) => {
+        if (wantedPalette.current !== next) return;
+        if (!theme) {
+          notify("error", t("app.colors.failed"));
+          setPalette({ name: defaultPalette, theme: siteTheme });
+          return;
+        }
+        setPalette({ name: next, theme });
+        storePalette(next);
+      });
     },
     setLocale(next: Locale) {
       wantedLocale.current = next;
@@ -58,7 +85,7 @@ export function App({ messages: initialMessages }: { messages: ProviderMessagesB
   return (
     <QueryClientProvider client={queryClient}>
       <InternationalizationProvider locale={locale} messages={messages}>
-        <Theme theme={siteTheme} mode={mode}>
+        <Theme theme={palette.theme} mode={mode}>
           <PreferencesContext value={preferences}>
             <ToastViewport position="bottomEnd" maxVisible={1}>
               <ToastBridge />

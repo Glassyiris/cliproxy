@@ -49,3 +49,9 @@ export const routes = {
   fetchPluginQuota: { method: "POST", path: "/plugins/{id}/quota" },
   resetPluginQuota: { method: "DELETE", path: "/plugins/{id}/quota" },
 } as const satisfies Record<string, Route>;
+
+// Routes outside /v8/management that need no key, relative to the page's base. tools/check-api.mjs
+// finds each in crates/cpa-server/src/lib.rs.
+export const publicRoutes = {
+  healthz: { method: "GET", path: "/healthz" },
+} as const satisfies Record<string, Route>;

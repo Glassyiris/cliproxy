@@ -1,12 +1,25 @@
-import { lazy, type ComponentType, type LazyExoticComponent, type SVGProps } from "react";
-import { ServerIcon } from "../components/icons.tsx";
+import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import type { IconProps } from "@astryxdesign/core/Icon";
+import { Server } from "lucide-react";
 import { t } from "../lib/i18n.ts";
+
+export type NavGroup = "overview" | "traffic" | "observe" | "server";
+
+/** Side navigation sections, in order. A section with no page is not shown. */
+export const navGroups: readonly { id: NavGroup; title(): string }[] = [
+  { id: "overview", title: () => t("app.navGroup.overview") },
+  { id: "traffic", title: () => t("app.navGroup.traffic") },
+  { id: "observe", title: () => t("app.navGroup.observe") },
+  { id: "server", title: () => t("app.navGroup.server") },
+];
 
 export type PageRoute = {
   /** The hash segment: `#system`. */
   id: string;
+  group: NavGroup;
   title(): string;
-  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  /** A semantic icon name from the theme or an icon component. */
+  icon: IconProps["icon"];
   page: LazyExoticComponent<ComponentType>;
 };
 
@@ -25,8 +38,9 @@ function page(load: () => Promise<{ default: ComponentType }>) {
 export const routes: readonly PageRoute[] = [
   {
     id: "system",
+    group: "server",
     title: () => t("app.nav.system"),
-    icon: ServerIcon,
+    icon: Server,
     page: page(() => import("../features/system/index.ts")),
   },
 ];

@@ -6,15 +6,18 @@
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>cliproxy-rs</title>
-    <!-- Before first paint: the stored theme and language (src/app/preferences.ts), else the system's. -->
+    <!-- Before first paint: the stored theme, palette and language (src/app/preferences.ts), else
+         the system's and the default palette. -->
     <script>
       (function () {
-        var root = document.documentElement, mode = null, locale = null;
+        var root = document.documentElement, mode = null, palette = null, locale = null;
         try {
           mode = localStorage.getItem("cliproxy-theme");
+          palette = localStorage.getItem("cliproxy-palette");
           locale = localStorage.getItem("cliproxy-locale");
         } catch (e) {}
         if (mode === "light" || mode === "dark") root.dataset.theme = mode;
+        if (palette === "main") root.dataset.palette = palette;
         if (locale !== "en" && locale !== "zh-CN" && locale !== "zh-TW") {
           locale = "en";
           var asked = navigator.languages || [];

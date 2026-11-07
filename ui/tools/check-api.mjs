@@ -1,7 +1,9 @@
 // Compares the Management API registry (src/lib/api/routes.ts) with the routes the Rust
 // router registers under /v8/management. Fails when the registry names a route the server
 // lacks, or the server has a route that is neither in the registry nor allowlisted with a
-// reason in tools/api-allowlist.json.
+// reason in tools/api-allowlist.json. The keyless routes in `publicRoutes` must each appear as a
+// `.route("<path>", get(..))` in crates/cpa-server/src/lib.rs; the server's other public routes
+// (the proxy itself) have no dashboard caller and are not compared.
 //
 // The router is read by evaluating the small subset of Rust that `fn router` is written in:
 // string bindings, format!, closures, local fns, `for` over tuple arrays, `if a == b`, and
@@ -13,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 const ui = fileURLToPath(new URL("..", import.meta.url));
 const rustFile = fileURLToPath(new URL("../../crates/cpa-server/src/management.rs", import.meta.url));
+const libFile = fileURLToPath(new URL("../../crates/cpa-server/src/lib.rs", import.meta.url));
 const allowFile = fileURLToPath(new URL("./api-allowlist.json", import.meta.url));
 const PREFIX = "/v8/management";
 const VERBS = { get: "GET", post: "POST", put: "PUT", patch: "PATCH", delete: "DELETE" };
@@ -383,6 +386,28 @@ function serverRoutes() {
     .map((r) => ({ method: r.method, path: r.path.slice(PREFIX.length) }));
 }
 
+// Every `.route("<path>", get(` in lib.rs. A keyless dashboard route is a GET; the server's
+// other routes (the proxy itself) have no dashboard caller and need no registry entry.
+function publicServerRoutes() {
+  const source = readFileSync(libFile, "utf8");
+  const rows = [...source.matchAll(/\.route\(\s*"([^"]+)"\s*,\s*get\(/g)].map((m) => ({
+    method: "GET",
+    path: m[1],
+  }));
+  if (!rows.length) fail("no .route(\"..\", get(..)) calls found in lib.rs");
+  return rows;
+}
+
+function publicProblems(registry, server) {
+  const have = new Set(server.map(key));
+  const problems = [];
+  for (const r of registry) {
+    if (r.path.startsWith(PREFIX)) problems.push(`publicRoutes: ${r.name} is under ${PREFIX}; move it to routes`);
+    else if (!have.has(key(r))) problems.push(`publicRoutes: ${r.name} is ${key(r)}, which lib.rs does not route`);
+  }
+  return problems;
+}
+
 function loadAllowlist() {
   const list = JSON.parse(readFileSync(allowFile, "utf8"));
   if (!Array.isArray(list)) fail("api-allowlist.json is not an array");
@@ -393,11 +418,14 @@ function loadAllowlist() {
 }
 
 async function main() {
-  let server, registry, allow;
+  let server, registry, allow, publicServer, publicRegistry;
   try {
     server = serverRoutes();
+    publicServer = publicServerRoutes();
     allow = loadAllowlist();
-    registry = Object.entries((await import(`${ui}src/lib/api/routes.ts`)).routes).map(([name, r]) => ({ name, ...r }));
+    const table = await import(`${ui}src/lib/api/routes.ts`);
+    registry = Object.entries(table.routes).map(([name, r]) => ({ name, ...r }));
+    publicRegistry = Object.entries(table.publicRoutes).map(([name, r]) => ({ name, ...r }));
   } catch (e) {
     console.error(`check-api: cannot parse: ${e.message}`);
     return 2;
@@ -417,6 +445,7 @@ async function main() {
     if (!have.has(key(a))) problems.push(`allowlist: ${key(a)} is not a server route; remove the line`);
     if (seen.has(key(a))) problems.push(`allowlist: ${key(a)} is also in the registry as ${seen.get(key(a))}; remove the line`);
   }
+  problems.push(...publicProblems(publicRegistry, publicServer));
   for (const r of server)
     if (!seen.has(key(r)) && !allowed.has(key(r)))
       problems.push(`server: ${key(r)} has no registry entry and no allowlist line with a reason`);
@@ -424,7 +453,7 @@ async function main() {
     for (const p of problems) console.error(`check-api: ${p}`);
     return 1;
   }
-  console.log(`check-api: ${server.length} routes under ${PREFIX}: ${registry.length} in the registry, ${allow.length} allowlisted`);
+  console.log(`check-api: ${server.length} routes under ${PREFIX}: ${registry.length} in the registry, ${allow.length} allowlisted; ${publicRegistry.length} keyless route(s) found in lib.rs`);
   return 0;
 }
 

@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { parseHash } from "./routes.ts";
 
-/** The current page from location.hash; `navigated` turns true after the first hash change. */
+/** The current page from location.hash. */
 export function useHashRoute() {
-  const [state, setState] = useState(() => ({ ...parseHash(location.hash), navigated: false }));
+  const [state, setState] = useState(() => parseHash(location.hash));
   useEffect(() => {
     const sync = () =>
       setState((s) => {
         const next = parseHash(location.hash);
-        return next.route === s.route && next.arg === s.arg ? s : { ...next, navigated: true };
+        return next.route === s.route && next.arg === s.arg ? s : next;
       });
     addEventListener("hashchange", sync);
     return () => removeEventListener("hashchange", sync);

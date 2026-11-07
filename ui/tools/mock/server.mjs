@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Mock v8 Management API for the dashboard. Zero dependencies, deterministic for a seed.
 //
-//   node server.mjs [--port 0] [--accounts 1000] [--seed 1] [--key mock]
+//   node server.mjs [--port 0] [--accounts 1000] [--seed 1] [--key mock] [--release v0.0.0-mock]
+//
+// --release none answers the release check as the server does for a repository with no release yet.
 //
 // Response shapes follow crates/cpa-server/src/management/*.rs. State lives in memory: write routes
 // answer like the real server and change what the next read returns. GET /credentials changes about
@@ -19,12 +21,15 @@ const { values: opt } = parseArgs({
     key: { type: "string", default: "mock" },
     churn: { type: "string", default: "0.05" },
     quiet: { type: "boolean", default: false },
+    release: { type: "string", default: "v0.0.0-mock" },
   },
 });
 const N = Math.max(0, Number(opt.accounts));
 const CHURN = Number(opt.churn);
 const KEY = opt.key;
 const VERSION = "cliproxy-rs-mock";
+// Three days before start, so the dashboard shows a past build in every time zone.
+const BUILD_DATE = new Date(Date.now() - 3 * 86_400_000).toISOString();
 const BUCKET_MS = 600_000;
 
 // ---------------------------------------------------------------------------------------------
@@ -608,7 +613,11 @@ on("POST", "/requests/api-call", (ctx) => {
   if (str(b.authIndex ?? b.auth_index) && !a) return fail(404, "auth not found");
   return { status: 200, body: { status_code: 200, header: { "Content-Type": ["application/json"] }, body: JSON.stringify(usagePayload(str(b.url), a)) } };
 });
-on("GET", "/server/latest-version", () => ok({ "latest-version": "v0.0.0-mock" }));
+on("GET", "/server/latest-version", () =>
+  opt.release === "none"
+    ? fail(502, "invalid_response", { message: "missing release version" })
+    : ok({ "latest-version": opt.release }),
+);
 
 // Usage
 on("GET", "/observability/usage/api-keys", () => {
@@ -757,7 +766,7 @@ const server = http.createServer((req, res) => {
     try {
       if (url.pathname === "/healthz") return (status = 200), send(200, { "Content-Type": "application/json" }, '{"status":"ok"}');
       if (!url.pathname.startsWith(PREFIX + "/") && url.pathname !== PREFIX) return send(404, {}, "");
-      const headers = { "X-CPA-VERSION": VERSION, "X-CPA-COMMIT": "0000000", "X-CPA-BUILD-DATE": "2026-11-08T00:00:00Z", "Cache-Control": "no-store" };
+      const headers = { "X-CPA-VERSION": VERSION, "X-CPA-COMMIT": "0000000", "X-CPA-BUILD-DATE": BUILD_DATE, "Cache-Control": "no-store" };
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
       const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || String(req.headers["x-management-key"] || "");
       if (!given) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"missing management key"}');

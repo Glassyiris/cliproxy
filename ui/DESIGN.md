@@ -1,9 +1,9 @@
 ---
-name: cliproxy-rs Switchboard
+name: cliproxy-rs Rosé Pine
 description: A quiet operator console. Grey carries hierarchy; hue carries state.
 ---
 
-# Design language: Switchboard
+# Design language: Rosé Pine (Moon/Dawn)
 
 The dashboard is where one person keeps many provider accounts healthy behind one local endpoint.
 They come to answer three questions, in this order: can the proxy serve right now, which account
@@ -15,9 +15,9 @@ style). Product rules in `PRODUCT.md` still apply; its visual and size clauses a
 
 ## Principles
 
-1. **Grey carries hierarchy, hue carries state.** Surfaces, text and controls are neutral. A
-   coloured pixel always means a state: ready, cooling, failing, info. No brand hue in the chrome;
-   the logo is the only chromatic thing that is not state.
+1. **Grey carries hierarchy, hue carries state.** Surfaces, text and controls are the palette's
+   neutral roles. A coloured pixel means a state (ready, cooling, failing, info) or, in iris
+   only, a link or the focus ring.
 2. **One way to draw each thing.** One row, one list, one detail panel, one dialog, one form field,
    one notice. Astryx components first; a local component exists only when two screens need it.
 3. **Dense, not cramped.** Row height and type follow Astryx's console scale. Numbers use tabular
@@ -29,36 +29,134 @@ style). Product rules in `PRODUCT.md` still apply; its visual and size clauses a
 
 ## Colour
 
-- Theme: one `defineTheme` in `src/themes/site/`, both modes first-class from the first commit,
-  following the system by default with a manual switch.
-- Neutrals: Astryx neutral ramp, a cool grey (very low chroma). Body and surface share one
-  background; cards and popovers step up one level.
-- Primary action: ink, not a hue — near-black on light, near-white on dark (the same treatment as
-  doona lite). Focus ring uses the same ink.
-- Status vocabulary, closed set, each with a text colour and a muted background, declared for both
-  modes: `ready` green, `cooling` amber, `failing` red, `info` blue, `disabled` neutral. Contrast:
-  body text ≥ 10:1, secondary and status text ≥ 5:1 in both modes, measured on the composited colour.
-- Text tokens are not fill tokens. Traffic strips use the neutral ramp for volume; red only for
+The palette is [Rosé Pine](https://rosepinetheme.com): **Moon** in dark mode and **Dawn** in light
+mode by default, with **Rosé Pine** (Main) for dark as the second choice. The values come
+unmodified from [rose-pine/palette](https://github.com/rose-pine/palette) (MIT): the named roles
+from `palette.json`, the highlight roles from `dist/css/rose-pine.css`; they live in
+`src/themes/site/rosePine.ts`. Owner, 2026-11-08: 「https://github.com/rose-pine 配色用這個把」;
+「原色優先」 — every colour is an official value; pairs that miss a contrast limit are listed in
+`REQUIREMENTS.md` Exceptions instead of being adjusted.
+
+- Theme: both site themes extend Astryx's official neutral theme
+  (`defineTheme({extends: neutralTheme})`, as Astryx's setup guide does) and set only colour and
+  type-size tokens: fonts, component styles, icons (lucide), radius and motion come from
+  neutral. `src/themes/site/siteTheme.ts` builds `site` (Moon, in the entry) and
+  `siteMainTheme.ts` builds `site-main` (loaded on demand when chosen), both with
+  `astryx theme build`; the colour and type tokens are shared (`roseTokens`). Both modes are
+  first-class, following the system by default with a manual switch.
+- Palette and mode are separate choices: the side nav has one menu for each (with language, in
+  its footer icon row), and the sign-in theme menu lists the modes, then the palettes. The choice
+  is stored like the mode and applied before the first render.
+- Roles, the same for both palettes, following Rosé Pine's own usage table:
+
+  | Dashboard role | Rosé Pine role |
+  | --- | --- |
+  | Page background | base |
+  | Card, side nav surface | surface |
+  | Popover, menu, palette, toast; status and accent muted fills | overlay |
+  | Hover and selected nav item, neutral badge | highlight med (low measures 1.01–1.12:1 on base and surface) |
+  | Hover tint mixed into radios, checkboxes and switches | highlight low |
+  | Borders, dividers, skeleton, track | highlight med |
+  | Emphasized border (inputs) | highlight high |
+  | Body text | text |
+  | Secondary text | subtle |
+  | Tertiary, placeholder, disabled text | muted |
+  | Primary button fill / its label | text / base (ink) |
+  | Links, focus ring | iris |
+  | Ready / success | pine |
+  | Info | foam |
+  | Warning (cooling) | gold |
+  | Error (failing) | love |
+  | rose | unused |
+
+- Status vocabulary, closed set: `ready`, `cooling`, `failing`, `info`, `disabled` (muted). A lamp
+  is Astryx's `StatusDot` (`success`, `warning`, `error`, `neutral`; `info` is for banners and
+  badges only) with its word in secondary text beside it, as the owner's BoothDex console draws
+  it (`admin/live-status.tsx`). Icons, lamps and status borders take the hue; banner and badge
+  fills are overlay with the hue as their text, so no fill is mixed from a hue. Contrast limits stay: body text ≥ 10:1,
+  secondary and status text ≥ 5:1, measured on the composited colour; the official colours miss
+  some of them, see `REQUIREMENTS.md`.
+- The dialog scrim, the shadow and the hover and pressed overlays drawn over a fill keep Astryx's
+  translucent defaults: they are not palette colours, and Rosé Pine defines none.
+- Text tokens are not fill tokens. Traffic strips use the neutral roles for volume; love only for
   failed buckets.
 
 ## Type
 
-- Figtree for UI (the owner's other consoles use it), CJK fallbacks to the system SC/TC fonts with
-  SC first for zh-CN and TC first for zh-TW.
-- Mono: JetBrains Mono for data only.
-- Scale (Astryx tokens): page title 24/600, section 18/600, body 14/400–500, supporting 13.
-  Headings stay 600 in every locale.
+- Fonts are the neutral theme's own, unchanged (owner, 2026-11-08: fonts and icons use the
+  component library's defaults): Figtree, then the system sans stack, for body and headings;
+  the system monospace stack for code. Neutral's `fonts.css` loads Figtree from Google Fonts at
+  run time; the app imports the same four weights from `@fontsource/figtree` instead (in
+  `src/themes/site/index.ts`), so it makes no third-party request, as BoothDex does. There is no
+  `typography` block and no per-locale font rule, so CJK text falls to the system fonts the
+  browser picks for the page language.
+- Scale: neutral's (base 14, ratio 1.2) is the app's, so no `typography.scale`. Three size tokens
+  stay in `roseTokens` because neutral's steps differ: page title 24/600 (`--text-heading-1-size`),
+  section 18/600 (`--text-heading-2-size`), supporting 13 (`--text-supporting-size`); body is 14.
+  Headings are 600 in every locale (neutral's weight).
 
 ## Layout
 
-- Shell: Astryx `AppShell` with a collapsible side nav (icon + label), the connection state and
-  server version once in the nav footer. Phones get the native drawer.
-- Every page uses one page frame: title, one supporting line, actions at the end of the title row,
-  then a single-column body. No card around a collection.
+Every screen starts from an Astryx template and keeps its frame (owner, 2026-11-08: build from
+the templates and the components as they come; 「這個側邊欄絕對不是組件庫和我的項目有的純ai風格難看死了」).
+
+### Shell (`shell-side-nav`, as BoothDex's admin shell)
+
+The precedent is the owner's BoothDex console, `web/src/components/admin/admin-shell.tsx`, itself
+built from the same template.
+
+- Astryx `AppShell` with the side nav only; there is no top bar. `SideNav` is `collapsible` and
+  `resizable` (260 px default, 220 to 360).
+- Header: `SideNavHeading` with the brand mark and "cliproxy-rs", linking to the first page.
+- Body: one `SideNavSection` per route `group` in `src/app/routes.ts` (Overview, Traffic, Observe,
+  Server), titled; a section with no page is not shown. Each page is a `SideNavItem` with its
+  icon (a lucide component from `routes.ts`); the current page is Astryx's own selected item.
+- Footer (`SideNavSection isHeaderHidden`): the connection row (host with its `StatusDot`; a
+  popover gives the lamp, version and commit), "Go to page" (`CommandPalette`, also Ctrl/Cmd+K,
+  lists every page grouped by section; SideNav has no search slot), GitHub (new tab) and Sign
+  out.
+- Footer icon row (`SideNav footerIcons`, beside the collapse button): language, colour mode and
+  palette, each a ghost icon button with a tooltip opening a radio menu. BoothDex keeps these in
+  an `HStack` inside the footer section; here that row was wider than the collapsed rail and
+  pushed every footer item out of it, and `footerIcons` is the slot SideNav stacks in the rail.
+- Phones (below Astryx `md`): AppShell's own phone bar and drawer, nothing hand-built; the bar
+  carries the heading and the footer icon row.
+- After sign-in and after every page change, focus moves to the page's h1 without a ring.
+
+### Sign-in (`login-card`)
+
+- One elevated card, centred; theme and language as one pair of icon menus at the page's top end,
+  on the page gutter. Under the card, one link to the repository.
+- Inside the card, top to bottom: brand mark and name; h1 "Connect to this server"; a status line
+  (lamp, host, and whether `GET /healthz` answers, rechecked every 10 s while the tab is shown);
+  the key field with a show/hide button (`InputGroup`); the primary Connect button; the help as a
+  closed `Collapsible`.
+- Connect is never greyed out. With an empty field it focuses the field and shows the field's
+  error; while signing in it shows Astryx's busy state and one press sends one request. Enter in
+  the field submits through `onEnter`, which ignores Enter that commits an IME conversion.
+- Sign-in errors are the field's error status, so the field describes them (`aria-describedby`).
+
+### Pages (`detail-page`, as BoothDex's page frame)
+
+- One page frame, `PageFrame` (`src/app/PageFrame.tsx`, after BoothDex's
+  `admin/page-frame.tsx`): a header with a divider, the h1 with its meta line beside it (under it
+  on phones) and the page's primary action at the header's end (below both on phones); the
+  outcome of that action as a banner directly under the header; then a single-column body on the
+  header's padding. No card around a collection.
+- System: four summary tiles (Version, Commit with a copy button, Built as a relative time whose
+  hover card gives the absolute time, Config layout), each label led by its icon; a
+  Configuration section as a `MetadataList` with an icon on every row (routing strategy, auth
+  directory, remote management as a status lamp with its word, dashboard source); one muted note at the end. A value the server does not send reads "Not reported".
+  `detail-page` over `settings`: System shows one record and one action, and has nothing to
+  edit, which is the `settings` template's whole body.
+- Release check outcomes: up to date (`success`), update available with a link to the releases
+  (`info`), cannot compare (`info`), no release published yet (`info`; the server's 502
+  `invalid_response`), checks disabled (`info`), anything else an error banner with Retry.
 - Collections are rows, not cards. A long list (Accounts, Logs) is virtualized and keeps its
   toolbar (search, filters, batch bar) above it.
 - Detail opens in a side panel on desktop and a bottom sheet on phones; the list does not reflow.
-- Content width: full width for list + panel screens; 960 px reading width for forms and settings.
+- Content width: full width for list + panel screens; 960 px reading width for forms, settings and
+  System.
 
 ## Components
 
@@ -90,8 +188,21 @@ waiting, live usage). No page transitions, no row entrance stagger: a list that 
 
 ## Not doing
 
-- No KPI tile row, no chart library, no gradients, glass or glow.
-- No brand accent hue in controls (add one later only as a theme token used in four places:
-  primary button, current nav item, links, focus ring).
-- No second icon set: one icon registry for the whole app.
+- No KPI tile row, no chart library, no gradients, glass or glow. The System summary tiles are the
+  one exception: four facts about the build, not metrics, and they never change while shown.
+- No top bar: the brand is the side nav's heading and the page title is the page's h1.
+- No custom selected-item decoration and no style overrides on Astryx navigation components, or
+  on any component: the theme sets tokens only (gate: `check:ui`, a `components` block in a
+  theme source fails).
+- No disabled-grey primary buttons: a primary action stays pressable and explains itself (focus
+  and a field error, or a banner) instead of greying out.
+- No long explanatory paragraphs above data: one supporting line under the title; anything more
+  is a collapsed section or one muted note after the data.
+- No accent hue beyond iris in its two places (links, focus ring); the primary button stays ink.
+- Icons are the component library's defaults and no app registry: a semantic name from the theme
+  where one fits the meaning (`calendar`, `wrench`, `search`, `copy`, `check`, `eyeSlash` ...; the
+  list is `npx astryx docs icons available-names`), otherwise a lucide component passed straight to
+  `Icon` or an `icon` prop and typed with Astryx's `IconProps["icon"]`. No `registerIcons`, no second
+  icon set. The brand mark (`src/components/BrandMark.tsx`) is the one drawn glyph (gate: `check:ui`,
+  an `<svg>` or `<path>` elsewhere and any `registerIcons` fail).
 - No per-page colours, spacings or font sizes.

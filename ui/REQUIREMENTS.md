@@ -35,7 +35,7 @@ Limits set by the owner on 2026-11-08 unless noted. Performance baselines are fr
 | JS heap after 5 min of polling | ≤ baseline | 53.2 MB (from 52.0 MB) | `tools/perf/run.mjs` |
 | Idle CPU on Accounts | ≤ baseline | 1.2% of one core | `tools/perf/run.mjs` |
 | Select all, main thread | ≤ baseline | 313 ms | `tools/perf/run.mjs` |
-| Contrast, both themes | body ≥ 10:1, secondary and status text ≥ 5:1 (above WCAG AA, from `DESIGN.md`) | light: body 15.9, lowest 7.05; dark: body 15.1, lowest 5.68 (2026-11-08, browser) | browser measurement, reported per phase |
+| Contrast, both themes | body ≥ 10:1, secondary and status text ≥ 5:1 (above WCAG AA, from `DESIGN.md`) | Rosé Pine Moon dark: body 11.86, lowest 3.94; Rosé Pine (Main) dark: body 13.39, lowest 3.16; Dawn light, both palettes: body 8.69, lowest 2.86 (2026-11-08, browser, 1440 px, en; remeasured with the highlight roles, unchanged). Pairs below the limits: Exceptions | browser measurement, reported per phase |
 
 ## Enforcement
 
@@ -74,6 +74,50 @@ Intentional designs that look like defects:
 | Quota checks run only on request, one at a time, at most once per account every 2 minutes | Each check is a real provider request | carried over |
 | Batch actions on accounts that share one file act on the whole file, and the dialog says so | The server deletes and toggles by file | carried over |
 | Polling pauses while the tab is hidden | No load for a dashboard nobody looks at | carried over |
+
+Contrast below the limits (official Rosé Pine colours). The owner ruled that the official palette
+values are used unmodified and the limits above stay (2026-11-08, 「原色優先」). "Browser" rows were
+measured on the rendered sign-in and System pages, menu open, info and error banners, at 1440 px
+in English (log: `/scratch/ssd/cliproxy-p1/rosepine/contrast-summary.log`); "palette" rows are
+pairs the theme maps but no P1 page draws yet, computed from the palette values. Remeasured
+after the highlight roles came in (2026-11-08). Dawn rows apply
+to both palettes.
+
+| Mode | Foreground on background | Ratio | Limit | Measured | Where | Owner ruling |
+| --- | --- | --- | --- | --- | --- | --- |
+| Moon dark | text on overlay | 8.82 | 10:1 | browser | Menu items | 「原色優先」 2026-11-08 |
+| Moon dark | text on highlight med | 7.41 | 10:1 | browser | Selected nav row, neutral badge, Kbd, "Go to page" button | 「原色優先」 2026-11-08 |
+| Moon dark | text on overlay under the hover layer | 7.65 | 10:1 | browser | Hovered or open menu row | 「原色優先」 2026-11-08 |
+| Moon dark | pine on surface | 3.94 | 5:1 | browser | Sign-in status line | 「原色優先」 2026-11-08 |
+| Moon dark | love on overlay | 4.00 | 5:1 | browser | Error banner, field error | 「原色優先」 2026-11-08 |
+| Moon dark | subtle on surface | 4.46 | 5:1 | browser | Secondary text on cards, side nav, content area | 「原色優先」 2026-11-08 |
+| Moon dark | subtle on base | 4.86 | 5:1 | browser | Secondary text on the page and side nav | 「原色優先」 2026-11-08 |
+| Main dark | pine on surface | 3.16 | 5:1 | browser | Sign-in status line | 「原色優先」 2026-11-08 |
+| Main dark | text on highlight med | 7.93 | 10:1 | browser | Selected nav row, neutral badge, Kbd, "Go to page" button | 「原色優先」 2026-11-08 |
+| Dawn light | text on base | 8.69 | 10:1 | browser | Body text on the page and side nav | 「原色優先」 2026-11-08 |
+| Dawn light | text on surface | 9.14 | 10:1 | browser | Body text on cards and the content area | 「原色優先」 2026-11-08 |
+| Dawn light | text on overlay | 7.92 | 10:1 | browser | Menu items | 「原色優先」 2026-11-08 |
+| Dawn light | text on highlight med | 6.86 | 10:1 | browser | Selected nav row, neutral badge, Kbd, "Go to page" button | 「原色優先」 2026-11-08 |
+| Dawn light | text on overlay under the hover layer | 7.31 | 10:1 | browser | Hovered or open menu row | 「原色優先」 2026-11-08 |
+| Dawn light | base on text | 8.69 | 10:1 | browser | Primary button label | 「原色優先」 2026-11-08 |
+| Dawn light | foam on overlay | 2.86 | 5:1 | browser | Info banner | 「原色優先」 2026-11-08 |
+| Dawn light | love on overlay | 3.50 | 5:1 | browser | Error banner, field error | 「原色優先」 2026-11-08 |
+| Dawn light | iris on surface | 3.65 | 5:1 | browser | Skip link | 「原色優先」 2026-11-08 |
+| Dawn light | subtle on base | 4.02 | 5:1 | browser | Secondary text on the page and side nav | 「原色優先」 2026-11-08 |
+| Dawn light | subtle on surface | 4.23 | 5:1 | browser | Secondary text on cards and the content area | 「原色優先」 2026-11-08 |
+| Moon dark | subtle on overlay | 3.61 | 5:1 | palette | Secondary text in menus and popovers | 「原色優先」 2026-11-08 |
+| Main dark | subtle on overlay | 4.71 | 5:1 | palette | Secondary text in menus and popovers | 「原色優先」 2026-11-08 |
+| Dawn light | subtle on overlay | 3.67 | 5:1 | palette | Secondary text in menus and popovers | 「原色優先」 2026-11-08 |
+| Moon dark | muted on base / surface / overlay | 3.03 / 2.79 / 2.25 | 5:1 | palette | Tertiary and placeholder text (disabled text is exempt) | 「原色優先」 2026-11-08 |
+| Main dark | muted on base / surface / overlay | 3.42 / 3.20 / 2.94 | 5:1 | palette | Tertiary and placeholder text (disabled text is exempt) | 「原色優先」 2026-11-08 |
+| Dawn light | muted on base / surface / overlay | 2.73 / 2.87 / 2.48 | 5:1 | palette | Tertiary and placeholder text (disabled text is exempt) | 「原色優先」 2026-11-08 |
+| Moon dark | pine on base / overlay | 4.29 / 3.19 | 5:1 | palette | Ready text | 「原色優先」 2026-11-08 |
+| Main dark | pine on base / overlay | 3.38 / 2.91 | 5:1 | palette | Ready text | 「原色優先」 2026-11-08 |
+| Moon dark | love on surface | 4.94 | 5:1 | palette | Failing text | 「原色優先」 2026-11-08 |
+| Dawn light | love on base / surface | 3.84 / 4.04 | 5:1 | palette | Failing text | 「原色優先」 2026-11-08 |
+| Dawn light | gold on base / surface / overlay | 2.05 / 2.16 / 1.87 | 5:1 | palette | Cooling text, warning banner | 「原色優先」 2026-11-08 |
+| Dawn light | foam on base / surface | 3.14 / 3.30 | 5:1 | palette | Info text | 「原色優先」 2026-11-08 |
+| Dawn light | iris on base / overlay | 3.47 / 3.16 | 5:1 | palette | Links | 「原色優先」 2026-11-08 |
 
 ## Not yet enforced
 

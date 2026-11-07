@@ -1,103 +1,187 @@
-import { Suspense, useEffect } from "react";
+// The app frame, as the owner's BoothDex console has it (admin/admin-shell.tsx) from the Astryx page
+// template shell-side-nav: AppShell with one collapsible, resizable SideNav: its heading on top, the
+// page sections from routes.ts, the session rows in the footer and the appearance controls in the
+// footer icon row beside the collapse button. On phones AppShell turns the nav into its drawer
+// behind its own bar. There is no top bar.
+
+import { LogOut, Plug } from "lucide-react";
+import { Suspense, useEffect, useMemo, useState, type AnchorHTMLAttributes } from "react";
 import { AppShell } from "@astryxdesign/core/AppShell";
-import { Icon } from "@astryxdesign/core/Icon";
 import { Center } from "@astryxdesign/core/Center";
+import { CommandPalette } from "@astryxdesign/core/CommandPalette";
+import { useHotkeys } from "@astryxdesign/core/hooks";
+import { Icon } from "@astryxdesign/core/Icon";
+import { Kbd } from "@astryxdesign/core/Kbd";
 import { VStack } from "@astryxdesign/core/Layout";
-import { NavIcon } from "@astryxdesign/core/NavIcon";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { Popover } from "@astryxdesign/core/Popover";
 import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { Spinner } from "@astryxdesign/core/Spinner";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
-import { BrandIcon, SignOutIcon } from "../components/icons.tsx";
-import { StatusLamp } from "../components/StatusLamp.tsx";
+import { createStaticSource } from "@astryxdesign/core/Typeahead";
+import { lampVariant, StatusLamp } from "../components/StatusLamp.tsx";
 import { t } from "../lib/i18n.ts";
+import { repository } from "../lib/repository.ts";
+import { BrandMark } from "../components/BrandMark.tsx";
 import { layout } from "../themes/site/layout.ts";
 import { PageWarning } from "./Notices.tsx";
-import { PreferenceMenus } from "./PreferenceMenus.tsx";
+import { FooterPreferences } from "./PreferenceMenus.tsx";
+import { usePreferences } from "./preferences.ts";
 import { QueryBoundary } from "./QueryBoundary.tsx";
-import { routes } from "./routes.ts";
+import { navGroups, routes, type PageRoute } from "./routes.ts";
 import { useSession } from "./Session.tsx";
 import { useDocumentTitle } from "./useDocumentTitle.ts";
 import { useHashRoute } from "./useHashRoute.ts";
 
-// Opened in a new tab: leaving this one would drop the key held in memory.
-const REPOSITORY = "https://github.com/vayungodara/cliproxy-rs";
+/** SideNavItem's link, opening in a new tab: the item has no `target` of its own. */
+function NewTabLink(props: AnchorHTMLAttributes<HTMLAnchorElement>) {
+  return <a {...props} target="_blank" rel="noreferrer" />;
+}
 
-/** After a page change, keyboard and screen-reader focus moves to the new page's title. */
-function FocusHeading({ enabled }: { enabled: boolean }) {
+/**
+ * Keyboard and screen-reader focus moves to the page title after sign-in and after every page
+ * change: the shell only mounts once a key is accepted, and the sign-in field it replaces is gone.
+ */
+function FocusHeading() {
   useEffect(() => {
-    if (!enabled) return;
     const heading = document.querySelector<HTMLElement>("[role=main] h1");
     if (!heading) return;
     heading.tabIndex = -1;
-    heading.focus();
-  }, [enabled]);
+    // A heading is a reading position, not a control: no focus ring around the title.
+    heading.focus({ focusVisible: false });
+  }, []);
   return null;
 }
 
-function ConnectionState() {
-  const { online, version } = useSession();
-  if (!online) return <StatusLamp status="failing" label={t("app.connection.lost")} />;
+/** The host and its lamp, as a nav row (the template's StatusDot end content); the popover adds the build. */
+function ConnectionItem() {
+  const { online, version, commit } = useSession();
+  const host = location.host;
+  const state = online ? t("app.connection.connected", { host }) : t("app.connection.lost");
+  const status = online ? "ready" : "failing";
+  const notReported = t("app.connection.notReported");
   return (
-    <VStack gap={0.5}>
-      <StatusLamp status="ready" label={t("app.connection.connected", { host: location.host })} />
-      {version ? (
-        <Text type="supporting" color="secondary">
-          {t("app.connection.version", { version })}
-        </Text>
-      ) : null}
-    </VStack>
+    <Popover
+      label={t("app.connection.label")}
+      placement="end"
+      alignment="end"
+      content={
+        <VStack gap={3}>
+          <StatusLamp status={status} label={state} />
+          <MetadataList>
+            <MetadataListItem label={t("app.connection.version")}>
+              {version ? <Text type="code">{version}</Text> : notReported}
+            </MetadataListItem>
+            <MetadataListItem label={t("app.connection.commit")}>
+              {commit && commit !== "none" ? <Text type="code">{commit}</Text> : notReported}
+            </MetadataListItem>
+          </MetadataList>
+        </VStack>
+      }
+    >
+      <SideNavItem
+        label={host}
+        icon={Plug}
+        endContent={<StatusDot variant={lampVariant[status]} label={state} />}
+      />
+    </Popover>
   );
 }
 
-export function Shell() {
-  const { route, navigated } = useHashRoute();
-  const { signOut } = useSession();
-  useDocumentTitle(t("app.document.pageTitle", { title: route.title() }));
-  const Page = route.page;
-
+/** "Go to page": a footer row (SideNav has no search slot) and Ctrl/Cmd+K, listing every page. */
+function GoToPage() {
+  const [isOpen, setOpen] = useState(false);
+  const { locale } = usePreferences();
+  // The titles come from the catalog, so the list is rebuilt when the language changes.
+  const source = useMemo(() => {
+    const group = (r: PageRoute) => navGroups.find((g) => g.id === r.group)?.title() ?? "";
+    return createStaticSource(
+      routes.map((r) => ({ id: r.id, label: r.title(), auxiliaryData: { group: group(r) } })),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- locale changes what t() returns
+  }, [locale]);
+  useHotkeys([{ keys: "mod+k", onPress: () => setOpen(true), allowInInputs: true }]);
   return (
-    <AppShell
-      contentPadding={0}
-      sideNav={
-        <SideNav
-          collapsible
-          resizable={layout.sidebar}
-          header={
-            <SideNavHeading
-              heading={t("app.brand.name")}
-              headingHref={`#${routes[0].id}`}
-              icon={<NavIcon icon={<Icon icon={BrandIcon} size="sm" />} />}
-            />
-          }
-          footer={
-            <SideNavSection title={t("app.nav.session")} isHeaderHidden>
-              <VStack paddingInline={2} paddingBlock={2}>
-                <ConnectionState />
-              </VStack>
-              <SideNavItem
-                label={t("app.nav.github")}
-                icon="externalLink"
-                onClick={() => void open(REPOSITORY, "_blank", "noopener,noreferrer")}
-              />
-              <SideNavItem label={t("app.nav.signOut")} icon={SignOutIcon} onClick={signOut} />
-            </SideNavSection>
-          }
-          footerIcons={<PreferenceMenus />}
-        >
-          <SideNavSection title={t("app.nav.label")} isHeaderHidden>
-            {routes.map((r) => (
+    <>
+      <SideNavItem
+        label={t("app.palette.label")}
+        icon="search"
+        endContent={<Kbd keys="mod+k" />}
+        onClick={() => setOpen(true)}
+      />
+      <CommandPalette
+        isOpen={isOpen}
+        onOpenChange={setOpen}
+        searchSource={source}
+        label={t("app.palette.label")}
+        emptySearchText={t("app.palette.empty")}
+        onValueChange={(id) => {
+          setOpen(false);
+          location.hash = `#${id}`;
+        }}
+      />
+    </>
+  );
+}
+
+function PageNav({ current }: { current: PageRoute }) {
+  const { signOut } = useSession();
+  return (
+    <SideNav
+      collapsible
+      resizable={layout.sidebar}
+      header={
+        <SideNavHeading
+          heading={t("app.brand.name")}
+          // The mark itself, as BoothDex's heading: NavIcon would paint an accent disc behind it.
+          icon={<Icon icon={BrandMark} />}
+          headingHref={`#${routes[0].id}`}
+        />
+      }
+      footerIcons={<FooterPreferences />}
+      footer={
+        <SideNavSection title={t("app.nav.footer")} isHeaderHidden>
+          <ConnectionItem />
+          <GoToPage />
+          <SideNavItem
+            label={t("app.nav.github")}
+            icon="externalLink"
+            href={repository.url}
+            as={NewTabLink}
+          />
+          <SideNavItem label={t("app.nav.signOut")} icon={LogOut} onClick={signOut} />
+        </SideNavSection>
+      }
+    >
+      {navGroups.map((group) => {
+        const pages = routes.filter((r) => r.group === group.id);
+        if (!pages.length) return null;
+        return (
+          <SideNavSection key={group.id} title={group.title()}>
+            {pages.map((r) => (
               <SideNavItem
                 key={r.id}
                 label={r.title()}
                 icon={r.icon}
                 href={`#${r.id}`}
-                isSelected={r === route}
+                isSelected={r === current}
               />
             ))}
           </SideNavSection>
-        </SideNav>
-      }
-    >
+        );
+      })}
+    </SideNav>
+  );
+}
+
+export function Shell() {
+  const { route } = useHashRoute();
+  useDocumentTitle(t("app.document.pageTitle", { title: route.title() }));
+  const Page = route.page;
+
+  return (
+    <AppShell contentPadding={0} sideNav={<PageNav current={route} />}>
       <QueryBoundary resetKey={route.id}>
         <Suspense
           key={route.id}
@@ -109,7 +193,7 @@ export function Shell() {
         >
           <PageWarning />
           <Page />
-          <FocusHeading enabled={navigated} />
+          <FocusHeading />
         </Suspense>
       </QueryBoundary>
     </AppShell>

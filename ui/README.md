@@ -1,6 +1,6 @@
 # cliproxy-rs dashboard
 
-The management dashboard for cliproxy-rs, written in Svelte 5 with plain CSS. It talks to the v8 Management API defined by Go CLIProxyAPI, and it has two outputs built from one source tree:
+The management dashboard for cliproxy-rs, written in React 19 with the Astryx design system. It talks to the v8 Management API defined by Go CLIProxyAPI, and it has two outputs built from one source tree:
 
 - `dist/` is embedded by the Rust binary (`crates/cpa-server/build.rs`) and served at `/management.html`.
 - `dist-panel/management.html` is one self-contained file for existing Go CLIProxyAPI servers. See [PANEL.md](PANEL.md).
@@ -31,13 +31,13 @@ The React dashboard in `dist-next/`. Code rules are in [CONVENTIONS.md](CONVENTI
 | Path | Role |
 | --- | --- |
 | `src/main.tsx` | Entry. Loads Astryx's Chinese strings first when the page starts in Chinese, then renders `App`. |
-| `src/app/` | Providers, sign-in, the shell (`AppShell` and the side nav), the route table `routes.ts` with hash routing and one lazy chunk per page, the page error boundary, the theme and language switches. |
+| `src/app/` | Providers, sign-in, the shell (`AppShell` and the side nav), the page frame `PageFrame.tsx`, the route table `routes.ts` with hash routing and one lazy chunk per page, the page error boundary, the theme and language switches. |
 | `src/features/<page>/` | One directory per screen: the page, its query hooks in `queries.ts`, tests. Now: `system`. |
-| `src/components/` | Parts used by two or more screens: the status lamp and the icon registry. |
+| `src/components/` | Parts used by two or more screens: the status lamp. |
 | `src/lib/api/` | One module per Management API area, one typed function per route; `routes.ts` is the registry `check:api` compares with the Rust router. |
 | `src/lib/` | The i18n runtime (`i18n.ts`), `notify()`, the session (sign-in, sign-in help, capability probes) and pure domain logic with tests. |
 | `src/i18n/` | Message catalogs, one per area, in en, zh-CN and zh-TW. |
-| `src/themes/site/` | The one theme: `siteTheme.ts` is the source; `site.css` and `site.js` are its `astryx theme build` output. |
+| `src/themes/site/` | The one theme in two palettes: `siteTheme.ts` (Rosé Pine Moon, built to `site.*`) and `siteMainTheme.ts` (Rosé Pine, built to `site-main.*`, loaded on demand) are the sources, both extending `@astryxdesign/theme-neutral` with tokens only (fonts, icons and components are neutral's), rebuilt with `astryx theme build`. |
 
 ## Honest states
 
@@ -85,8 +85,12 @@ Both scripts are for disposable servers with fake credentials only: they edit co
 
 ## Security
 
-The management key lives in `src/api.ts` module memory and is cleared on sign-out; reloading signs out. Only the theme is stored. Plugin store descriptions are decoded as text, never inserted as HTML. Downloaded credential files and configuration previews contain secrets; treat them accordingly. Do not use the dashboard over plain HTTP across a network.
+The management key lives in `src/lib/api/client.ts` module memory and is cleared on sign-out; reloading signs out. Only the theme mode, the palette and the language are stored (`src/app/preferences.ts`), plus the first-run card's flags (`src/lib/first-run.ts`). Plugin store descriptions are decoded as text, never inserted as HTML. Downloaded credential files and configuration previews contain secrets; treat them accordingly. Do not use the dashboard over plain HTTP across a network.
 
 ## Fonts
 
-Host Grotesk (SIL Open Font License, `public/fonts/OFL.txt`), subset to Latin and weights 400–650 with fontTools.
+Neutral's own: Figtree (body and headings, SIL Open Font License 1.1) and the system monospace stack, as `@astryxdesign/theme-neutral` (MIT) sets them; the theme package bundles no font files and its `fonts.css` loads Figtree from Google Fonts at run time, so `src/themes/site/index.ts` imports the same weights (400 to 700) from `@fontsource/figtree` (OFL 1.1) instead and the dashboard makes no third-party request. CJK text uses the system fonts.
+
+## Colours
+
+Rosé Pine palette (MIT, https://github.com/rose-pine/palette), values unmodified in `src/themes/site/rosePine.ts`.
