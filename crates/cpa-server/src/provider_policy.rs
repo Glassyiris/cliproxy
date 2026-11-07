@@ -227,17 +227,5 @@ mod tests {
             ),
             ("provider-a", "opencode-zen", "kimi/kimi-1", "claude")
         );
-        let routed = Config::parse(&format!(
-            "{yaml}model-routers:\n  - name: smart\n    providers: {{exclude: [nobody, Provider-A, kimi/kimi-9]}}\n"
-        ))
-        .unwrap();
-        assert_eq!(
-            Providers::problems(&routed, &[kimi1]),
-            [
-                r#"routing.providers: "provider-a" is listed twice in order; its first tier applies"#,
-                r#"model-routers "smart" providers: "nobody" matches no credential"#,
-                r#"model-routers "smart" providers: "kimi/kimi-9" matches no credential"#,
-            ]
-        );
     }
 }

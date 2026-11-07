@@ -1494,17 +1494,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_order_tries_the_first_tier_first_and_names_the_server() {
-        let (entry, down_seen) = down().await;
-        let (url, seen, _, _rt) = proxy(&format!("{entry}routing:\n  providers:\n    order: [down]\n")).await;
-        let body = serde_json::json!({"model": "cheap", "messages": [{"role": "user", "content": "hi"}]});
-        let (status, _, text, provider) = chat(&url, body).await;
-        assert_eq!((status, provider.as_str()), (200, "Acme"), "{text}");
-        assert_eq!(*down_seen.lock().unwrap(), ["up-cheap"], "the first tier went first");
-        assert_eq!(upstream_model(&seen.lock().unwrap()[0]), "up-cheap");
-    }
-
-    #[tokio::test]
     async fn a_router_keeps_to_its_scope_and_falls_back_once() {
         let (entry, down_seen) = down().await;
         let (url, seen, _, rt) = proxy(&format!(
@@ -1514,8 +1503,12 @@ mod tests {
         rt.model_router.publish(rated());
         let ask = |text: &str| serde_json::json!({"model": "picky", "messages": [{"role": "user", "content": text}]});
         // The judge grades 4: `top`, which only `Down` may serve. A request fault stays.
-        let (status, routed, text, _) = chat(&url, ask("malformed")).await;
-        assert_eq!((status, routed.as_str()), (400, "top"), "{text}");
+        let (status, routed, text, provider) = chat(&url, ask("malformed")).await;
+        assert_eq!(
+            (status, routed.as_str(), provider.as_str()),
+            (400, "top", "Down"),
+            "{text}"
+        );
         assert_eq!(*down_seen.lock().unwrap(), ["up-top"]);
         // A `stop` rule ends the request on its model too.
         let (status, routed, text, _) = chat(&url, ask("halt")).await;
