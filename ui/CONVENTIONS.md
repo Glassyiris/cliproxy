@@ -46,6 +46,10 @@ src/i18n/        catalogs per area: en, zh-CN, zh-TW
 
 - Astryx component props first; then StyleX `stylex.create` with theme tokens. No CSS files, no
   `style={{}}`, no hex, rgb or px values outside `src/themes/`. (gate: check-ui)
+- Our StyleX output sits in the `app` cascade layer, after Astryx's components and before the
+  theme (`src/themes/layers.css`, `useCSSLayers` in `vite.config.ts`). Unlayered CSS would beat
+  the theme: one of our atomic classes shared a name with Button's and hid every destructive
+  label. So when xstyle and the theme set the same property, the theme wins.
 - Motion only through the shared motion module. (gate: check-ui)
 
 ## Text
