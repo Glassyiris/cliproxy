@@ -9,7 +9,8 @@
 // Source: every t("key") literal exists; every key is used by a literal or by `dynamicKeys`;
 //   a computed t(`prefix.${x}`) needs a literal prefix that some `dynamicKeys` entry extends,
 //   and every `dynamicKeys` entry must be covered by such a call; no JSX text literal and no
-//   literal aria-label, title, placeholder or alt in .tsx.
+//   literal in a text prop (aria-label, title, placeholder, alt, Astryx label, description and
+//   the rest of TEXT_ATTRIBUTES) in .tsx.
 //
 // Exit codes: 0 clean, 1 violation, 2 cannot run (a catalog cannot be loaded).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -25,7 +26,38 @@ const srcDir = join(ui, "src");
 const i18nDir = join(srcDir, "i18n");
 const LOCALES = ["en", "zh-CN", "zh-TW"];
 const KEY_SHAPE = /^([a-z][A-Za-z0-9]*)\.[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*$/;
-const TEXT_ATTRIBUTES = new Set(["aria-label", "title", "placeholder", "alt"]);
+// Props that put text on screen or in the accessibility tree: the DOM ones, and the Astryx 0.7.11
+// ones (its .d.ts props typed string or ReactNode that carry words, by name or by suffix).
+const TEXT_ATTRIBUTES = new Set([
+  "alt",
+  "aria-braillelabel",
+  "aria-brailleroledescription",
+  "aria-description",
+  "aria-label",
+  "aria-placeholder",
+  "aria-roledescription",
+  "aria-valuetext",
+  "body",
+  "caption",
+  "description",
+  "formatHint",
+  "heading",
+  "label",
+  "message",
+  "placeholder",
+  "subheading",
+  "subtitle",
+  "superheading",
+  "text",
+  "title",
+  "tooltip",
+  "unit",
+  "units",
+]);
+// labelTooltip, dismissLabel, emptySearchText, disabledMessage, calendarDescription, imageAlt ...
+const TEXT_ATTRIBUTE_SUFFIX =
+  /[a-z](Label|Text|Message|Placeholder|Description|Tooltip|Alt|Heading|Title|Summary)$/;
+const isTextAttribute = (name) => TEXT_ATTRIBUTES.has(name) || TEXT_ATTRIBUTE_SUFFIX.test(name);
 const HAS_TEXT = /[\p{L}\p{N}]/u;
 const TEST_FILE = /\.test(?:-support)?\.tsx?$/;
 // Product names that read the same in every locale and may stay in JSX.
@@ -208,7 +240,7 @@ function jsxLiteralProblems(node) {
     for (const text of literalStrings(node.expression))
       if (HAS_TEXT.test(text) && !UNTRANSLATED.has(text.trim())) found.push(`JSX string "${text}"`);
   }
-  if (ts.isJsxAttribute(node) && TEXT_ATTRIBUTES.has(node.name.getText())) {
+  if (ts.isJsxAttribute(node) && isTextAttribute(node.name.getText())) {
     const value = ts.isJsxExpression(node.initializer ?? node)
       ? node.initializer.expression
       : node.initializer;

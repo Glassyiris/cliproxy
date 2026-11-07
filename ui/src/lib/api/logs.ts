@@ -14,11 +14,13 @@ export type LogPage = {
 export const readLogs = (options: { limit: number; cursor?: string }, signal?: AbortSignal) =>
   request<LogPage>(routes.readLogs, { query: options, signal });
 
-export const clearLogs = () => request<{ success: true; message: string; removed: number }>(routes.clearLogs);
+export const clearLogs = () =>
+  request<{ success: true; message: string; removed: number }>(routes.clearLogs);
 
 export type ErrorLogFile = { name: string; size: number; modified: number };
 
-export const listErrorLogs = (signal?: AbortSignal) => request<{ files: ErrorLogFile[] }>(routes.listErrorLogs, { signal });
+export const listErrorLogs = (signal?: AbortSignal) =>
+  request<{ files: ErrorLogFile[] }>(routes.listErrorLogs, { signal });
 
 export const downloadErrorLog = (name: string, signal?: AbortSignal) =>
   request<Blob>(routes.downloadErrorLog, { params: { name }, signal, as: "blob" });

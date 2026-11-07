@@ -4,7 +4,14 @@ import { routes } from "./routes.ts";
 export type Cooldown = {
   scope: "credential" | "model";
   model_key?: string;
-  reason: "credential_quota" | "quota" | "unauthorized" | "payment_required" | "not_found" | "transient_error" | "unknown";
+  reason:
+    | "credential_quota"
+    | "quota"
+    | "unauthorized"
+    | "payment_required"
+    | "not_found"
+    | "transient_error"
+    | "unknown";
   retry_at: string;
   remaining_seconds: number;
   /** cliproxy-rs only: the upstream's stated reset when the trusted cooldown bound cut it. */
@@ -67,11 +74,17 @@ export type Credential = {
 
 export type CredentialList = { observed_at: string; files: Credential[] };
 
-export const listCredentials = (signal?: AbortSignal) => request<CredentialList>(routes.listCredentials, { signal });
+export const listCredentials = (signal?: AbortSignal) =>
+  request<CredentialList>(routes.listCredentials, { signal });
 
 type Failed = { name: string; error: string }[];
 /** One file answers `{status}` only; several add counts, and `partial` (HTTP 207) lists failures. */
-export type UploadResult = { status: "ok" | "partial"; uploaded?: number; files?: string[]; failed?: Failed };
+export type UploadResult = {
+  status: "ok" | "partial";
+  uploaded?: number;
+  files?: string[];
+  failed?: Failed;
+};
 
 export function uploadCredentials(files: File[]) {
   const form = new FormData();
@@ -79,11 +92,22 @@ export function uploadCredentials(files: File[]) {
   return request<UploadResult>(routes.uploadCredentials, { body: form });
 }
 
-export type DeleteResult = { status: "ok" | "partial"; deleted?: number; files?: string[]; failed?: Failed };
+export type DeleteResult = {
+  status: "ok" | "partial";
+  deleted?: number;
+  files?: string[];
+  failed?: Failed;
+};
 
-export const deleteCredentials = (names: string[]) => request<DeleteResult>(routes.deleteCredentials, { body: { names } });
+export const deleteCredentials = (names: string[]) =>
+  request<DeleteResult>(routes.deleteCredentials, { body: { names } });
 
-export type CredentialModel = { id: string; display_name?: string; type?: string; owned_by?: string };
+export type CredentialModel = {
+  id: string;
+  display_name?: string;
+  type?: string;
+  owned_by?: string;
+};
 
 export const listCredentialModels = (name: string, signal?: AbortSignal) =>
   request<{ models: CredentialModel[] }>(routes.listCredentialModels, { query: { name }, signal });
@@ -94,7 +118,12 @@ export const downloadCredential = (name: string, signal?: AbortSignal) =>
 
 type Target = { name: string; auth_index?: string };
 
-export type StatusResult = { status: "ok"; disabled: boolean; via?: "config:excluded-models"; excluded_pattern?: "*" };
+export type StatusResult = {
+  status: "ok";
+  disabled: boolean;
+  via?: "config:excluded-models";
+  excluded_pattern?: "*";
+};
 
 export const setCredentialStatus = (target: Target, disabled: boolean) =>
   request<StatusResult>(routes.setCredentialStatus, { body: { ...target, disabled } });
@@ -120,4 +149,5 @@ export type RefreshResult = {
   auth: { id: string; provider: string; label: string; status: string; disabled: boolean };
 };
 
-export const refreshCredentials = (target: Target) => request<RefreshResult>(routes.refreshCredentials, { body: target });
+export const refreshCredentials = (target: Target) =>
+  request<RefreshResult>(routes.refreshCredentials, { body: target });

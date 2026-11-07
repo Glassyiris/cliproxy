@@ -24,7 +24,10 @@ export function lineDiff(before: string, after: string): { kind: string; text: s
   let start = 0,
     end = 0;
   while (start < Math.min(a.length, b.length) && a[start] === b[start]) start++;
-  while (end < Math.min(a.length, b.length) - start && a[a.length - 1 - end] === b[b.length - 1 - end])
+  while (
+    end < Math.min(a.length, b.length) - start &&
+    a[a.length - 1 - end] === b[b.length - 1 - end]
+  )
     end++;
   return [
     ...a.slice(0, start).map((text) => ({ kind: "same", text })),

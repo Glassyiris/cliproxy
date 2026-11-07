@@ -7,41 +7,23 @@ package-lock.json
 scripts
 *.md
 index.html
-# ponytail: files written before this gate and not yet formatted (P1a lib and tools, the mock
-# server and the perf harness). Format one with `npx prettier --write <file>`, then delete its
-# line; the list is empty once the P1b merge has been followed by a single formatting pass.
-src/lib/api/client.test.ts
-src/lib/api/client.ts
-src/lib/api/config.test.ts
-src/lib/api/config.ts
-src/lib/api/credentials.ts
-src/lib/api/fake-server.test-support.ts
-src/lib/api/logs.ts
-src/lib/api/oauth.ts
-src/lib/api/observability.ts
-src/lib/api/plugins.ts
-src/lib/api/probes.ts
-src/lib/api/proxy.ts
-src/lib/api/requests.ts
-src/lib/api/routing.ts
-src/lib/client-keys.ts
-src/lib/compare.test.ts
-src/lib/compare.ts
+# Written by `astryx theme build` and the palette generator; `astryx theme build --check`
+# compares them byte for byte, so they keep the generator's formatting.
+src/themes/site/site.css
+src/themes/site/site.js
+src/themes/site/site.d.ts
+src/themes/site/site.css.d.ts
+src/themes/site/site.variants.d.ts
+src/themes/site/sitePalette.generated.ts
+src/themes/site/sitePalette.generated.receipt.json
+# ponytail: files written before this gate and not yet formatted. The three src/lib files have
+# a function that formatting pushes over the 80-line limit; split it, format the file, then
+# delete its line. The tools are outside the dashboard work's write scope.
 src/lib/credentials.test.ts
 src/lib/credentials.ts
 src/lib/quota-windows.test.ts
-src/lib/quota-windows.ts
-src/lib/quota.test.ts
-src/lib/quota.ts
-src/lib/routing.ts
-src/lib/time.test.ts
-src/lib/tool-setup.test.ts
-src/lib/tool-setup.ts
-src/lib/usage.test.ts
-src/lib/usage.ts
 tools/api-allowlist.json
 tools/check-api.mjs
 tools/mock/server.mjs
 tools/perf/adapters/svelte.mjs
-tools/perf/README.md
 tools/perf/run.mjs

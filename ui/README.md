@@ -26,16 +26,18 @@ The React rewrite builds into `dist-next/`, which is not checked in. `ui/dist` i
 
 ## Structure
 
+The React dashboard in `dist-next/`. Code rules are in [CONVENTIONS.md](CONVENTIONS.md).
+
 | Path | Role |
 | --- | --- |
-| `src/api.ts` | Fetch wrapper. Holds the management key in memory and reports unimplemented routes (Go-style empty 404, 501, 405). |
-| `src/store.svelte.ts` | Shared state: session, server kind from version headers, config, credentials, plugins, capabilities, toasts, writes with stale checks. |
-| `src/core.ts` | Pure helpers: credential state, traffic buckets, usage records, quota windows, diffs. Tested in `src/core.test.ts`. |
-| `src/Load.svelte` | Loading, error, not-available and data states for one read. |
-| `src/Missing.svelte` | One line naming actions this server does not implement. |
-| `src/Grille.svelte` | The 20-bucket traffic grille. |
-| `src/Editor.svelte` | JSON or YAML editor with a reviewed diff and a reread before writing. |
-| `src/pages/*.svelte` | One component per screen. |
+| `src/main.tsx` | Entry. Loads Astryx's Chinese strings first when the page starts in Chinese, then renders `App`. |
+| `src/app/` | Providers, sign-in, the shell (`AppShell` and the side nav), the route table `routes.ts` with hash routing and one lazy chunk per page, the page error boundary, the theme and language switches. |
+| `src/features/<page>/` | One directory per screen: the page, its query hooks in `queries.ts`, tests. Now: `system`. |
+| `src/components/` | Parts used by two or more screens: the status lamp and the icon registry. |
+| `src/lib/api/` | One module per Management API area, one typed function per route; `routes.ts` is the registry `check:api` compares with the Rust router. |
+| `src/lib/` | The i18n runtime (`i18n.ts`), `notify()`, the session (sign-in, sign-in help, capability probes) and pure domain logic with tests. |
+| `src/i18n/` | Message catalogs, one per area, in en, zh-CN and zh-TW. |
+| `src/themes/site/` | The one theme: `siteTheme.ts` is the source; `site.css` and `site.js` are its `astryx theme build` output. |
 
 ## Honest states
 

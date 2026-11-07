@@ -11,7 +11,12 @@ export const accountProbes: readonly Probe[] = [
   { route: routes.callProvider },
 ];
 
-export const connectProbes: readonly Probe[] = [{ route: routes.startOAuth }, { route: routes.importOAuth }];
+export const connectProbes: readonly Probe[] = [
+  { route: routes.startOAuth },
+  { route: routes.importOAuth },
+];
 
 // count=0 fails validation, so probing never removes a record from the queue.
-export const usageProbes: readonly Probe[] = [{ route: routes.drainUsageQueue, query: { count: 0 } }];
+export const usageProbes: readonly Probe[] = [
+  { route: routes.drainUsageQueue, query: { count: 0 } },
+];

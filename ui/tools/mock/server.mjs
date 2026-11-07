@@ -757,7 +757,7 @@ const server = http.createServer((req, res) => {
     try {
       if (url.pathname === "/healthz") return (status = 200), send(200, { "Content-Type": "application/json" }, '{"status":"ok"}');
       if (!url.pathname.startsWith(PREFIX + "/") && url.pathname !== PREFIX) return send(404, {}, "");
-      const headers = { "X-CPA-VERSION": VERSION, "Cache-Control": "no-store" };
+      const headers = { "X-CPA-VERSION": VERSION, "X-CPA-COMMIT": "0000000", "X-CPA-BUILD-DATE": "2026-11-08T00:00:00Z", "Cache-Control": "no-store" };
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
       const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || String(req.headers["x-management-key"] || "");
       if (!given) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"missing management key"}');

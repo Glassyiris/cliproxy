@@ -1,9 +1,10 @@
 // `npm run lint`: ESLint, then a Prettier check.
 //
-// ESLint findings are counted per rule and compared with tools/lint-ratchet.json, which lists
-// the debt that existed when the gate was added ({ "<rule>": count }). A rule absent from the
-// file is allowed zero. The check fails when a count rises and also when it falls, so a fixed
-// finding forces the file to be lowered and the debt cannot come back.
+// ESLint findings are counted per rule and file and compared with tools/lint-ratchet.json, which
+// lists the debt that existed when the gate was added ({ "<rule>": { "<path>": count } }), so a
+// new finding in one file cannot hide behind a fix in another. A rule or file absent from it is
+// allowed zero. The check fails when a count rises and also when it falls, so a fixed finding
+// forces the file to be lowered and the debt cannot come back.
 //
 // Exit codes: 0 clean, 1 violation, 2 cannot run (bad config, unreadable ratchet file).
 import { spawn } from "node:child_process";
@@ -32,15 +33,23 @@ function prettierCheck() {
   });
 }
 
+const key = (rule, path) => `${rule} in ${path}`;
+
 function readRatchet() {
   const parsed = JSON.parse(readFileSync(ratchetFile, "utf8"));
-  for (const [rule, count] of Object.entries(parsed)) {
-    if (!Number.isInteger(count) || count < 1)
-      throw new Error(
-        `lint-ratchet.json: ${rule} must be a positive integer, delete the entry at 0`,
-      );
+  const allowed = new Map();
+  for (const [rule, files] of Object.entries(parsed)) {
+    if (typeof files !== "object" || files === null || Array.isArray(files))
+      throw new Error(`lint-ratchet.json: ${rule} must map file paths to counts`);
+    for (const [path, count] of Object.entries(files)) {
+      if (!Number.isInteger(count) || count < 1)
+        throw new Error(
+          `lint-ratchet.json: ${rule} ${path} must be a positive integer, delete the entry at 0`,
+        );
+      allowed.set(key(rule, path), count);
+    }
   }
-  return parsed;
+  return allowed;
 }
 
 const problems = [];
@@ -63,23 +72,23 @@ const found = new Map();
 for (const file of results) {
   const path = file.filePath.slice(ui.length);
   for (const message of file.messages) {
-    const rule = message.ruleId ?? NO_RULE;
-    const list = found.get(rule) ?? [];
+    const id = key(message.ruleId ?? NO_RULE, path);
+    const list = found.get(id) ?? [];
     list.push(`${path}:${message.line}:${message.column} ${message.message}`);
-    found.set(rule, list);
+    found.set(id, list);
   }
 }
 
-for (const rule of new Set([...found.keys(), ...Object.keys(ratchet)])) {
-  const list = found.get(rule) ?? [];
-  const allowed = ratchet[rule] ?? 0;
+for (const id of new Set([...found.keys(), ...ratchet.keys()])) {
+  const list = found.get(id) ?? [];
+  const allowed = ratchet.get(id) ?? 0;
   if (list.length > allowed) {
     problems.push(
-      `${rule}: ${list.length} findings, ratchet allows ${allowed}\n  ${list.join("\n  ")}`,
+      `${id}: ${list.length} findings, ratchet allows ${allowed}\n  ${list.join("\n  ")}`,
     );
   } else if (list.length < allowed) {
     problems.push(
-      `${rule}: ${list.length} findings, ratchet still says ${allowed}; ` +
+      `${id}: ${list.length} findings, ratchet still says ${allowed}; ` +
         `lower it in tools/lint-ratchet.json${list.length === 0 ? " (delete the entry)" : ""}`,
     );
   }

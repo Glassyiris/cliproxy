@@ -6,10 +6,17 @@ import { fakeServer } from "./api/fake-server.test-support.ts";
 const server = fakeServer();
 const { connect } = await import("./api/client.ts");
 const { createQuotaChecker } = await import("./quota.ts");
-connect("secret", { unauthorized() {}, version() {} });
+connect("secret", { unauthorized() {}, server() {} });
 
 const account = (auth_index: string, extra: Partial<Credential> = {}) =>
-  ({ name: `${auth_index}.json`, auth_index, provider: "claude", disabled: false, quota: { signals: {} }, ...extra }) as Credential;
+  ({
+    name: `${auth_index}.json`,
+    auth_index,
+    provider: "claude",
+    disabled: false,
+    quota: { signals: {} },
+    ...extra,
+  }) as Credential;
 
 test("quota checks: button-driven, one at a time, each account at most once per 2 minutes", async () => {
   const list = [account("a"), account("b"), account("c", { disabled: true })];
@@ -21,7 +28,13 @@ test("quota checks: button-driven, one at a time, each account at most once per 
     return new Promise<Response>((r) =>
       setTimeout(() => {
         open--;
-        r(Response.json({ status_code: 200, header: {}, body: JSON.stringify({ five_hour: { utilization: 40, resets_at: "" } }) }));
+        r(
+          Response.json({
+            status_code: 200,
+            header: {},
+            body: JSON.stringify({ five_hour: { utilization: 40, resets_at: "" } }),
+          }),
+        );
       }, 5),
     );
   };
@@ -56,7 +69,14 @@ test("quota checks: button-driven, one at a time, each account at most once per 
 });
 
 test("a refused token keeps its status code next to the last known limits", async () => {
-  const list = [account("d", { quota: { observed_at: "2026-10-02T12:00:00Z", signals: { "anthropic-ratelimit-unified-5h-utilization": "0.5" } } })];
+  const list = [
+    account("d", {
+      quota: {
+        observed_at: "2026-10-02T12:00:00Z",
+        signals: { "anthropic-ratelimit-unified-5h-utilization": "0.5" },
+      },
+    }),
+  ];
   const checker = createQuotaChecker({ plugins: () => [], credentials: () => list });
   server.answer = () => Response.json({ status_code: 401, header: {}, body: "" });
   await checker.checkAll(list);

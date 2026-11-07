@@ -29,7 +29,17 @@ const noFeatures = {
 const sourceFiles = ["src/**/*.{ts,tsx}", "vite.config.ts"];
 
 export default defineConfig(
-  { ignores: ["dist/**", "dist-next/**", "node_modules/**", "public/**"] },
+  {
+    ignores: [
+      "dist/**",
+      "dist-next/**",
+      "node_modules/**",
+      "public/**",
+      "src/themes/site/site.js",
+      "src/themes/site/site.d.ts",
+      "src/themes/site/site.variants.d.ts",
+    ],
+  },
   { linterOptions: { reportUnusedDisableDirectives: "error" } },
   {
     files: sourceFiles,

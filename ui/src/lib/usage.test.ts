@@ -17,11 +17,33 @@ test("usage events keep display fields only and summarise by model", () => {
     tokens: { input_tokens: 10, output_tokens: 5 },
   };
   const e = cleanEvent(raw);
-  assert.deepEqual(Object.keys(e).sort(), ["at", "auth", "failed", "id", "input", "latency", "model", "output", "provider", "status", "ttft"]);
+  assert.deepEqual(Object.keys(e).sort(), [
+    "at",
+    "auth",
+    "failed",
+    "id",
+    "input",
+    "latency",
+    "model",
+    "output",
+    "provider",
+    "status",
+    "ttft",
+  ]);
   assert.equal(JSON.stringify(e).includes("secret"), false);
   assert.deepEqual([e.model, e.status, e.at], ["daily", 529, Date.parse(raw.timestamp)]);
-  const s = usageStats([e, cleanEvent({ model: "m", latency_ms: 0 }), cleanEvent({ model: "m", latency_ms: 300, ttft_ms: 0 })]);
+  const s = usageStats([
+    e,
+    cleanEvent({ model: "m", latency_ms: 0 }),
+    cleanEvent({ model: "m", latency_ms: 300, ttft_ms: 0 }),
+  ]);
   assert.deepEqual([s.count, s.failed, s.latency, s.ttft], [3, 1, 100, 40]);
-  assert.deepEqual(s.models.map((m) => [m.model, m.count]), [["m", 2], ["daily", 1]]);
+  assert.deepEqual(
+    s.models.map((m) => [m.model, m.count]),
+    [
+      ["m", 2],
+      ["daily", 1],
+    ],
+  );
   assert.equal(usageStats([]).latency, null);
 });

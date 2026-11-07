@@ -1,6 +1,10 @@
 // Token, layout and motion bans for src/ (REQUIREMENTS rows 3, 4, 5, 11, 20).
 //
 // - Colour, px and radius/spacing literals and `style` attributes: only under src/themes/.
+// - Size literals (a number or a length such as "8rem") on the size props of the Astryx 0.7.11
+//   components in use, as JSX attributes or object properties: only under src/themes/. Spacing
+//   scale props (gap, padding) take scale steps and stay legal; "100%" and full-viewport lengths
+//   fill their container and are not sizes.
 // - CSS files and CSS imports: only src/themes/ and the entry src/main.tsx (imports only).
 // - transition/animation/keyframes and animation libraries: only under src/components/motion/.
 // - Raw <div> and <span>: Astryx has Stack, HStack, Grid, Center, Layout and Text (0.7.11).
@@ -30,6 +34,23 @@ const MOTION_LIBRARY =
   /^(?:framer-motion|motion(?:\/.*)?|@react-spring\/.*|react-spring|react-transition-group|gsap|animejs)$/;
 const SPACING_PROPERTY = /^(?:padding.*|margin.*|gap|rowGap|columnGap|borderRadius|fontSize)$/;
 const ZERO_OR_KEYWORD = new Set(["0", "auto", "inherit", "initial", "unset"]);
+// Width and height props of Card, Center, Layout, LayoutPanel, LayoutHeader, LayoutFooter,
+// Skeleton, Button, TextInput, MetadataList, DropdownMenu, the stacks and SideNav `resizable`.
+const SIZE_PROPERTY = new Set([
+  "width",
+  "height",
+  "minWidth",
+  "maxWidth",
+  "minHeight",
+  "maxHeight",
+  "contentWidth",
+  "defaultWidth",
+  "menuWidth",
+  "menuMaxHeight",
+]);
+// A length anywhere in the value, so `min(60rem, 100%)` is caught as well as `60rem`.
+const LENGTH = /(?:^|[^\w.])-?(?:\d+\.?\d*|\.\d+)(?:[a-z]+|%)?(?![\w.])/i;
+const FILL_ANYWHERE = /\b100(?:%|[dls]?v[hw]|v(?:min|max|[bi]))(?![\w.])|\b0(?![\w.%])/g;
 const BANNED_NAME = /^(?:utils?|common|helpers?|shared|misc)$/i;
 const TEST_FILE = /\.test(?:-support)?\.tsx?$/;
 
@@ -98,6 +119,18 @@ function checkTokens(node, fail) {
   }
 }
 
+function checkSize(node, fail) {
+  const named = ts.isJsxAttribute(node) || ts.isPropertyAssignment(node);
+  if (!named || !SIZE_PROPERTY.has(propertyName(node))) return;
+  const value = literalValue(node.initializer);
+  const size =
+    typeof value === "number"
+      ? value !== 0
+      : typeof value === "string" && LENGTH.test(value.replace(FILL_ANYWHERE, ""));
+  if (size && value !== "0")
+    fail("size", node, "sizes come from src/themes/ (layout.ts), not literals");
+}
+
 function checkJsx(node, fail) {
   if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
     const name = node.tagName.getText();
@@ -140,6 +173,7 @@ function checkFile(file, errors) {
     if (!inThemes) {
       checkJsx(node, fail);
       checkTokens(node, fail);
+      checkSize(node, fail);
     }
     ts.forEachChild(node, visit);
   };
@@ -159,5 +193,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-ui ok: ${files.length} source files (colours, px, tokens, style, layout, css, motion, names)`,
+  `check-ui ok: ${files.length} source files (colours, px, tokens, sizes, style, layout, css, motion, names)`,
 );

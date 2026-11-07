@@ -16,7 +16,10 @@ export type OAuthStart = {
  * local callback port (claude, codex, antigravity). Unknown providers answer 404 provider_not_found.
  */
 export const startOAuth = (provider: string, forward: boolean, signal?: AbortSignal) =>
-  request<OAuthStart>(routes.startOAuth, { query: { provider, is_webui: forward ? "true" : undefined }, signal });
+  request<OAuthStart>(routes.startOAuth, {
+    query: { provider, is_webui: forward ? "true" : undefined },
+    signal,
+  });
 
 /** HTTP 200 in every case; an unknown or expired state is `{status: "error"}`. */
 export type OAuthStatus = { status: "ok" | "wait" } | { status: "error"; error: string };
@@ -27,7 +30,13 @@ export const oauthStatus = (state: string, signal?: AbortSignal) =>
 export const cancelOAuth = (state: string) =>
   request<{ status: "ok"; cancelled: boolean }>(routes.cancelOAuth, { query: { state } });
 
-export type VertexImport = { status: "ok"; "auth-file": string; project_id: string; email: string; location: string };
+export type VertexImport = {
+  status: "ok";
+  "auth-file": string;
+  project_id: string;
+  email: string;
+  location: string;
+};
 
 /** Import a Vertex service-account file. An empty location makes the server use us-central1. */
 export function importVertex(file: File, location: string) {
@@ -39,10 +48,15 @@ export function importVertex(file: File, location: string) {
 
 /** Start binding Sign in with ChatGPT to a file-backed Codex credential. */
 export const bindSiwc = (name: string) =>
-  request<{ status: "ok"; url: string; state: string; flow: "siwc_bind"; expires_in: number }>(routes.bindSiwc, {
-    body: { name },
-  });
+  request<{ status: "ok"; url: string; state: string; flow: "siwc_bind"; expires_in: number }>(
+    routes.bindSiwc,
+    {
+      body: { name },
+    },
+  );
 
 /** Finish a sign-in from the browser's final URL when the redirect page did not load. */
 export const submitOAuthCallback = (provider: string, redirectUrl: string) =>
-  request<{ status: "ok" }>(routes.submitOAuthCallback, { body: { provider, redirect_url: redirectUrl } });
+  request<{ status: "ok" }>(routes.submitOAuthCallback, {
+    body: { provider, redirect_url: redirectUrl },
+  });

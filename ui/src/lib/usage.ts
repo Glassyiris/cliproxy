@@ -36,7 +36,10 @@ const median = (v: number[]) => {
   return s.length ? s[Math.floor((s.length - 1) / 2)] : null;
 };
 export function usageStats(events: UsageEvent[]) {
-  const models = new Map<string, { model: string; count: number; failed: number; input: number; output: number }>();
+  const models = new Map<
+    string,
+    { model: string; count: number; failed: number; input: number; output: number }
+  >();
   for (const e of events) {
     const m = models.get(e.model) || { model: e.model, count: 0, failed: 0, input: 0, output: 0 };
     m.count++;

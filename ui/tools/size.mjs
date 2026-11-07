@@ -27,16 +27,28 @@ function cannotRun(message) {
   process.exit(2);
 }
 
-// References in index.html: module scripts and preloads are JS, stylesheets are CSS.
+// References in index.html, attributes in any order: module scripts and preloads are JS,
+// stylesheets are CSS. No module script means the entry was missed, which would measure 0 B.
 function htmlAssets(html) {
-  const pick = (pattern) =>
-    [...html.matchAll(pattern)].map((match) => join("assets", match[1].replace(/^.*assets\//, "")));
+  const tags = (name) =>
+    [...html.matchAll(new RegExp(`<${name}\\b([^>]*)>`, "gi"))].map(([, attributes]) =>
+      Object.fromEntries(
+        [...attributes.matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)].map(
+          (a) => [a[1].toLowerCase(), a[2] ?? a[3] ?? a[4] ?? ""],
+        ),
+      ),
+    );
+  const asset = (path) => join("assets", path.replace(/^.*assets\//, ""));
+  const rel = (tag, value) => (tag.rel ?? "").toLowerCase().split(/\s+/).includes(value);
+  const links = tags("link");
+  const scripts = tags("script").filter((tag) => tag.type === "module" && tag.src);
+  if (scripts.length === 0) cannotRun('index.html has no <script type="module" src>');
   return {
     js: [
-      ...pick(/<script[^>]+type="module"[^>]+src="([^"]+)"/g),
-      ...pick(/<link[^>]+rel="modulepreload"[^>]+href="([^"]+)"/g),
+      ...scripts.map((tag) => asset(tag.src)),
+      ...links.filter((tag) => rel(tag, "modulepreload") && tag.href).map((tag) => asset(tag.href)),
     ],
-    css: pick(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g),
+    css: links.filter((tag) => rel(tag, "stylesheet") && tag.href).map((tag) => asset(tag.href)),
   };
 }
 

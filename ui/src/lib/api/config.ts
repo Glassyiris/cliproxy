@@ -9,19 +9,32 @@ export type ConfigWrite = { "config-version": number; status: "ok" };
 
 export const readConfig = (signal?: AbortSignal) => request<Config>(routes.readConfig, { signal });
 
-export const readConfigYaml = (signal?: AbortSignal) => request<string>(routes.readConfigYaml, { signal, as: "text" });
+export const readConfigYaml = (signal?: AbortSignal) =>
+  request<string>(routes.readConfigYaml, { signal, as: "text" });
 
-export const writeConfigYaml = (yaml: string) => request<ConfigWrite>(routes.writeConfigYaml, { body: yaml });
+export const writeConfigYaml = (yaml: string) =>
+  request<ConfigWrite>(routes.writeConfigYaml, { body: yaml });
 
 // `path` is a config key path such as "routing/strategy"; each segment is checked and encoded.
 const params = (path: string) => ({ path: fieldPath(path).slice("/config/".length) });
 
 /** One config value. With `fallback`, a key the file does not set reads as that value. */
-export async function readConfigValue<T = unknown>(path: string, options: { signal?: AbortSignal; fallback?: T } = {}) {
+export async function readConfigValue<T = unknown>(
+  path: string,
+  options: { signal?: AbortSignal; fallback?: T } = {},
+) {
   try {
-    return await request<T>(routes.readConfigValue, { params: params(path), signal: options.signal });
+    return await request<T>(routes.readConfigValue, {
+      params: params(path),
+      signal: options.signal,
+    });
   } catch (e) {
-    if ("fallback" in options && e instanceof ApiError && e.status === 404 && e.code === "not_found")
+    if (
+      "fallback" in options &&
+      e instanceof ApiError &&
+      e.status === 404 &&
+      e.code === "not_found"
+    )
       return options.fallback as T;
     throw e;
   }

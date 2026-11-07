@@ -19,7 +19,9 @@ const usageURL: Record<string, string> = {
 };
 const GAP = 120_000;
 
-export type QuotaReading = { at: number; windows: Window[]; error?: string; code?: number } | { error: string; code?: number };
+export type QuotaReading =
+  | { at: number; windows: Window[]; error?: string; code?: number }
+  | { error: string; code?: number };
 export type QuotaPending = "queued" | "checking";
 export const quotaKey = (a: Credential) => a.auth_index || a.name;
 
@@ -39,21 +41,25 @@ export function createQuotaChecker(sources: QuotaSources) {
   let queue: Promise<unknown> = Promise.resolve();
   const changed = () => listeners.forEach((l) => l());
 
-  const plugin = (p: string) => sources.plugins().find((x) => x.supports_quota && (x.quota_provider || x.id) === p);
+  const plugin = (p: string) =>
+    sources.plugins().find((x) => x.supports_quota && (x.quota_provider || x.id) === p);
   /** The provider has a usage endpoint or quota plugin this server can call. */
   const hasSource = (a: Credential) =>
     !!plugin(provider(a)) || (!!usageURL[provider(a)] && available(routes.callProvider));
   const canCheck = (a: Credential) => !a.disabled && hasSource(a);
   const gap = (k: string, now: number) => Math.max(0, (tried.get(k) ?? -Infinity) + GAP - now);
   /** Milliseconds until this account may be checked again; a queued or running check counts as a full wait. */
-  const wait = (a: Credential, now = Date.now()) => (pending.has(quotaKey(a)) ? GAP : gap(quotaKey(a), now));
+  const wait = (a: Credential, now = Date.now()) =>
+    pending.has(quotaKey(a)) ? GAP : gap(quotaKey(a), now);
 
   /** Keep known limits visible alongside a failed check: last successful check, else passive signals. */
   function limits(a: Credential): Limits {
     const live = readings.get(quotaKey(a));
     if (live && "windows" in live) return live;
     const windows = signalWindows(provider(a), a.quota);
-    return windows.length ? { ...live, windows, at: Date.parse(a.quota?.observed_at ?? "") || 0 } : live || null;
+    return windows.length
+      ? { ...live, windows, at: Date.parse(a.quota?.observed_at ?? "") || 0 }
+      : live || null;
   }
 
   async function read(a: Credential) {
@@ -63,14 +69,26 @@ export function createQuotaChecker(sources: QuotaSources) {
       const pl = plugin(p);
       if (pl) raw = await fetchPluginQuota(pl.id, a.auth_index);
       else {
-        const header: Record<string, string> = { Authorization: "Bearer $TOKEN$", "Content-Type": "application/json" };
-        if (p === "claude") Object.assign(header, { "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-cli/2.1.280 (external, cli)" });
+        const header: Record<string, string> = {
+          Authorization: "Bearer $TOKEN$",
+          "Content-Type": "application/json",
+        };
+        if (p === "claude")
+          Object.assign(header, {
+            "anthropic-beta": "oauth-2025-04-20",
+            "User-Agent": "claude-cli/2.1.280 (external, cli)",
+          });
         if (p === "codex") {
           header["User-Agent"] = "codex-tui/0.149.1";
           const account = a.id_token?.chatgpt_account_id;
           if (account) header["Chatgpt-Account-Id"] = account;
         }
-        const r = await callProvider({ authIndex: a.auth_index, method: "GET", url: usageURL[p], header });
+        const r = await callProvider({
+          authIndex: a.auth_index,
+          method: "GET",
+          url: usageURL[p],
+          header,
+        });
         if (r.status_code < 200 || r.status_code >= 300)
           // `code` lets Connect tell a refused token (401/403) from any other failed read.
           throw Object.assign(
@@ -88,7 +106,11 @@ export function createQuotaChecker(sources: QuotaSources) {
       readings.set(quotaKey(a), { at: Date.now(), windows: quotaWindows(p, raw) });
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
-      readings.set(quotaKey(a), { ...readings.get(quotaKey(a)), error, code: (e as { code?: number }).code });
+      readings.set(quotaKey(a), {
+        ...readings.get(quotaKey(a)),
+        error,
+        code: (e as { code?: number }).code,
+      });
     }
   }
 

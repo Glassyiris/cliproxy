@@ -493,7 +493,7 @@ function markdown() {
   const m = report.meta;
   const L = [];
   L.push(`# Dashboard performance: ${m.ui}, ${m.accounts} accounts`, "");
-  L.push(`${m.date} · commit ${m.commit} · ${m.chrome} · ${m.cpus} · seed ${m.seed} · polling ${report.m3.pollingMinutes ?? m.minutes} min`, "");
+  L.push(`${m.date} · commit ${m.commit} · ${m.chrome} · ${m.cpus} · load ${m.loadavgAtStart?.join(" / ") ?? "not recorded"} · seed ${m.seed} · polling ${report.m3.pollingMinutes ?? m.minutes} min`, "");
   L.push("| Metric | Result |", "| --- | --- |");
   const m1 = report.m1;
   if (m1.accounts) L.push(`| M1 sign-in to ${m.accounts} Accounts rows, painted | ${m1.accounts.medianPaintMs} ms (runs ${m1.accounts.runs.map((x) => x.paint).join(", ")}) |`);

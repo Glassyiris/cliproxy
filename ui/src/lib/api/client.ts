@@ -9,14 +9,17 @@ const endpoint = `${base}/v8/management`;
 export type SessionHooks = {
   /** The server rejected the key (401). */
   unauthorized(): void;
-  /** X-CPA-VERSION of the latest answer, or null when the server could not be reached. */
-  version(value: string | null): void;
+  /** Build headers of the latest answer, or null when the server could not be reached. */
+  server(build: ServerBuild | null): void;
 };
+
+/** X-CPA-VERSION, X-CPA-COMMIT and X-CPA-BUILD-DATE; empty when the header is absent. */
+export type ServerBuild = { version: string; commit: string; built: string };
 
 let key = "";
 // Bumped on every sign-in and sign-out, so an answer that belongs to the old session is dropped.
 let revision = 0;
-let hooks: SessionHooks = { unauthorized() {}, version() {} };
+let hooks: SessionHooks = { unauthorized() {}, server() {} };
 
 export function connect(secret: string, sessionHooks: SessionHooks) {
   key = secret;
@@ -101,7 +104,8 @@ function url(route: Route, call: Call) {
     return rest ? value : encodeURIComponent(value);
   });
   const query = new URLSearchParams();
-  for (const [k, v] of Object.entries(call.query ?? {})) if (v !== undefined) query.set(k, String(v));
+  for (const [k, v] of Object.entries(call.query ?? {}))
+    if (v !== undefined) query.set(k, String(v));
   const search = query.size ? `?${query}` : "";
   return { path, href: `${endpoint}${path}${search}` };
 }
@@ -113,14 +117,18 @@ async function send(route: Route, call: Call) {
   const yaml = path === "/config.yaml";
   const form = call.body instanceof FormData;
   const headers: Record<string, string> = { Authorization: `Bearer ${key}` };
-  if (call.body !== undefined && !form) headers["Content-Type"] = yaml ? "application/yaml" : "application/json";
+  if (call.body !== undefined && !form)
+    headers["Content-Type"] = yaml ? "application/yaml" : "application/json";
   const timeout = AbortSignal.timeout(path.includes("/refresh") ? 300_000 : 30_000);
   let response: Response;
   try {
     response = await fetch(href, {
       method: route.method,
       headers,
-      body: call.body === undefined || form || yaml ? (call.body as BodyInit | undefined) : JSON.stringify(call.body),
+      body:
+        call.body === undefined || form || yaml
+          ? (call.body as BodyInit | undefined)
+          : JSON.stringify(call.body),
       signal: call.signal ? AbortSignal.any([call.signal, timeout]) : timeout,
       cache: "no-store",
       redirect: "error",
@@ -128,11 +136,16 @@ async function send(route: Route, call: Call) {
   } catch (e) {
     if (call.signal?.aborted) throw e;
     if (at !== revision) throw new ConnectionError("session-changed");
-    hooks.version(null);
+    hooks.server(null);
     throw new ConnectionError(timeout.aborted ? "timeout" : "unreachable");
   }
   if (at !== revision) throw new ConnectionError("session-changed");
-  hooks.version(response.headers.get("x-cpa-version"));
+  const header = (name: string) => response.headers.get(name) ?? "";
+  hooks.server({
+    version: header("x-cpa-version"),
+    commit: header("x-cpa-commit"),
+    built: header("x-cpa-build-date"),
+  });
   return response;
 }
 
@@ -141,15 +154,26 @@ export async function request<T>(route: Route, call: Call = {}): Promise<T> {
   const at = revision;
   const response = await send(route, call);
   const as = call.as ?? "json";
-  const value = !response.ok
-    ? await response.json().catch(() => ({}))
-    : as === "blob"
-      ? await response.blob()
-      : as === "text"
-        ? await response.text()
-        : response.status === 204
-          ? undefined
-          : await response.json();
+  let value;
+  try {
+    value = !response.ok
+      ? await response.json().catch(() => ({}))
+      : as === "blob"
+        ? await response.blob()
+        : as === "text"
+          ? await response.text()
+          : response.status === 204
+            ? undefined
+            : await response.json();
+  } catch (e) {
+    // A body that breaks off or is not JSON is a failed answer, the same as a failed fetch.
+    if (call.signal?.aborted) throw e;
+    if (at !== revision) throw new ConnectionError("session-changed");
+    hooks.server(null);
+    // The request's own 30 s timeout also covers reading the body.
+    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
+    throw new ConnectionError(timedOut ? "timeout" : "unreachable");
+  }
   // A body that finishes after sign-out or a reconnect belongs to the old session.
   if (at !== revision) throw new ConnectionError("session-changed");
   if (response.ok) return value as T;

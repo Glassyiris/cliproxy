@@ -3,9 +3,13 @@ import { request } from "./client.ts";
 import { routes } from "./routes.ts";
 
 /** Per provider, then per "<base_url>|<api_key>" (the raw key), lifetime and recent counts. */
-export type ApiKeyUsage = Record<string, Record<string, { success: number; failed: number; recent_requests: RequestBucket[] }>>;
+export type ApiKeyUsage = Record<
+  string,
+  Record<string, { success: number; failed: number; recent_requests: RequestBucket[] }>
+>;
 
-export const apiKeyUsage = (signal?: AbortSignal) => request<ApiKeyUsage>(routes.apiKeyUsage, { signal });
+export const apiKeyUsage = (signal?: AbortSignal) =>
+  request<ApiKeyUsage>(routes.apiKeyUsage, { signal });
 
 /** One finished request. Records also carry the client key, client IP and headers; the server sends more fields. */
 export type UsageRecord = {
@@ -19,7 +23,13 @@ export type UsageRecord = {
   alias: string;
   auth_index: string;
   request_id: string;
-  tokens: { input_tokens: number; output_tokens: number; reasoning_tokens: number; cached_tokens: number; total_tokens: number };
+  tokens: {
+    input_tokens: number;
+    output_tokens: number;
+    reasoning_tokens: number;
+    cached_tokens: number;
+    total_tokens: number;
+  };
 };
 
 /**

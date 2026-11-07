@@ -1,4 +1,11 @@
-export const tools = ["Claude Code", "Codex CLI", "Cursor", "OpenAI SDK", "Anthropic SDK", "curl"] as const;
+export const tools = [
+  "Claude Code",
+  "Codex CLI",
+  "Cursor",
+  "OpenAI SDK",
+  "Anthropic SDK",
+  "curl",
+] as const;
 /** A POSIX shell single-quoted literal: nothing inside is expanded. */
 const shq = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 /** A shell word, quoted only when it holds characters the shell would interpret. */
@@ -9,7 +16,12 @@ const str = (s: string) => JSON.stringify(s);
  * Setup text for one tool, pointed at this server (base has no trailing slash). Values are
  * quoted for the language they land in, so a key holding $, quotes or backslashes pastes intact.
  */
-export function snippet(tool: (typeof tools)[number], base: string, key: string, model: string): string {
+export function snippet(
+  tool: (typeof tools)[number],
+  base: string,
+  key: string,
+  model: string,
+): string {
   const v1 = `${base}/v1`;
   switch (tool) {
     case "Claude Code":

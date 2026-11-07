@@ -11,6 +11,11 @@ export type ProviderCall = {
 };
 
 /** The provider's answer. HTTP 200 even when the provider failed: check `status_code`. */
-export type ProviderAnswer = { status_code: number; header: Record<string, string[]>; body: string };
+export type ProviderAnswer = {
+  status_code: number;
+  header: Record<string, string[]>;
+  body: string;
+};
 
-export const callProvider = (call: ProviderCall) => request<ProviderAnswer>(routes.callProvider, { body: call });
+export const callProvider = (call: ProviderCall) =>
+  request<ProviderAnswer>(routes.callProvider, { body: call });

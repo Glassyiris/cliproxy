@@ -6,7 +6,9 @@
     "tools/*.mjs",
     "tools/mock/server.mjs",
     "tools/perf/run.mjs",
-    "tools/perf/adapters/*.mjs"
+    "tools/perf/adapters/*.mjs",
+    // The source `astryx theme build` compiles into site.js and site.css, which the app imports.
+    "src/themes/site/siteTheme.ts"
   ],
   "project": ["src/**/*.{ts,tsx}", "tools/**/*.mjs"],
   // ponytail: P1a wrote the API layer and the pure lib before any page calls it, so these
@@ -20,14 +22,13 @@
     "src/lib/config-path.ts": ["exports"],
     "src/lib/credentials.ts": ["exports", "types"],
     "src/lib/quota-windows.ts": ["exports"],
-    "src/lib/quota.ts": ["exports"]
+    "src/lib/quota.ts": ["exports"],
+    // Palette generator output, rewritten on every run; siteTheme.ts reads only `palette`.
+    "src/themes/site/sitePalette.generated.ts": ["exports", "duplicates"]
   },
   "ignoreDependencies": [
-    // ponytail: no source imports these yet; the theme (fonts) and the first pages (Query,
-    // Virtual) bring them in P1b or P2. Delete each line when its first import lands.
-    "@fontsource-variable/figtree",
-    "@fontsource/jetbrains-mono",
-    "@tanstack/react-query",
+    // ponytail: no source imports this yet; the first virtualized list (Accounts, P2) brings it.
+    // Delete the line when that import lands.
     "@tanstack/react-virtual"
   ]
 }

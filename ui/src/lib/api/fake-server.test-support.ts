@@ -10,7 +10,12 @@ export function fakeServer() {
   Object.assign(globalThis, { location: { href: "http://cpa.test/management.html" } });
   globalThis.fetch = async (input, init = {}) => {
     const body = typeof init.body === "string" ? tryJson(init.body) : init.body;
-    const s: Sent = { method: init.method ?? "GET", url: new URL(String(input)), headers: init.headers as Record<string, string>, body };
+    const s: Sent = {
+      method: init.method ?? "GET",
+      url: new URL(String(input)),
+      headers: init.headers as Record<string, string>,
+      body,
+    };
     sent.push(s);
     if (init.signal?.aborted) throw init.signal.reason;
     return server.answer(s);
