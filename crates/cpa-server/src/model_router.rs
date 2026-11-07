@@ -349,15 +349,22 @@ fn cheaper(a: &&Variant, b: &&Variant) -> std::cmp::Ordering {
     a.cost.total_cmp(&b.cost).then(b.index.total_cmp(&a.index))
 }
 
-/// The index a variant needs for `difficulty` (0..4) under `tier`. The requirement maps
-/// difficulty linearly onto the index range of the cost/capability Pareto front: its top
-/// is the best index, its bottom the cheapest variant's (which no variant dominates), so
-/// dominated variants never stretch the scale.
+/// How far below the requirement a variant's index may be and still meet it: index gaps
+/// this small are within benchmark noise, and a cheaper variant should not lose to one
+/// that costs much more for them.
+// ponytail: a fixed point; per-benchmark confidence intervals if Artificial Analysis
+// publishes them.
+const INDEX_TOLERANCE: f64 = 1.0;
+
+/// The index a variant needs for `difficulty` (0..4) under `tier`, less
+/// [`INDEX_TOLERANCE`]. The requirement maps difficulty linearly onto the index range of
+/// the cost/capability Pareto front: its top is the best index, its bottom the cheapest
+/// variant's (which no variant dominates), so dominated variants never stretch the scale.
 fn requirement(pool: &[Variant], difficulty: f64, tier: Tier) -> Option<f64> {
     let low = pool.iter().min_by(cheaper)?.index;
     let high = pool.iter().map(|v| v.index).fold(f64::NEG_INFINITY, f64::max);
     let share = (difficulty / TOP_DIFFICULTY + tier.shift()).clamp(0.0, 1.0);
-    Some(low + share * (high - low) - 1e-9)
+    Some(low + share * (high - low) - INDEX_TOLERANCE)
 }
 
 /// The cheapest variant whose index meets `need`.
@@ -1005,6 +1012,11 @@ mod tests {
         assert_eq!(pick(0.0, Tier::Cost), "cheap");
         assert_eq!(pick(0.0, Tier::Quality), "mid");
         assert!(rank(&[], 2.0, Tier::Balanced).is_none());
+        // A variant 0.06 short of 57.46 is within the tolerance: it wins on cost over one
+        // that scores 1.7 higher for two thirds more.
+        let close = [v("low", 34.8, 0.2), v("xhigh", 57.4, 6.0), v("max", 59.1, 10.0)];
+        assert_eq!(rank(&close, 3.73, Tier::Balanced).unwrap().model, "xhigh");
+        assert_eq!(rank(&close, 4.0, Tier::Balanced).unwrap().model, "max");
     }
 
     #[test]
