@@ -1593,6 +1593,25 @@
       }
     },
     "config-version": "version",
-    "worker-threads": "int"
+    "worker-threads": "int",
+    "artificial-analysis": {
+      "fields": {
+        "api-key": "string",
+        "url": "string",
+        "cache-file": "string"
+      }
+    },
+    "model-routers": {
+      "list": {
+        "fields": {
+          "name": "string",
+          "tier": "string",
+          "judge": "opaque",
+          "models": {
+            "list": "opaque"
+          }
+        }
+      }
+    }
   }
 }

@@ -560,6 +560,10 @@ where
             if let Some(value) = trace.header() {
                 response.headers_mut().insert("x-cpa-trace-id", value);
             }
+            // The model a model router chose (cliproxy-rs only).
+            if let Some(value) = trace.6.get().and_then(|m| axum::http::HeaderValue::from_str(m).ok()) {
+                response.headers_mut().insert("x-cpa-routed-model", value);
+            }
             response
         }
     };
@@ -701,13 +705,21 @@ pub async fn run_with_bootstrap_retries(rt: &Arc<Runtime>, call: Call, trace: &T
         }
         (Some(Route::Provider { provider, model }), None) => Some((provider, model)),
     };
+    let mut call = call;
+    // A model router (`model-routers`) names the model, for the registry to route.
+    if routed.is_none()
+        && call.forced_provider.is_none()
+        && let Some(model) = crate::model_router::resolve(rt, &call).await
+    {
+        let _ = trace.6.set(model.clone());
+        call.model = model;
+    }
     // Go resolves providers before the lifecycle starts: an unknown model never starts one.
     let resolved = route(rt, &rt.registry(), &call, routed.as_ref()).map_err(|e| e.failure)?;
     // The usage record's prompt prefix is the client's, before interceptors rewrite it.
     if call.operation == Operation::Generate && rt.usage_queue().accepts() {
         trace.prompt_prefix(call.entry, &call.body);
     }
-    let mut call = call;
     let hooks = crate::plugins::interceptors::start(rt, trace, &mut call, &resolved.1).await?;
     let result = retry_bootstrap(rt, call, trace, &resolved, hooks.as_ref()).await;
     match hooks {
@@ -800,6 +812,8 @@ pub struct Trace(
     /// The client's prompt prefix before plugin interceptors rewrite the body
     /// (`crate::usage_record::prompt_prefix`).
     std::sync::OnceLock<String>,
+    /// The model a model router sent the request to ([`crate::model_router`]).
+    std::sync::OnceLock<String>,
 );
 
 impl Trace {
@@ -814,6 +828,7 @@ impl Trace {
                 .unwrap_or_default(),
             Default::default(),
             crate::observability::current_clock(),
+            Default::default(),
             Default::default(),
         );
         if let Some(id) = id.filter(|id| !id.is_empty()) {

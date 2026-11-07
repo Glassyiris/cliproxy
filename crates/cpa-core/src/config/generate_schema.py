@@ -104,6 +104,8 @@ put("oauth.providers.codex.chatgpt-keep-alive", "bool")
 put("observability.usage.claude-cache-telemetry", "bool")
 put("routing.cooldown.max-trusted-cooldown", "string")
 schema["fields"]["worker-threads"] = "int"
+schema["fields"]["artificial-analysis"] = {"fields": {"api-key": "string", "url": "string", "cache-file": "string"}}
+schema["fields"]["model-routers"] = {"list": {"fields": {"name": "string", "tier": "string", "judge-model": "string", "models": {"list": "opaque"}}}}
 schema["fields"].pop("home", None)
 Path(__file__).with_name("schema.json").write_text(json.dumps(schema, indent=2) + "\n")
 print(f"Generated schema from {revision}")

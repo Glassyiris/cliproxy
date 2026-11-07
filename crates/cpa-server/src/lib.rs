@@ -1,5 +1,6 @@
 //! HTTP surface: routes and client-key auth over an axum-independent [`runtime`].
 
+pub mod aa;
 mod access;
 mod affinity;
 pub mod body_limit;
@@ -24,6 +25,7 @@ pub mod lcp;
 pub mod listener;
 pub mod logging;
 pub mod management;
+mod model_router;
 pub mod model_updater;
 mod models;
 pub mod observability;

@@ -189,6 +189,47 @@ The key is read once at start from the `-config` file (`./config.yaml` by defaul
 
 This setting exists only in cliproxy-rs. CLIProxyAPI starts with it in the file and keeps it through v0 Management API saves, but any v8 configuration write comments it out, and uploading a whole `config.yaml` that contains it is refused. With a config shared between the two servers, use `TOKIO_WORKER_THREADS`. See [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md).
 
+## model-routers
+
+A model router is a model name, such as `smart`, that picks the model and effort for each request, so the client does not have to choose. It is modelled on OpenRouter's Jev Router: a judge grades how hard each request is, and the router picks the cheapest model whose measured capability meets that difficulty. Scores and prices come from [Artificial Analysis](https://artificialanalysis.ai/), which needs a free API key:
+
+```yaml
+artificial-analysis:
+  api-key: aa-...            # without one, nothing is fetched
+  cache-file: /var/lib/cliproxy/artificial-analysis.json   # optional: survives restarts
+
+api-keys:
+  openai-compatibility:
+    - name: opencode-zen     # Jev's provider, connected like any other
+      base-url: https://opencode.ai/zen/v1
+      prefix: opencode-zen
+      keys:
+        - api-key: sk-...
+      models:
+        - name: jev-1.13
+
+model-routers:
+  - name: smart              # the model clients send; `smart(high)` hints the effort
+    tier: balanced           # cost, balanced (default) or quality
+    judge: opencode-zen/jev-1.13
+  - name: smart-cheap
+    tier: cost
+    judge: gemini-3-8-flash  # or any chat model this proxy serves
+    models:                  # optional: only these candidates, otherwise every available model
+      - claude-sonnet-5-5
+      - gpt-6-astra(high)    # a suffix keeps only that effort
+      - {model: my-deepseek, aa: "DeepSeek V4 Pro", price: {input: 0.3, output: 1.2}}
+```
+
+How a request to `smart` is routed:
+
+- **Candidates.** The `models` list, or every available model, minus those without credentials, in a cooldown or with a context window smaller than the request (4 bytes a token, a base64 attachment 1,600 tokens). Each candidate contributes one variant per effort that Artificial Analysis measured and its route offers, matched by display name, then ID, or by `aa`. A variant's cost is Artificial Analysis' cost per benchmark task, scaled by `price` (USD per million tokens, blended 3:1) over the list price when `price` is set.
+- **Grade.** The `judge`, a model of this proxy named as clients name it, grades the user message (its first 4,000 bytes) from 0 to 4 within 10 seconds. A Jev model (upstream name `jev…`) gets a System One `score` question at its provider's `{base-url}/systemone`, with the first ready credential's key and proxy, outside the scheduler and usage. Any other model is a chat judge, asked through the dispatcher for one digit. A router without a judge is skipped; a judge that names a router is never asked. Without a grade (logged as a warning), request signals stand in: 0 for a short prompt without tools, else 1, plus 1 for tools and 1 past about 50,000 tokens. A client effort (the router's suffix, `reasoning_effort`, `reasoning.effort`, `output_config.effort`, Gemini's `thinkingLevel`) adds -1 (`none`, `minimal`, `low`), +1 (`high`) or +2 (`xhigh`, `max`).
+- **Pick.** The grade maps linearly onto the index range of the candidates' cost/capability Pareto front, moved by -15% (`cost`), 0 or +20% (`quality`) of that range; the cheapest variant that meets it serves. The client's suffix is kept when the route has none of its own. Without any rated candidate, the first available listed model serves, else the newest available model.
+- **Conversation.** A conversation (the session the server derives, see `session_source` in [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)) keeps its model for an hour after its last request, so its prompt cache stays warm. Tool-result requests always keep it; a new user message is graded again and moves the conversation only to a stronger model. It also moves when its model becomes unavailable, leaves `models` or is too small. `count_tokens` neither asks the judge nor binds; image, video and speech routes do not route. A Responses client chaining `previous_response_id` should send `prompt_cache_key`, `conversation_id` or a session header, or each turn can land on another model.
+
+The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-CPA-Routed-Model` names the model that served a request; `GET /v1/models` lists the routers. Not covered yet: Home mode (Home receives the router name as sent), the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cliproxy-rs ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
+
 ## Environment
 
 - `MANAGEMENT_PASSWORD`: the management key, instead of `management.secret-key`.

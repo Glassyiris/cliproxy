@@ -87,16 +87,13 @@ async fn list(
         return intercept("openai", crate::codex_models::response(&rt, &version)).await;
     }
     let registry = rt.registry();
+    // Model routers (cliproxy-rs only) list after the registry's models.
+    let routers = crate::model_router::listed(&rt.config());
+    let models = registry.available_with(|c, m| rt.suspension(c, m)).chain(&routers);
     let (source, body) = if anthropic {
-        (
-            "claude",
-            claude_list(registry.available_with(|c, m| rt.suspension(c, m)), disable_cloaking()),
-        )
+        ("claude", claude_list(models, disable_cloaking()))
     } else {
-        (
-            "openai",
-            openai_list(registry.available_with(|c, m| rt.suspension(c, m))),
-        )
+        ("openai", openai_list(models))
     };
     intercept(source, respond::gin_json(200, body)).await
 }

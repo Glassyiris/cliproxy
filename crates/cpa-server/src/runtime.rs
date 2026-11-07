@@ -64,6 +64,8 @@ pub struct Runtime {
     catalogs: Mutex<Option<crate::model_updater::Session>>,
     /// Serializes config commits through their catalog reconfigure.
     config_commit: Mutex<()>,
+    /// The model routers' benchmarks and conversation bindings ([`crate::model_router`]).
+    pub(crate) model_router: crate::model_router::State,
 }
 
 /// The Codex refresh transactions under a credential file's lock: shutdown stops the
@@ -128,6 +130,7 @@ impl Runtime {
             codex_refreshes: CodexRefreshes::default(),
             catalogs: Mutex::default(),
             config_commit: Mutex::default(),
+            model_router: Default::default(),
         };
         rt.publish_policy(policy);
         rt.store.configure_cooldown_store(cooldown_dir);
