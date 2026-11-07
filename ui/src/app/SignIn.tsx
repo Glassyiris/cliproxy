@@ -4,13 +4,11 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Icon } from "@astryxdesign/core/Icon";
-import { Eye } from "lucide-react";
-import { InputGroup } from "@astryxdesign/core/InputGroup";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { Heading, Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
 import { BrandMark } from "../components/BrandMark.tsx";
+import { KeyField } from "../components/KeyField.tsx";
 import { StatusLamp } from "../components/StatusLamp.tsx";
 import { healthz } from "../lib/api/system.ts";
 import { t } from "../lib/i18n.ts";
@@ -60,54 +58,6 @@ function CardTop() {
   );
 }
 
-function KeyField({
-  secret,
-  onChange,
-  failure,
-  submit,
-  inputRef,
-}: {
-  secret: string;
-  onChange: (value: string) => void;
-  failure: string;
-  submit: () => void;
-  inputRef: React.RefObject<HTMLInputElement | null>;
-}) {
-  const [shown, setShown] = useState(false);
-  const toggle = shown ? t("app.signIn.hideKey") : t("app.signIn.showKey");
-  return (
-    <InputGroup
-      label={t("app.signIn.managementKey")}
-      size="lg"
-      status={failure ? { type: "error", message: failure } : undefined}
-    >
-      <TextInput
-        ref={inputRef}
-        label={t("app.signIn.managementKey")}
-        isLabelHidden
-        type={shown ? "text" : "password"}
-        value={secret}
-        onChange={onChange}
-        onEnter={submit}
-        hasAutoFocus
-        autoComplete="current-password"
-        autoCapitalize="off"
-        hasAutoCorrect={false}
-        hasSpellCheck={false}
-        enterKeyHint="go"
-      />
-      <Button
-        label={toggle}
-        tooltip={toggle}
-        isIconOnly
-        variant="secondary"
-        icon={<Icon icon={shown ? "eyeSlash" : Eye} />}
-        onClick={() => setShown((s) => !s)}
-      />
-    </InputGroup>
-  );
-}
-
 export function SignIn() {
   const { signIn } = useSession();
   const [secret, setSecret] = useState("");
@@ -152,6 +102,8 @@ export function SignIn() {
             <CardTop />
             <VStack gap={4}>
               <KeyField
+                label={t("app.signIn.managementKey")}
+                kind="sign-in"
                 secret={secret}
                 onChange={(value) => {
                   setSecret(value);
