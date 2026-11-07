@@ -1,0 +1,33 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // The Vite entry (src/main.tsx via index.html) is found by knip's Vite plugin.
+  "entry": [
+    "src/**/*.test.{ts,tsx}",
+    "tools/*.mjs",
+    "tools/mock/server.mjs",
+    "tools/perf/run.mjs",
+    "tools/perf/adapters/*.mjs"
+  ],
+  "project": ["src/**/*.{ts,tsx}", "tools/**/*.mjs"],
+  // ponytail: P1a wrote the API layer and the pure lib before any page calls it, so these
+  // modules and exports have no importer yet. Delete an entry when the page that uses it lands
+  // (P2 Accounts and Overview, P3 the other pages); an export still unused after P3 is dead
+  // code and should go.
+  "ignoreIssues": {
+    "src/lib/api/**": ["files", "exports", "types"],
+    "src/lib/client-keys.ts": ["files"],
+    "src/lib/first-run.ts": ["files"],
+    "src/lib/config-path.ts": ["exports"],
+    "src/lib/credentials.ts": ["exports", "types"],
+    "src/lib/quota-windows.ts": ["exports"],
+    "src/lib/quota.ts": ["exports"]
+  },
+  "ignoreDependencies": [
+    // ponytail: no source imports these yet; the theme (fonts) and the first pages (Query,
+    // Virtual) bring them in P1b or P2. Delete each line when its first import lands.
+    "@fontsource-variable/figtree",
+    "@fontsource/jetbrains-mono",
+    "@tanstack/react-query",
+    "@tanstack/react-virtual"
+  ]
+}
