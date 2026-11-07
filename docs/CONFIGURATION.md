@@ -115,6 +115,28 @@ How the server picks an account for each request. [MULTI-ACCOUNT.md](MULTI-ACCOU
 | `cooldown.transient-error-cooldown-seconds` | How long to rest an account after a temporary upstream error; `0` means 60 seconds, a negative value turns it off. |
 | `cooldown.save-cooldown-status` | `true` keeps cooldowns in `.cds` files in `auth-dir`, so a restart does not forget them. |
 | `cooldown.max-trusted-cooldown` | A cliproxy-rs addition. When an account hits its usage limit, the provider says when it resets, sometimes days ahead, and the account rests until then. Providers often reset early, so cliproxy-rs trusts the stated time for at most this long (`"1h"` by default; a Go duration such as `"90m"`, or a bare number meaning seconds; at least 10 seconds), then lets the next request through to check. If the account is still limited, the next rest is twice as long, and never longer than the stated reset. `0` trusts the stated reset, as CLIProxyAPI does. An unreadable value is logged and the default is used. See [differences from Go](DIFFERENCES-FROM-GO.md#deliberate-differences). |
+| `providers.exclude`, `providers.order` | A cliproxy-rs addition: which providers a request may use and in what order. See [Provider scope and order](#provider-scope-and-order). |
+
+### Provider scope and order
+
+When several providers serve the same model, `routing.providers` decides which of them a request may use (`exclude`) and which it tries first (`order`). Without it, credential `priority` and `strategy` decide, as in CLIProxyAPI.
+
+```yaml
+routing:
+  strategy: round-robin              # balances inside a tier
+  providers:
+    exclude: [provider-x]            # never used for a model named without a prefix
+    order:                           # tiers, tried top down
+      - [provider-a, provider-b]     # first tier: a and b in turn
+      - provider-c                   # second tier: only while the first has no usable account
+```
+
+- **Selectors.** The `name` of an `api-keys` entry (OpenAI-compatibility entries too), a login type for every login file of it (`kimi`), or one login file as `kimi/<file in auth-dir without .json>` or `kimi/<email>`, case-insensitively. A selector that matches no credential, or one an `order` lists twice, is logged when the config loads.
+- **Scope.** `exclude` takes the matching credentials away from requests that name a model without a prefix; a model named with a provider's prefix (`provider-x/model`) still reaches that provider.
+- **Order.** A tier is one selector or a list of them; the strategy balances inside it, and a lower tier serves only while every credential above it is cooling down, disabled or already failed in this request. Credentials no tier matches come after every tier, ordered by their `priority`. Order decides only where a new conversation lands: with `session-affinity`, a conversation stays on its account while that account is usable, even when a higher tier recovers, so its prompt cache stays warm. Plugin schedulers keep their own order, but never see excluded credentials.
+- **Failover.** Whether a failure moves on to the next credential is the provider's `request-scoped-errors` rule (`continue`, `continue-and-cooldown`, `stop`, `stop-and-cooldown`), else the usual handling: a request fault stops, other faults cool the credential and move on.
+
+`X-CPA-Routed-Provider` names the selector of the credential that served a request (the entry name, or `type/file` for a login). These settings and the header exist only in cliproxy-rs ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)).
 
 ### Optional preset: fail over only on 429
 
@@ -219,16 +241,22 @@ model-routers:
       - claude-sonnet-5-5
       - gpt-6-astra(high)    # a suffix keeps only that effort
       - {model: my-deepseek, aa: "DeepSeek V4 Pro", price: {input: 0.3, output: 1.2}}
+    fallback-models: 1       # optional: another model when this one fails (default 0)
+    providers:               # optional: like routing.providers, for this router only
+      exclude: [provider-c]
+      order: [provider-b, [provider-a, kimi]]
 ```
 
 How a request to `smart` is routed:
 
-- **Candidates.** The `models` list, or every available model, minus those without credentials, in a cooldown or with a context window smaller than the request (4 bytes a token, a base64 attachment 1,600 tokens). Each candidate contributes one variant per effort that Artificial Analysis measured and its route offers, matched by display name, then ID, or by `aa`. A variant's cost is Artificial Analysis' cost per benchmark task, scaled by `price` (USD per million tokens, blended 3:1) over the list price when `price` is set.
-- **Grade.** The `judge`, a model of this proxy named as clients name it, grades the user message (its first 4,000 bytes) from 0 to 4 within 10 seconds. A Jev model (upstream name `jev…`) gets a System One `score` question at its provider's `{base-url}/systemone`, with the first ready credential's key and proxy, outside the scheduler and usage. Any other model is a chat judge, asked through the dispatcher for one digit. A router without a judge is skipped; a judge that names a router is never asked. Without a grade (logged as a warning), request signals stand in: 0 for a short prompt without tools, else 1, plus 1 for tools and 1 past about 50,000 tokens. A client effort (the router's suffix, `reasoning_effort`, `reasoning.effort`, `output_config.effort`, Gemini's `thinkingLevel`) adds -1 (`none`, `minimal`, `low`), +1 (`high`) or +2 (`xhigh`, `max`).
+- **Candidates.** The `models` list, or every available model, minus those without a usable credential in the router's scope, in a cooldown or with a context window smaller than the request (4 bytes a token, a base64 attachment 1,600 tokens). Each candidate contributes one variant per effort that Artificial Analysis measured and its route offers, matched by display name, then ID, or by `aa`. A variant's cost is Artificial Analysis' cost per benchmark task, scaled by `price` (USD per million tokens, blended 3:1) over the list price when `price` is set.
+- **Providers.** The router's `providers` work like [`routing.providers`](#provider-scope-and-order) for its requests: both `exclude` lists apply, even to a model with a prefix, and its `order`, when set, replaces the global one. When every credential in scope fails, the request fails; it never falls back to an excluded provider. The judge follows only `routing.providers`.
+- **Model fallback.** With `fallback-models: N`, a request whose model failed before anything reached the client moves to another candidate, at most N times: the cheapest untried one that meets the same requirement, else the strongest one left (without benchmarks, the next listed one). It is not graded again and the conversation moves with it. A request fault (a 400, say) does not move, since another model would fail it too. Plugin interceptors run again for each model.
+- **Grade.** The `judge`, a model of this proxy named as clients name it, grades the user message (its first 4,000 bytes) from 0 to 4 within 10 seconds. A Jev model (upstream name `jev…`) gets a System One `score` question at its provider's `{base-url}/systemone`, with each ready credential's key and proxy in `routing.providers` order (then priority) until one answers, outside the scheduler and usage. Any other model is a chat judge, asked through the dispatcher for one digit. A router without a judge is skipped; a judge that names a router is never asked. Without a grade (logged as a warning), request signals stand in: 0 for a short prompt without tools, else 1, plus 1 for tools and 1 past about 50,000 tokens. A client effort (the router's suffix, `reasoning_effort`, `reasoning.effort`, `output_config.effort`, Gemini's `thinkingLevel`) adds -1 (`none`, `minimal`, `low`), +1 (`high`) or +2 (`xhigh`, `max`).
 - **Pick.** The grade maps linearly onto the index range of the candidates' cost/capability Pareto front, moved by -15% (`cost`), 0 or +20% (`quality`) of that range; the cheapest variant that meets it serves. The client's suffix is kept when the route has none of its own. Without any rated candidate, the first available listed model serves, else the newest available model.
 - **Conversation.** A conversation (the session the server derives, see `session_source` in [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)) keeps its model for an hour after its last request, so its prompt cache stays warm. Tool-result requests always keep it; a new user message is graded again and moves the conversation only to a stronger model. It also moves when its model becomes unavailable, leaves `models` or is too small. `count_tokens` neither asks the judge nor binds; image, video and speech routes do not route. A Responses client chaining `previous_response_id` should send `prompt_cache_key`, `conversation_id` or a session header, or each turn can land on another model.
 
-The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-CPA-Routed-Model` names the model that served a request; `GET /v1/models` lists the routers. Not covered yet: Home mode (Home receives the router name as sent), the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cliproxy-rs ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
+The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-CPA-Routed-Model` names the model that served a request and `X-CPA-Routed-Provider` its provider; `GET /v1/models` lists the routers. Not covered yet: Home mode (Home receives the router name as sent), the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cliproxy-rs ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
 
 ## Environment
 

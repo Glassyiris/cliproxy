@@ -33,6 +33,7 @@ mod openai;
 pub mod persist;
 pub mod plugins;
 pub mod pprof;
+pub mod provider_policy;
 mod realtime;
 mod refresh;
 pub mod registry;

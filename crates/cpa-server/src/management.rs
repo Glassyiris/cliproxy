@@ -355,9 +355,11 @@ impl Management {
 }
 
 /// `Policy::from(routing)` plus the provider-level rules Go reads from config:
-/// `oauth.request-scoped-errors`, sanitized like `SanitizeOAuthRequestScopedErrors`.
+/// `oauth.request-scoped-errors`, sanitized like `SanitizeOAuthRequestScopedErrors`, and
+/// cliproxy-rs `routing.providers`.
 pub fn policy(cfg: &Config) -> Policy {
     let mut policy = Policy::from(&cfg.routing);
+    policy.providers = std::sync::Arc::new(crate::provider_policy::Providers::global(cfg));
     let rules = cfg
         .document
         .get("oauth")

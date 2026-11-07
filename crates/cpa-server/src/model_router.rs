@@ -153,6 +153,11 @@ struct Router {
     judge: String,
     /// The candidates; empty means every available model.
     models: Vec<Entry>,
+    /// The router's provider scope and order over `routing.providers`
+    /// ([`crate::provider_policy`]); the judge follows only `routing.providers`.
+    scope: Arc<crate::provider_policy::Providers>,
+    /// How many other models a request may move to when its model fails.
+    fallback_models: usize,
 }
 
 #[derive(Default)]
@@ -183,6 +188,7 @@ fn parse(cfg: &Config) -> Settings {
     let url = text(&aa["url"]);
     let cache_file = text(&aa["cache-file"]);
     let mut routers: Vec<Router> = Vec::new();
+    let global = crate::provider_policy::Providers::global(cfg);
     for r in doc["model-routers"].as_sequence().into_iter().flatten() {
         let name = text(&r["name"]);
         if name.is_empty() || name == "auto" || routers.iter().any(|o| o.name == name) {
@@ -236,6 +242,8 @@ fn parse(cfg: &Config) -> Settings {
             name,
             tier,
             models,
+            scope: Arc::new(global.within(&r["providers"])),
+            fallback_models: r["fallback-models"].as_u64().unwrap_or(0) as usize,
         });
     }
     Settings {
@@ -337,16 +345,23 @@ fn variants(spec: &Spec, entry: Option<&Entry>, catalog: &Catalog) -> Vec<Varian
         .collect()
 }
 
-/// The cheapest variant whose index meets `difficulty` (0..4) under `tier`. The
-/// requirement maps difficulty linearly onto the index range of the cost/capability
-/// Pareto front: its top is the best index, its bottom the cheapest variant's (which no
-/// variant dominates), so dominated variants never stretch the scale.
-fn rank(pool: &[Variant], difficulty: f64, tier: Tier) -> Option<&Variant> {
-    let cheaper = |a: &&Variant, b: &&Variant| a.cost.total_cmp(&b.cost).then(b.index.total_cmp(&a.index));
+fn cheaper(a: &&Variant, b: &&Variant) -> std::cmp::Ordering {
+    a.cost.total_cmp(&b.cost).then(b.index.total_cmp(&a.index))
+}
+
+/// The index a variant needs for `difficulty` (0..4) under `tier`. The requirement maps
+/// difficulty linearly onto the index range of the cost/capability Pareto front: its top
+/// is the best index, its bottom the cheapest variant's (which no variant dominates), so
+/// dominated variants never stretch the scale.
+fn requirement(pool: &[Variant], difficulty: f64, tier: Tier) -> Option<f64> {
     let low = pool.iter().min_by(cheaper)?.index;
     let high = pool.iter().map(|v| v.index).fold(f64::NEG_INFINITY, f64::max);
     let share = (difficulty / TOP_DIFFICULTY + tier.shift()).clamp(0.0, 1.0);
-    let need = low + share * (high - low) - 1e-9;
+    Some(low + share * (high - low) - 1e-9)
+}
+
+/// The cheapest variant whose index meets `need`.
+fn cheapest(pool: &[Variant], need: f64) -> Option<&Variant> {
     pool.iter().filter(|v| v.index >= need).min_by(cheaper)
 }
 
@@ -500,9 +515,11 @@ async fn judge(rt: &Arc<Runtime>, call: &Call, model: &str, routers: &[Router]) 
     if text.trim().is_empty() || routers.iter().any(|r| r.name == split_suffix(model).0.trim()) {
         return None;
     }
-    let graded = match judgment_route(rt, model) {
-        Some((credential, upstream)) => ask_system_one(rt, &credential, &upstream, &text).await,
-        None => ask_chat(rt, call, model, &text).await,
+    let routes = judgment_routes(rt, model);
+    let graded = if routes.is_empty() {
+        ask_chat(rt, call, model, &text).await
+    } else {
+        ask_jev(rt, &routes, &text).await
     };
     match graded {
         Ok(grade) => Some(grade.clamp(0.0, TOP_DIFFICULTY)),
@@ -513,33 +530,67 @@ async fn judge(rt: &Arc<Runtime>, call: &Call, model: &str, routers: &[Router]) 
     }
 }
 
-/// The credential and upstream model name that serve `model` when it is a Jev judgment
-/// model; `None` for a chat model. Jev answers System One requests at its provider's
-/// `{base-url}/systemone` (OpenCode Zen: `https://opencode.ai/zen/v1`).
-// ponytail: Jev is told apart by its name, and the first ready credential serves it; a
-// model flag and the scheduler if other judgment models or several Jev keys appear.
-fn judgment_route(rt: &Runtime, model: &str) -> Option<(Arc<cpa_core::credential::Credential>, String)> {
+/// The credentials and upstream model names that serve `model` when it is a Jev judgment
+/// model, in `routing.providers` order (then priority); empty for a chat model. Jev
+/// answers System One requests at its provider's `{base-url}/systemone` (OpenCode Zen:
+/// `https://opencode.ai/zen/v1`).
+// ponytail: Jev is told apart by its name; a model flag if other judgment models appear.
+fn judgment_routes(rt: &Runtime, model: &str) -> Vec<(Arc<cpa_core::credential::Credential>, String)> {
     let registry = rt.registry();
     let providers = registry.providers(model);
     if providers.is_empty() {
-        return None;
+        return Vec::new();
     }
     let aliases = crate::registry::global_aliases(&rt.config());
-    rt.store().snapshot().into_iter().find_map(|c| {
-        let serves = !c.disabled
-            && providers.contains(&crate::registry::provider_key(&c))
-            && registry.client_supports(&c.id, model)
-            && !rt.store().blocked(&c, model)
-            && c.attributes.get("base_url").is_some_and(|b| !b.trim().is_empty());
-        if !serves {
-            return None;
+    let scope = rt.policy().providers.clone();
+    let mut routes: Vec<_> = rt
+        .store()
+        .snapshot()
+        .into_iter()
+        .filter_map(|c| {
+            let serves = !c.disabled
+                && providers.contains(&crate::registry::provider_key(&c))
+                && registry.client_supports(&c.id, model)
+                && !scope.excludes_direct(&c, model)
+                && !rt.store().blocked(&c, model)
+                && c.attributes.get("base_url").is_some_and(|b| !b.trim().is_empty());
+            if !serves {
+                return None;
+            }
+            let upstream = crate::registry::execution_models(&aliases, &c, model)
+                .0
+                .into_iter()
+                .next()?;
+            upstream.go_lower().starts_with("jev").then_some((c, upstream))
+        })
+        .collect();
+    routes.sort_by_key(|(c, _)| std::cmp::Reverse(scope.rank(c)));
+    routes
+}
+
+/// Asks Jev through each of `routes` in turn until one grades, within [`JUDGE_TIMEOUT`]
+/// in all. Outside the scheduler: a judgment neither binds nor cools a credential.
+async fn ask_jev(
+    rt: &Runtime,
+    routes: &[(Arc<cpa_core::credential::Credential>, String)],
+    task: &str,
+) -> Result<f64, String> {
+    let deadline = Instant::now() + JUDGE_TIMEOUT;
+    let mut reason = String::new();
+    for (credential, upstream) in routes {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(format!("{reason}, then timed out"));
         }
-        let upstream = crate::registry::execution_models(&aliases, &c, model)
-            .0
-            .into_iter()
-            .next()?;
-        upstream.go_lower().starts_with("jev").then_some((c, upstream))
-    })
+        reason = match tokio::time::timeout(left, ask_system_one(rt, credential, upstream, task, left)).await {
+            Ok(Ok(grade)) => return Ok(grade),
+            Ok(Err(reason)) => reason,
+            Err(_) => "timed out".to_owned(),
+        };
+        let name = rt.policy().providers.name(credential);
+        tracing::debug!(provider = %name, "model router: judge gave no grade ({reason})");
+    }
+    Err(reason)
 }
 
 /// HTTP clients for System One judgments, one per proxy, kept across requests.
@@ -552,6 +603,7 @@ async fn ask_system_one(
     credential: &Arc<cpa_core::credential::Credential>,
     model: &str,
     task: &str,
+    timeout: Duration,
 ) -> Result<f64, String> {
     let credential = rt.for_executor(credential);
     let attribute = |key: &str| credential.attributes.get(key).map(|v| v.trim()).unwrap_or_default();
@@ -575,7 +627,7 @@ async fn ask_system_one(
         &url,
         headers,
         Some(body.into()),
-        Some(JUDGE_TIMEOUT),
+        Some(timeout),
     )
     .await
     .map_err(|_| "request failed".to_owned())?;
@@ -640,17 +692,119 @@ fn grade(answer: &str) -> Option<i32> {
     (digit <= 4).then_some(digit as i32)
 }
 
-/// The model a router named by `call.model` sends the call to, with an effort suffix;
-/// `None` when the call names no router (or in Home mode, where Home routes the model).
+/// A router's decision for one request.
+pub(crate) struct Routed {
+    /// The model the request goes to, with an effort suffix.
+    pub model: String,
+    /// The router's provider scope and order, for the request's credential selections.
+    pub scope: Arc<crate::provider_policy::Providers>,
+    fallback: Fallback,
+}
+
+/// What [`fall_back`] needs to pick another model for the same request.
+struct Fallback {
+    router: String,
+    /// Moves left (`fallback-models`).
+    left: usize,
+    /// The index a replacement should meet; `None` without benchmarks, where the next
+    /// listed model serves.
+    need: Option<f64>,
+    /// Models (IDs) this request already went to.
+    tried: Vec<String>,
+    /// The conversation's binding key, when the request decides its model.
+    key: Option<(String, String)>,
+    suffix: Option<String>,
+    tokens: usize,
+}
+
+/// The decision of a router named by `call.model`; `None` when the call names no router
+/// (or in Home mode, where Home routes the model).
 /// Boxed: the judge's dispatch re-enters the dispatcher that called this router.
 pub(crate) fn resolve<'a>(
     rt: &'a Arc<Runtime>,
     call: &'a Call,
-) -> Pin<Box<dyn Future<Output = Option<String>> + Send + 'a>> {
+) -> Pin<Box<dyn Future<Output = Option<Routed>> + Send + 'a>> {
     Box::pin(route(rt, call))
 }
 
-async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<String> {
+/// Whether a request that failed this way may move to another model: not when the
+/// request itself is at fault (another model fails it too).
+pub(crate) fn fails_over(failure: &crate::dispatch::Failure) -> bool {
+    use crate::dispatch::Failure;
+    match failure {
+        Failure::Exec(e) => !crate::classify::is_request_invalid(e),
+        Failure::Unavailable { .. } | Failure::Cooldown { .. } => true,
+        _ => false,
+    }
+}
+
+/// The pattern sent on, with the client's suffix on a route that sets no effort of its own.
+fn finish(pattern: &str, suffix: Option<&str>) -> String {
+    match (split_suffix(pattern).1, suffix) {
+        (None, Some(s)) => format!("{pattern}({s})"),
+        _ => pattern.to_owned(),
+    }
+}
+
+/// A listed candidate as sent without benchmarks: with its configured effort, if any.
+fn unrated(spec: &Spec, entry: Option<&Entry>) -> String {
+    match entry.and_then(|e| split_suffix(&e.model).1) {
+        Some(pin) => format!("{}({pin})", spec.id),
+        None => spec.id.clone(),
+    }
+}
+
+/// A credential's state for the router's model lists: out of its scope counts as
+/// unusable.
+fn usable(rt: &Runtime, router: &Router, credential: &str, model: &str) -> crate::registry::Suspension {
+    match rt.store().get(credential) {
+        Some(c) if router.scope.excludes(&c) => crate::registry::Suspension::Other { quota_exceeded: false },
+        _ => rt.suspension(credential, model),
+    }
+}
+
+/// The router's candidates: its listed models (or every available one) that a usable
+/// credential in its scope serves and whose context fits `tokens`.
+fn candidates<'a>(
+    rt: &'a Runtime,
+    router: &'a Router,
+    registry: &'a crate::registry::Registry,
+    tokens: usize,
+) -> Vec<(&'a Spec, Option<&'a Entry>)> {
+    let fits = |s: &Spec| {
+        let window = if s.context_length > 0 {
+            s.context_length
+        } else {
+            s.input_token_limit
+        };
+        window <= 0 || tokens as i64 <= window
+    };
+    let available: Vec<&Spec> = registry
+        .available_with(|c, m| usable(rt, router, c, m))
+        .filter(|s| fits(s))
+        .collect();
+    if router.models.is_empty() {
+        return available.iter().map(|s| (*s, None)).collect();
+    }
+    let find = |model: &str| available.iter().copied().find(|s| s.id.go_eq_fold(model.trim()));
+    router
+        .models
+        .iter()
+        .filter_map(|e| find(split_suffix(&e.model).0).map(|s| (s, Some(e))))
+        .collect()
+}
+
+fn pool(candidates: &[(&Spec, Option<&Entry>)], catalog: Option<Arc<Catalog>>) -> Vec<Variant> {
+    match catalog {
+        Some(catalog) => candidates
+            .iter()
+            .flat_map(|(spec, entry)| variants(spec, *entry, &catalog))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<Routed> {
     let (base, suffix) = split_suffix(&call.model);
     let suffix = suffix.map(str::trim).filter(|s| !s.is_empty());
     let settings = settings(&rt.config());
@@ -660,34 +814,8 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<String> {
         return None;
     }
     let tokens = estimate_tokens(&call.body);
-    let fits = |s: &Spec| {
-        let window = if s.context_length > 0 {
-            s.context_length
-        } else {
-            s.input_token_limit
-        };
-        window <= 0 || tokens as i64 <= window
-    };
     let registry = rt.registry();
-    let available: Vec<&Spec> = registry
-        .available_with(|c, m| rt.suspension(c, m))
-        .filter(|s| fits(s))
-        .collect();
-    let find = |model: &str| available.iter().copied().find(|s| s.id.go_eq_fold(model.trim()));
-    // The client's suffix applies only to a route that sets no effort of its own.
-    let finish = |pattern: &str| match (split_suffix(pattern).1, suffix) {
-        (None, Some(s)) => format!("{pattern}({s})"),
-        _ => pattern.to_owned(),
-    };
-    let candidates: Vec<(&Spec, Option<&Entry>)> = if router.models.is_empty() {
-        available.iter().map(|s| (*s, None)).collect()
-    } else {
-        router
-            .models
-            .iter()
-            .filter_map(|e| find(split_suffix(&e.model).0).map(|s| (s, Some(e))))
-            .collect()
-    };
+    let candidates = candidates(rt, router, &registry, tokens);
     // Counting tokens neither pays for a judge nor decides the conversation's model.
     let counting = call.operation == Operation::CountTokens;
     let now = Instant::now();
@@ -700,6 +828,19 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<String> {
     )
     .id
     .map(|session| (router.name.clone(), session));
+    let routed = |pattern: &str, model: &str, need: Option<f64>| Routed {
+        model: finish(pattern, suffix),
+        scope: router.scope.clone(),
+        fallback: Fallback {
+            router: router.name.clone(),
+            left: router.fallback_models,
+            need,
+            tried: vec![model.to_owned()],
+            key: key.clone().filter(|_| !counting),
+            suffix: suffix.map(str::to_owned),
+            tokens,
+        },
+    };
     // A conversation keeps its model while the router still offers it (a config change can
     // take it away); only a new user message is graded again.
     let bound = key
@@ -710,29 +851,23 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<String> {
         && (counting || !fresh_turn(&call.body))
     {
         tracing::debug!(router = %router.name, model = %b.pattern, "model router: kept (agent loop)");
-        return Some(finish(&b.pattern));
+        return Some(routed(&b.pattern, &b.model, Some(b.index)));
     }
-    let pool: Vec<Variant> = match rt.model_router.catalog() {
-        Some(catalog) => candidates
-            .iter()
-            .flat_map(|(spec, entry)| variants(spec, *entry, &catalog))
-            .collect(),
-        None => Vec::new(),
-    };
+    let pool = pool(&candidates, rt.model_router.catalog());
     if pool.is_empty() {
         if let Some(b) = &bound {
-            return Some(finish(&b.pattern));
+            return Some(routed(&b.pattern, &b.model, None));
         }
         // No benchmark for any candidate: the first listed one, else the newest model.
-        let fallback = match candidates.first() {
-            Some((spec, Some(entry))) => match split_suffix(&entry.model).1 {
-                Some(pin) => format!("{}({pin})", spec.id),
-                None => spec.id.clone(),
-            },
-            _ => registry.resolve_auto(|c, m| rt.suspension(c, m))?,
+        let (pattern, model) = match candidates.first() {
+            Some((spec, entry @ Some(_))) => (unrated(spec, *entry), spec.id.clone()),
+            _ => {
+                let model = registry.resolve_auto(|c, m| usable(rt, router, c, m))?;
+                (model.clone(), model)
+            }
         };
-        tracing::debug!(router = %router.name, model = %fallback, "model router: no rated candidate");
-        return Some(finish(&fallback));
+        tracing::debug!(router = %router.name, model = %pattern, "model router: no rated candidate");
+        return Some(routed(&pattern, &model, None));
     }
     // Token counting never pays for a judgment.
     let judged = if counting {
@@ -743,7 +878,8 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<String> {
     let signals = judged.unwrap_or_else(|| heuristic(&call.body, tokens));
     let effort = effort(suffix, &call.body);
     let difficulty = (signals + effort_shift(&effort)).clamp(0.0, TOP_DIFFICULTY);
-    let pick = rank(&pool, difficulty, router.tier)?;
+    let need = requirement(&pool, difficulty, router.tier)?;
+    let pick = cheapest(&pool, need)?;
     // A conversation only moves up: a weaker pick would throw its prompt cache away.
     if let Some(b) = &bound
         && pick.index <= b.index
@@ -757,7 +893,7 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<String> {
             candidate = %pick.pattern,
             "model router: kept (new message needs no stronger model)"
         );
-        return Some(finish(&b.pattern));
+        return Some(routed(&b.pattern, &b.model, Some(need)));
     }
     tracing::debug!(
         router = %router.name,
@@ -771,15 +907,61 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<String> {
         from = bound.as_ref().map_or("", |b| b.pattern.as_str()),
         "model router: routed"
     );
-    if let Some(key) = key.filter(|_| !counting) {
+    if let Some(key) = key.clone().filter(|_| !counting) {
         rt.model_router.bind(key, pick, now);
     }
-    Some(finish(&pick.pattern))
+    Some(routed(&pick.pattern, &pick.model, Some(need)))
+}
+
+impl Routed {
+    /// Whether `fallback-models` lets the request move to another model.
+    pub(crate) fn falls_back(&self) -> bool {
+        self.fallback.left > 0
+    }
+}
+
+/// Moves a request whose routed model failed to another model: the cheapest untried
+/// candidate that meets the same requirement, else the strongest one left; without
+/// benchmarks, the next listed one. The conversation moves with it. `None` once
+/// `fallback-models` moves are spent or no candidate is left.
+pub(crate) fn fall_back(rt: &Runtime, routed: &mut Routed) -> Option<String> {
+    let f = &mut routed.fallback;
+    f.left = f.left.checked_sub(1)?;
+    let settings = settings(&rt.config());
+    let router = settings.routers.iter().find(|r| r.name == f.router)?;
+    let registry = rt.registry();
+    let candidates: Vec<_> = candidates(rt, router, &registry, f.tokens)
+        .into_iter()
+        .filter(|(s, _)| !f.tried.contains(&s.id))
+        .collect();
+    let pool = pool(&candidates, rt.model_router.catalog());
+    let strongest = || pool.iter().max_by(|a, b| a.index.total_cmp(&b.index));
+    let (pattern, model) = match f.need.filter(|_| !pool.is_empty()) {
+        Some(need) => {
+            let pick = cheapest(&pool, need).or_else(strongest)?;
+            if let Some(key) = f.key.clone() {
+                rt.model_router.bind(key, pick, Instant::now());
+            }
+            (pick.pattern.clone(), pick.model.clone())
+        }
+        None => {
+            let (spec, entry) = candidates.first()?;
+            (unrated(spec, *entry), spec.id.clone())
+        }
+    };
+    tracing::info!(router = %router.name, from = %routed.model, to = %pattern, "model router: fell back");
+    f.tried.push(model);
+    routed.model = finish(&pattern, f.suffix.as_deref());
+    Some(routed.model.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rank(pool: &[Variant], difficulty: f64, tier: Tier) -> Option<&Variant> {
+        cheapest(pool, requirement(pool, difficulty, tier)?)
+    }
 
     fn v(model: &str, index: f64, cost: f64) -> Variant {
         Variant {
@@ -1007,7 +1189,7 @@ mod tests {
     type Judged = Arc<Mutex<Vec<(Option<String>, String)>>>;
 
     /// A mock Jev at `<url>/v1/systemone`: a task that says "prove" scores 3.8, "fail"
-    /// answers 500, anything else scores 0.
+    /// answers 500, as does any request with the key `bad-key`; anything else scores 0.
     async fn jev() -> (String, Judged) {
         async fn answer(
             axum::extract::State(seen): axum::extract::State<Judged>,
@@ -1019,9 +1201,10 @@ mod tests {
                 .get("authorization")
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
+            let rejected = auth.as_deref() == Some("Bearer bad-key");
             seen.lock().unwrap().push((auth, body.clone()));
             let task = json::get(body.as_bytes(), "state.task").str().into_owned();
-            if task.contains("fail") {
+            if task.contains("fail") || rejected {
                 return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
             let score = if task.contains("prove") { 3.8 } else { 0.0 };
@@ -1115,8 +1298,9 @@ mod tests {
         Catalog::new(0, &models)
     }
 
-    /// Status, `X-CPA-Routed-Model` and body of one Chat Completions request.
-    async fn chat(url: &str, body: serde_json::Value) -> (u16, String, String) {
+    /// Status, `X-CPA-Routed-Model`, body and `X-CPA-Routed-Provider` of one Chat
+    /// Completions request.
+    async fn chat(url: &str, body: serde_json::Value) -> (u16, String, String, String) {
         let res = wreq::Client::new()
             .post(format!("{url}/v1/chat/completions"))
             .header("authorization", "Bearer client-key")
@@ -1125,13 +1309,15 @@ mod tests {
             .send()
             .await
             .unwrap();
-        let routed = res
-            .headers()
-            .get("x-cpa-routed-model")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_owned();
-        (res.status().as_u16(), routed, res.text().await.unwrap())
+        let header = |name: &str| {
+            res.headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let (routed, provider) = (header("x-cpa-routed-model"), header("x-cpa-routed-provider"));
+        (res.status().as_u16(), routed, res.text().await.unwrap(), provider)
     }
 
     fn upstream_model(body: &str) -> String {
@@ -1149,7 +1335,7 @@ mod tests {
         rt.model_router.publish(rated());
         // Jev grades "hi" trivial: the cheapest rated model serves it.
         let first = serde_json::json!({"model": "smart", "messages": [{"role": "user", "content": "hi"}]});
-        let (status, routed, text) = chat(&url, first).await;
+        let (status, routed, text, _) = chat(&url, first).await;
         assert_eq!((status, routed.as_str()), (200, "cheap"), "{text}");
         assert_eq!(upstream_model(&seen.lock().unwrap()[0]), "up-cheap");
         {
@@ -1210,7 +1396,7 @@ mod tests {
         let (url, seen, _, _rt) =
             proxy("model-routers:\n  - name: smart\n    judge: judge\n    models: [missing, top(high), cheap]\n").await;
         let body = serde_json::json!({"model": "smart", "messages": [{"role": "user", "content": "hi"}]});
-        let (status, routed, text) = chat(&url, body).await;
+        let (status, routed, text, _) = chat(&url, body).await;
         assert_eq!((status, routed.as_str()), (200, "top(high)"), "{text}");
         assert_eq!(upstream_model(&seen.lock().unwrap()[0]), "up-top");
     }
@@ -1232,9 +1418,88 @@ mod tests {
         rt.model_router.publish(rated());
         // Jev answers 500; the short tool-free prompt is then trivial by its signals.
         let body = serde_json::json!({"model": "smart", "messages": [{"role": "user", "content": "please fail"}]});
-        let (status, routed, text) = chat(&url, body).await;
+        let (status, routed, text, _) = chat(&url, body).await;
         assert_eq!((status, routed.as_str()), (200, "cheap"), "{text}");
         assert_eq!(judged_by_jev.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_judge_tries_jev_credentials_in_provider_order() {
+        let (jev_url, judged_by_jev) = jev().await;
+        let zen = |name: &str, key: &str| {
+            format!(
+                "    - name: {name}\n      base-url: {jev_url}/v1\n      prefix: zen\n      models:\n        - {{name: jev-1.13}}\n      keys:\n        - api-key: {key}\n"
+            )
+        };
+        let (url, _, _, rt) = proxy(&format!(
+            "{}{}routing:\n  providers:\n    order: [zen-bad]\nmodel-routers:\n  - name: smart\n    judge: zen/jev-1.13\n",
+            zen("zen", "jev-key"),
+            zen("zen-bad", "bad-key")
+        ))
+        .await;
+        rt.model_router.publish(rated());
+        // The first credential in order answers 500; the next one grades the request.
+        let body = serde_json::json!({"model": "smart", "messages": [{"role": "user", "content": "prove it"}]});
+        let (status, routed, text, _) = chat(&url, body).await;
+        assert_eq!((status, routed.as_str()), (200, "top"), "{text}");
+        let keys: Vec<Option<String>> = judged_by_jev.lock().unwrap().iter().map(|(k, _)| k.clone()).collect();
+        assert_eq!(keys, [Some("Bearer bad-key".into()), Some("Bearer jev-key".into())]);
+    }
+
+    /// A second OpenAI-compatible provider `Down` at a mock that answers 400 to a request
+    /// that says "malformed" and 500 to any other; it records the upstream models.
+    async fn down() -> (String, Arc<Mutex<Vec<String>>>) {
+        async fn fail(
+            axum::extract::State(seen): axum::extract::State<Arc<Mutex<Vec<String>>>>,
+            body: String,
+        ) -> axum::response::Response {
+            use axum::response::IntoResponse;
+            seen.lock().unwrap().push(upstream_model(&body));
+            let status = if body.contains("malformed") {
+                axum::http::StatusCode::BAD_REQUEST
+            } else {
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, r#"{"error":{"message":"down"}}"#).into_response()
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let url = serve(axum::Router::new().fallback(fail).with_state(seen.clone())).await;
+        let entry = format!(
+            "    - name: Down\n      base-url: {url}/v1\n      models:\n        - {{name: up-cheap, alias: cheap, display-name: Cheap One}}\n        - {{name: up-top, alias: top, display-name: Top One}}\n      keys:\n        - api-key: sk-fake-down\n"
+        );
+        (entry, seen)
+    }
+
+    #[tokio::test]
+    async fn provider_order_tries_the_first_tier_first_and_names_the_server() {
+        let (entry, down_seen) = down().await;
+        let (url, seen, _, _rt) = proxy(&format!("{entry}routing:\n  providers:\n    order: [down]\n")).await;
+        let body = serde_json::json!({"model": "cheap", "messages": [{"role": "user", "content": "hi"}]});
+        let (status, _, text, provider) = chat(&url, body).await;
+        assert_eq!((status, provider.as_str()), (200, "Acme"), "{text}");
+        assert_eq!(*down_seen.lock().unwrap(), ["up-cheap"], "the first tier went first");
+        assert_eq!(upstream_model(&seen.lock().unwrap()[0]), "up-cheap");
+    }
+
+    #[tokio::test]
+    async fn a_router_keeps_to_its_scope_and_falls_back_once() {
+        let (entry, down_seen) = down().await;
+        let (url, seen, _, rt) = proxy(&format!(
+            "{entry}model-routers:\n  - name: picky\n    judge: judge\n    fallback-models: 1\n    models: [cheap, top]\n    providers: {{exclude: [acme]}}\n"
+        ))
+        .await;
+        rt.model_router.publish(rated());
+        let ask = |text: &str| serde_json::json!({"model": "picky", "messages": [{"role": "user", "content": text}]});
+        // The judge grades 4: `top`, which only `Down` may serve. A request fault stays.
+        let (status, routed, text, _) = chat(&url, ask("malformed")).await;
+        assert_eq!((status, routed.as_str()), (400, "top"), "{text}");
+        assert_eq!(*down_seen.lock().unwrap(), ["up-top"]);
+        // A provider fault moves the request to one other model, never to Acme.
+        let (status, routed, text, _) = chat(&url, ask("hello")).await;
+        assert_eq!((status, routed.as_str()), (500, "cheap"), "{text}");
+        assert_eq!(*down_seen.lock().unwrap(), ["up-top", "up-top", "up-cheap"]);
+        let acme: Vec<String> = seen.lock().unwrap().iter().map(|b| upstream_model(b)).collect();
+        assert_eq!(acme, ["up-judge", "up-judge"], "Acme only judged");
     }
 
     #[tokio::test]
