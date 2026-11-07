@@ -569,7 +569,9 @@ fn judgment_routes(rt: &Runtime, model: &str) -> Vec<(Arc<cpa_core::credential::
 }
 
 /// Asks Jev through each of `routes` in turn until one grades, within [`JUDGE_TIMEOUT`]
-/// in all. Outside the scheduler: a judgment neither binds nor cools a credential.
+/// in all. Each attempt gets an equal share of what is left, so a credential that hangs
+/// cannot use up the next one's turn. Outside the scheduler: a judgment neither binds
+/// nor cools a credential.
 async fn ask_jev(
     rt: &Runtime,
     routes: &[(Arc<cpa_core::credential::Credential>, String)],
@@ -577,12 +579,12 @@ async fn ask_jev(
 ) -> Result<f64, String> {
     let deadline = Instant::now() + JUDGE_TIMEOUT;
     let mut reason = String::new();
-    for (credential, upstream) in routes {
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
+    for (i, (credential, upstream)) in routes.iter().enumerate() {
+        let share = deadline.saturating_duration_since(Instant::now()) / (routes.len() - i) as u32;
+        if share.is_zero() {
             return Err(format!("{reason}, then timed out"));
         }
-        reason = match tokio::time::timeout(left, ask_system_one(rt, credential, upstream, task, left)).await {
+        reason = match tokio::time::timeout(share, ask_system_one(rt, credential, upstream, task, share)).await {
             Ok(Ok(grade)) => return Ok(grade),
             Ok(Err(reason)) => reason,
             Err(_) => "timed out".to_owned(),
@@ -713,6 +715,8 @@ struct Fallback {
     tried: Vec<String>,
     /// The conversation's binding key, when the request decides its model.
     key: Option<(String, String)>,
+    /// The pick the conversation binds to once it served ([`Routed::commit`]).
+    bind: Option<Variant>,
     suffix: Option<String>,
     tokens: usize,
 }
@@ -837,6 +841,7 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<Routed> {
             need,
             tried: vec![model.to_owned()],
             key: key.clone().filter(|_| !counting),
+            bind: None,
             suffix: suffix.map(str::to_owned),
             tokens,
         },
@@ -907,16 +912,23 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<Routed> {
         from = bound.as_ref().map_or("", |b| b.pattern.as_str()),
         "model router: routed"
     );
-    if let Some(key) = key.clone().filter(|_| !counting) {
-        rt.model_router.bind(key, pick, now);
-    }
-    Some(routed(&pick.pattern, &pick.model, Some(need)))
+    let mut routed = routed(&pick.pattern, &pick.model, Some(need));
+    routed.fallback.bind = Some(pick.clone());
+    Some(routed)
 }
 
 impl Routed {
     /// Whether `fallback-models` lets the request move to another model.
     pub(crate) fn falls_back(&self) -> bool {
         self.fallback.left > 0
+    }
+
+    /// Binds the conversation to a newly picked model once that model served: a model
+    /// that failed never becomes the conversation's.
+    pub(crate) fn commit(&self, rt: &Runtime) {
+        if let (Some(key), Some(pick)) = (&self.fallback.key, &self.fallback.bind) {
+            rt.model_router.bind(key.clone(), pick, Instant::now());
+        }
     }
 }
 
@@ -939,13 +951,12 @@ pub(crate) fn fall_back(rt: &Runtime, routed: &mut Routed) -> Option<String> {
     let (pattern, model) = match f.need.filter(|_| !pool.is_empty()) {
         Some(need) => {
             let pick = cheapest(&pool, need).or_else(strongest)?;
-            if let Some(key) = f.key.clone() {
-                rt.model_router.bind(key, pick, Instant::now());
-            }
+            f.bind = Some(pick.clone());
             (pick.pattern.clone(), pick.model.clone())
         }
         None => {
             let (spec, entry) = candidates.first()?;
+            f.bind = None;
             (unrated(spec, *entry), spec.id.clone())
         }
     };
@@ -1189,7 +1200,8 @@ mod tests {
     type Judged = Arc<Mutex<Vec<(Option<String>, String)>>>;
 
     /// A mock Jev at `<url>/v1/systemone`: a task that says "prove" scores 3.8, "fail"
-    /// answers 500, as does any request with the key `bad-key`; anything else scores 0.
+    /// answers 500, as does any request with the key `bad-key`; the key `slow-key` never
+    /// gets an answer; anything else scores 0.
     async fn jev() -> (String, Judged) {
         async fn answer(
             axum::extract::State(seen): axum::extract::State<Judged>,
@@ -1202,7 +1214,11 @@ mod tests {
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
             let rejected = auth.as_deref() == Some("Bearer bad-key");
+            let hangs = auth.as_deref() == Some("Bearer slow-key");
             seen.lock().unwrap().push((auth, body.clone()));
+            if hangs {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
             let task = json::get(body.as_bytes(), "state.task").str().into_owned();
             if task.contains("fail") || rejected {
                 return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -1432,22 +1448,28 @@ mod tests {
             )
         };
         let (url, _, _, rt) = proxy(&format!(
-            "{}{}routing:\n  providers:\n    order: [zen-bad]\nmodel-routers:\n  - name: smart\n    judge: zen/jev-1.13\n",
+            "{}{}{}routing:\n  providers:\n    order: [zen-slow, zen-bad]\nmodel-routers:\n  - name: smart\n    judge: zen/jev-1.13\n",
             zen("zen", "jev-key"),
-            zen("zen-bad", "bad-key")
+            zen("zen-bad", "bad-key"),
+            zen("zen-slow", "slow-key")
         ))
         .await;
         rt.model_router.publish(rated());
-        // The first credential in order answers 500; the next one grades the request.
+        // In order: one credential hangs and gets only its share of the budget, the next
+        // answers 500, the last grades the request.
+        let started = Instant::now();
         let body = serde_json::json!({"model": "smart", "messages": [{"role": "user", "content": "prove it"}]});
         let (status, routed, text, _) = chat(&url, body).await;
         assert_eq!((status, routed.as_str()), (200, "top"), "{text}");
+        assert!(started.elapsed() < JUDGE_TIMEOUT, "{:?}", started.elapsed());
         let keys: Vec<Option<String>> = judged_by_jev.lock().unwrap().iter().map(|(k, _)| k.clone()).collect();
-        assert_eq!(keys, [Some("Bearer bad-key".into()), Some("Bearer jev-key".into())]);
+        let keys: Vec<&str> = keys.iter().map(|k| k.as_deref().unwrap_or_default()).collect();
+        assert_eq!(keys, ["Bearer slow-key", "Bearer bad-key", "Bearer jev-key"]);
     }
 
     /// A second OpenAI-compatible provider `Down` at a mock that answers 400 to a request
-    /// that says "malformed" and 500 to any other; it records the upstream models.
+    /// that says "malformed" and 500 to any other, naming "halt" when the request does;
+    /// its rule stops on that 500. It records the upstream models.
     async fn down() -> (String, Arc<Mutex<Vec<String>>>) {
         async fn fail(
             axum::extract::State(seen): axum::extract::State<Arc<Mutex<Vec<String>>>>,
@@ -1460,12 +1482,13 @@ mod tests {
             } else {
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR
             };
-            (status, r#"{"error":{"message":"down"}}"#).into_response()
+            let message = if body.contains("halt") { "halt" } else { "down" };
+            (status, format!(r#"{{"error":{{"message":"{message}"}}}}"#)).into_response()
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
         let url = serve(axum::Router::new().fallback(fail).with_state(seen.clone())).await;
         let entry = format!(
-            "    - name: Down\n      base-url: {url}/v1\n      models:\n        - {{name: up-cheap, alias: cheap, display-name: Cheap One}}\n        - {{name: up-top, alias: top, display-name: Top One}}\n      keys:\n        - api-key: sk-fake-down\n"
+            "    - name: Down\n      base-url: {url}/v1\n      request-scoped-errors:\n        - {{status: 500, match: [halt], action: stop}}\n      models:\n        - {{name: up-cheap, alias: cheap, display-name: Cheap One}}\n        - {{name: up-top, alias: top, display-name: Top One}}\n      keys:\n        - api-key: sk-fake-down\n"
         );
         (entry, seen)
     }
@@ -1494,12 +1517,16 @@ mod tests {
         let (status, routed, text, _) = chat(&url, ask("malformed")).await;
         assert_eq!((status, routed.as_str()), (400, "top"), "{text}");
         assert_eq!(*down_seen.lock().unwrap(), ["up-top"]);
+        // A `stop` rule ends the request on its model too.
+        let (status, routed, text, _) = chat(&url, ask("halt")).await;
+        assert_eq!((status, routed.as_str()), (500, "top"), "{text}");
+        assert_eq!(*down_seen.lock().unwrap(), ["up-top", "up-top"]);
         // A provider fault moves the request to one other model, never to Acme.
         let (status, routed, text, _) = chat(&url, ask("hello")).await;
         assert_eq!((status, routed.as_str()), (500, "cheap"), "{text}");
-        assert_eq!(*down_seen.lock().unwrap(), ["up-top", "up-top", "up-cheap"]);
+        assert_eq!(*down_seen.lock().unwrap(), ["up-top", "up-top", "up-top", "up-cheap"]);
         let acme: Vec<String> = seen.lock().unwrap().iter().map(|b| upstream_model(b)).collect();
-        assert_eq!(acme, ["up-judge", "up-judge"], "Acme only judged");
+        assert_eq!(acme, ["up-judge", "up-judge", "up-judge"], "Acme only judged");
     }
 
     #[tokio::test]

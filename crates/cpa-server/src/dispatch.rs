@@ -741,9 +741,16 @@ pub async fn run_with_bootstrap_retries(rt: &Arc<Runtime>, call: Call, trace: &T
             Some(hooks) => hooks.finish(result, trace).await,
             None => result,
         };
-        // Only a failure before any byte reached the client moves to another model.
+        // A conversation moves to a routed model only once it served.
+        if let (Ok(_), Some(picked)) = (&result, &picked) {
+            picked.commit(rt);
+        }
+        // Only a failure before any byte reached the client moves to another model, and
+        // never one a `stop` rule (or a plugin) ended.
         let next = match (&result, picked.as_mut(), &original) {
-            (Err(failure), Some(picked), Some(original)) if crate::model_router::fails_over(failure) => {
+            (Err(failure), Some(picked), Some(original))
+                if !trace.stopped() && crate::model_router::fails_over(failure) =>
+            {
                 crate::model_router::fall_back(rt, picked).map(|model| (model, original.clone()))
             }
             _ => None,
@@ -847,6 +854,8 @@ pub struct Trace(
     std::sync::Mutex<Option<String>>,
     /// The ID of the last credential selected for the request.
     std::sync::Mutex<Option<String>>,
+    /// An attempt stopped the request (a `stop` rule, a request fault or a plugin).
+    std::sync::atomic::AtomicBool,
 );
 
 impl Trace {
@@ -861,6 +870,7 @@ impl Trace {
                 .unwrap_or_default(),
             Default::default(),
             crate::observability::current_clock(),
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -934,6 +944,14 @@ impl Trace {
 
     fn routed_model(&self) -> Option<String> {
         self.6.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
+    fn stop(&self) {
+        self.8.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn stopped(&self) -> bool {
+        self.8.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The provider selector (`routing.providers`) of the last selected credential.
@@ -1242,7 +1260,10 @@ async fn run_routed(
             };
             match attempt(rt, &cfg, &policy, &call, &request, usage.as_ref(), lease, target, hooks).await {
                 Attempt::Done(done) => return Ok(done),
-                Attempt::Stop(fault) => return Err(fault.into_run_error()),
+                Attempt::Stop(fault) => {
+                    trace.stop();
+                    return Err(fault.into_run_error());
+                }
                 Attempt::Next(fault) => {
                     if classify::upstream_attempted(&fault.error) {
                         upstream = Some(fault.clone());
@@ -1286,6 +1307,7 @@ async fn run_routed(
             aliases: &aliases,
             pinned: pinned.as_deref(),
             compact,
+            scope: selection.scope.clone(),
         };
         if !retry_round {
             return credits
@@ -2060,6 +2082,8 @@ struct Credits<'a> {
     aliases: &'a std::collections::HashMap<String, Vec<cpa_core::registry::dynamic::OAuthAlias>>,
     pinned: Option<&'a str>,
     compact: bool,
+    /// The request's provider scope (a router's), else `routing.providers` applies.
+    scope: Option<Arc<crate::provider_policy::Providers>>,
 }
 
 impl Credits<'_> {
@@ -2101,6 +2125,14 @@ impl Credits<'_> {
         let ids = snapshot
             .iter()
             .filter(|c| !c.disabled && c.provider.trim().eq_ignore_ascii_case("antigravity"))
+            .filter(|c| {
+                !crate::provider_policy::Providers::out_of_scope(
+                    self.scope.as_deref(),
+                    &policy.providers,
+                    c,
+                    self.model,
+                )
+            })
             .filter(|c| self.pinned.is_none_or(|p| p.is_empty() || c.id == p))
             .map(|c| c.id.as_str());
         for id in cpa_exec::antigravity_credits::order_candidates(ids) {

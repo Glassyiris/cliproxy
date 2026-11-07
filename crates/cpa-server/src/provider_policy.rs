@@ -110,6 +110,15 @@ impl Providers {
         self.excludes(c) && crate::registry::strip_prefix(model, c).len() == model.len()
     }
 
+    /// Whether `c` is outside a request's scope: its router's (`scope`), else `global`
+    /// (`routing.providers`) for a request that names `model`.
+    pub fn out_of_scope(scope: Option<&Self>, global: &Self, c: &Credential, model: &str) -> bool {
+        match scope {
+            Some(scope) => scope.excludes(c),
+            None => global.excludes_direct(c, model),
+        }
+    }
+
     /// The credential's tier: higher ranks first. Listed tiers outrank every unlisted
     /// credential, which keeps its `priority` (all of them without an order, as in Go).
     pub fn rank(&self, c: &Credential) -> (bool, i64) {

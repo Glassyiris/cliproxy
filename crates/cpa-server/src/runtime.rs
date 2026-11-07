@@ -1233,9 +1233,13 @@ fn ready<'a>(
     let eligible: Vec<_> = creds
         .iter()
         .filter(|c| !c.disabled && !selection.exclude.contains(&c.id))
-        .filter(|c| match &selection.scope {
-            Some(scope) => !scope.excludes(c),
-            None => !policy.providers.excludes_direct(c, &selection.model),
+        .filter(|c| {
+            !crate::provider_policy::Providers::out_of_scope(
+                selection.scope.as_deref(),
+                &policy.providers,
+                c,
+                &selection.model,
+            )
         })
         .filter(|c| policy.retry_limit(c) >= selection.retry_round && (!configured || scheduler.admits(c, policy)))
         .filter_map(|c| admit(c).map(|m| (c, m)))
