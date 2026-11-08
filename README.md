@@ -235,6 +235,8 @@ GNU Affero General Public License, version 3 or later. See [LICENSE](LICENSE). I
 
 cliproxy grew from [cliproxy-rs](https://github.com/vayungodara/cliproxy-rs), a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) by Luis Pater and Router-For.ME. Both are MIT licensed; [NOTICE](NOTICE) keeps their copyright notices and [LICENSE-MIT](LICENSE-MIT) the MIT text that covers the portions derived from them.
 
+The binary also contains third-party Rust crates, a bundled copy of BoringSSL and the dashboard's npm packages, each under its own license; [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES) lists them with their license texts.
+
 ## Thanks
 
 - [vayungodara/cliproxy-rs](https://github.com/vayungodara/cliproxy-rs), the Rust rewrite this project grew from.
