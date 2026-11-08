@@ -1,187 +1,164 @@
-import type { ReactNode } from "react";
-import { Activity, CircleCheck, KeyRound, Percent } from "lucide-react";
 import { Card } from "@astryxdesign/core/Card";
 import { Grid } from "@astryxdesign/core/Grid";
-import { Icon, type IconProps } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Link } from "@astryxdesign/core/Link";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
-import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Heading, Text } from "@astryxdesign/core/Text";
-import { currentLocale, list, t } from "../../lib/i18n.ts";
+import { StatusDot, type StatusDotVariant } from "@astryxdesign/core/StatusDot";
+import { Text } from "@astryxdesign/core/Text";
+import type { Buckets } from "../../lib/credentials.ts";
+import { currentLocale, t } from "../../lib/i18n.ts";
+import { span } from "../../lib/time.ts";
 import { layout } from "../../themes/site/layout.ts";
-import type { LampCounts } from "./summary.ts";
+import { LineSkeleton } from "./LineSkeleton.tsx";
+import { failures, type Summary } from "./summary.ts";
 
 const number = (n: number) => new Intl.NumberFormat(currentLocale()).format(n);
-/** One decimal, rounded down so a rate with failures never reads 100 %; a clean 100 % has none. */
-const percent = (rate: number) => {
-  const digits = rate === 1 ? 0 : 1;
-  const shown = Math.floor(rate * 1000) / 1000;
+/** One decimal, rounded up so any failure reads at least 0.1 %; only all failed reads 100 %. */
+function percent(failed: number, total: number) {
+  const shown = failed === total ? 1 : Math.min(0.999, Math.ceil((failed / total) * 1000) / 1000);
   return new Intl.NumberFormat(currentLocale(), {
     style: "percent",
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
+    maximumFractionDigits: 1,
   }).format(shown);
+}
+
+type Judgement = "good" | "attention" | "urgent" | "none";
+const dot: Record<Judgement, StatusDotVariant> = {
+  good: "success",
+  attention: "warning",
+  urgent: "error",
+  none: "neutral",
 };
+const word = (j: Judgement) =>
+  ({
+    good: t("overview.tiles.good"),
+    attention: t("overview.tiles.attention"),
+    urgent: t("overview.tiles.urgent"),
+    none: t("overview.tiles.none"),
+  })[j];
+
+type TileData = { judgement: Judgement; value: string; basis: string };
 
 /**
- * A number tile: the label with its icon, the value as a heading, a status dot beside it only
- * while the number asks for attention, and one supporting line. The label links to the page
- * that explains the number.
+ * One KPI tile as the template's KpiTile draws it: the judgement lamp beside the label, the value,
+ * and one line of basis. `data` is undefined while loading; every line keeps its height then.
  */
-function Tile({
-  icon,
-  label,
-  href,
-  value,
-  sub,
-  attention,
-}: {
-  icon: IconProps["icon"];
-  label: string;
-  href: string;
-  /** Undefined while loading. */
-  value: string | undefined;
-  sub?: ReactNode;
-  attention?: "warning" | "error";
-}) {
-  const note =
-    attention && (attention === "error" ? t("overview.tiles.error") : t("overview.tiles.warning"));
+function Tile({ label, data, index }: { label: string; data?: TileData; index: number }) {
+  const judgement = data?.judgement ?? "none";
+  const lamp = data ? word(judgement) : t("overview.tiles.loading");
   return (
-    <Card padding={4} height="100%">
-      <VStack gap={1}>
+    <Card padding={4}>
+      <VStack gap={2}>
         <HStack gap={2} vAlign="center" wrap="nowrap">
-          <Icon icon={icon} size="sm" color="secondary" />
-          <Text type="label" color="secondary">
-            <Link href={href}>{label}</Link>
+          <StatusDot variant={dot[judgement]} label={lamp} tooltip={lamp} />
+          <Text type="label" color="secondary" maxLines={1}>
+            {label}
           </Text>
         </HStack>
-        {value === undefined ? (
-          <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
-        ) : (
-          <HStack gap={2} vAlign="center">
-            <Heading level={2}>{value}</Heading>
-            {note && <StatusDot variant={attention} label={note} tooltip={note} />}
-          </HStack>
-        )}
-        {sub && (
-          <Text type="supporting" color="secondary">
-            {sub}
+        {data ? (
+          <Text type="large" hasTabularNumbers>
+            {data.value}
           </Text>
+        ) : (
+          <LineSkeleton role="metric" index={index} />
+        )}
+        {data ? (
+          <Text type="supporting" color="secondary" maxLines={1}>
+            {data.basis}
+          </Text>
+        ) : (
+          <LineSkeleton role="supporting" index={index} />
         )}
       </VStack>
     </Card>
   );
 }
 
-export type TileData = {
-  /** Account states; undefined while loading, null when the accounts could not be read. */
-  counts: LampCounts | null | undefined;
-  /** Requests in the last 200 minutes; null when nothing is reported. */
-  requests: { total: number; failed: number; rate: number | null } | null | undefined;
-  /** Client keys; null when the configuration could not be read. */
-  keys: number | null | undefined;
-};
-
-const blank = "—";
-
-function canServe(counts: TileData["counts"]) {
-  if (!counts) return { value: counts === null ? blank : undefined };
-  const total = counts.ok + counts.warn + counts.bad + counts.off;
-  const states = [
-    counts.warn && t("overview.tiles.cooling", { count: counts.warn }),
-    counts.bad && t("overview.tiles.failing", { count: counts.bad }),
-    counts.off && t("overview.tiles.disabled", { count: counts.off }),
-  ].filter((s): s is string => !!s);
+function canServe(s: Summary): TileData {
+  const cannot = s.total - s.ready;
   return {
-    value: t("overview.tiles.readyOf", { ready: counts.ok, total }),
-    sub: !total
-      ? t("overview.tiles.noAccounts")
-      : states.length
-        ? list(states)
-        : t("overview.tiles.allReady"),
-    attention:
-      total && !counts.ok
-        ? ("error" as const)
-        : counts.warn || counts.bad
-          ? ("warning" as const)
-          : undefined,
+    judgement: !s.ready ? "urgent" : s.failing ? "attention" : "good",
+    value: t("overview.tiles.readyOf", { ready: s.ready, total: s.total }),
+    basis: cannot
+      ? t("overview.tiles.cannotServe", { count: cannot })
+      : t("overview.tiles.allReady"),
   };
 }
 
-function successSub(requests: NonNullable<TileData["requests"]>) {
-  if (requests.total)
-    return t("overview.tiles.succeeded", {
-      ok: requests.total - requests.failed,
-      total: requests.total,
-    });
-  return (
-    <>
-      {t("overview.tiles.noRequests")} <Link href="#use">{t("overview.tiles.setUpTool")}</Link>
-    </>
-  );
+function cooling(s: Summary, now: number): TileData {
+  const { count, soonest } = s.cooling;
+  return {
+    judgement: count ? "attention" : "good",
+    value: number(count),
+    basis:
+      soonest === null
+        ? t("overview.tiles.noneCooling")
+        : t("overview.tiles.soonestBack", { time: span(Math.max(0, soonest - now)) }),
+  };
 }
 
-/** Requests and success rate: loading, "—" (unread or unreported), or the numbers. */
-function trafficTiles(requests: TileData["requests"], failedRead: boolean) {
-  if (!requests) {
-    const value = requests === undefined ? undefined : blank;
-    const sub = requests === null && !failedRead ? t("overview.tiles.notReported") : undefined;
-    return { requests: { value, sub }, success: { value, sub } };
-  }
+const notReported = (): TileData => ({
+  judgement: "none",
+  value: "—",
+  basis: t("overview.tiles.notReported"),
+});
+
+function requests(traffic: Buckets | null): TileData {
+  if (!traffic) return notReported();
+  const { total } = failures(traffic);
   return {
-    requests: {
-      value: number(requests.total),
-      sub: t("overview.tiles.failed", { count: requests.failed }),
+    judgement: total ? "good" : "none",
+    value: number(total),
+    basis: t("overview.tiles.lastBucket", { count: traffic.total.at(-1) ?? 0 }),
+  };
+}
+
+function failureShare(traffic: Buckets | null): TileData {
+  if (!traffic) return notReported();
+  const { total, failed, share } = failures(traffic);
+  if (share === null)
+    return { judgement: "none", value: "—", basis: t("overview.tiles.noRequests") };
+  return {
+    // DESIGN.md "Colour": gold from 5 % failed, love from 50 %.
+    judgement: share >= 0.5 ? "urgent" : share >= 0.05 ? "attention" : "good",
+    value: percent(failed, total),
+    basis: t("overview.tiles.failed", { count: failed }),
+  };
+}
+
+/**
+ * The four judgements: accounts that can serve, requests in the last 200 minutes, the failed
+ * share, and accounts cooling down with the soonest back. `summary` is undefined while the
+ * accounts load; `traffic` is undefined until the provider-key usage answers too.
+ */
+export function Tiles({
+  summary,
+  traffic,
+  now,
+}: {
+  summary: Summary | undefined;
+  traffic: Buckets | null | undefined;
+  now: number;
+}) {
+  const tiles = [
+    { label: t("overview.tiles.canServe"), data: summary && canServe(summary) },
+    {
+      label: t("overview.tiles.requests"),
+      data: traffic === undefined ? undefined : requests(traffic),
     },
-    success: {
-      value: requests.rate === null ? blank : percent(requests.rate),
-      sub: successSub(requests),
+    {
+      label: t("overview.tiles.failureShare"),
+      data: traffic === undefined ? undefined : failureShare(traffic),
     },
-  };
-}
-
-function keyTile(keys: TileData["keys"]) {
-  if (keys === undefined || keys === null) return { value: keys === null ? blank : undefined };
-  return {
-    value: number(keys),
-    sub: keys ? t("overview.tiles.keysRequired") : t("overview.tiles.noKeys"),
-    attention: keys ? undefined : ("warning" as const),
-  };
-}
-
-export function StatusTiles({ counts, requests, keys }: TileData) {
-  const tiles = trafficTiles(requests, counts === null);
+    { label: t("overview.tiles.cooling"), data: summary && cooling(summary, now) },
+  ];
   return (
     <Grid
       columns={{ minWidth: layout.summaryTileMin, max: 4, repeat: "fit" }}
       gap={3}
       aria-label={t("overview.tiles.label")}
     >
-      <Tile
-        icon={CircleCheck}
-        label={t("overview.tiles.canServe")}
-        href="#accounts?show=attention"
-        {...canServe(counts)}
-      />
-      <Tile
-        icon={Activity}
-        label={t("overview.tiles.requests")}
-        href="#usage"
-        {...tiles.requests}
-      />
-      <Tile
-        icon={Percent}
-        label={t("overview.tiles.successRate")}
-        href="#usage"
-        {...tiles.success}
-      />
-      <Tile
-        icon={KeyRound}
-        label={t("overview.tiles.clientKeys")}
-        href="#keys"
-        {...keyTile(keys)}
-      />
+      {tiles.map((tile, index) => (
+        <Tile key={tile.label} label={tile.label} data={tile.data} index={index} />
+      ))}
     </Grid>
   );
 }

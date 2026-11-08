@@ -78,7 +78,7 @@ const TYPE_PROPS = {
   Heading: { size: new Set(), weight: new Set(), type: new Set() },
 };
 // Route files rebuilt on the Layout frame (DESIGN.md "Roles"); a page joins when it is rewritten.
-const REWRITTEN_ROUTES = new Set([]);
+const REWRITTEN_ROUTES = new Set(["src/features/overview/Overview.tsx"]);
 const DEFAULT_EXPORT = /export\s*\{\s*default\s*\}\s*from\s*["'](\.\/[^"']+)["']/;
 
 function listFiles(dir) {

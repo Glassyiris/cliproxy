@@ -33,7 +33,12 @@ const OPTIONAL = ["tableRow", "primaryButton", "headerControl", "rowAction", "sk
 // Routes rebuilt on the roles table; a route joins when its page is rewritten, with the element
 // that answers its question (plan 五, checked to be in view) and its OPTIONAL measurements:
 //   overview: { answer: "<selector>", measures: ["primaryButton", "skeletonShift"] },
-const ROUTES = {};
+const ROUTES = {
+  overview: {
+    answer: "#overview-attention li, #overview-attention .astryx-empty-state",
+    measures: ["primaryButton", "skeletonShift"],
+  },
+};
 // The measurements that must agree across routes; CLS and the skeleton shift are per-route limits.
 const ROLES = [...ALWAYS, ...OPTIONAL].filter((name) => name !== "cls" && name !== "skeletonShift");
 

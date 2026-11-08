@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { Credential } from "../../lib/api/credentials.ts";
-import { needsAttention, successRate, traffic } from "./summary.ts";
+import { bucketTimes, failures, summarize, totalTraffic } from "./summary.ts";
 
 const now = Date.parse("2026-11-08T12:00:00Z");
 const at = (ms: number) => new Date(now + ms).toISOString();
@@ -12,9 +12,9 @@ const cooling = (name: string, ms: number) =>
     cooldowns: [{ scope: "credential", reason: "quota", retry_at: at(ms), remaining_seconds: 0 }],
   });
 const bucketsOf = (...pairs: [number, number][]) =>
-  pairs.map(([success, failed]) => ({ time: "", success, failed }));
+  pairs.map(([success, failed], i) => ({ time: `t${i}`, success, failed }));
 
-test("attention: failing first in list order, then cooling by soonest recovery; ready and disabled left out", () => {
+test("alerts: failing in list order, no-key warning, cooling by soonest recovery, disabled as one", () => {
   const files = [
     cooling("late", 3 * 3_600_000),
     account("ready"),
@@ -23,50 +23,43 @@ test("attention: failing first in list order, then cooling by soonest recovery; 
     account("off", { disabled: true, status: "disabled", unavailable: true }),
     account("revoked", { status: "error", unavailable: true, status_message: "unauthorized" }),
   ];
+  const s = summarize(files, 0, now);
   assert.deepEqual(
-    needsAttention(files, now).map((r) => r.account.name),
-    ["broken", "revoked", "soon", "late"],
+    s.alerts.map((a) => (a.kind === "account" ? a.row.account.name : `${a.kind}`)),
+    ["broken", "revoked", "noKeys", "soon", "late", "disabled"],
   );
+  assert.deepEqual(
+    { total: s.total, ready: s.ready, failing: s.failing, cooling: s.cooling },
+    { total: 6, ready: 1, failing: 2, cooling: { count: 2, soonest: now + 60_000 } },
+  );
+  // Keys configured, or not read yet: no warning.
+  assert.ok(summarize(files, 2, now).alerts.every((a) => a.kind !== "noKeys"));
+  assert.ok(summarize(files, undefined, now).alerts.every((a) => a.kind !== "noKeys"));
 });
 
-test("traffic: groups accounts and provider keys by provider; accounts without history stay unknown", () => {
+test("traffic: accounts and provider keys add up per bucket; nothing reported is null", () => {
   const files = [
     account("a", { recent_requests: bucketsOf([2, 1], [3, 0]) }),
-    account("b", { recent_requests: bucketsOf([1, 0], [0, 0]) }),
     account("c", { provider: "claude", recent_requests: undefined as never }),
   ];
   const usage = {
     openrouter: { "u|k1": { success: 0, failed: 0, recent_requests: bucketsOf([4, 2], [0, 0]) } },
   };
-  const t = traffic(files, usage);
-  assert.deepEqual(t.accounts, [
-    { provider: "codex", buckets: { total: [4, 3], failed: [1, 0] } },
-    { provider: "claude", buckets: null },
-  ]);
-  assert.deepEqual(t.keys, [
-    { provider: "openrouter", buckets: { total: [6, 0], failed: [2, 0] } },
-  ]);
-  assert.deepEqual(t.all, { total: [10, 3], failed: [3, 0] });
-  assert.equal(t.max, 10);
-  // Nothing reported at all: no total and the strips still get a usable max.
-  assert.deepEqual(traffic([account("c", { recent_requests: undefined as never })], null), {
-    all: null,
-    accounts: [{ provider: "codex", buckets: null }],
-    keys: [],
-    max: 1,
-  });
+  assert.deepEqual(totalTraffic(files, usage), { total: [9, 3], failed: [3, 0] });
+  assert.equal(totalTraffic([files[1]], null), null);
+  assert.deepEqual(bucketTimes(files, 2), ["t0", "t1"]);
+  assert.deepEqual(bucketTimes([files[1]], 2), ["", ""]);
 });
 
-test("success rate: unknown without history, none without requests, else the share that succeeded", () => {
-  assert.equal(successRate(null), null);
-  assert.deepEqual(successRate({ total: [0, 0], failed: [0, 0] }), {
+test("failures: none without requests, else the failed share", () => {
+  assert.deepEqual(failures({ total: [0, 0], failed: [0, 0] }), {
     total: 0,
     failed: 0,
-    rate: null,
+    share: null,
   });
-  assert.deepEqual(successRate({ total: [6, 2], failed: [2, 0] }), {
+  assert.deepEqual(failures({ total: [6, 2], failed: [2, 0] }), {
     total: 8,
     failed: 2,
-    rate: 0.75,
+    share: 0.25,
   });
 });

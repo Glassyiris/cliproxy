@@ -1,169 +1,187 @@
+// Overview, from the Astryx template dashboard-alert-rail: header | tiles and chart | alert rail.
+// Deviations from the template, one per line with its reason:
+// - Header padding 4, not 6: roles.header (DESIGN.md "Roles"), so the h1 and content share a line.
+// - Content padding 4, not 6: roles.content, for the same line.
+// - KPI values are Text type="large" hasTabularNumbers, not Heading level 2: roles "Numbers".
+// - No time-window, environment or region controls: the server keeps 200 minutes for one proxy.
+// - Header line: the server host and whether it answers, not "Updated <time>"; the time would
+//   arrive with the data and push the header on a phone.
+// - The header lamp does not pulse: DESIGN.md "Motion" keeps pulses for live streams.
+// - The primary action is default size, not lg: roles.primaryAction.
+// - Tiles: four judgements with one basis line each, no delta and no sparkline (the chart below
+//   has the series); at least layout.summaryTileMin wide, not 240, so a phone shows two per row
+//   and the first alert stays in the first screen.
+// - One chart card (requests with failures on top) instead of two: the API reports nothing else.
+// - No uptime roster and no service breakdown in the rail: per-source detail lives on Traffic
+//   analysis (#usage), linked from the chart card.
+// - The rail is layout.detailPanel.defaultSize wide, not 400: check:ui keeps size literals in the
+//   theme, and that is the shared panel width.
+// - Below 1024 px the rail folds in under the tiles, not at the end, so on a phone the first alert
+//   is in the first screen (DESIGN.md "Routes").
+// - Alerts are rows that link to where they are fixed, without state Tokens or timestamps: the
+//   server reports states, not alert events.
+// - First run (no accounts): the template's EmptyState, in a card, replaces the tiles and chart.
 import { useMemo } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
-import { Divider } from "@astryxdesign/core/Divider";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Text } from "@astryxdesign/core/Text";
-import { Timestamp } from "@astryxdesign/core/Timestamp";
-import { PageFrame } from "../../app/PageFrame.tsx";
-import { useApiKeyUsage, useConfig, useCredentials, usePlugins } from "../../app/serverQueries.ts";
+import {
+  HStack,
+  Layout,
+  LayoutContent,
+  LayoutHeader,
+  LayoutPanel,
+  VStack,
+} from "@astryxdesign/core/Layout";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import { Heading, Text } from "@astryxdesign/core/Text";
+import { useConnectAccount } from "../../app/connect-entry.ts";
+import { useApiKeyUsage, useConfig, useCredentials } from "../../app/serverQueries.ts";
 import { useSession } from "../../app/Session.tsx";
-import { useAction } from "../../app/useAction.ts";
 import { ReadError } from "../../components/ReadError.tsx";
-import { StatusLamp } from "../../components/StatusLamp.tsx";
-import type { Credential } from "../../lib/api/credentials.ts";
 import { readPath } from "../../lib/config-path.ts";
-import { buckets, sum } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
+import { roles } from "../../themes/site/roles.ts";
 import { AttentionFeed } from "./Attention.tsx";
-import { GetStarted, useFirstRun } from "./GetStarted.tsx";
-import { LimitsSection } from "./Limits.tsx";
-import { useErrorLogs } from "./queries.ts";
-import { ServerFacts } from "./ServerFacts.tsx";
-import { lampCounts, needsAttention, successRate, traffic } from "./summary.ts";
-import { StatusTiles } from "./Tiles.tsx";
-import { TrafficCard } from "./Traffic.tsx";
+import { FirstRun } from "./FirstRun.tsx";
+import { bucketTimes, summarize, totalTraffic } from "./summary.ts";
+import { Tiles } from "./Tiles.tsx";
+import { TrafficCard, type Read } from "./Traffic.tsx";
 
-/** Undefined while a read is pending, null when it failed: the regions draw both. */
-const pendingOr = (isError: boolean) => (isError ? null : undefined);
+const failedRead = (
+  query: { isError: boolean; error: unknown; refetch: () => unknown },
+  what: string,
+): Read | null =>
+  query.isError ? { error: query.error, what, retry: () => void query.refetch() } : null;
 
-const hasServed = (files: Credential[]) =>
-  files.some((a) => {
-    const b = buckets(a);
-    return a.success || a.failed || (b && sum(b.total));
-  });
+const present = (reads: (Read | null)[]) => reads.filter((r): r is Read => r !== null);
 
-function Meta({ online, observedAt }: { online: boolean; observedAt?: string }) {
-  return (
-    <HStack gap={3} vAlign="center" wrap="wrap">
-      <StatusLamp
-        status={online ? "ready" : "failing"}
-        label={
-          online ? t("app.connection.connected", { host: location.host }) : t("app.connection.lost")
-        }
-      />
-      {observedAt && (
-        <Text type="supporting" color="secondary">
-          {t("overview.page.updated")}{" "}
-          <Timestamp value={observedAt} format="relative" type="inherit" color="inherit" isLive />
-        </Text>
-      )}
-    </HStack>
-  );
-}
-
-/** Every read the page shows, and what the tiles, strips and rail derive from them. */
+/**
+ * Every read the page shows and what the regions derive from them. A failed poll keeps the last
+ * answer on screen; the failure is shown beside it.
+ */
 function useOverviewData() {
   const credentials = useCredentials({ poll: true });
   const keyUsage = useApiKeyUsage({ poll: true });
   const config = useConfig();
   const files = credentials.data?.files;
   const now = credentials.dataUpdatedAt;
-  const failed = credentials.isError;
+  const keys = config.data
+    ? (readPath(config.data, "access/api-keys", []) as string[]).length
+    : undefined;
   // Key usage counts in every total, so the totals wait for it; a failed read leaves it out.
   const usage = keyUsage.isError ? null : keyUsage.data;
-  const summary = useMemo(() => {
-    // A failed poll keeps the last answer in the cache; those states are no longer current.
-    if (failed || !files) {
-      const blank = pendingOr(failed);
-      return { counts: blank, traffic: blank, attention: blank };
-    }
-    return {
-      counts: lampCounts(files, now),
-      traffic: usage === undefined ? undefined : traffic(files, usage),
-      attention: needsAttention(files, now),
-    };
-  }, [files, now, usage, failed]);
-  const keys = config.data ? (readPath(config.data, "access/api-keys", []) as string[]) : undefined;
-  const keyRead = keyUsage.isError
-    ? { error: keyUsage.error, retry: () => void keyUsage.refetch() }
-    : null;
-  return { credentials, keyRead, config, files, now, summary, keys };
+  const summary = useMemo(() => files && summarize(files, keys, now), [files, keys, now]);
+  const traffic = useMemo(
+    () => (files && usage !== undefined ? totalTraffic(files, usage) : undefined),
+    [files, usage],
+  );
+  const times = useMemo(
+    () => (files && traffic ? bucketTimes(files, traffic.total.length) : []),
+    [files, traffic],
+  );
+  const accounts = failedRead(credentials, t("overview.read.accounts"));
+  return {
+    files,
+    now,
+    summary,
+    traffic,
+    times,
+    accounts,
+    // With no accounts on screen, each region says why; with stale ones, the rail does.
+    unread: files ? null : accounts,
+    keyUsage: failedRead(keyUsage, t("overview.read.keyUsage")),
+    config: failedRead(config, t("overview.read.config")),
+  };
 }
 
-function ConnectButton() {
+function Header({ connect }: { connect: () => void }) {
+  const { online } = useSession();
+  const reachability = t("overview.page.server", {
+    host: location.host,
+    state: online ? "up" : "down",
+  });
   return (
-    <Button
-      label={t("overview.page.connect")}
-      variant="primary"
-      href="#connect"
-      icon={<Icon icon={Plus} />}
-    />
+    <LayoutHeader padding={roles.header.padding} hasDivider>
+      <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
+        <VStack gap={0} vAlign="center">
+          <Heading level={roles.heading.page}>{t("overview.page.title")}</Heading>
+          <HStack gap={2} vAlign="center">
+            <StatusDot variant={online ? "success" : "error"} label={reachability} />
+            <Text type="supporting" color="secondary">
+              {reachability}
+            </Text>
+          </HStack>
+        </VStack>
+        <Button
+          label={t("overview.page.connect")}
+          variant={roles.primaryAction.variant}
+          size={roles.primaryAction.size}
+          icon={<Icon icon={Plus} />}
+          onClick={connect}
+        />
+      </HStack>
+    </LayoutHeader>
   );
 }
 
 export default function Overview() {
-  const { credentials, keyRead, config, files, now, summary, keys } = useOverviewData();
-  const plugins = usePlugins();
-  const errorLogs = useErrorLogs();
-  const { online } = useSession();
-  const action = useAction();
+  const data = useOverviewData();
+  const connect = useConnectAccount();
   const isNarrow = useMediaQuery(layout.railFolds);
-  const firstRun = useFirstRun(files?.length);
-
+  const isFirstRun = data.files?.length === 0;
   const rail = (hasStickyHeader: boolean) => (
     <AttentionFeed
-      rows={summary.attention}
-      hasAccounts={!!files?.length}
-      now={now}
+      summary={data.summary}
+      now={data.now}
+      reads={present([data.accounts, data.config])}
       hasStickyHeader={hasStickyHeader}
     />
   );
   return (
-    <PageFrame
-      title={t("overview.page.title")}
-      width="full"
-      meta={<Meta online={online} observedAt={credentials.data?.observed_at} />}
-      actions={<ConnectButton />}
-      panel={
-        isNarrow
-          ? undefined
-          : {
-              label: t("overview.attention.heading"),
-              content: rail(true),
-            }
+    <Layout
+      height="fill"
+      header={<Header connect={connect} />}
+      content={
+        <LayoutContent padding={roles.content.padding}>
+          <VStack gap={6}>
+            {isFirstRun ? (
+              <FirstRun connect={connect} />
+            ) : data.unread ? (
+              <ReadError {...data.unread} />
+            ) : (
+              <Tiles summary={data.summary} traffic={data.traffic} now={data.now} />
+            )}
+            {isNarrow && <Card padding={0}>{rail(false)}</Card>}
+            {/* Folded, the rail grows from its skeleton to its rows, so on a phone the chart
+                waits for them rather than being pushed down. */}
+            {!isFirstRun && (!isNarrow || data.summary) && (
+              <TrafficCard
+                traffic={data.traffic}
+                times={data.times}
+                reads={present([data.unread, data.keyUsage])}
+              />
+            )}
+          </VStack>
+        </LayoutContent>
       }
-    >
-      <VStack gap={10}>
-        {credentials.isError && (
-          <ReadError
-            error={credentials.error}
-            what={t("overview.page.accounts")}
-            retry={() => void credentials.refetch()}
-          />
-        )}
-        {firstRun.isOpen && files && keys && (
-          <GetStarted
-            accounts={files.length}
-            keys={keys}
-            served={hasServed(files)}
-            action={action}
-            onFinish={firstRun.finish}
-            onDismiss={firstRun.dismiss}
-          />
-        )}
-        <StatusTiles
-          counts={summary.counts}
-          requests={summary.traffic ? successRate(summary.traffic.all) : summary.traffic}
-          keys={keys ? keys.length : pendingOr(config.isError)}
-        />
-        <Divider />
-        <TrafficCard traffic={summary.traffic} keyRead={keyRead} />
-        {isNarrow && <Card padding={0}>{rail(false)}</Card>}
-        {files && (
-          <LimitsSection
-            files={files}
-            plugins={plugins.data?.plugins ?? []}
-            now={now}
-            action={action}
-          />
-        )}
-        <ServerFacts config={config} plugins={plugins} errorLogs={errorLogs} />
-      </VStack>
-    </PageFrame>
+      end={
+        isNarrow ? undefined : (
+          <LayoutPanel
+            width={layout.detailPanel.defaultSize}
+            padding={0}
+            hasDivider
+            role="complementary"
+            label={t("overview.attention.heading")}
+            isScrollable
+          >
+            {rail(true)}
+          </LayoutPanel>
+        )
+      }
+    />
   );
 }

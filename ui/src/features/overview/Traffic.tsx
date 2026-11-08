@@ -1,171 +1,80 @@
-import { Fragment, type ReactNode } from "react";
+import { useMemo } from "react";
 import { Card } from "@astryxdesign/core/Card";
-import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { TrafficChart } from "../../components/charts/index.ts";
 import { ReadError } from "../../components/ReadError.tsx";
-import { TrafficStrip } from "../../components/TrafficStrip.tsx";
-import { notImplemented } from "../../lib/api/client.ts";
-import { label, sum, type Buckets } from "../../lib/credentials.ts";
+import type { Buckets } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
-import { layout } from "../../themes/site/layout.ts";
-import type { Traffic } from "./summary.ts";
+import { failures } from "./summary.ts";
 
-const nameSkeleton = (
-  <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
-);
+const NO_BUCKETS: Buckets = { total: [], failed: [] };
+/** The server writes a bucket as "14:50-15:00"; a range takes an en dash. */
+const span = (time: string) => time.replace("-", "\u2013");
 
-/** One row: the name and its totals, then the strip. */
-function TrafficRow({
-  name,
-  href,
-  buckets,
-  max,
-}: {
-  name: string;
-  href?: string;
-  buckets: Buckets | null;
-  max: number;
-}) {
-  return (
-    <VStack gap={2}>
-      <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
-        <Heading level={4} accessibilityLevel={3}>
-          {href ? <Link href={href}>{name}</Link> : name}
-        </Heading>
-        <Text type="supporting" color="secondary">
-          {buckets
-            ? t("overview.traffic.count", {
-                total: sum(buckets.total),
-                failed: sum(buckets.failed),
-              })
-            : t("overview.traffic.noHistory")}
-        </Text>
-      </HStack>
-      {buckets && <TrafficStrip buckets={buckets} max={max} />}
-    </VStack>
-  );
+/** The written conclusion under the chart: totals, then the busiest ten minutes. */
+function conclusion(traffic: Buckets, times: string[]) {
+  const { total, failed } = failures(traffic);
+  if (!total) return t("overview.chart.none");
+  const peak = Math.max(...traffic.total);
+  const at = traffic.total.indexOf(peak);
+  return t("overview.chart.summary", { total, failed, peak, time: span(times[at] ?? "") });
 }
 
-function SkeletonRows() {
-  return [0, 1, 2].map((i) => (
-    <Fragment key={i}>
-      {i > 0 && <Divider />}
-      <VStack gap={2}>
-        {nameSkeleton}
-        <Skeleton height={layout.valueSkeleton.height} index={i} />
-      </VStack>
-    </Fragment>
-  ));
-}
-
-export type KeyUsageRead = { error: unknown; retry: () => void } | null;
-
-function rows(traffic: Traffic, keyRead: KeyUsageRead) {
-  const list: { key: string; node: ReactNode }[] = [
-    {
-      key: "all",
-      node: <TrafficRow name={t("overview.traffic.all")} buckets={traffic.all} max={traffic.max} />,
-    },
-    ...traffic.accounts.map((r) => ({
-      key: `a:${r.provider}`,
-      node: (
-        <TrafficRow
-          name={t("overview.traffic.accounts", { provider: label(r.provider) })}
-          href={`#accounts?provider=${encodeURIComponent(r.provider)}`}
-          buckets={r.buckets}
-          max={traffic.max}
-        />
-      ),
-    })),
-  ];
-  if (keyRead && notImplemented(keyRead.error))
-    list.push({
-      key: "keys",
-      node: (
-        <HStack gap={2} vAlign="center">
-          <Icon icon="info" size="sm" color="info" />
-          <Text type="supporting" color="secondary">
-            {t("overview.traffic.keysNotReported")}
-          </Text>
-        </HStack>
-      ),
-    });
-  else if (keyRead)
-    list.push({
-      key: "keys",
-      node: (
-        <ReadError
-          error={keyRead.error}
-          what={t("overview.traffic.keyUsage")}
-          retry={keyRead.retry}
-        />
-      ),
-    });
-  else
-    for (const r of traffic.keys)
-      list.push({
-        key: `k:${r.provider}`,
-        node: (
-          <TrafficRow
-            name={t("overview.traffic.keys", { provider: label(r.provider) })}
-            href={`#providers?family=${encodeURIComponent(r.provider)}`}
-            buckets={r.buckets}
-            max={traffic.max}
-          />
-        ),
-      });
-  return list;
-}
+export type Read = { error: unknown; what: string; retry: () => void };
 
 /**
- * One strip per provider: all traffic first, then accounts and provider keys by provider.
- * `traffic` is undefined while the accounts or the key usage load, and null when the accounts
- * could not be read; the page banner says so.
+ * The template's chart card: requests per ten-minute bucket over 200 minutes with failures on
+ * top, its one-sentence conclusion, and the way to the per-source detail on Traffic analysis.
+ * `traffic` is undefined while loading and null when the server reports no history; `reads` are
+ * the failed reads it depends on.
  */
 export function TrafficCard({
   traffic,
-  keyRead,
+  times,
+  reads,
 }: {
-  traffic: Traffic | null | undefined;
-  keyRead: KeyUsageRead;
+  traffic: Buckets | null | undefined;
+  times: string[];
+  reads: Read[];
 }) {
-  const list = traffic ? rows(traffic, keyRead) : [];
-  const isEmpty = traffic && !traffic.accounts.length && !traffic.keys.length && !keyRead;
+  const categories = useMemo(
+    () => times.map((time) => ({ tick: time.split("-")[0] ?? "", full: span(time) })),
+    [times],
+  );
+  const failedWithoutData = traffic === undefined && reads.length > 0;
   return (
-    <VStack gap={6}>
-      <VStack>
-        <Heading level={2}>{t("overview.traffic.heading")}</Heading>
-        <Text type="supporting" color="secondary">
-          {t("overview.traffic.description")}
-        </Text>
-      </VStack>
-      <Card padding={6}>
-        {traffic === undefined ? (
-          <VStack gap={6}>
-            <SkeletonRows />
+    <Card padding={6}>
+      <VStack gap={4}>
+        <HStack gap={3} vAlign="start" hAlign="between" wrap="wrap">
+          <VStack gap={1}>
+            <Heading level={3} accessibilityLevel={2}>
+              {t("overview.chart.heading")}
+            </Heading>
+            <Text type="supporting" color="secondary">
+              {t("overview.chart.description")}
+            </Text>
           </VStack>
-        ) : traffic === null ? (
-          <Text type="body" color="secondary">
-            {t("overview.traffic.unavailable")}
-          </Text>
-        ) : isEmpty ? (
-          <EmptyState title={t("overview.traffic.empty")} headingLevel={3} isCompact />
-        ) : (
-          <VStack gap={6}>
-            {list.map((row, index) => (
-              <Fragment key={row.key}>
-                {index > 0 && <Divider />}
-                {row.node}
-              </Fragment>
-            ))}
-          </VStack>
+          <Link href="#usage">{t("overview.chart.bySource")}</Link>
+        </HStack>
+        {reads.map((read) => (
+          <ReadError key={read.what} error={read.error} what={read.what} retry={read.retry} />
+        ))}
+        {traffic === null ? (
+          <EmptyState title={t("overview.chart.notReported")} headingLevel={3} isCompact />
+        ) : failedWithoutData ? null : (
+          <TrafficChart
+            categories={categories}
+            buckets={traffic ?? NO_BUCKETS}
+            names={{ requests: t("overview.chart.requests"), failed: t("overview.chart.failed") }}
+            label={t("overview.chart.label")}
+            summary={traffic ? conclusion(traffic, times) : t("overview.tiles.loading")}
+            loading={!traffic}
+          />
         )}
-      </Card>
-    </VStack>
+      </VStack>
+    </Card>
   );
 }
