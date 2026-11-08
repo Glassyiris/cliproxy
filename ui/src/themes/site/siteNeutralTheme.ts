@@ -22,9 +22,10 @@ export const siteNeutralTheme = defineTheme({
     // bar showed no value. The fill takes neutral's seed grey, #777777; the track stays, since it
     // is also every input's outline. Light keeps neutral's #919191.
     "--color-text-disabled": ["#919191", "#777777"],
-    // Chart volume takes the same greys as the quota bar fill above (core's blue-grey
-    // light-dark(#8494A3, #8C939B) read as tinted): 3.15:1 on the light card, 3.85:1 dark.
-    "--color-data-neutral": ["#919191", "#777777"],
+    // Chart volume (charts.ts reads this token for the requests series) is Astryx's
+    // categorical blue, as BoothDex's trend charts draw it: grey read as dead (owner,
+    // 2026-11-09, chose 「Astryx 藍」). 4.7:1 on the light card, 3.7:1 on the dark one.
+    "--color-data-neutral": ["#0171E3", "#0171E3"],
     // Warning is neutral's orange family, soft fill and dark ink like a muted badge, so a waiting
     // badge, cooling dot or warning banner is quiet beside the greys. Source values in comments.
     "--color-warning": ["#ffc7a1", "#503424"], // was #ffce2f; neutral --color-background-orange
