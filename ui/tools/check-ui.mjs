@@ -16,6 +16,10 @@
 // - A `components` block in a theme source under src/themes/: the theme sets tokens only, and
 //   component styles come from Astryx and the neutral theme it extends.
 // - No module or directory named util, common, helper, shared or misc.
+// - Type roles (src/themes/site/roles.ts): Heading levels 1 to 4; Text and Heading `size`,
+//   `weight` and `type` only as the roles table allows, written as literals or `roles.*`; it names
+//   no Heading `type`, since the level sets the scale. A route file (the page a feature's index.ts
+//   exports) has at most one level-1 Heading, and a rewritten one draws a LayoutHeader holding it.
 //
 // Tests and the i18n catalogs are skipped: tests hold fixtures and the catalogs hold prose.
 // Exit codes: 0 clean, 1 violation, 2 cannot read src/.
@@ -23,6 +27,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { roles } from "../src/themes/site/roles.ts";
 
 // An optional argument points the gate at another ui/ directory (used to drive it red).
 const ui = resolve(process.argv[2] ?? fileURLToPath(new URL("..", import.meta.url)));
@@ -63,6 +68,18 @@ const GENERATED_CSS = new Set(["src/themes/site/site.css", "src/themes/site/site
 const PAGE_SELECTOR = /^(?:html|body|:root)(?:\[[^\]]+\])*$/;
 const BANNED_NAME = /^(?:utils?|common|helpers?|shared|misc)$/i;
 const TEST_FILE = /\.test(?:-support)?\.tsx?$/;
+const HEADING_LEVELS = new Set(Object.values(roles.heading));
+const TYPE_PROPS = {
+  Text: {
+    size: new Set(Object.values(roles.textSize)),
+    weight: new Set(Object.values(roles.textWeight)),
+    type: new Set(Object.values(roles.textType)),
+  },
+  Heading: { size: new Set(), weight: new Set(), type: new Set() },
+};
+// Route files rebuilt on the Layout frame (DESIGN.md "Roles"); a page joins when it is rewritten.
+const REWRITTEN_ROUTES = new Set([]);
+const DEFAULT_EXPORT = /export\s*\{\s*default\s*\}\s*from\s*["'](\.\/[^"']+)["']/;
 
 function listFiles(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
@@ -197,7 +214,98 @@ function checkHandCss(text, fail) {
   }
 }
 
-function checkFile(file, errors) {
+// The values an attribute can take: literals, both branches of a conditional, or a `roles.*`
+// path. Undefined when any part is something else, which the table cannot vouch for.
+function choicesOf(node) {
+  if (!node) return undefined;
+  if (ts.isJsxExpression(node) || ts.isParenthesizedExpression(node))
+    return choicesOf(node.expression);
+  if (ts.isStringLiteralLike(node)) return [node.text];
+  if (ts.isNumericLiteral(node)) return [Number(node.text)];
+  if (ts.isConditionalExpression(node)) {
+    const [yes, no] = [choicesOf(node.whenTrue), choicesOf(node.whenFalse)];
+    return yes && no ? [...yes, ...no] : undefined;
+  }
+  if (ts.isPropertyAccessExpression(node) && /^roles\./.test(node.getText())) {
+    const value = node
+      .getText()
+      .split(".")
+      .slice(1)
+      .reduce((object, key) => object?.[key], roles);
+    return typeof value === "string" || typeof value === "number" ? [value] : undefined;
+  }
+  return undefined;
+}
+
+function attributeOf(element, name) {
+  return element.attributes.properties.find(
+    (property) => ts.isJsxAttribute(property) && property.name.getText() === name,
+  );
+}
+
+function isPageTitle(node) {
+  if (!ts.isJsxOpeningElement(node) && !ts.isJsxSelfClosingElement(node)) return false;
+  if (node.tagName.getText() !== "Heading") return false;
+  const level = choicesOf(attributeOf(node, "level")?.initializer);
+  return level?.length === 1 && level[0] === roles.heading.page;
+}
+
+function checkTypeRoles(node, fail) {
+  if (!ts.isJsxOpeningElement(node) && !ts.isJsxSelfClosingElement(node)) return;
+  const tag = node.tagName.getText();
+  if (tag === "Heading") {
+    const levels = choicesOf(attributeOf(node, "level")?.initializer);
+    if (!levels || levels.some((level) => !HEADING_LEVELS.has(level)))
+      fail("type", node, "Heading level is 1 to 4, a literal or roles.heading.*");
+  }
+  for (const [prop, allowed] of Object.entries(TYPE_PROPS[tag] ?? {})) {
+    const attribute = attributeOf(node, prop);
+    if (!attribute) continue;
+    const values = choicesOf(attribute.initializer);
+    if (!values || values.some((value) => !allowed.has(value)))
+      fail("type", node, `${tag} ${prop} is not in the roles table (src/themes/site/roles.ts)`);
+  }
+}
+
+function headerHoldsTitle(node) {
+  if (ts.isJsxElement(node) && node.openingElement.tagName.getText() === "LayoutHeader") {
+    let found = false;
+    const search = (child) => {
+      found ||= isPageTitle(child);
+      if (!found) ts.forEachChild(child, search);
+    };
+    search(node);
+    if (found) return true;
+  }
+  return ts.forEachChild(node, headerHoldsTitle) ?? false;
+}
+
+function checkRouteFile(ast, relativePath, fail) {
+  const titles = [];
+  const collect = (node) => {
+    if (isPageTitle(node)) titles.push(node);
+    ts.forEachChild(node, collect);
+  };
+  collect(ast);
+  if (titles.length > 1) fail("type", titles[1], "a route has one level-1 Heading");
+  if (REWRITTEN_ROUTES.has(relativePath) && !headerHoldsTitle(ast))
+    fail("type", null, "a rewritten route draws a LayoutHeader holding its level-1 Heading");
+}
+
+// The page each feature's index.ts exports as its default: the file a route renders.
+function routeFiles() {
+  const features = join(srcDir, "features");
+  if (!existsSync(features)) return new Set();
+  return new Set(
+    readdirSync(features).flatMap((name) => {
+      const index = join(features, name, "index.ts");
+      const target = existsSync(index) && DEFAULT_EXPORT.exec(readFileSync(index, "utf8"))?.[1];
+      return target ? [`src/features/${name}/${target.slice(2)}`] : [];
+    }),
+  );
+}
+
+function checkFile(file, errors, routes) {
   const relativePath = relative(ui, file).replaceAll("\\", "/");
   const inThemes = relativePath.startsWith(THEMES);
   const inMotion = relativePath.startsWith(MOTION);
@@ -220,6 +328,7 @@ function checkFile(file, errors) {
     checkImport(node, fail, { relativePath, inMotion });
     checkGlyph(node, fail);
     checkRegistry(node, fail);
+    checkTypeRoles(node, fail);
     if (themeSource) checkThemeSource(node, fail);
     if (!inMotion) checkMotion(node, fail);
     if (!inThemes) {
@@ -230,6 +339,7 @@ function checkFile(file, errors) {
     ts.forEachChild(node, visit);
   };
   visit(ast);
+  if (routes.has(relativePath)) checkRouteFile(ast, relativePath, fail);
 }
 
 if (!existsSync(srcDir)) {
@@ -238,12 +348,13 @@ if (!existsSync(srcDir)) {
 }
 const errors = [];
 const files = listFiles(srcDir).filter((file) => /\.(?:tsx?|css)$/.test(file));
-for (const file of files) checkFile(file, errors);
+const routes = routeFiles();
+for (const file of files) checkFile(file, errors, routes);
 if (errors.length > 0) {
   console.error(errors.join("\n"));
   console.error(`check-ui: ${errors.length} violations`);
   process.exit(1);
 }
 console.log(
-  `check-ui ok: ${files.length} source files (colours, px, tokens, sizes, style, layout, css, motion, names, icons, theme)`,
+  `check-ui ok: ${files.length} source files (colours, px, tokens, sizes, style, layout, css, motion, names, icons, theme, type roles)`,
 );

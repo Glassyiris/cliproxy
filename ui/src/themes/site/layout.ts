@@ -1,6 +1,8 @@
 // Fixed sizes of the app frame, in the units the Astryx props take: numbers are pixels.
 export const layout = {
   signInWidth: 400,
+  // Deprecated: only the old PageFrame reads it. Rewritten pages take roles.content.settingsWidth or formWidth;
+  // this goes when M1/M2 remove PageFrame.
   pageWidth: 960,
   // The detail panel beside a list, as the table-filter template sizes it: wide enough for a
   // MetadataList's label column, narrow enough to leave the table its columns.

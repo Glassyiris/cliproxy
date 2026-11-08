@@ -16,6 +16,7 @@
     "knip": "knip",
     "check:astryx": "astryx doctor --built dist-next",
     "check:size": "node tools/size.mjs",
+    "measure": "node tools/measure/run.mjs",
     "check": "node tools/check-all.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
