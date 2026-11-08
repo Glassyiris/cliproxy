@@ -1,0 +1,13 @@
+[
+  { "method": "PUT", "path": "/config", "reason": "Replaces the whole config as JSON; whole-file edits go to PUT /config.yaml." },
+  { "method": "PATCH", "path": "/config", "reason": "Merges into the whole config; section PUT and YAML PUT cover every edit." },
+  { "method": "GET", "path": "/config/", "reason": "Same handler with an empty path; fieldPath rejects an empty segment, so it is not a distinct read." },
+  { "method": "PUT", "path": "/config/", "reason": "Same as PUT /config with a trailing slash." },
+  { "method": "PATCH", "path": "/config/", "reason": "Same as PATCH /config with a trailing slash." },
+  { "method": "DELETE", "path": "/config/", "reason": "An empty-path DELETE always answers 400 cannot_delete_config." },
+  { "method": "PATCH", "path": "/config/{*path}", "reason": "Merges one subtree; the editors PUT the whole value after a stale check." },
+  { "method": "DELETE", "path": "/config/{*path}", "reason": "Deletes one key; the YAML editor already removes keys." },
+  { "method": "GET", "path": "/oauth/callback", "reason": "The provider's browser redirect lands here without the management key; the dashboard never fetches it." },
+  { "method": "DELETE", "path": "/plugins/store", "reason": "Deletes the plugin whose id is store; DELETE /plugins/{id} with id store resolves to it at runtime." },
+  { "method": "GET", "path": "/plugins/{id}/quota", "reason": "Same fetch as POST /plugins/{id}/quota with auth_index in the query; the dashboard posts a body." }
+]

@@ -1,0 +1,6 @@
+/* The cascade-layer order, imported first by src/main.tsx (Astryx's migration guide, "Cascade
+   layer audit"). The app's StyleX rules (layer `app`, vite.config.ts) sit above Astryx's
+   component atomics and below the theme. StyleX names an atomic class by its declaration, so an
+   app rule such as `background-color: var(--color-error)` has the same class as an Astryx one;
+   unlayered, it outranked every theme rule that overrides that class. */
+@layer reset, astryx-base, app, astryx-theme;

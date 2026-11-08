@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // The Vite entry (src/main.tsx via index.html) is found by knip's Vite plugin.
+  "entry": [
+    "src/**/*.test.{ts,tsx}",
+    "tools/*.mjs",
+    "tools/mock/server.mjs",
+    "tools/perf/run.mjs",
+    "tools/perf/adapters/*.mjs",
+    // The sources `astryx theme build` compiles into site.* and site-main.*, which the app imports.
+    "src/themes/site/siteTheme.ts",
+    "src/themes/site/siteMainTheme.ts",
+    // The charts module's Names and SourceNames types have no importer outside it yet.
+    "src/components/charts/index.ts"
+  ],
+  "project": ["src/**/*.{ts,tsx}", "tools/**/*.mjs"]
+}

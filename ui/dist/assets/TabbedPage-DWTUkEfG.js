@@ -1,0 +1,1 @@
+import{t as e}from"./pageHost-C5De_9X9.js";import{i as t}from"./useHashRoute-Dm7rep9d.js";import{x as n}from"./tokens.stylex-BRBC-NZS.js";var r=n();function i({tabs:n,actions:i}){let[a]=t(),o=n.find(e=>e.id===a.view)??n[0],s=o.page;return(0,r.jsx)(e,{value:{kind:`tab`,title:o.label(),tabs:null,actions:i},children:(0,r.jsx)(s,{},o.id)})}export{i as t};

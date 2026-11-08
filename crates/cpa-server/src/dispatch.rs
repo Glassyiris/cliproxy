@@ -539,7 +539,7 @@ where
     // Upstream headers and the trace ID go on a rendered response; once a keep-alive
     // committed the headers they are lost, as in Go.
     let traced = {
-        let trace = trace.clone();
+        let (trace, rt) = (trace.clone(), rt.clone());
         move |mut response: axum::response::Response, upstream: Option<Upstream>| {
             // The same config snapshot decides passthrough for both header sources.
             let passthrough = matches!(upstream, Some(Upstream::Success(_)));
@@ -559,6 +559,19 @@ where
             }
             if let Some(value) = trace.header() {
                 response.headers_mut().insert("x-cpa-trace-id", value);
+            }
+            // The model a model router chose, and the provider that served (cliproxy-rs only).
+            if let Some(value) = trace
+                .routed_model()
+                .and_then(|m| axum::http::HeaderValue::from_str(&m).ok())
+            {
+                response.headers_mut().insert("x-cpa-routed-model", value);
+            }
+            if let Some(value) = trace
+                .routed_provider(&rt)
+                .and_then(|p| axum::http::HeaderValue::from_str(&p).ok())
+            {
+                response.headers_mut().insert("x-cpa-routed-provider", value);
             }
             response
         }
@@ -701,18 +714,53 @@ pub async fn run_with_bootstrap_retries(rt: &Arc<Runtime>, call: Call, trace: &T
         }
         (Some(Route::Provider { provider, model }), None) => Some((provider, model)),
     };
-    // Go resolves providers before the lifecycle starts: an unknown model never starts one.
-    let resolved = route(rt, &rt.registry(), &call, routed.as_ref()).map_err(|e| e.failure)?;
-    // The usage record's prompt prefix is the client's, before interceptors rewrite it.
-    if call.operation == Operation::Generate && rt.usage_queue().accepts() {
-        trace.prompt_prefix(call.entry, &call.body);
-    }
     let mut call = call;
-    let hooks = crate::plugins::interceptors::start(rt, trace, &mut call, &resolved.1).await?;
-    let result = retry_bootstrap(rt, call, trace, &resolved, hooks.as_ref()).await;
-    match hooks {
-        Some(hooks) => hooks.finish(result, trace).await,
-        None => result,
+    // A model router (`model-routers`) names the model, for the registry to route.
+    let mut picked = None;
+    if routed.is_none()
+        && call.forced_provider.is_none()
+        && let Some(decision) = crate::model_router::resolve(rt, &call).await
+    {
+        trace.set_routed_model(&decision.model);
+        call.model = decision.model.clone();
+        picked = Some(decision);
+    }
+    // A router's `fallback-models` sends the client's request again, before interceptors.
+    let original = picked.as_ref().is_some_and(|p| p.falls_back()).then(|| call.clone());
+    loop {
+        // Go resolves providers before the lifecycle starts: an unknown model never starts one.
+        let resolved = route(rt, &rt.registry(), &call, routed.as_ref()).map_err(|e| e.failure)?;
+        // The usage record's prompt prefix is the client's, before interceptors rewrite it.
+        if call.operation == Operation::Generate && rt.usage_queue().accepts() {
+            trace.prompt_prefix(call.entry, &call.body);
+        }
+        let scope = picked.as_ref().map(|p| p.scope.clone());
+        let hooks = crate::plugins::interceptors::start(rt, trace, &mut call, &resolved.1).await?;
+        let result = retry_bootstrap(rt, call, trace, &resolved, scope, hooks.as_ref()).await;
+        let result = match hooks {
+            Some(hooks) => hooks.finish(result, trace).await,
+            None => result,
+        };
+        // A conversation moves to a routed model only once it served.
+        if let (Ok(_), Some(picked)) = (&result, &picked) {
+            picked.commit(rt);
+        }
+        // Only a failure before any byte reached the client moves to another model, and
+        // never one a `stop` rule (or a plugin) ended.
+        let next = match (&result, picked.as_mut(), &original) {
+            (Err(failure), Some(picked), Some(original))
+                if !trace.stopped() && crate::model_router::fails_over(failure) =>
+            {
+                crate::model_router::fall_back(rt, picked).map(|model| (model, original.clone()))
+            }
+            _ => None,
+        };
+        let Some((model, original)) = next else {
+            return result;
+        };
+        trace.set_routed_model(&model);
+        call = original;
+        call.model = model;
     }
 }
 
@@ -722,6 +770,7 @@ async fn retry_bootstrap(
     call: Call,
     trace: &Trace,
     resolved: &(Vec<String>, String),
+    scope: Option<Arc<crate::provider_policy::Providers>>,
     hooks: Option<&Arc<crate::plugins::interceptors::Hooks>>,
 ) -> Result<Done, Failure> {
     // Go `maxBootstrapRetries = 0` while Home is enabled: Home's own rounds decide.
@@ -730,7 +779,7 @@ async fn retry_bootstrap(
     } else {
         0
     };
-    let mut result = run_primed(rt, call.clone(), trace, resolved.clone(), hooks).await;
+    let mut result = run_primed(rt, call.clone(), trace, resolved.clone(), scope.clone(), hooks).await;
     for _ in 0..max {
         let original = match &result {
             Err(RunError {
@@ -739,7 +788,7 @@ async fn retry_bootstrap(
             }) if bootstrap_eligible(classify::go_status(e)) => e.clone(),
             _ => break,
         };
-        result = match run_primed(rt, call.clone(), trace, resolved.clone(), hooks).await {
+        result = match run_primed(rt, call.clone(), trace, resolved.clone(), scope.clone(), hooks).await {
             Err(RunError {
                 failure,
                 bootstrap: false,
@@ -769,9 +818,10 @@ async fn run_primed(
     call: Call,
     trace: &Trace,
     resolved: (Vec<String>, String),
+    scope: Option<Arc<crate::provider_policy::Providers>>,
     hooks: Option<&Arc<crate::plugins::interceptors::Hooks>>,
 ) -> Result<Done, RunError> {
-    let result = run_routed(rt, call, trace, resolved, hooks.map(|h| &**h)).await;
+    let result = run_routed(rt, call, trace, resolved, scope, hooks.map(|h| &**h)).await;
     match (hooks, result) {
         (Some(hooks), Ok(done @ Done::Stream { .. })) => {
             hooks.prime(Ok(done), trace).await.map_err(|failure| RunError {
@@ -800,6 +850,12 @@ pub struct Trace(
     /// The client's prompt prefix before plugin interceptors rewrite the body
     /// (`crate::usage_record::prompt_prefix`).
     std::sync::OnceLock<String>,
+    /// The model a model router sent the request to ([`crate::model_router`]).
+    std::sync::Mutex<Option<String>>,
+    /// The ID of the last credential selected for the request.
+    std::sync::Mutex<Option<String>>,
+    /// An attempt stopped the request (a `stop` rule, a request fault or a plugin).
+    std::sync::atomic::AtomicBool,
 );
 
 impl Trace {
@@ -814,6 +870,9 @@ impl Trace {
                 .unwrap_or_default(),
             Default::default(),
             crate::observability::current_clock(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
             Default::default(),
         );
         if let Some(id) = id.filter(|id| !id.is_empty()) {
@@ -864,6 +923,7 @@ impl Trace {
     }
 
     pub(crate) fn selected(&self, credential: &cpa_core::credential::Credential) {
+        *self.7.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(credential.id.clone());
         let index = cpa_core::config::credentials::auth_index(credential);
         if index.is_empty() {
             return;
@@ -876,6 +936,33 @@ impl Trace {
     /// The trace ID once a credential was selected.
     pub(crate) fn id(&self) -> Option<String> {
         self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
+    fn set_routed_model(&self, model: &str) {
+        *self.6.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(model.to_owned());
+    }
+
+    fn routed_model(&self) -> Option<String> {
+        self.6.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
+    fn stop(&self) {
+        self.8.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn stopped(&self) -> bool {
+        self.8.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The provider selector (`routing.providers`) of the last selected credential.
+    fn routed_provider(&self, rt: &Runtime) -> Option<String> {
+        let id = self
+            .7
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()?;
+        let credential = rt.store().get(&id)?;
+        Some(rt.policy().providers.name(&credential))
     }
 
     pub(crate) fn clock(&self) -> Arc<crate::observability::Clock> {
@@ -959,7 +1046,7 @@ impl Fault {
 /// `Manager.Execute*`). Selection failures take part in retry rounds too.
 pub async fn run(rt: &Arc<Runtime>, call: Call, trace: &Trace) -> Result<Done, RunError> {
     let resolved = route(rt, &rt.registry(), &call, None)?;
-    run_routed(rt, call, trace, resolved, None).await
+    run_routed(rt, call, trace, resolved, None, None).await
 }
 
 /// [`run`] for resolved providers and model, with the request's plugin hooks.
@@ -968,6 +1055,7 @@ async fn run_routed(
     call: Call,
     trace: &Trace,
     (providers, model): (Vec<String>, String),
+    scope: Option<Arc<crate::provider_policy::Providers>>,
     hooks: Option<&crate::plugins::interceptors::Hooks>,
 ) -> Result<Done, RunError> {
     let (cfg, policy) = rt.request_snapshot();
@@ -1031,6 +1119,7 @@ async fn run_routed(
         session_parent: session.parent,
         session_fork: session.fork,
         exclude: pinned_exclusion.clone(),
+        scope,
         ..Selection::default()
     };
     if rt.plugins().has_scheduler() {
@@ -1171,7 +1260,10 @@ async fn run_routed(
             };
             match attempt(rt, &cfg, &policy, &call, &request, usage.as_ref(), lease, target, hooks).await {
                 Attempt::Done(done) => return Ok(done),
-                Attempt::Stop(fault) => return Err(fault.into_run_error()),
+                Attempt::Stop(fault) => {
+                    trace.stop();
+                    return Err(fault.into_run_error());
+                }
                 Attempt::Next(fault) => {
                     if classify::upstream_attempted(&fault.error) {
                         upstream = Some(fault.clone());
@@ -1215,6 +1307,7 @@ async fn run_routed(
             aliases: &aliases,
             pinned: pinned.as_deref(),
             compact,
+            scope: selection.scope.clone(),
         };
         if !retry_round {
             return credits
@@ -1989,6 +2082,8 @@ struct Credits<'a> {
     aliases: &'a std::collections::HashMap<String, Vec<cpa_core::registry::dynamic::OAuthAlias>>,
     pinned: Option<&'a str>,
     compact: bool,
+    /// The request's provider scope (a router's), else `routing.providers` applies.
+    scope: Option<Arc<crate::provider_policy::Providers>>,
 }
 
 impl Credits<'_> {
@@ -2030,6 +2125,14 @@ impl Credits<'_> {
         let ids = snapshot
             .iter()
             .filter(|c| !c.disabled && c.provider.trim().eq_ignore_ascii_case("antigravity"))
+            .filter(|c| {
+                !crate::provider_policy::Providers::out_of_scope(
+                    self.scope.as_deref(),
+                    &policy.providers,
+                    c,
+                    self.model,
+                )
+            })
             .filter(|c| self.pinned.is_none_or(|p| p.is_empty() || c.id == p))
             .map(|c| c.id.as_str());
         for id in cpa_exec::antigravity_credits::order_candidates(ids) {

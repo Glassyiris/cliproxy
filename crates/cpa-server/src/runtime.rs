@@ -64,6 +64,8 @@ pub struct Runtime {
     catalogs: Mutex<Option<crate::model_updater::Session>>,
     /// Serializes config commits through their catalog reconfigure.
     config_commit: Mutex<()>,
+    /// The model routers' benchmarks and conversation bindings ([`crate::model_router`]).
+    pub(crate) model_router: crate::model_router::State,
 }
 
 /// The Codex refresh transactions under a credential file's lock: shutdown stops the
@@ -106,6 +108,9 @@ impl Runtime {
     pub fn new(config: Config, credentials: Vec<Credential>, executors: Executors) -> Self {
         let mut policy = crate::management::policy(&config);
         policy.compat_disable_cooling = crate::scheduler::compat_cooling(&config);
+        for problem in crate::provider_policy::Providers::problems(&config, &credentials) {
+            tracing::warn!("{problem}");
+        }
         let cooldown_dir = cooldown_dir(&config, &policy);
         let (enabled, strict) = signature_cache_config(&config);
         cpa_translate::set_antigravity_signature_cache_config(enabled, strict);
@@ -128,6 +133,7 @@ impl Runtime {
             codex_refreshes: CodexRefreshes::default(),
             catalogs: Mutex::default(),
             config_commit: Mutex::default(),
+            model_router: Default::default(),
         };
         rt.publish_policy(policy);
         rt.store.configure_cooldown_store(cooldown_dir);
@@ -233,6 +239,9 @@ impl Runtime {
             return false;
         }
         policy.compat_disable_cooling = crate::scheduler::compat_cooling(&config);
+        for problem in crate::provider_policy::Providers::problems(&config, &self.store.snapshot()) {
+            tracing::warn!("{problem}");
+        }
         let (enabled, strict) = signature_cache_config(&config);
         cpa_translate::set_antigravity_signature_cache_config(enabled, strict);
         let dir = cooldown_dir(&config, &policy);
@@ -1224,6 +1233,14 @@ fn ready<'a>(
     let eligible: Vec<_> = creds
         .iter()
         .filter(|c| !c.disabled && !selection.exclude.contains(&c.id))
+        .filter(|c| {
+            !crate::provider_policy::Providers::out_of_scope(
+                selection.scope.as_deref(),
+                &policy.providers,
+                c,
+                &selection.model,
+            )
+        })
         .filter(|c| policy.retry_limit(c) >= selection.retry_round && (!configured || scheduler.admits(c, policy)))
         .filter_map(|c| admit(c).map(|m| (c, m)))
         .collect();
@@ -1304,6 +1321,9 @@ pub struct Selection {
     /// What a plugin scheduler learns about the request (Go `SchedulerPickRequest`'s
     /// `Stream` and `Options`); without it the scheduler sees no headers or metadata.
     pub scheduler: Option<Arc<crate::plugins::SchedulerContext>>,
+    /// A model router's provider scope and order (cliproxy-rs only); `None` follows
+    /// `routing.providers`.
+    pub scope: Option<Arc<crate::provider_policy::Providers>>,
 }
 
 impl Selection {
@@ -2096,10 +2116,11 @@ impl CredentialStore {
             Instant::now(),
             false,
         )?;
-        let tier = ready.iter().map(|(c, _)| crate::scheduler::priority(c)).max();
+        let scope = crate::scheduler::scope(selection, policy);
+        let tier = ready.iter().map(|(c, _)| scope.rank(c)).max();
         let mut out: Vec<_> = ready
             .into_iter()
-            .filter(|(c, _)| across || Some(crate::scheduler::priority(c)) == tier)
+            .filter(|(c, _)| across || Some(scope.rank(c)) == tier)
             .map(|(c, _)| Arc::clone(c))
             .collect();
         // Go `availableAuthsFromPriorityBuckets` orders both modes by ID.
@@ -2129,7 +2150,7 @@ impl CredentialStore {
                 // choice to the configured selector (docs/DIFFERENCES-FROM-GO.md).
                 Pick::Auth(id) => refs.iter().find(|(c, _)| c.id == *id).map(|(c, _)| (*c, None)),
                 Pick::Builtin(strategy) => scheduler
-                    .pick_builtin(&refs, &selection, *strategy, ranks)
+                    .pick_builtin(&refs, &selection, &policy, *strategy, ranks)
                     .map(|c| (c, None)),
                 Pick::Configured => None,
             };

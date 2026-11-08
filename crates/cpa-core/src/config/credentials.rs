@@ -544,6 +544,23 @@ pub fn config_key_location(cfg: &Config, id: &str) -> Option<KeyLocation> {
         .and_then(|(_, origin)| origin)
 }
 
+/// The `name` of the `api-keys` entry each config-backed credential comes from, by
+/// credential ID, for cliproxy-rs provider selectors (`routing.providers`). Entries
+/// without a name are absent.
+pub fn entry_names(cfg: &Config) -> std::collections::HashMap<String, String> {
+    synthesize(cfg)
+        .into_iter()
+        .filter_map(|(c, origin)| {
+            let name = match origin {
+                Some(o) => text(groups(cfg, o.family).get(o.group)?.get("name")),
+                None => c.attributes.get("compat_name")?.clone(),
+            };
+            let name = name.trim();
+            (!name.is_empty()).then(|| (c.id, name.to_owned()))
+        })
+        .collect()
+}
+
 /// Position of a config API key: `api-keys.<family>[group].keys[key]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyLocation {

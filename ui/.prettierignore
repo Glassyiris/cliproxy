@@ -1,0 +1,31 @@
+dist
+node_modules
+public
+package-lock.json
+# Not formatted by this gate: the browser-check scripts, Markdown and the HTML shell.
+scripts
+*.md
+index.html
+# Written by `astryx theme build`; `astryx theme build --check` compares them byte for byte, so
+# they keep the generator's formatting.
+src/themes/site/site.css
+src/themes/site/site.js
+src/themes/site/site.d.ts
+src/themes/site/site.css.d.ts
+src/themes/site/site.variants.d.ts
+src/themes/site/site-main.css
+src/themes/site/site-main.js
+src/themes/site/site-main.d.ts
+src/themes/site/site-main.css.d.ts
+src/themes/site/site-main.variants.d.ts
+# ponytail: files written before this gate and not yet formatted. The three src/lib files have
+# a function that formatting pushes over the 80-line limit; split it, format the file, then
+# delete its line. The tools are outside the dashboard work's write scope.
+src/lib/credentials.test.ts
+src/lib/credentials.ts
+src/lib/quota-windows.test.ts
+tools/api-allowlist.json
+tools/check-api.mjs
+tools/mock/server.mjs
+tools/perf/adapters/svelte.mjs
+tools/perf/run.mjs

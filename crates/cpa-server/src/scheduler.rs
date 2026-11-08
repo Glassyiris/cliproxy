@@ -2,6 +2,7 @@
 //! publishes this policy through Runtime::publish_policy.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use cpa_common::gostr::GoStr;
@@ -289,6 +290,9 @@ pub struct Policy {
     pub compat_disable_cooling: Vec<(String, Option<bool>)>,
     /// OAuth-only `oauth.request-scoped-errors` channels; API keys must not inherit these.
     pub oauth_request_scoped_errors: HashMap<String, Vec<ErrorRule>>,
+    /// `routing.providers` (cliproxy-rs only): the scope and order of requests without a
+    /// router's own. Filled from the config on every publish.
+    pub providers: Arc<crate::provider_policy::Providers>,
 }
 
 impl Default for Policy {
@@ -308,6 +312,7 @@ impl Default for Policy {
             force_model_prefix: false,
             compat_disable_cooling: Vec::new(),
             oauth_request_scoped_errors: HashMap::new(),
+            providers: Arc::default(),
         }
     }
 }
@@ -444,6 +449,12 @@ fn metadata<'a>(c: &'a Credential, key: &str) -> Option<&'a Value> {
 /// A credential's priority tier, as selection reads it.
 pub(crate) fn priority(c: &Credential) -> i64 {
     integer(c, "priority").unwrap_or(0)
+}
+
+/// The provider scope and order a selection follows: its router's, else
+/// `routing.providers`.
+pub(crate) fn scope<'a>(selection: &'a Selection, policy: &'a Policy) -> &'a crate::provider_policy::Providers {
+    selection.scope.as_deref().unwrap_or(&policy.providers)
 }
 
 fn integer(c: &Credential, key: &str) -> Option<i64> {
@@ -1015,7 +1026,7 @@ impl Scheduler {
             {
                 return Some((c, Some(found)));
             }
-            let picked = self.pick_unbound(candidates, selection, policy.strategy, ranks)?;
+            let picked = self.pick_unbound(candidates, selection, policy, policy.strategy, ranks)?;
             let bound = self.lcp.bind(&namespace, request.prepared(), &picked.id, now);
             return Some((picked, bound));
         }
@@ -1034,7 +1045,7 @@ impl Scheduler {
     ) -> Option<&'a Credential> {
         let ttl = policy.session_affinity_ttl;
         let Some(keys) = self.affinity(policy).then(|| session_keys(selection)).flatten() else {
-            return self.pick_unbound(candidates, selection, policy.strategy, ranks);
+            return self.pick_unbound(candidates, selection, policy, policy.strategy, ranks);
         };
         self.affinity.sweep(now, ttl);
         let fork = selection.session_fork;
@@ -1056,7 +1067,7 @@ impl Scheduler {
         };
         let picked = match reuse {
             Some(c) => c,
-            None => self.pick_unbound(candidates, selection, policy.strategy, ranks)?,
+            None => self.pick_unbound(candidates, selection, policy, policy.strategy, ranks)?,
         };
         self.affinity.bind(&picked.id, &bind_keys, now, ttl);
         Some(picked)
@@ -1127,30 +1138,32 @@ impl Scheduler {
         &mut self,
         candidates: &[(&'a Credential, &str)],
         selection: &Selection,
+        policy: &Policy,
         strategy: Strategy,
         ranks: &Ranks<'_>,
     ) -> Option<&'a Credential> {
-        self.pick_unbound(candidates, selection, strategy, ranks)
+        self.pick_unbound(candidates, selection, policy, strategy, ranks)
     }
 
+    /// Picks among the highest tier: credential priority, or the selection's provider
+    /// order ([`scope`]).
     fn pick_unbound<'a>(
         &mut self,
         candidates: &[(&'a Credential, &str)],
         selection: &Selection,
+        policy: &Policy,
         strategy: Strategy,
         ranks: &Ranks<'_>,
     ) -> Option<&'a Credential> {
         let model = canonical_model(&selection.model).to_owned();
         let provider_keys = selection.provider_keys();
         let providers_key = provider_keys.join(",");
-        let tier = candidates
-            .iter()
-            .map(|(c, _)| integer(c, "priority").unwrap_or(0))
-            .max()?;
+        let scope = scope(selection, policy);
+        let tier = candidates.iter().map(|(c, _)| scope.rank(c)).max()?;
         let mut ready: Vec<(&Credential, &str)> = candidates
             .iter()
             .copied()
-            .filter(|(c, _)| integer(c, "priority").unwrap_or(0) == tier)
+            .filter(|(c, _)| scope.rank(c) == tier)
             .collect();
         ready.sort_by(|a, b| a.0.id.cmp(&b.0.id));
         // Providers that have ready candidates, in the request's provider order.
@@ -2409,6 +2422,41 @@ mod tests {
             "a"
         );
         assert_eq!(s.pick(&tag(&[&low, &high]), &selection("m"), &p, now).unwrap().id, "b");
+    }
+
+    #[test]
+    fn provider_order_ranks_unbound_picks_and_never_moves_a_bound_session() {
+        let cfg =
+            cpa_core::config::Config::parse("routing:\n  providers:\n    order: [claude/a, [claude/b, claude/c]]\n")
+                .unwrap();
+        // `b`'s priority does not lift it over the first tier.
+        let (a, b, c) = (
+            cred("a", serde_json::json!({})),
+            cred("b", serde_json::json!({"priority": 9})),
+            cred("c", serde_json::json!({})),
+        );
+        let p = Policy {
+            strategy: Strategy::RoundRobin,
+            session_affinity: true,
+            providers: Arc::new(crate::provider_policy::Providers::global(&cfg)),
+            ..Default::default()
+        };
+        let session = |id: &str| Selection {
+            session: Some(id.into()),
+            ..selection("m")
+        };
+        let now = Instant::now();
+        let mut s = Scheduler::default();
+        // Without `a`, the second tier balances new sessions.
+        let one = s.pick(&tag(&[&b, &c]), &session("one"), &p, now).unwrap().id.clone();
+        let two = s.pick(&tag(&[&b, &c]), &session("two"), &p, now).unwrap().id.clone();
+        assert_ne!(one, two);
+        // `a` recovers: bound sessions stay where they are, new ones go to `a`.
+        for _ in 0..3 {
+            assert_eq!(s.pick(&tag(&[&a, &b, &c]), &session("one"), &p, now).unwrap().id, one);
+            assert_eq!(s.pick(&tag(&[&a, &b, &c]), &session("two"), &p, now).unwrap().id, two);
+        }
+        assert_eq!(s.pick(&tag(&[&a, &b, &c]), &session("three"), &p, now).unwrap().id, "a");
     }
 
     #[test]

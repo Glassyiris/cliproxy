@@ -1428,6 +1428,10 @@ async fn serve(
     }
     // Go `misc.StartAntigravityVersionUpdater` and `startModelCatalogUpdaters`.
     cpa_server::model_updater::start(&rt, home_config.is_some());
+    // Model router benchmarks (cliproxy-rs only); idle without `artificial-analysis.api-key`.
+    if home_config.is_none() {
+        cpa_server::aa::start(&rt);
+    }
     let home = home_config.map(|home_config| {
         let dispatcher = Arc::new(home::Dispatcher::new(&rt));
         rt.set_remote_dispatch(Some(dispatcher.clone()));

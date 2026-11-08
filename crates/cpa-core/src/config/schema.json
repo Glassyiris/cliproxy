@@ -74,6 +74,16 @@
             "transient-error-cooldown-seconds": "int",
             "max-trusted-cooldown": "string"
           }
+        },
+        "providers": {
+          "fields": {
+            "exclude": {
+              "list": "string"
+            },
+            "order": {
+              "list": "opaque"
+            }
+          }
         }
       }
     },
@@ -1593,6 +1603,36 @@
       }
     },
     "config-version": "version",
-    "worker-threads": "int"
+    "worker-threads": "int",
+    "artificial-analysis": {
+      "fields": {
+        "api-key": "string",
+        "url": "string",
+        "cache-file": "string"
+      }
+    },
+    "model-routers": {
+      "list": {
+        "fields": {
+          "name": "string",
+          "tier": "string",
+          "judge": "opaque",
+          "models": {
+            "list": "opaque"
+          },
+          "fallback-models": "int",
+          "providers": {
+            "fields": {
+              "exclude": {
+                "list": "string"
+              },
+              "order": {
+                "list": "opaque"
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }

@@ -229,6 +229,38 @@ jobs:
             unshare --net -- sh -c 'ip link set lo up && exec setpriv --reuid="$1" --regid="$2" --init-groups -- cargo nextest run -p cpa-server --features media-relay,pprof --lib --locked --profile ci' \
             sh "$(id -u)" "$(id -g)"
 
+  # The Rust binary embeds the committed ui/dist (crates/cpa-server/build.rs), so a source
+  # change without a rebuild would ship a stale dashboard. This job runs the dashboard's own
+  # gates, rebuilds, and fails when the rebuild differs from what is committed. The build is
+  # byte-for-byte reproducible.
+  dashboard:
+    name: dashboard (checks and committed build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install and check
+        working-directory: ui
+        run: |
+          npm ci
+          npm run check
+      - name: Rebuild
+        working-directory: ui
+        run: npm run build
+      # status, not diff: a new or removed file under ui/dist counts as well.
+      - name: Committed build matches the source
+        run: |
+          if [ -n "$(git status --porcelain -- ui/dist)" ]; then
+            git status --short -- ui/dist
+            echo '::error::ui/dist is stale; run npm run build in ui and commit the result'
+            exit 1
+          fi
+
   perf:
     name: ${{ matrix.gates }} (Linux)
     # The release builds use Ubuntu 22.04 too, so the sizes compare with theirs, and its
