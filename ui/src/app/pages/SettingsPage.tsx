@@ -19,7 +19,7 @@ export default function SettingsPage() {
       <PageHostContext
         value={{
           kind: "tab",
-          title: t("app.nav.settings"),
+          title: t("app.nav.config"),
           tabs: null,
           actions: (
             <Button

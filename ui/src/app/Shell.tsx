@@ -155,47 +155,61 @@ function useOpenRoutes(current: string) {
   return [open, toggle] as const;
 }
 
+type NavEntry = { key: string; label: string; icon: PageRoute["icon"]; href: string; on: boolean };
+type NavCategory = { id: string; label: string; icon: PageRoute["icon"]; entries: NavEntry[] };
+
 /**
- * The pages: a route with views is a collapsible category (open by default) with its pages under
- * it. In the collapsed rail every page is its own icon, so reaching one is one click, never a
- * flyout (owner, 2026-11-08: 「這個不人體工學」).
+ * The side nav's categories in route order: a route's views, or the route itself, are the items
+ * of its category (`navGroup`, else its own id); the category's route comes first in it.
+ */
+function navCategories(current: PageRoute, view: string | undefined): NavCategory[] {
+  const entriesOf = (r: PageRoute): NavEntry[] => {
+    if (!r.views) {
+      const label = r.navTitle?.() ?? r.title();
+      return [{ key: r.id, label, icon: r.icon, href: `#${r.id}`, on: r === current }];
+    }
+    const first = r.views[0].id;
+    const active = r === current ? (r.views.find((v) => v.id === view)?.id ?? first) : null;
+    return r.views.map((v) => ({
+      key: `${r.id}-${v.id}`,
+      label: v.title(),
+      icon: v.icon,
+      href: v.id === first ? `#${r.id}` : `#${r.id}?view=${v.id}`,
+      on: v.id === active,
+    }));
+  };
+  return routes
+    .filter((r) => !r.navGroup)
+    .map((r) => ({
+      id: r.id,
+      label: r.title(),
+      icon: r.groupIcon ?? r.icon,
+      entries: [r, ...routes.filter((m) => m.navGroup === r.id)].flatMap(entriesOf),
+    }));
+}
+
+/**
+ * The pages: a category with more than one page is collapsible (open by default) with its pages
+ * under it; a lone page is a plain item. In the collapsed rail every page is its own icon, so
+ * reaching one is one click, never a flyout (owner, 2026-11-08: 「這個不人體工學」).
  */
 function PageItems({ current }: { current: PageRoute }) {
   const { isCollapsed } = useSideNavCollapse();
   const [params] = useHashParams();
-  const [open, toggle] = useOpenRoutes(current.id);
-  return routes.map((r) => {
-    if (!r.views) {
-      return (
-        <SideNavItem
-          key={r.id}
-          label={r.title()}
-          icon={r.icon}
-          href={`#${r.id}`}
-          isSelected={r === current}
-        />
-      );
-    }
-    const first = r.views[0].id;
-    const active = r === current ? (r.views.find((v) => v.id === params.view)?.id ?? first) : null;
-    const items = r.views.map((v) => (
-      <SideNavItem
-        key={`${r.id}-${v.id}`}
-        label={v.title()}
-        icon={v.icon}
-        href={v.id === first ? `#${r.id}` : `#${r.id}?view=${v.id}`}
-        isSelected={v.id === active}
-      />
+  const [open, toggle] = useOpenRoutes(current.navGroup ?? current.id);
+  return navCategories(current, params.view).map((c) => {
+    const items = c.entries.map((e) => (
+      <SideNavItem key={e.key} label={e.label} icon={e.icon} href={e.href} isSelected={e.on} />
     ));
-    if (isCollapsed) return items;
+    if (isCollapsed || c.entries.length === 1) return items;
     return (
       <SideNavItem
-        key={r.id}
-        label={r.title()}
-        icon={r.icon}
+        key={c.id}
+        label={c.label}
+        icon={c.icon}
         collapsible={{
-          isCollapsed: !open.has(r.id),
-          onCollapsedChange: (isClosed) => toggle(r.id, !isClosed),
+          isCollapsed: !open.has(c.id),
+          onCollapsedChange: (isClosed) => toggle(c.id, !isClosed),
         }}
       >
         {items}

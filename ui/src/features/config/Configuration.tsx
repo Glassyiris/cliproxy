@@ -251,7 +251,7 @@ export default function Configuration() {
 
   return (
     <PageFrame
-      title={t("app.nav.settings")}
+      title={t("app.nav.config")}
       meta={
         config.data && (
           <Text type="supporting" color="secondary">

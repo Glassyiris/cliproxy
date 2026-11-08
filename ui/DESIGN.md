@@ -113,7 +113,7 @@ deviation with its reason.
 Six hash routes (owner, 2026-11-08: 「很多東西沒必要一定是一個頁面」). What used to be a page of its
 own is a view of one of them (`?view=`, listed under its route in the side nav, which is a
 collapsible category, open by default; in the collapsed rail each view is its own icon) or a
-dialog (`?open=`). Pages carry no tab strip (owner, 2026-11-08: header tabs read as 「切換太離譜了」;
+dialog (`?open=`). Overview stands alone; every other page sits in a category (Accounts, Models, Monitoring, Server, with client keys under Server beside Settings), so no lone item sits between categories (owner, 2026-11-08: 「中間卡一個沒展開的是不是很奇怪」). Pages carry no tab strip (owner, 2026-11-08: header tabs read as 「切換太離譜了」;
 「側邊欄可以做之前那種收起」). Sign-in is not a route. The R1 to R5 rewrites
 redesign the content of Accounts, Clients, Models, Activity and Settings; until then each tab and
 dialog hosts the earlier page unchanged through a thin host in `src/app/pages/`.

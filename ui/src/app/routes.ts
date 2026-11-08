@@ -9,6 +9,7 @@ import {
   KeyRound,
   LayoutDashboard,
   ScrollText,
+  ServerCog,
   Users,
 } from "lucide-react";
 import { t } from "../lib/i18n.ts";
@@ -27,6 +28,12 @@ export type PageRoute = {
    * no `?view=`. A route with views is a collapsible category; one without is a single item.
    */
   views?: readonly RouteView[];
+  /** The side-nav category this route sits in when it is not its own (clients sit under Server). */
+  navGroup?: string;
+  /** The route's item in its own category when that differs from the category's title. */
+  navTitle?: () => string;
+  /** The category's icon when the route's own icon marks its item. */
+  groupIcon?: IconProps["icon"];
   /** Fetches the page's chunk ahead of the first visit. */
   preload(): Promise<unknown>;
 };
@@ -69,6 +76,8 @@ export const routes: readonly PageRoute[] = [
   {
     id: "clients",
     title: () => t("app.nav.clients"),
+    navGroup: "settings",
+    navTitle: () => t("keys.page.title"),
     icon: KeyRound,
     ...page(() => import("./pages/ClientsPage.tsx")),
   },
@@ -95,6 +104,8 @@ export const routes: readonly PageRoute[] = [
   {
     id: "settings",
     title: () => t("app.nav.settings"),
+    navTitle: () => t("app.nav.config"),
+    groupIcon: ServerCog,
     icon: "wrench",
     ...page(() => import("./pages/SettingsPage.tsx")),
   },

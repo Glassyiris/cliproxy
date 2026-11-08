@@ -12,7 +12,7 @@ export default function ClientsPage() {
   const use = useDialogParam("use", ["tool", "key"]);
   return (
     <>
-      <PageHostContext value={{ kind: "tab", title: t("app.nav.clients"), tabs: null }}>
+      <PageHostContext value={{ kind: "tab", title: t("keys.page.title"), tabs: null }}>
         <ClientKeys />
       </PageHostContext>
       <UseWithTools isOpen={use.isOpen} onClose={use.close} />
