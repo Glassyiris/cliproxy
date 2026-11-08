@@ -94,7 +94,7 @@ export const siteMainTheme = {
     "--_astryx-motion-tempo": "1",
     "--font-family-body": "Figtree, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
     "--font-family-heading": "Figtree, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
-    "--font-family-code": "ui-monospace, \"SF Mono\", Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+    "--font-family-code": "ui-monospace, \"SF Mono\", Menlo, \"Cascadia Code\", Consolas, \"JetBrains Mono\", \"Fira Code\", \"Noto Sans Mono\", \"DejaVu Sans Mono\", \"Liberation Mono\", monospace",
     "--color-syntax-keyword": "light-dark(#6b187c, #efa8ff)",
     "--color-syntax-string": "light-dark(#0b5615, #a4d6a3)",
     "--color-syntax-comment": "light-dark(#525252, #b9b9b9)",
@@ -538,7 +538,7 @@ export const siteMainTheme = {
       },
       "code": {
         "family": "ui-monospace",
-        "fallbacks": "\"SF Mono\", Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+        "fallbacks": "\"SF Mono\", Menlo, \"Cascadia Code\", Consolas, \"JetBrains Mono\", \"Fira Code\", \"Noto Sans Mono\", \"DejaVu Sans Mono\", \"Liberation Mono\", monospace"
       }
     },
     "motion": {

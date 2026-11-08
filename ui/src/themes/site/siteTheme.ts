@@ -143,9 +143,13 @@ export const siteTypography: ThemeConfig["typography"] = {
   scale: { base: 15, ratio: 1.2 },
   body: { family: "Figtree", fallbacks: neutralSans },
   heading: { family: "Figtree", fallbacks: neutralSans, weights: { 3: "semibold", 4: "semibold" } },
+  // Liberation Mono and Courier New are Courier's metrics and look like it; the common Linux, Windows
+  // and editor monos come first so a desktop without SF Mono or Consolas does not land on them
+  // (owner, 2026-11-08, of the config editor and the account panel: 「也太難看了」).
   code: {
     family: "ui-monospace",
-    fallbacks: '"SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    fallbacks:
+      '"SF Mono", Menlo, "Cascadia Code", Consolas, "JetBrains Mono", "Fira Code", "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", monospace',
   },
 };
 
