@@ -25,13 +25,22 @@ export class SignInError extends Error {
   }
 }
 
+let signOuts = 0;
+
+/** Cancel checks already in progress, so a sign-out in any tab cannot be undone by a late answer. */
+export function cancelSignIns() {
+  signOuts++;
+}
+
 /**
  * Open a session with `secret`: the key is checked by reading the config and held in the API
  * client's memory (app/Session.tsx stores it through lib/keyStore.ts), and every capability probe
  * goes out once. On failure the key is dropped from memory again. Aborting `signal` gives up the
- * check, which counts as a server that could not be reached.
+ * check, which counts as a server that could not be reached. A sign-out during the check cancels
+ * it before probes or the caller can keep the key.
  */
 export async function openSession(secret: string, hooks: SessionHooks, signal?: AbortSignal) {
+  const at = signOuts;
   connect(secret, hooks);
   try {
     await readConfig(signal);
@@ -41,6 +50,10 @@ export async function openSession(secret: string, hooks: SessionHooks, signal?: 
       ? [t("app.connection.unreachable"), "unreachable" as const]
       : signInHelp(e);
     throw new SignInError(message, reason);
+  }
+  if (at !== signOuts) {
+    disconnect();
+    throw new SignInError(t("app.signIn.signedOutElsewhere"), "other");
   }
   probe([...accountProbes, ...connectProbes, ...usageProbes]);
 }

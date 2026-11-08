@@ -29,6 +29,7 @@ export default {
     "app.connection.unreachable": "服务器没有响应。请确认服务器正在运行，并且此地址可以访问它。",
     "app.connection.timeout": "服务器在 30 秒内没有响应。请重试。",
     "app.signIn.rejected": "管理密钥已被拒绝。请重新登录。",
+    "app.signIn.signedOutElsewhere": "已在其他标签页退出登录，请重新登录。",
 
     "app.nav.footer": "连接与偏好设置",
     "app.nav.pages": "页面",

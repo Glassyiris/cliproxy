@@ -30,6 +30,7 @@ export default {
       "The server did not answer. Check that it is running and that this address reaches it.",
     "app.connection.timeout": "The server did not answer within 30 seconds. Try again.",
     "app.signIn.rejected": "The management key was rejected. Sign in again.",
+    "app.signIn.signedOutElsewhere": "Signed out in another tab. Sign in again.",
 
     "app.nav.footer": "Connection and preferences",
     "app.nav.pages": "Pages",

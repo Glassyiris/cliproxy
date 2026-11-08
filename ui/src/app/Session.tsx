@@ -13,7 +13,7 @@ import { t } from "../lib/i18n.ts";
 import { notify } from "../lib/notify.ts";
 import type { ServerBuild, SessionHooks } from "../lib/api/client.ts";
 import { discard, forget, onForgotten, recall, remember } from "../lib/keyStore.ts";
-import { closeSession, openSession, SignInError } from "../lib/session.ts";
+import { cancelSignIns, closeSession, openSession, SignInError } from "../lib/session.ts";
 
 type SessionState = {
   signedIn: boolean;
@@ -102,6 +102,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onForgotten(() => {
+        cancelSignIns();
         if (signedIn.current) endSession();
       }),
     [endSession],
@@ -109,6 +110,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   // Only an explicit sign-out clears both stores and signs out the other tabs.
   const signOut = useCallback(() => {
+    cancelSignIns();
     for (const work of leaving) work();
     forget();
     endSession();

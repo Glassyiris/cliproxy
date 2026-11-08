@@ -5,7 +5,7 @@ import { fakeServer } from "./api/fake-server.test-support.ts";
 const server = fakeServer();
 const { request, ConnectionError } = await import("./api/client.ts");
 const { routes } = await import("./api/routes.ts");
-const { openSession, SignInError } = await import("./session.ts");
+const { cancelSignIns, openSession, SignInError } = await import("./session.ts");
 const { loadLocale, setLocale, t } = await import("./i18n.ts");
 const catalog = (await import("../i18n/app.ts")).default;
 const zhTW = (await import("../i18n/zh-TW/app.ts")).default;
@@ -93,6 +93,35 @@ test("the help follows the chosen language", async () => {
     zhTW["zh-TW"]["app.signIn.apiOff"],
   );
   setLocale("en");
+});
+
+test("a sign-out cancels a pending sign-in before probes, and a later sign-in succeeds", async () => {
+  server.sent.length = 0;
+  let resolveConfig!: (response: Response) => void;
+  server.answer = () => new Promise<Response>((resolve) => (resolveConfig = resolve));
+  const pending = openSession("secret", hooks);
+  cancelSignIns();
+  resolveConfig(Response.json({ "config-version": 8 }));
+  await assert.rejects(pending, (e) => {
+    assert.ok(e instanceof SignInError);
+    assert.equal(e.reason, "other");
+    assert.equal(e.message, t("app.signIn.signedOutElsewhere"));
+    return true;
+  });
+  await assert.rejects(
+    request(routes.readConfig),
+    (e) => e instanceof ConnectionError && e.reason === "signed-out",
+  );
+  assert.deepEqual(
+    server.sent.map((s) => `${s.method} ${s.url.pathname}`),
+    ["GET /v8/management/config"],
+    "the cancelled sign-in sends no probes and leaves no key for another request",
+  );
+
+  server.answer = () => Response.json({ "config-version": 8 });
+  await openSession("secret", hooks);
+  assert.ok(server.sent.some((s) => s.url.pathname !== "/v8/management/config"));
+  await request(routes.readConfig);
 });
 
 test("a good key opens the session and sends each capability probe once", async () => {
