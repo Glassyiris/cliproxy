@@ -50,6 +50,13 @@ jobs:
           template = Path("packaging/homebrew/cliproxy-rs.rb").read_text()
           (tap / "Formula/cliproxy-rs.rb").write_text(render("v1.2.3", checksums, template))
           PY
+      # Homebrew now refuses to load a formula from a tap it has not been told to trust,
+      # the local test tap included; a Homebrew without `brew trust` loads it anyway.
+      - name: Trust the local test tap
+        run: |
+          if brew trust --help > /dev/null 2>&1; then
+            brew trust --tap vayungodara/tap
+          fi
       - name: Style and offline audit (no binary build or install)
         run: |
           # Retain post_install for older Homebrew; only its deprecation cop is excluded.
