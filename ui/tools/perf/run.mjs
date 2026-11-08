@@ -137,6 +137,9 @@ const initScript = () => {
     }).observe({ type: "longtask", buffered: true });
   } catch {}
   document.addEventListener("submit", () => (window.__t0 = performance.now()), true);
+  // The React sign-in submits from a type="button" Connect (Enter goes through onEnter), so no
+  // submit event fires; its click is the same moment.
+  document.addEventListener("click", (e) => { if (e.target.closest?.("form button")) window.__t0 ??= performance.now(); }, true);
 };
 const takeLongTasks = () => {
   const a = window.__lt || [];

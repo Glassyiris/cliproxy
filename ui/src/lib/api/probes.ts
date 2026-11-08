@@ -5,6 +5,7 @@ import { routes } from "./routes.ts";
 export const accountProbes: readonly Probe[] = [
   { route: routes.uploadCredentials },
   { route: routes.refreshCredentials },
+  { route: routes.setCredentialStatus },
   { route: routes.setCredentialFields },
   { route: routes.deleteCredentials },
   { route: routes.resetCooldown },

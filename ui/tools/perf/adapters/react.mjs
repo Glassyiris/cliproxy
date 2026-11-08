@@ -7,13 +7,20 @@
 const pageReady =
   "(() => { const m = document.querySelector('[role=main]'); const h = m && m.querySelector('h1'); return !!h && h.textContent.trim().startsWith(ctx.title) && !m.querySelector('[aria-busy=\"true\"]') && !m.querySelector('.astryx-skeleton'); })()";
 
+/** Account rows of the Accounts table: each has its selection checkbox (group rows do not). */
+const rows = "[role=main] tbody tr:has(input[type=checkbox])";
+const allRows = `[...document.querySelectorAll('${rows} input[type=checkbox]')]`;
+const toolbar = '[role=main] [aria-label="Selected accounts"]';
+const panel = '[role=group][aria-label^="Details of "]';
+
 export default {
   id: "react",
   label: "React dashboard (ui/src, Astryx)",
 
   login: {
     key: "input[type=password]",
-    submit: "form button[type=submit]",
+    // The sign-in Connect button is type="button"; Enter in the field submits through onEnter.
+    submit: 'form button:has-text("Connect")',
     // Shown once the session is open.
     done: "[role=main] h1",
     // Shown when sign-in is refused.
@@ -24,14 +31,64 @@ export default {
   hash: (id) => `#${id}`,
 
   /** The built pages. `title` is the English heading each page renders. */
-  pages: [{ id: "system", title: "System" }],
+  pages: [
+    { id: "overview", title: "Overview" },
+    { id: "accounts", title: "Accounts" },
+    { id: "system", title: "System" },
+  ],
   pageReady,
 
-  // ponytail: Accounts and Overview do not exist yet, so M1 "listed", the row count and the M5
-  // interactions have nothing to select. Fill them in when the Accounts page lands (P2).
-  listed: {},
-  rowCount: "0",
-  interactions: [],
+  /**
+   * M1 "listed". Accounts virtualizes its table, so only the rows in view are in the DOM: the page
+   * is listed when the table counts every account (aria-rowcount, accounts plus provider group
+   * rows) and its first rows are painted. Overview shows no row per account; it is listed when
+   * it is ready, which its skeletons hold back until the account list has arrived.
+   */
+  listed: {
+    accounts: `(${pageReady}) && Number(document.querySelector('[role=main] table')?.getAttribute('aria-rowcount')) >= ctx.n && !!document.querySelector('${rows}')`,
+    overview: pageReady,
+  },
+
+  /** Accounts in the Accounts table model, group rows included. */
+  rowCount:
+    "Number(document.querySelector('[role=main] table')?.getAttribute('aria-rowcount') ?? 0)",
+
+  /**
+   * M5 interactions on Accounts. With the rows virtualized, "every row" is every rendered row;
+   * the selection toolbar and the panel are the page-wide signs that the state changed.
+   */
+  interactions: [
+    {
+      name: "select all",
+      target: "[role=main] thead input[type=checkbox]",
+      done: `(${allRows}).length > 0 && (${allRows}).every((c) => c.checked) && !!document.querySelector('${toolbar}')`,
+    },
+    {
+      name: "deselect all",
+      target: "[role=main] thead input[type=checkbox]",
+      done: `(${allRows}).every((c) => !c.checked) && !document.querySelector('${toolbar}')`,
+    },
+    {
+      name: "select one row",
+      target: `${rows} input[type=checkbox]`,
+      done: `(${allRows}).filter((c) => c.checked).length === 1`,
+    },
+    {
+      name: "unselect one row",
+      target: `${rows} input[type=checkbox]`,
+      done: `(${allRows}).every((c) => !c.checked)`,
+    },
+    {
+      name: "expand row",
+      target: `${rows} td:nth-child(2)`,
+      done: `!!document.querySelector('${panel}')`,
+    },
+    {
+      name: "collapse row",
+      target: `${rows} td:nth-child(2)`,
+      done: `!document.querySelector('${panel}')`,
+    },
+  ],
 
   /**
    * A failed /v8 request the UI provokes on purpose is not a coverage gap: the capability probes
