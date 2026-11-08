@@ -5,6 +5,7 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Typeahead, createStaticSource, type SearchableItem } from "@astryxdesign/core/Typeahead";
 import { FormDialog } from "../../components/FormDialog.tsx";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import {
@@ -38,7 +39,7 @@ export function FamilyField({
     <Selector
       label={t("models.col.family")}
       value={value}
-      options={channels.map((id) => ({ value: id, label: label(id) }))}
+      options={channels.map((id) => ({ value: id, label: label(id), icon: providerIcon(id) }))}
       onChange={(next) => isChannel(next) && onChange(next)}
     />
   );

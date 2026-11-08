@@ -9,8 +9,9 @@ import { Card } from "@astryxdesign/core/Card";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import type { Buckets } from "../../lib/credentials.ts";
+import { providerIcon } from "../ProviderIcon.tsx";
 import { currentLocale } from "../../lib/i18n.ts";
-import { chartGeometry, series } from "../../themes/site/charts.ts";
+import { chartGeometry, MARK_GAP, series } from "../../themes/site/charts.ts";
 import { LegendDot, type Series } from "./ChartFrame.tsx";
 
 export type Names = { requests: string; failed: string };
@@ -18,7 +19,14 @@ export type Names = { requests: string; failed: string };
 export type SourceNames = Names & { failedShare: string };
 
 /** One traffic source as the comparison chart takes it. */
-export type SourceRow = { key: string; label: string; total: number; failed: number };
+export type SourceRow = {
+  key: string;
+  label: string;
+  total: number;
+  failed: number;
+  /** The provider whose mark sits beside the label on the axis. */
+  provider?: string;
+};
 
 type TipItem = { label: string; value: string; series?: Series };
 
@@ -63,6 +71,56 @@ function ChartTip({ heading, items }: { heading?: string; items?: TipItem[] }) {
 
 const { margin, tick, grid, cursor, minTickGap } = chartGeometry;
 const axis = { tick, axisLine: false, tickLine: false } as const;
+
+/** The mark beside a source's axis label and the gap between mark and name, in em of the tick. */
+const MARK_EM = 1.15;
+const MARK_GAP_EM = 0.45;
+
+type TickProps = {
+  x?: number | string;
+  y?: number | string;
+  index?: number;
+  /** recharts' tick class: it measures the elements carrying it for the axis's auto width. */
+  className?: string;
+};
+
+/**
+ * A source's axis label with its provider's mark between the name and the bar, so the marks line
+ * up in one column. Sized in em so it follows the tick's font size.
+ */
+function sourceTick(rows: readonly SourceRow[]) {
+  return function SourceTick({ x = 0, y = 0, index = 0, className }: TickProps) {
+    const provider = rows[index]?.provider;
+    const Mark = provider ? providerIcon(provider) : undefined;
+    const name = shorten(rows[index]?.label ?? "");
+    return (
+      <g
+        transform={`translate(${x},${y})`}
+        className={className}
+        color={tick.fill}
+        fontSize={tick.fontSize}
+      >
+        {Mark && (
+          <Mark
+            x={`-${MARK_EM}em`}
+            y={`-${MARK_EM / 2}em`}
+            width={`${MARK_EM}em`}
+            height={`${MARK_EM}em`}
+            aria-hidden
+          />
+        )}
+        <text
+          x={Mark ? `-${MARK_EM + MARK_GAP_EM}em` : 0}
+          dy="0.35em"
+          textAnchor="end"
+          fill="currentColor"
+        >
+          {name}
+        </text>
+      </g>
+    );
+  };
+}
 
 type BucketRow = { tick: string; full: string; ok: number; failed: number };
 
@@ -117,15 +175,21 @@ export function TrafficPlot({
   );
 }
 
-/** Sources side by side, busiest first, one bar each in the volume colour. */
+/** Sources side by side in the order given, one bar each in the volume colour. */
 export function SourcePlot({ rows, names }: { rows: readonly SourceRow[]; names: SourceNames }) {
-  const sorted = [...rows].sort((a, b) => b.total - a.total);
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={sorted} layout="vertical" margin={margin}>
+      <BarChart data={rows} layout="vertical" margin={margin}>
         <CartesianGrid vertical horizontal={false} stroke={grid} />
         <XAxis type="number" allowDecimals={false} tickFormatter={count} {...axis} />
-        <YAxis type="category" dataKey="label" width="auto" tickFormatter={shorten} {...axis} />
+        <YAxis
+          type="category"
+          dataKey="label"
+          width="auto"
+          {...axis}
+          tickMargin={MARK_GAP}
+          tick={sourceTick(rows)}
+        />
         <Tooltip
           isAnimationActive={false}
           cursor={{ fill: cursor }}

@@ -144,8 +144,7 @@ export const siteTypography: ThemeConfig["typography"] = {
   body: { family: "Figtree", fallbacks: neutralSans },
   heading: { family: "Figtree", fallbacks: neutralSans, weights: { 3: "semibold", 4: "semibold" } },
   // Liberation Mono and Courier New are Courier's metrics and look like it; the common Linux, Windows
-  // and editor monos come first so a desktop without SF Mono or Consolas does not land on them
-  // (owner, 2026-11-08, of the config editor and the account panel: 「也太難看了」).
+  // and editor monos come first so a desktop without SF Mono or Consolas does not land on them.
   code: {
     family: "ui-monospace",
     fallbacks:
@@ -177,12 +176,12 @@ export const siteAdaptations: ThemeConfig["adaptations"] = {
 
 /**
  * Sizes from the nbcards admin (card-v2 `web/src/themes/shared/index.ts` `panelShared`, and the
- * radii of `web/src/themes/site/siteTheme.ts`; MIT, the owner's project): controls one 4 px step up
+ * radii of `web/src/themes/site/siteTheme.ts`; MIT): controls one 4 px step up
  * (sm 32 row actions and icon buttons, md 36 buttons and inputs, lg 40), supporting text 13 on a
  * 20 px line, and radius 8 / 12 / 16 (inner, element, card). The metric value (display-3, 31 px)
  * is semibold, as card-v2's MetricCard draws it.
  */
-const sizeTokens = {
+export const siteSizes = {
   "--size-element-sm": "32px",
   "--size-element-md": "36px",
   "--size-element-lg": "40px",
@@ -198,7 +197,7 @@ const sizeTokens = {
 export const roseTokens = (dark: RosePineVariant) => {
   const r = roles(dark);
   return {
-    ...sizeTokens,
+    ...siteSizes,
     ...chromeTokens(r, dark),
     ...statusTokens(r),
     ...dataTokens(r),
@@ -206,8 +205,9 @@ export const roseTokens = (dark: RosePineVariant) => {
 };
 
 /**
- * The site theme, built twice: Moon (the default, this file) and Main (siteMainTheme.ts, loaded on
- * demand). Both extend Astryx's neutral theme and set tokens and the type scale only: fonts,
+ * The site theme, built three times: Moon (the default, this file), Main (siteMainTheme.ts) and
+ * Neutral (siteNeutralTheme.ts), the last two loaded on demand. All extend Astryx's neutral theme
+ * and set tokens and the type scale only: fonts,
  * components, icons (lucide) and motion come from neutral, so no Astryx component carries a style of this
  * app's own. Each file calls defineTheme itself: the build follows `extends` to carry neutral's
  * icon registry only through a direct defineTheme call.

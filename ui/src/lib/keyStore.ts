@@ -1,5 +1,5 @@
-// The only code that stores the management key (owner, 2026-11-08: session storage by default,
-// local storage when the operator ticks "Remember on this device"). The API client still reads the
+// The management key uses session storage by default, and local storage only when the operator
+// ticks "Remember on this device". The API client still reads the
 // key from its own memory; storage is read once, at load.
 //
 // A store that throws (blocked site data, a private window) counts as holding nothing.

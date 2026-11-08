@@ -14,11 +14,11 @@ const pieces = (value: string, at: keyof typeof BREAKS) =>
 
 /**
  * An identifier (address, header name, file name, email) in the text around it, with no chip and
- * no mono family (owner, 2026-11-08: 「也太難看了」; the code family falls back to a Courier-like
- * face where SF Mono and Consolas are missing), that breaks only after its separators, so an address
+ * no mono family (the code family falls back to a Courier-like face where SF Mono and Consolas
+ * are missing), that breaks only after its separators, so an address
  * shows whole on a phone, "x-api-key" never splits, and a file name breaks after `@`, `.`, `-` or
- * `_`, never inside a word. Text alone breaks a long token anywhere, which split "x-api-key" at
- * its hyphen and an address inside its port at 390 px.
+ * `_`, never inside a word. Text alone can break a long token anywhere, including a header name at
+ * its hyphen or an address inside its port at 390 px.
  */
 export function Identifier({
   children,

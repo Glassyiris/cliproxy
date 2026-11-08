@@ -135,7 +135,7 @@ function useSubmit(input: RefObject<HTMLInputElement | null>) {
 
 export function SignIn() {
   const [secret, setSecret] = useState("");
-  // Off on every load: keeping the key on the device is chosen each time (owner, 2026-11-08).
+  // Off on every load: keeping the key on the device is chosen each time.
   const [persist, setPersist] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const { failure, setFailure, busy, submit } = useSubmit(input);

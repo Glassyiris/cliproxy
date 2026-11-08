@@ -35,7 +35,7 @@ The React dashboard source. Code rules are in [CONVENTIONS.md](CONVENTIONS.md).
 | `src/lib/` | The i18n runtime (`i18n.ts`), `notify()`, the session (sign-in, sign-in help, capability probes) and pure domain logic with tests. |
 | `src/i18n/` | Message catalogs, one per area: English in `<area>.ts`, ships with the app; the translations in `zh-CN/` and `zh-TW/`, each locale loaded on demand as one chunk through its `index.ts`. |
 | `src/themes/layers.css` | The cascade layer order, imported first: reset, Astryx components, our StyleX (`app`), theme. |
-| `src/themes/site/` | The one theme in two palettes: `siteTheme.ts` (Rosé Pine Moon, built to `site.*`) and `siteMainTheme.ts` (Rosé Pine, built to `site-main.*`, loaded on demand) are the sources, both extending `@astryxdesign/theme-neutral` with tokens only (fonts, icons and components are neutral's), rebuilt with `astryx theme build`. |
+| `src/themes/site/` | The one theme in three palettes: `siteNeutralTheme.ts` (Astryx neutral colours, the default, built to `site-neutral.*`), `siteTheme.ts` (Rosé Pine Moon, built to `site.*`) and `siteMainTheme.ts` (Rosé Pine, built to `site-main.*`), the last two loaded on demand, are the sources, all extending `@astryxdesign/theme-neutral` with tokens only (fonts, icons and components are neutral's), rebuilt with `astryx theme build`. |
 
 ## Honest states
 
@@ -82,7 +82,7 @@ Both scripts are for disposable servers with fake credentials only: they edit co
 
 ## Security
 
-The management key lives in `src/lib/api/client.ts` module memory and is cleared on sign-out; reloading signs out. Only the theme mode, the palette and the language are stored (`src/app/preferences.ts`), plus the first-run card's flags (`src/lib/first-run.ts`). Plugin store descriptions are decoded as text, never inserted as HTML. Downloaded credential files and configuration previews contain secrets; treat them accordingly. Do not use the dashboard over plain HTTP across a network.
+The management key lives in `src/lib/api/client.ts` module memory and is cleared on sign-out; reloading signs out. Only the theme mode, the palette and the language are stored (`src/app/preferences.ts`), plus the first-run card's flags (`src/lib/firstRun.ts`). Plugin store descriptions are decoded as text, never inserted as HTML. Downloaded credential files and configuration previews contain secrets; treat them accordingly. Do not use the dashboard over plain HTTP across a network.
 
 ## Fonts
 

@@ -1,14 +1,14 @@
-// Template: settings-sidebar, with its group list as a tab strip under the page header (owner,
-// 2026-11-08: 「按鈕改上面試試看？」). The strip scrolls on a phone, so one layout serves every width.
+// Template: settings-sidebar, with its group list as a tab strip under the page header.
+// The strip scrolls on a phone, so one layout serves every width.
 // Deviations:
 // - In PageFrame with its LayoutHeader and h1 (DESIGN.md "Roles", Header): the template has no
-//   header, and its own nav heading ("Account settings") would stack under the h1, so it is gone.
+//   header, and its own nav heading ("Account settings") would duplicate the h1.
 // - Rows are label and hint beside the control on a two-column Grid, not the template's
 //   expand-to-edit rows: every setting is a control that edits in place, and one Save in the header
-//   reviews all changes as a diff first (brief R5), which per-row Save buttons cannot show.
+//   reviews all changes as a diff first, which per-row Save buttons cannot show.
 // - The group is `?section=` in the hash, so Back and reload keep it; the template keeps it in state.
 // - Icons are lucide, not heroicons; the "Professional hosting tools" list and the info cards are
-//   gone: cliproxy has no counterpart.
+//   omitted because cliproxy has no counterpart.
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileCode, KeyRound, Globe, Route, ScrollText, Send } from "lucide-react";
@@ -18,6 +18,7 @@ import { Icon, type IconProps } from "@astryxdesign/core/Icon";
 import { VStack } from "@astryxdesign/core/Layout";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { serverKeys, useConfig } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
@@ -25,13 +26,13 @@ import { useHashParams, useHashRoute, useUnsavedChanges } from "../../app/useHas
 import { ReadError } from "../../components/ReadError.tsx";
 import { hinted } from "../../i18n/config.ts";
 import { replaceConfigValue, type Config } from "../../lib/api/config.ts";
-import { absent } from "../../lib/config-path.ts";
+import { absent } from "../../lib/configPath.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
 import { Advanced } from "./Advanced.tsx";
 import { Access } from "./Access.tsx";
 import { ReviewDialog } from "./ReviewDialog.tsx";
-import { Control, Row } from "./SettingRow.tsx";
+import { Control, isWide, Row } from "./SettingRow.tsx";
 import {
   changes,
   editDraft,
@@ -44,7 +45,7 @@ import {
   type Group,
 } from "./settings.ts";
 
-const icons: Record<Group, IconProps["icon"]> = {
+const groupIcons: Record<Group, IconProps["icon"]> = {
   routing: Route,
   access: KeyRound,
   network: Globe,
@@ -78,7 +79,7 @@ function GroupTabs({ active, onSelect }: { active: Group; onSelect: (group: Grou
             key={group}
             value={group}
             label={t(`config.group.${group}`)}
-            icon={<Icon icon={icons[group]} size="sm" />}
+            icon={<Icon icon={groupIcons[group]} size="sm" />}
             panelId={panelId}
           />
         ))}
@@ -105,6 +106,7 @@ function GroupRows({
         label={t(`config.label.${settingId(setting)}`)}
         hint={hintOf(settingId(setting))}
         note={setting.restart ? t("config.row.restart") : undefined}
+        isStacked={isWide(setting)}
       >
         <Control
           setting={setting}
@@ -210,6 +212,7 @@ export default function Configuration() {
         <Button
           label={t("config.save.button")}
           variant="primary"
+          icon={<Icon icon={icons.save} />}
           isLoading={action.busy}
           onClick={() =>
             draft.pending.length ? setReviewing(true) : notify("info", t("config.save.none"))

@@ -61,7 +61,7 @@ const TEXT_ATTRIBUTE_SUFFIX =
   /[a-z](Label|Text|Message|Placeholder|Description|Tooltip|Alt|Heading|Title|Summary)$/;
 const isTextAttribute = (name) => TEXT_ATTRIBUTES.has(name) || TEXT_ATTRIBUTE_SUFFIX.test(name);
 const HAS_TEXT = /[\p{L}\p{N}]/u;
-const TEST_FILE = /\.test(?:-support)?\.tsx?$/;
+const TEST_FILE = /\.test(?:Support)?\.tsx?$/;
 // Product names that read the same in every locale and may stay in JSX.
 const UNTRANSLATED = new Set(["cliproxy-rs"]);
 // Characters OpenCC rewrites although Taiwan usage writes them as they are: 台灣, 了解.

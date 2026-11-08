@@ -3,7 +3,6 @@ import PayloadRules from "../../features/payload";
 import { t } from "../../lib/i18n.ts";
 import { TabbedPage } from "./TabbedPage.tsx";
 
-/** Models, with the payload rules as its second tab. */
 export default function ModelsPage() {
   return (
     <TabbedPage

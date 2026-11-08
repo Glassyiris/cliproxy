@@ -1,7 +1,7 @@
 // `npm run lint`: ESLint, then a Prettier check.
 //
 // ESLint findings are counted per rule and file and compared with tools/lint-ratchet.json, which
-// lists the debt that existed when the gate was added ({ "<rule>": { "<path>": count } }), so a
+// lists permitted debt ({ "<rule>": { "<path>": count } }), so a
 // new finding in one file cannot hide behind a fix in another. A rule or file absent from it is
 // allowed zero. The check fails when a count rises and also when it falls, so a fixed finding
 // forces the file to be lowered and the debt cannot come back.

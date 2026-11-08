@@ -5,7 +5,7 @@ import { Link } from "@astryxdesign/core/Link";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import type { Config } from "../../lib/api/config.ts";
-import { readPath } from "../../lib/config-path.ts";
+import { readPath } from "../../lib/configPath.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
 import { Row } from "./SettingRow.tsx";

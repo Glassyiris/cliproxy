@@ -33,7 +33,6 @@ export function ColorModeToggle({ iconSize = "md" }: { iconSize?: "sm" | "md" })
   );
 }
 
-/** The palette choices, as menu rows. Moon, the default, comes first. */
 function PaletteOptions() {
   const { palette, setPalette } = usePreferences();
   return (
@@ -42,13 +41,13 @@ function PaletteOptions() {
       value={palette}
       onChange={(value) => isPalette(value) && setPalette(value)}
     >
+      <DropdownMenuRadioItem value="neutral" label={t("app.colors.neutral")} />
       <DropdownMenuRadioItem value="moon" label={t("app.colors.moon")} />
       <DropdownMenuRadioItem value="main" label={t("app.colors.main")} />
     </DropdownMenuRadioGroup>
   );
 }
 
-/** The language choices, as menu rows. */
 function LanguageOptions() {
   const { locale, setLocale } = usePreferences();
   return (
@@ -72,7 +71,6 @@ const trigger = (label: string, icon: IconProps["icon"]) => ({
   variant: "ghost" as const,
 });
 
-/** The colour-mode, palette and language switches of the sign-in page, at the page's top end. */
 export function PreferenceMenus() {
   return (
     <HStack gap={1} vAlign="center">

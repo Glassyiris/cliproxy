@@ -43,7 +43,7 @@ On Windows, or with Homebrew or Scoop, see [Quick start](#quick-start).
 
 2. Sign in to the dashboard with `CLIPROXY_MANAGEMENT_KEY` from the `keys.env` next to your config. Add a provider API key, or connect your own account. Read [Accounts and provider terms](#accounts-and-provider-terms) before connecting a subscription.
 
-3. Open the dashboard's **Use with tools** page and copy the Codex CLI or Claude Code settings. Your tools use `CLIPROXY_CLIENT_KEY`, not the management key.
+3. On the dashboard's **Client keys** page, open **Use with tools** and copy the Codex CLI or Claude Code settings. Your tools use `CLIPROXY_CLIENT_KEY`, not the management key.
 
 Run the install command again to upgrade, or `brew upgrade cliproxy-rs` with Homebrew. Both keep your config and keys. [INSTALL.md](https://github.com/vayungodara/cliproxy-rs/blob/master/docs/INSTALL.md) covers start at login, release binaries, Docker and building from source. [GETTING-STARTED.md](https://github.com/vayungodara/cliproxy-rs/blob/master/docs/GETTING-STARTED.md) has the longer walkthrough.
 
@@ -53,8 +53,8 @@ cliproxy-rs is a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/vayungodara/cliproxy-rs/raw/master/docs/img/overview-dark.png">
-    <img src="https://github.com/vayungodara/cliproxy-rs/raw/master/docs/img/overview-light.png" alt="The dashboard's Provider keys page with demo data: DeepSeek, GLM, Kimi and OpenRouter API keys and their requests over the last 200 minutes. Red dots mark the 429s from one DeepSeek key; the second key took those requests." width="880">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/overview-dark.png">
+    <img src="docs/img/overview-light.png" alt="The dashboard's Overview with demo data: 4 of 5 accounts can serve, 761 requests in the last 200 minutes at a 2.3% failure share, one account out of quota, and the requests per 10 minutes and per source" width="880">
   </picture>
 </p>
 

@@ -9,6 +9,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { defineSyntaxTheme, SyntaxTheme } from "@astryxdesign/core/theme/syntax";
 import { usePreferences } from "../app/preferences.ts";
+import type { Palette } from "../themes/site/index.ts";
 import { layout } from "../themes/site/layout.ts";
 import { dawn, main, moon, type RosePineVariant } from "../themes/site/rosePine.ts";
 
@@ -40,15 +41,15 @@ const syntaxTheme = (dark: RosePineVariant, name: string) => {
   });
 };
 
-const themes = {
+// Neutral has none: Astryx's syntax tokens default to the theme's palette tokens.
+const themes: Partial<Record<Palette, ReturnType<typeof syntaxTheme>>> = {
   moon: syntaxTheme(moon, "rose-pine-moon"),
   main: syntaxTheme(main, "rose-pine-main"),
 };
 
-/** Code shown or edited inside takes the Rosé Pine syntax colours of the chosen palette. */
 export function CodeColors({ children }: { children: ReactNode }) {
-  const { palette } = usePreferences();
-  return <SyntaxTheme theme={themes[palette]}>{children}</SyntaxTheme>;
+  const theme = themes[usePreferences().palette];
+  return theme ? <SyntaxTheme theme={theme}>{children}</SyntaxTheme> : children;
 }
 
 const loadCodeMirror = () =>
@@ -70,9 +71,8 @@ const { height } = layout.codeEditor;
 const padding = "var(--spacing-2)";
 
 /**
- * Focus is a ring laid over the box's own edge: an offset outline was cut off by the dialog body's
- * scroll edge and read as a selection (owner, 2026-11-08: 「被選中。」), and an inset shadow or
- * outline sat under the gutter's background, so the left edge came out broken.
+ * Focus uses a ring over the box's edge because the dialog's scroll edge clips offset outlines.
+ * An inset shadow or outline falls under the gutter's background and breaks the ring's left edge.
  */
 const focusRing = {
   "&.cm-focused": { outline: "none" },
@@ -176,7 +176,6 @@ function useCodeMirror(
 ) {
   const host = useRef<HTMLElement>(null);
   const editor = useRef<EditorView | null>(null);
-  /** Points the content's aria-describedby at an id, or drops it. */
   const describe = useRef<((id: string | null) => void) | null>(null);
   const changed = useRef(onChange);
   useEffect(() => {

@@ -5,8 +5,8 @@ import { usePlots } from "./loadPlots.ts";
 import type { SourceNames, SourceRow } from "./plots.tsx";
 
 /**
- * Traffic sources compared by requests, busiest first, one bar each in a single series colour; the
- * tooltip adds failures and their share. A Skeleton of the plot's size holds the space while the
+ * Traffic sources compared by requests, one bar each in a single series colour, in the order
+ * given; the tooltip adds failures and their share. A Skeleton of the plot's size holds the space while the
  * data or recharts is pending.
  */
 export function SourceChart({
@@ -28,7 +28,12 @@ export function SourceChart({
   const placeholder = <Skeleton />;
   const plot = loading || !plots ? placeholder : <plots.SourcePlot rows={rows} names={names} />;
   return (
-    <ChartFrame label={label} summary={summary} plot={chartPlot.sources(rows.length)}>
+    <ChartFrame
+      label={label}
+      summary={summary}
+      legend={[{ series: "volume", label: names.requests }]}
+      plot={chartPlot.plot}
+    >
       {plot}
     </ChartFrame>
   );

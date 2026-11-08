@@ -9,13 +9,13 @@
 // - Phones keep the table with two columns (pattern with its action and field count as a second
 //   line, and Remove), as the Models tab does.
 import { useRef, useState, type ReactNode, type RefObject } from "react";
-import { Plus } from "lucide-react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { icons } from "../../components/icons.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
@@ -104,6 +104,7 @@ function Body({ page, addButton }: { page: Page; addButton: ReactNode }) {
       {groups && <NotListBanners groups={groups} />}
       {groups && !hasRules && (
         <EmptyState
+          icon={<Icon icon={icons.payload} size="lg" />}
           title={t("payload.empty.title")}
           headingLevel={roles.heading.section}
           actions={addButton}
@@ -111,6 +112,7 @@ function Body({ page, addButton }: { page: Page; addButton: ReactNode }) {
       )}
       {shown && hasRules && !shown.length && (
         <EmptyState
+          icon={<Icon icon={icons.search} size="lg" />}
           title={t("payload.empty.noMatch")}
           headingLevel={roles.heading.section}
           actions={
@@ -161,7 +163,7 @@ export default function PayloadRules() {
       ref={addRef}
       label={t("payload.page.add")}
       variant={roles.primaryAction.variant}
-      icon={<Icon icon={Plus} />}
+      icon={<Icon icon={icons.add} />}
       isDisabled={page.config.isPending}
       onClick={() => page.setAdding(true)}
     />

@@ -1,7 +1,6 @@
 // The open rule in the detail panel, as table-grouped's TaskDetailPanel: facts in a MetadataList,
-// then the rule's JSON read-only in a CodeBlock. Editing stays where it is today, in Settings'
-// config editor; the CodeMirror editor R5 adds for Settings is the one to replace this CodeBlock
-// once it can be shared.
+// then the rule's JSON read-only in a CodeBlock. Editing stays in Settings' config editor so
+// every change goes through its review and reread-and-compare.
 import { X } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
@@ -10,6 +9,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { fieldsOf } from "./RuleTable.tsx";
@@ -42,7 +42,12 @@ export function RulePanel({
         />
       </HStack>
       <HStack gap={2} wrap="wrap">
-        <Button label={t("payload.row.remove")} variant="secondary" onClick={onRemove} />
+        <Button
+          label={t("payload.row.remove")}
+          variant="secondary"
+          icon={<Icon icon={icons.delete} />}
+          onClick={onRemove}
+        />
       </HStack>
       <MetadataList label={{ position: "start" }}>
         <MetadataListItem label={t("payload.col.kind")}>

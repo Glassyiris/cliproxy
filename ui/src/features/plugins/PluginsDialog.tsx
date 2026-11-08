@@ -21,6 +21,7 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { useConfig, usePlugins } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams, useHashRoute } from "../../app/useHashRoute.ts";
@@ -143,6 +144,7 @@ function InstalledPanel({ onBrowse }: { onBrowse: () => void }) {
       <InstalledFacts list={list} config={config} writes={writes} />
       {plugins && !plugins.length ? (
         <EmptyState
+          icon={<Icon icon={icons.plugins} size="lg" />}
           title={t("plugins.empty.title")}
           headingLevel={3}
           actions={<Button label={t("plugins.page.browse")} variant="primary" onClick={onBrowse} />}

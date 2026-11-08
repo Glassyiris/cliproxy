@@ -1,5 +1,5 @@
 // One value for each role that repeats across pages. Sizes and spacing come from the nbcards admin
-// (card-v2, MIT, the owner's project; measured in p3/r/ref/nbcards/REPORT.md): its `web/src/ui/
+// (card-v2, MIT; measured in p3/r/ref/nbcards/REPORT.md): its `web/src/ui/
 // layout.ts` spacing constants, `PageFrame.tsx` page frame and `UI-RULES.md` heading levels, cards
 // and buttons. The Astryx templates the pages are built from settle the rest. DESIGN.md "Roles"
 // lists every role with its source. Spacing inside one template's own composition (a toolbar's
@@ -9,8 +9,7 @@ import { layout } from "./layout.ts";
 export const roles = {
   // card-v2 PageFrame.tsx: padding 6 on Layout (24 px; 4 on a phone), set once so the header and
   // the content share one line and the h1 sits at the same place on every page; the body ends with
-  // paddingBlockEnd 10 (40 px). Unlike card-v2 the content line is not capped at 1440: on a wide
-  // screen the cap left empty bands on both sides (owner, 2026-11-08: 「留空太多了？」).
+  // paddingBlockEnd 10 (40 px). The content stays uncapped to use the room on wide screens.
   page: { padding: 6, phonePadding: 4, bottomPadding: 10 },
   // card-v2 layout.ts: SECTION_GAP between a page's sections, CARD_GAP between cards and between
   // blocks inside one card, CARD_PADDING the one Card padding.
@@ -50,7 +49,5 @@ export const roles = {
   // (table-filter:4313).
   detailPanel: layout.detailPanel,
   detailSheet: { height: "tall", padding: 0 },
-  // SideNav's own gap between its top rows (2 px), repeated inside a category.
-  nav: { rowGap: 0.5 },
   compactSurface: "(max-width: 768px), (max-width: 1024px) and (pointer: coarse) and (hover: none)",
 } as const;

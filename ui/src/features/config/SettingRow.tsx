@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Grid } from "@astryxdesign/core/Grid";
-import { VStack } from "@astryxdesign/core/Layout";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
@@ -14,43 +13,59 @@ import { isValid, settingId, type Setting } from "./settings.ts";
 
 /**
  * One row of a settings group, as the settings-sidebar template draws its rows: the name and what
- * it does at the start, the control beside it; where both columns do not fit they stack.
+ * it does at the start, the control at the end of the row (it wraps under the name where both do
+ * not fit). `isStacked` puts a wide control (a choice list, a free-text field) under the name
+ * instead, as the template's open row does, so it starts where the name does.
  */
 export function Row({
   label,
   hint,
   note,
+  isStacked = false,
   children,
 }: {
   label: string;
   /** The label is a config key, set in the mono family (DESIGN.md "Text types"). */
   hint?: string;
   note?: string;
+  isStacked?: boolean;
   children: ReactNode;
 }) {
-  return (
-    <VStack paddingBlock={4}>
-      <Grid columns={{ minWidth: layout.settingsColumnMin }} gap={4} align="start">
-        <VStack gap={0}>
-          <Text type="body" weight="semibold">
-            {label}
-          </Text>
-          {hint && (
-            <Text type="supporting" color="secondary">
-              {hint}
-            </Text>
-          )}
-          {note && (
-            <Text type="supporting" color="secondary">
-              {note}
-            </Text>
-          )}
-        </VStack>
-        {children}
-      </Grid>
+  const name = (
+    <VStack gap={0}>
+      <Text type="body" weight="semibold">
+        {label}
+      </Text>
+      {hint && (
+        <Text type="supporting" color="secondary">
+          {hint}
+        </Text>
+      )}
+      {note && (
+        <Text type="supporting" color="secondary">
+          {note}
+        </Text>
+      )}
     </VStack>
   );
+  if (isStacked)
+    return (
+      <VStack gap={3} paddingBlock={4}>
+        {name}
+        {children}
+      </VStack>
+    );
+  return (
+    <HStack hAlign="between" vAlign="start" gap={4} paddingBlock={4} wrap="wrap">
+      <StackItem size="fill">{name}</StackItem>
+      {children}
+    </HStack>
+  );
 }
+
+/** Whether a setting's control is wide enough to sit under its name rather than beside it. */
+export const isWide = (s: Setting) =>
+  s.kind === "choice" || s.kind === "list" || (s.kind === "text" && !s.pattern);
 
 const label = (s: Setting) => t(`config.label.${settingId(s)}`);
 
@@ -123,12 +138,15 @@ export function Control({
         ))}
       </RadioList>
     );
-  if (isLoading) {
-    const short = setting.kind === "number" || (setting.kind === "text" && setting.pattern);
+  // A control beside its name holds a short placeholder, so it stays on the name's line and the
+  // row keeps its height when the control arrives; one under its name takes the full width.
+  if (isLoading)
     return (
-      <Skeleton width={short ? layout.shortControlWidth : "100%"} height="var(--size-element-md)" />
+      <Skeleton
+        width={isWide(setting) ? "100%" : layout.shortControlWidth}
+        height="var(--size-element-md)"
+      />
     );
-  }
   if (setting.kind === "switch")
     return (
       <Switch

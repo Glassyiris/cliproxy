@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { fakeServer } from "./api/fake-server.test-support.ts";
+import { fakeServer } from "./api/fakeServer.testSupport.ts";
 
 const server = fakeServer();
 const { request, ConnectionError } = await import("./api/client.ts");

@@ -1,18 +1,9 @@
 // The table-filter template's row activation (`table-filter:2728-2767`): each row is one tab stop,
 // a click or Enter or Space opens its detail, and the open row is one step past hover. When the
 // detail closes and takes focus with it, focus goes back to the row, as rowKeys does for Accounts.
+import { rowStyles } from "../../components/rowStyles.ts";
 import { useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent } from "react";
-import * as stylex from "@stylexjs/stylex";
 import type { TablePlugin } from "@astryxdesign/core/Table";
-import { colorVars } from "@astryxdesign/core/theme/tokens.stylex";
-
-const styles = stylex.create({
-  clickableRow: { cursor: "pointer" },
-  activeRow: {
-    backgroundColor: colorVars["--color-overlay-pressed"],
-    "--table-row-overlay": colorVars["--color-overlay-pressed"],
-  },
-});
 
 export function useRowActivation<T extends { key: string }>(
   openKey: string | undefined,
@@ -53,7 +44,7 @@ export function useRowActivation<T extends { key: string }>(
             },
           },
           xstyle: props.xstyle.concat(
-            isOpen ? [styles.clickableRow, styles.activeRow] : styles.clickableRow,
+            isOpen ? [rowStyles.clickableRow, rowStyles.activeRow] : rowStyles.clickableRow,
           ),
         };
       },

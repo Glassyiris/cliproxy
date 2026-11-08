@@ -5,6 +5,7 @@ import { HStack, StackItem } from "@astryxdesign/core/Layout";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { channels, isChannel, type Channel } from "./modelConfig.ts";
@@ -50,7 +51,7 @@ export function Toolbar({
         value={family ?? ALL}
         options={[
           { value: ALL, label: t("models.filter.allFamilies") },
-          ...channels.map((id) => ({ value: id, label: label(id) })),
+          ...channels.map((id) => ({ value: id, label: label(id), icon: providerIcon(id) })),
         ]}
         onChange={(value) => onFamily(isChannel(value) ? value : undefined)}
       />

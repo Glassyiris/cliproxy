@@ -1,8 +1,10 @@
 // The open key group in the detail panel (a bottom sheet on phones), in the account panel's
 // anatomy: the title with its family, the facts, one row of actions at the end, then the sections
 // (each key with its weight, traffic, reveal and copy; the models, when the group restricts them).
-import { useState, type ReactNode } from "react";
-import { Eye, Trash2, X } from "lucide-react";
+import { icons } from "../../components/icons.ts";
+import { PanelBlock } from "../../components/PanelBlock.tsx";
+import { useState } from "react";
+import { Eye, X } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Divider } from "@astryxdesign/core/Divider";
 import { useClipboard } from "@astryxdesign/core/hooks";
@@ -15,9 +17,10 @@ import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Identifier } from "../../components/Identifier.tsx";
 import { familyName } from "../../components/keyFamilies.ts";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { RequestSparkline } from "../../components/RequestSparkline.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
-import { mask } from "../../lib/client-keys.ts";
+import { mask } from "../../lib/clientKeys.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
 import { roles } from "../../themes/site/roles.ts";
@@ -25,16 +28,6 @@ import { isFailing, modelText, type Entry, type Key, type KeyTraffic } from "./g
 import { MiddleText } from "./MiddleText.tsx";
 import type { GroupAction } from "./useGroupWrites.ts";
 import { statusOf } from "./words.ts";
-
-/** A block of the panel: an h3 over its content. */
-function Block({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <VStack gap={2}>
-      <Heading level={3}>{title}</Heading>
-      {children}
-    </VStack>
-  );
-}
 
 // The characters a revealed key keeps at its end when the line is too short for all of it.
 const KEY_TAIL = 4;
@@ -140,7 +133,7 @@ function Keys({ entry }: { entry: Entry }) {
       return next;
     });
   return (
-    <Block title={t("providers.panel.keys")}>
+    <PanelBlock title={t("providers.panel.keys")}>
       {entry.keys.length ? (
         <List density="compact" hasDividers>
           {entry.keys.map((k, i) => (
@@ -152,7 +145,7 @@ function Keys({ entry }: { entry: Entry }) {
           {t("providers.table.noKeys")}
         </Text>
       )}
-    </Block>
+    </PanelBlock>
   );
 }
 
@@ -161,13 +154,13 @@ function Models({ entry }: { entry: Entry }) {
   const models = entry.group.models?.filter((m) => m.name) ?? [];
   if (!models.length) return null;
   return (
-    <Block title={t("providers.panel.models")}>
+    <PanelBlock title={t("providers.panel.models")}>
       <List density="compact" hasDividers>
         {models.map((m, i) => (
           <ListItem key={i} label={<Identifier breakAt="name">{modelText(m)}</Identifier>} />
         ))}
       </List>
-    </Block>
+    </PanelBlock>
   );
 }
 
@@ -203,7 +196,7 @@ function Actions({
         items={[
           {
             label: t("providers.group.deleteOne"),
-            icon: Trash2,
+            icon: icons.delete,
             variant: "destructive",
             isDisabled: busy,
             onClick: () => onAction({ kind: "delete", family, index }),
@@ -237,9 +230,11 @@ export function GroupPanel({
             <Heading level={roles.heading.section} maxLines={1}>
               {entry.name}
             </Heading>
-            <Text type={roles.textType.supporting} color="secondary">
-              {familyName(entry.family)}
-            </Text>
+            <ProviderLabel provider={entry.family} size="xsm" color="secondary">
+              <Text type={roles.textType.supporting} color="secondary">
+                {familyName(entry.family)}
+              </Text>
+            </ProviderLabel>
           </VStack>
         </StackItem>
         <IconButton

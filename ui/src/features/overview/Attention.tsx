@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
-import { CircleQuestionMark, CloudOff, Gauge, KeyRound, LogIn, PowerOff } from "lucide-react";
+import { CircleQuestionMark, CloudOff, Gauge, LogIn, PowerOff } from "lucide-react";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Icon, type IconProps } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { MetricCard } from "../../components/MetricCard.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { SectionHeading } from "../../components/SectionHeading.tsx";
@@ -100,7 +101,7 @@ function AlertCard({ alert, now }: { alert: Alert; now: number }) {
     return (
       <MetricCard
         label={t("overview.attention.noKeys")}
-        icon={KeyRound}
+        icon={icons.clientKeys}
         iconColor="warning"
         value={count(0)}
         badge={<Badge variant="warning" label={t("overview.attention.unprotected")} />}
@@ -160,7 +161,7 @@ export function Attention({
 }) {
   return (
     <VStack gap={roles.gap.card}>
-      <SectionHeading title={t("overview.attention.heading")} />
+      <SectionHeading icon={icons.attention} title={t("overview.attention.heading")} />
       {reads.map((read) => (
         <ReadError key={read.what} error={read.error} what={read.what} retry={read.retry} />
       ))}

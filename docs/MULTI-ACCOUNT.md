@@ -8,7 +8,7 @@ Sign in to each account once, from the dashboard (Connect account) or the comman
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/credentials-dark.png">
-  <img src="img/credentials-light.png" alt="The Credentials page: three Claude and two Codex accounts with their state and recent requests" width="880">
+  <img src="img/credentials-light.png" alt="The Accounts page: two Claude and three Codex accounts with their state, session and weekly quota, and recent requests" width="880">
 </picture>
 
 The provider's sign-in page uses whatever account your browser is logged into. To add a second Claude account, log out of claude.ai first, or open the sign-in link in a private window or another browser profile; `--no-browser` prints the link instead of opening it. The dashboard's Credentials page lists every account with its state, and lets you disable one without deleting it.
@@ -48,7 +48,7 @@ CLIProxyAPI has no `soonest-reset`: it reads that value, and an unset strategy, 
 
 You can change the strategy on the dashboard's Configuration page, or in `config.yaml`.
 
-Each account can also have a `priority` (default 0). The proxy only uses the accounts with the highest priority among those that are ready, and falls back to lower ones when all of those are cooling down or disabled. Set Priority and Weight per account on the dashboard's Credentials page, or as top-level `"priority"` and `"weight"` fields in the account's file.
+Each account can also have a `priority` (default 0). The proxy only uses the accounts with the highest priority among those that are ready, and falls back to lower ones when all of those are cooling down or disabled. Set Priority and Weight per account in its panel on the dashboard's Accounts page, or as top-level `"priority"` and `"weight"` fields in the account's file.
 
 ## Session affinity
 
@@ -73,13 +73,13 @@ When a provider answers 429 (too many requests, or a used-up limit), the proxy r
 - A rejected token (401 or 403) rests the account for 30 minutes, and the dashboard marks it "Sign in again" when the sign-in has expired or was revoked.
 - A successful request on the account clears its cooldown for that model.
 
-`routing.retry.request-retry` (default 0) adds rounds over the accounts when every attempt in a round failed, and `routing.retry.max-retry-interval` (seconds, default 0) lets the proxy wait for an account to come out of cooldown instead of failing at once. The Reset cooldown button on the Credentials and Quotas pages clears the proxy's own record only; it does not give back any provider limit.
+`routing.retry.request-retry` (default 0) adds rounds over the accounts when every attempt in a round failed, and `routing.retry.max-retry-interval` (seconds, default 0) lets the proxy wait for an account to come out of cooldown instead of failing at once. The Reset cooldown action in an account's panel on the Accounts page clears the proxy's own record only; it does not give back any provider limit.
 
 The optional [fail over only on 429 preset](CONFIGURATION.md#optional-preset-fail-over-only-on-429) keeps 429 failover for OAuth accounts. It stops ordinary failover after a failed attempt for the listed non-429 statuses. Credential-preparation failures and an enabled `requests.streaming.bootstrap-retries` can still cause another attempt.
 
 ## Read the quota view
 
-The Quotas page asks each account's provider for its usage when you press Check quota (or Check limits on the Overview). For a Claude account it shows the rows Claude Code's own `/usage` shows:
+The Accounts page asks each account's provider for its usage when you press Check quotas, or Check quota in an account's panel. For a Claude account it shows the rows Claude Code's own `/usage` shows:
 
 - Current session: the 5-hour window.
 - Current week (all models): the weekly limit.
@@ -88,7 +88,7 @@ The Quotas page asks each account's provider for its usage when you press Check 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/quotas-dark.png">
-  <img src="img/quotas-light.png" alt="The Quotas page: Claude session and weekly limits including a Fable-only weekly cap, and Codex 5-hour and weekly limits" width="880">
+  <img src="img/quotas-light.png" alt="A Claude account's panel on the Accounts page: its current session and weekly limits, then its settings" width="880">
 </picture>
 
 Each row shows how much is used and when it resets. Codex accounts show their 5-hour and weekly windows. Between checks, the proxy also reads the limit headers that Codex sends with every reply, so the Overview can show Codex limits without a check.
@@ -156,7 +156,7 @@ routing:
     max-retry-interval: 30
 ```
 
-Sign in five times (three Claude accounts, two Codex accounts), then set these fields on the Credentials page, or add them to the files in `~/.cliproxy-rs/auth`:
+Sign in five times (three Claude accounts, two Codex accounts), then set these fields in each account's panel on the Accounts page, or add them to the files in `~/.cliproxy-rs/auth`:
 
 | Account file | Fields | Why |
 |---|---|---|

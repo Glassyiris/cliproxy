@@ -6,12 +6,13 @@
 //   scale props (gap, padding) take scale steps and stay legal; "100%" and full-viewport lengths
 //   fill their container and are not sizes.
 // - CSS files and CSS imports: only src/themes/ and the entry src/main.tsx (imports only). Under
-//   src/themes/, CSS other than the generated site.css and site-main.css selects only html, body
-//   and :root (with attribute selectors) and has no transition, animation or @keyframes.
+//   src/themes/, CSS other than the generated site.css, site-main.css and site-neutral.css
+//   selects only html, body and :root (with attribute selectors) and has no transition, animation or @keyframes.
 // - transition/animation/keyframes and animation libraries: only under src/components/motion/.
 // - Raw <div> and <span>: Astryx has Stack, HStack, Grid, Center, Layout and Text (0.7.11).
 // - Raw <svg> and <path>: icons are Astryx's semantic names or lucide components passed to Icon,
-//   the brand mark included.
+//   the brand mark included. The one exception is src/components/ProviderIcon.tsx, which draws the
+//   vendored provider marks (REQUIREMENTS.md, Exceptions).
 // - registerIcons: no app icon registry; the theme's registry is the only one (Astryx default).
 // - A `components` block in a theme source under src/themes/: the theme sets tokens only, and
 //   component styles come from Astryx and the neutral theme it extends.
@@ -67,10 +68,14 @@ const SIZE_PROPERTY = new Set([
 const LENGTH = /(?:^|[^\w.])-?(?:\d+\.?\d*|\.\d+)(?:[a-z]+|%)?(?![\w.])/i;
 const FILL_ANYWHERE = /\b100(?:%|[dls]?v[hw]|v(?:min|max|[bi]))(?![\w.])|\b0(?![\w.%])/g;
 // What `astryx theme build` writes; every other CSS file under src/themes/ is hand-written.
-const GENERATED_CSS = new Set(["src/themes/site/site.css", "src/themes/site/site-main.css"]);
+const GENERATED_CSS = new Set([
+  "src/themes/site/site.css",
+  "src/themes/site/site-main.css",
+  "src/themes/site/site-neutral.css",
+]);
 const PAGE_SELECTOR = /^(?:html|body|:root)(?:\[[^\]]+\])*$/;
 const BANNED_NAME = /^(?:utils?|common|helpers?|shared|misc)$/i;
-const TEST_FILE = /\.test(?:-support)?\.tsx?$/;
+const TEST_FILE = /\.test(?:Support)?\.tsx?$/;
 const HEADING_LEVELS = new Set(Object.values(roles.heading));
 const TYPE_PROPS = {
   Text: {
@@ -81,13 +86,13 @@ const TYPE_PROPS = {
   Heading: { size: new Set(), weight: new Set(), type: new Set() },
 };
 const FRAME = "src/app/PageFrame.tsx";
+const BRAND_MARKS = "src/components/ProviderIcon.tsx";
 const CARD_PADDINGS = new Set([roles.card.padding, 0]);
 const CARD_PADDING_EXCEPTIONS = {
   // login-card's own card (padding 8); card-v2 UI-RULES.md exempts the auth card the same way.
   "src/app/SignIn.tsx": "sign-in card",
   // A chart tooltip is a popover drawn as a small card, as card-v2's TrendTip draws it.
   "src/components/charts/plots.tsx": "chart tooltip",
-  // Pages R1 to R5 rewrite next; each leaves this list when it is rewritten.
 };
 const DEFAULT_EXPORT = /export\s*\{\s*default\s*\}\s*from\s*["'](\.\/[^"']+)["']/;
 
@@ -354,7 +359,7 @@ function checkFile(file, errors, routes) {
   const themeSource = inThemes && !file.endsWith(".d.ts") && /\.tsx?$/.test(file);
   const visit = (node) => {
     checkImport(node, fail, { relativePath, inMotion });
-    checkGlyph(node, fail);
+    if (relativePath !== BRAND_MARKS) checkGlyph(node, fail);
     checkRegistry(node, fail);
     checkTypeRoles(node, fail);
     checkCardPadding(node, fail, relativePath);

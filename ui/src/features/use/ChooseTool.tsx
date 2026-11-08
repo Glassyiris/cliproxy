@@ -1,6 +1,6 @@
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { t } from "../../lib/i18n.ts";
-import { tools } from "../../lib/tool-setup.ts";
+import { tools } from "../../lib/toolSetup.ts";
 import type { Tool } from "./tool.ts";
 
 /** A line only where the name leaves something to know before choosing. */

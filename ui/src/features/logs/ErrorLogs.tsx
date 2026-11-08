@@ -1,6 +1,5 @@
 // The error logs: one row per file the server kept for a failed request, newest as listed.
 import { useState } from "react";
-import { Download } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -9,6 +8,7 @@ import { List, ListItem } from "@astryxdesign/core/List";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
+import { icons } from "../../components/icons.ts";
 import { useAction } from "../../app/useAction.ts";
 import { Identifier } from "../../components/Identifier.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
@@ -59,7 +59,7 @@ function FileRow({
           label={t("logs.errors.download")}
           variant={roles.rowAction.variant}
           size={roles.rowAction.size}
-          icon={<Icon icon={Download} size="sm" />}
+          icon={<Icon icon={icons.download} size="sm" />}
           isLoading={isPending}
           onClick={onDownload}
         />
@@ -96,7 +96,13 @@ export function ErrorLogs({
       </VStack>
     );
   if (!files.data.length)
-    return <EmptyState title={t("logs.errors.empty")} headingLevel={roles.heading.section} />;
+    return (
+      <EmptyState
+        icon={<Icon icon={icons.logs} size="lg" />}
+        title={t("logs.errors.empty")}
+        headingLevel={roles.heading.section}
+      />
+    );
   if (!shown.length)
     return (
       <EmptyState

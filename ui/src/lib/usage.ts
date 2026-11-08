@@ -15,20 +15,28 @@ export type UsageEvent = {
   input: number;
   output: number;
 };
-export function cleanEvent(raw: Data): UsageEvent {
+type UsageRecord = Data & {
+  alias?: string;
+  model?: string;
+  provider?: string;
+  auth_index?: string;
+  request_id?: string;
+};
+
+export function cleanEvent(raw: UsageRecord): UsageEvent {
   const t = Date.parse(String(raw.timestamp));
   return {
     at: Number.isNaN(t) ? Date.now() : t,
     latency: Number(raw.latency_ms) || 0,
     ttft: Number(raw.ttft_ms) || 0,
     failed: raw.failed === true,
-    status: Number(raw.fail?.status_code) || (raw.failed === true ? 0 : 200),
+    status: Number((raw.fail as Data | undefined)?.status_code) || (raw.failed === true ? 0 : 200),
     model: String(raw.alias || raw.model || "unknown"),
     provider: String(raw.provider || "unknown"),
     auth: String(raw.auth_index || ""),
     id: String(raw.request_id || ""),
-    input: Number(raw.tokens?.input_tokens) || 0,
-    output: Number(raw.tokens?.output_tokens) || 0,
+    input: Number((raw.tokens as Data | undefined)?.input_tokens) || 0,
+    output: Number((raw.tokens as Data | undefined)?.output_tokens) || 0,
   };
 }
 const median = (v: number[]) => {

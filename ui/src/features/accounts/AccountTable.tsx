@@ -7,9 +7,10 @@
 // checkbox, which the template drops, so batch actions still reach every account on a phone. Astryx Table has no virtualizer, so the body is windowed with @tanstack/react-virtual
 // as LogRows.tsx does it: the table gets the rows in view between two spacer rows as tall as the
 // rows left out.
+import { scrollParent, useScrollMargin } from "../../components/useScrollMargin.ts";
+import { rowStyles } from "../../components/rowStyles.ts";
 import {
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type Dispatch,
@@ -28,12 +29,12 @@ import {
   type TablePlugin,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import { colorVars } from "@astryxdesign/core/theme/tokens.stylex";
 import { QuotaWindow } from "../../components/QuotaWindow.tsx";
 import { RequestSparkline } from "../../components/RequestSparkline.tsx";
 import { listColumns, type ListShape } from "../../components/listShape.ts";
 import { ListSkeleton } from "../../components/loadingRows.tsx";
 import { isRowItself, onRowKey, rowAt, useReturnFocus } from "../../components/rowKeys.ts";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
 import { TwoLines } from "../../components/TwoLines.tsx";
 import { Words } from "../../components/Words.tsx";
@@ -44,11 +45,6 @@ import type { Row } from "./rows.ts";
 import { reasonOf, recoveryOf, statusOf } from "./words.ts";
 
 const styles = stylex.create({
-  clickableRow: { cursor: "pointer" },
-  activeRow: {
-    backgroundColor: colorVars["--color-overlay-pressed"],
-    "--table-row-overlay": colorVars["--color-overlay-pressed"],
-  },
   spacer: (height: number) => ({ height, paddingBlock: 0 }),
 });
 
@@ -63,33 +59,6 @@ const spacerOf = (item: Row) => {
   const height = (item as unknown as Partial<Spacer>).spacer;
   return typeof height === "number" ? height : undefined;
 };
-
-/** Where the table body starts in the scrolled content, measured again on every resize. */
-function useScrollMargin(scroller: HTMLElement | null, body: HTMLElement | null) {
-  const [margin, setMargin] = useState(0);
-  useEffect(() => {
-    if (!scroller || !body) return;
-    const measure = () => {
-      const top =
-        body.getBoundingClientRect().top -
-        scroller.getBoundingClientRect().top +
-        scroller.scrollTop;
-      setMargin((m) => (Math.abs(top - m) > 0.5 ? top : m));
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    for (const child of scroller.children) observer.observe(child);
-    return () => observer.disconnect();
-  }, [scroller, body]);
-  return margin;
-}
-
-/** The nearest ancestor that scrolls vertically: the page's content region. */
-function scrollParent(el: HTMLElement | null) {
-  for (let p = el?.parentElement; p; p = p.parentElement)
-    if (/auto|scroll/.test(getComputedStyle(p).overflowY)) return p;
-  return null;
-}
 
 export type TableProps = {
   shown: Row[];
@@ -143,9 +112,7 @@ function Summary({ row, now }: { row: Row; now: number }) {
   return (
     <VStack gap={0.5}>
       <Name row={row} />
-      <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
-        {accountLine(row)}
-      </Text>
+      <AccountLine row={row} />
       <HStack gap={2} vAlign="center" wrap="wrap">
         <StatusLamp status={lampStatus[row.view.lamp]} label={statusOf(row.view)} />
         {reason && (
@@ -180,10 +147,21 @@ const widths = {
 type Cell = (render: (r: Row) => ReactNode) => (r: Row) => ReactNode;
 
 /** The account's second line: provider and plan, then its note, else its file. */
-const accountLine = (r: Row) =>
-  [[label(r.provider), r.account.id_token?.plan_type].filter(Boolean).join(" "), r.account.note]
+function AccountLine({ row: r }: { row: Row }) {
+  const line = [
+    [label(r.provider), r.account.id_token?.plan_type].filter(Boolean).join(" "),
+    r.account.note,
+  ]
     .filter(Boolean)
     .join(", ");
+  return (
+    <ProviderLabel provider={r.provider} size="xsm" color="secondary">
+      <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
+        {line}
+      </Text>
+    </ProviderLabel>
+  );
+}
 
 /** The name column, with the selection checkbox in its header and in each row. */
 function accountColumn(
@@ -236,7 +214,7 @@ function columnsOf(
     ];
   const columns: TableColumn<Row>[] = [
     accountColumn(selection, allSelected, cell, (r) => (
-      <TwoLines first={<Name row={r} />} second={accountLine(r)} />
+      <TwoLines first={<Name row={r} />} second={<AccountLine row={r} />} />
     )),
     {
       key: "status",
@@ -329,7 +307,7 @@ function useRowPlugin(
               ),
           },
           xstyle: props.xstyle.concat(
-            isOpen ? [styles.clickableRow, styles.activeRow] : styles.clickableRow,
+            isOpen ? [rowStyles.clickableRow, rowStyles.activeRow] : rowStyles.clickableRow,
           ),
         };
       },

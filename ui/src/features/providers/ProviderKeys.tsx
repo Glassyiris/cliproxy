@@ -1,6 +1,5 @@
 // Provider keys, on the Accounts frame (table-inbox): which upstream key groups serve, and which
-// key has a problem. Both pages list upstream credentials, so they read as one design (owner,
-// 2026-11-08: 「帳號 / 供應商金鑰其實是差不多的東西為什麼不統一一下設計」). The header holds the h1, the
+// key has a problem. Both pages list upstream credentials, so they share one design. The header holds the h1, the
 // jump to Settings and the Add menu, the one primary action; the filter row holds the views, the
 // family and status Selectors and the search, as on Accounts; a group opens in the detail panel
 // (a bottom sheet on phones). Deviations from the template, each with its reason:
@@ -12,12 +11,12 @@
 //   a batch over several families would be several unrelated writes.
 // - The detail is the shared detail panel (`roles.detailPanel`), as on Accounts.
 import { useCallback, useMemo } from "react";
-import { Plus } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Banner } from "@astryxdesign/core/Banner";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
 import { VStack } from "@astryxdesign/core/Layout";
+import { icons } from "../../components/icons.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { usePreferences } from "../../app/preferences.ts";
 import { useApiKeyUsage, useConfig } from "../../app/serverQueries.ts";
@@ -25,6 +24,7 @@ import { useAction } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { families, familyName, isFamily, type Family } from "../../components/keyFamilies.ts";
 import { useListShape, type ListShape } from "../../components/listShape.ts";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { SettingsLink } from "../../components/SettingsLink.tsx";
 import { ApiError } from "../../lib/api/client.ts";
@@ -64,7 +64,11 @@ function AddMenu({
   onPick: (family: Family) => void;
   isDisabled: boolean;
 }) {
-  const item = (f: Family) => ({ label: familyName(f), onClick: () => onPick(f) });
+  const item = (f: Family) => ({
+    label: familyName(f),
+    icon: providerIcon(f),
+    onClick: () => onPick(f),
+  });
   const unused = families.filter((f) => !configured.has(f));
   return (
     <DropdownMenu
@@ -72,7 +76,7 @@ function AddMenu({
       button={{
         label: t("providers.page.add"),
         variant: roles.primaryAction.variant,
-        icon: <Icon icon={Plus} size="sm" />,
+        icon: <Icon icon={icons.add} size="sm" />,
         isDisabled,
       }}
       alignment="end"

@@ -30,20 +30,33 @@ style). Product rules in `PRODUCT.md` still apply; its visual and size clauses a
 
 ## Colour
 
-The palette is [Rosé Pine](https://rosepinetheme.com): **Moon** in dark mode and **Dawn** in light
-mode by default, with **Rosé Pine** (Main) for dark as the second choice. The values come
+The default palette is **Neutral** (owner, 2026-11-09: 「默認配色改成中性？」), described below.
+The other two are [Rosé Pine](https://rosepinetheme.com): **Moon** in dark mode and **Dawn** in
+light mode, and **Rosé Pine** (Main) for dark with Dawn for light. The Rosé Pine values come
 unmodified from [rose-pine/palette](https://github.com/rose-pine/palette) (MIT): the named roles
 from `palette.json`, the highlight roles from `dist/css/rose-pine.css`; they live in
 `src/themes/site/rosePine.ts`. Owner, 2026-11-08: 「https://github.com/rose-pine 配色用這個把」;
 「原色優先」 — every colour is an official value; pairs that miss a contrast limit are listed in
 `REQUIREMENTS.md` Exceptions instead of being adjusted.
 
-- Theme: both site themes extend Astryx's official neutral theme
-  (`defineTheme({extends: neutralTheme})`, as Astryx's setup guide does) and set only colour and
-  type-size tokens: fonts, component styles, icons (lucide), radius and motion come from
-  neutral. `src/themes/site/siteTheme.ts` builds `site` (Moon, in the entry) and
-  `siteMainTheme.ts` builds `site-main` (loaded on demand when chosen), both with
-  `astryx theme build`; the colour and type tokens are shared (`roseTokens`). Both modes are
+**Neutral** is Astryx's neutral theme with its own colours in both modes, added for anyone who
+finds Rosé Pine too colourful (owner, 2026-11-09: 「至少把中性主題加回來把，這個主題顏色太豐富了可能有人不喜歡」).
+`siteNeutralTheme.ts` builds `site-neutral` (in the entry) with the site's sizes, type scale
+and motion rule, and a few colours so it reads monochrome (owner, 2026-11-09: 「不太中性感覺」
+「難看的配色」): bar fills and chart volume take neutral's greys (#919191 light, #777777 dark)
+instead of core's blue-grey, and warning takes neutral's orange family (soft #ffc7a1 / #503424
+fill, #622700 / #ffb37e ink; light icons and dots core's #d66100) instead of its bright yellow
+#ffce2f. Accent, focus ring, error, success and info stay neutral's. Each override and its source
+value is commented in the file. The role table below is the Rosé Pine palettes'.
+
+- Theme: the three site themes extend Astryx's official neutral theme
+  (`defineTheme({extends: neutralTheme})`, as Astryx's setup guide does) and set only tokens:
+  fonts, component styles, icons (lucide), radius and motion come from neutral.
+  `src/themes/site/siteNeutralTheme.ts` builds `site-neutral` (Neutral, the default, in the
+  entry); `siteTheme.ts` builds `site` (Moon) and `siteMainTheme.ts` builds `site-main`, both
+  loaded on demand when chosen. `astryx theme build` names its outputs after the theme, and they keep
+  those names, so the import example in each generated header stays true; the Rosé Pine colour
+  and type tokens are shared (`roseTokens`). Both modes are
   first-class, following the system by default with a manual switch.
 - Palette and mode are separate choices. Mode is one click: a ghost icon button flips light and
   dark relative to what is shown (BoothDex's ColorModeToggle), and until the first press the page
@@ -111,9 +124,12 @@ deviation with its reason.
 ### Routes
 
 Six hash routes (owner, 2026-11-08: 「很多東西沒必要一定是一個頁面」). What used to be a page of its
-own is a view of one of them (`?view=`, listed under its route in the side nav, which is a
-collapsible category, open by default; in the collapsed rail each view is its own icon) or a
-dialog (`?open=`). Overview stands alone; every other page sits in a category (Accounts, Models, Monitoring, Server, with client keys under Server beside Settings), so no lone item sits between categories (owner, 2026-11-08: 「中間卡一個沒展開的是不是很奇怪」). Pages carry no tab strip (owner, 2026-11-08: header tabs read as 「切換太離譜了」;
+own is a view of one of them (`?view=`) or a dialog (`?open=`). The side nav groups the pages in
+titled sections, never collapsed, as the nbcards console does (owner, 2026-11-09: 「側邊欄可以對著
+nbcards重新改一下 不要收起也行」): Monitor (Overview, Usage), Accounts (Accounts, Provider keys),
+Models (Models, Payload rules), Server (Settings, Client keys, Logs) (owner, 2026-11-09: 「把概覽丟監控
+裡面然後弄到最上面 日誌放到伺服器那邊」). The table is `navSections` in `src/app/routes.ts`; a
+view's URL stays on its route whatever section lists it. Pages carry no tab strip (owner, 2026-11-08: header tabs read as 「切換太離譜了」;
 「側邊欄可以做之前那種收起」). Sign-in is not a route. The R1 to R5 rewrites
 redesign the content of Accounts, Clients, Models, Activity and Settings; until then each tab and
 dialog hosts the earlier page unchanged through a thin host in `src/app/pages/`.
@@ -160,11 +176,10 @@ built from the same template.
 - Astryx `AppShell` with the side nav only; there is no top bar. `SideNav` is `collapsible` and
   `resizable` (260 px default, 220 to 360).
 - Header: `SideNavHeading` with the brand mark and "cliproxy-rs", linking to the first page.
-- Body: one untitled `SideNavSection` with the six pages in `src/app/routes.ts` order, each a
-  `SideNavItem` with its lucide icon; no groups, no group headers and no children (with six items
-  they are noise). The current page is Astryx's own selected item. `Network` is the brand mark and
-  never a nav icon.
-- Collapsed rail: every page is one icon that navigates on click, its name as `SideNavItem`'s own
+- Body: one `SideNavSection` per entry of `navSections`, its title a small heading over its
+  `SideNavItem`s, each with its lucide icon; no collapsible groups. The current page is Astryx's own
+  selected item. `Network` is the brand mark and never a nav icon.
+- Collapsed rail: section headings hide and every page is one icon that navigates on click, its name as `SideNavItem`'s own
   tooltip on hover and keyboard focus; no flyout or submenu exists. Tab reaches each icon in order
   and Enter navigates. The width and the collapsed state persist through `resizable.autoSaveId`
   (Astryx reads and writes localStorage in try/catch), a per-viewer convenience.

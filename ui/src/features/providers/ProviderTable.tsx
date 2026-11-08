@@ -5,16 +5,16 @@
 // keys column takes the room of the quota columns a group lacks. Below the list's stacking width
 // (a phone) each row is one summary cell, as on Accounts. A server holds a handful of groups, so
 // the list is not windowed.
+import { rowStyles } from "../../components/rowStyles.ts";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import * as stylex from "@stylexjs/stylex";
 import { VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Table, type TableColumn, type TablePlugin } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import { colorVars } from "@astryxdesign/core/theme/tokens.stylex";
 import { familyName } from "../../components/keyFamilies.ts";
 import { listColumns, type ListShape } from "../../components/listShape.ts";
 import { ListSkeleton } from "../../components/loadingRows.tsx";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { RequestSparkline } from "../../components/RequestSparkline.tsx";
 import { isRowItself, onRowKey, rowAt, useReturnFocus } from "../../components/rowKeys.ts";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
@@ -26,14 +26,6 @@ import { entryId, type Entry } from "./groups.ts";
 import { endpointParts, MiddleText } from "./MiddleText.tsx";
 import { statusOf } from "./words.ts";
 
-const styles = stylex.create({
-  clickableRow: { cursor: "pointer" },
-  activeRow: {
-    backgroundColor: colorVars["--color-overlay-pressed"],
-    "--table-row-overlay": colorVars["--color-overlay-pressed"],
-  },
-});
-
 type Item = Entry & Record<string, unknown>;
 
 /**
@@ -43,14 +35,18 @@ type Item = Entry & Record<string, unknown>;
 function GroupLine({ entry }: { entry: Entry }) {
   const family = familyName(entry.family);
   const url = entry.group["base-url"];
-  if (!url)
-    return (
-      <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
-        {family}
-      </Text>
-    );
-  const { head, tail } = endpointParts(url);
-  return <MiddleText head={`${family} · ${head}`} tail={tail} isSecondary />;
+  const parts = url ? endpointParts(url) : null;
+  return (
+    <ProviderLabel provider={entry.family} size="xsm" color="secondary">
+      {parts ? (
+        <MiddleText head={`${family} · ${parts.head}`} tail={parts.tail} isSecondary />
+      ) : (
+        <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
+          {family}
+        </Text>
+      )}
+    </ProviderLabel>
+  );
 }
 
 function Name({ entry }: { entry: Entry }) {
@@ -172,7 +168,7 @@ function useRowPlugin(
               ),
           },
           xstyle: props.xstyle.concat(
-            isOpen ? [styles.clickableRow, styles.activeRow] : styles.clickableRow,
+            isOpen ? [rowStyles.clickableRow, rowStyles.activeRow] : rowStyles.clickableRow,
           ),
         };
       },

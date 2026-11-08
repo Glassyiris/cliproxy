@@ -1,3 +1,4 @@
+import { matchesWords } from "../../lib/search.ts";
 import type { Credential, CredentialFields } from "../../lib/api/credentials.ts";
 import {
   accountRow,
@@ -10,7 +11,6 @@ import {
   type Limits,
 } from "../../lib/credentials.ts";
 
-/** One account in the table. */
 export interface Row extends Record<string, unknown> {
   /** File and auth index: one file can hold several accounts. Selection is kept by this key. */
   key: string;
@@ -89,23 +89,20 @@ export type Filters = { provider: string; view: View; show: Show | ""; search: s
  * provider and plan, and the server's message, so "codex pro" or "429" finds what the list shows.
  */
 export function matches(row: Row, search: string) {
-  const words = search.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return true;
   const a = row.account;
   const sub = row.view.sub;
-  const text = [
-    row.name,
-    a.email,
-    a.note,
-    a.name,
-    label(row.provider),
-    a.id_token?.plan_type,
-    sub?.kind === "detail" ? sub.text : null,
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .toLowerCase();
-  return words.every((w) => text.includes(w));
+  return matchesWords(
+    [
+      row.name,
+      a.email,
+      a.note,
+      a.name,
+      label(row.provider),
+      a.id_token?.plan_type,
+      sub?.kind === "detail" ? sub.text : null,
+    ],
+    search,
+  );
 }
 
 /** The families with accounts, in the order their first account sorts. */

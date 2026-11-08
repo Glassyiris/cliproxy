@@ -11,11 +11,11 @@
 // - Phones keep the table with two columns (model with its family and status as a second line,
 //   and the row menu) instead of the template's card list: the rows stay one pattern.
 import { useRef, useState, type ReactNode, type RefObject } from "react";
-import { Ban, Plus } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
@@ -192,7 +192,7 @@ function HeaderActions({
     <>
       <Button
         label={t("models.page.exclude")}
-        icon={<Icon icon={Ban} />}
+        icon={<Icon icon={icons.exclude} />}
         isIconOnly={isMobile}
         tooltip={isMobile ? t("models.page.exclude") : undefined}
         onClick={onExclude}
@@ -201,7 +201,7 @@ function HeaderActions({
         ref={addButton}
         label={t("models.page.add")}
         variant={roles.primaryAction.variant}
-        icon={<Icon icon={Plus} />}
+        icon={<Icon icon={icons.add} />}
         onClick={onAdd}
       />
     </>

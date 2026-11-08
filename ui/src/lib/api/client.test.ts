@@ -1,8 +1,15 @@
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
-import { test } from "node:test";
-import { fakeServer } from "./fake-server.test-support.ts";
+import { mock, test } from "node:test";
+import { fakeServer } from "./fakeServer.testSupport.ts";
 import type { ServerBuild } from "./client.ts";
+
+const storageAccess = mock.fn(() => undefined);
+for (const name of ["localStorage", "sessionStorage", "indexedDB"])
+  Object.defineProperty(globalThis, name, { configurable: true, get: storageAccess });
+Object.defineProperty(globalThis, "document", {
+  configurable: true,
+  value: Object.defineProperty({}, "cookie", { get: storageAccess, set: storageAccess }),
+});
 
 const server = fakeServer();
 const { ApiError, ConnectionError, available, connect, disconnect, probe, request } =
@@ -15,7 +22,7 @@ let rejected = 0;
 const signIn = () =>
   connect("secret", { unauthorized: () => rejected++, server: (b) => builds.push(b) });
 
-test("the key stays in memory: no request before sign-in, a bearer header after, never storage", async () => {
+test("API session sends the key only while connected and never accesses storage", async () => {
   disconnect();
   await assert.rejects(
     request(routes.readConfig),
@@ -34,11 +41,14 @@ test("the key stays in memory: no request before sign-in, a bearer header after,
   assert.equal(server.sent[0].headers.Authorization, "Bearer secret");
   assert.equal(server.sent[0].url.href, "http://cpa.test/v8/management/config");
   assert.deepEqual(builds.at(-1), { version: "cliproxy-rs-1.0.0", commit: "abc1234", built: "" });
-  for (const file of ["client.ts", "routes.ts"])
-    assert.doesNotMatch(
-      readFileSync(new URL(file, import.meta.url), "utf8"),
-      /localStorage|sessionStorage|indexedDB|document\.cookie/,
-    );
+  disconnect();
+  const sent = server.sent.length;
+  await assert.rejects(
+    request(routes.readConfig),
+    (e) => e instanceof ConnectionError && e.reason === "signed-out",
+  );
+  assert.equal(server.sent.length, sent);
+  assert.equal(storageAccess.mock.callCount(), 0);
 });
 
 test("server errors keep status and message; 401 signs out", async () => {

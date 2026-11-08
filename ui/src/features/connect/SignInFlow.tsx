@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
@@ -52,9 +53,11 @@ export function SignInFlow({ flow, signIn }: { flow: Flow; signIn: SignIn }) {
     <VStack gap={roles.gap.card}>
       <HStack gap={2} vAlign="center" wrap="wrap">
         <StackItem size="fill">
-          <Heading level={roles.heading.card} ref={heading} tabIndex={-1}>
-            {label(flow.provider)}
-          </Heading>
+          <ProviderLabel provider={flow.provider} color="secondary">
+            <Heading level={roles.heading.card} ref={heading} tabIndex={-1}>
+              {label(flow.provider)}
+            </Heading>
+          </ProviderLabel>
         </StackItem>
         <Expiry flow={flow} polledAt={signIn.polledAt} />
         <HStack aria-live="polite">

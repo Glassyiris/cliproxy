@@ -1,4 +1,4 @@
-import { tools } from "../../lib/tool-setup.ts";
+import { tools } from "../../lib/toolSetup.ts";
 
 export type Tool = (typeof tools)[number];
 

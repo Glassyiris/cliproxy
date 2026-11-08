@@ -1,10 +1,10 @@
-// The app frame, as the owner's BoothDex console has it (admin/admin-shell.tsx) from the Astryx page
+// The app frame, as the BoothDex console has it (admin/admin-shell.tsx) from the Astryx page
 // template shell-side-nav: AppShell with one collapsible, resizable SideNav: its heading on top, the
 // six pages from routes.ts as flat items, the session rows in the footer, and the colour-mode toggle and the
 // settings button in the footer icon row beside the collapse button. On phones AppShell turns the nav into its drawer
 // behind its own bar. There is no top bar.
 
-import { LogOut, Network, Plug } from "lucide-react";
+import { LogOut, Network } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState, type AnchorHTMLAttributes } from "react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { AppShell } from "@astryxdesign/core/AppShell";
@@ -27,17 +27,17 @@ import { Spinner } from "@astryxdesign/core/Spinner";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
 import { createStaticSource } from "@astryxdesign/core/Typeahead";
+import { icons } from "../components/icons.ts";
 import { lampVariant, StatusLamp } from "../components/StatusLamp.tsx";
 import { t } from "../lib/i18n.ts";
 import { repository } from "../lib/repository.ts";
 import { layout } from "../themes/site/layout.ts";
-import { roles } from "../themes/site/roles.ts";
 import { PageDialog, useDialogParam } from "./pages/PageDialog.tsx";
 import { PageWarning } from "./Notices.tsx";
 import { ColorModeToggle } from "./PreferenceMenus.tsx";
 import { usePreferences } from "./preferences.ts";
 import { QueryBoundary } from "./QueryBoundary.tsx";
-import { destinations, routes, type PageRoute } from "./routes.ts";
+import { destinations, navSections, routes, type NavRef, type PageRoute } from "./routes.ts";
 import { SettingsButton } from "./settings/SettingsDialog.tsx";
 import { shortcuts } from "./settings/ShortcutsPanel.tsx";
 import { useSession } from "./Session.tsx";
@@ -92,7 +92,7 @@ function ConnectionItem() {
     >
       <SideNavItem
         label={host}
-        icon={Plug}
+        icon={icons.use}
         endContent={<StatusDot variant={lampVariant[status]} label={state} />}
       />
     </Popover>
@@ -152,89 +152,51 @@ function GoToPage() {
   );
 }
 
-/** Which categories are open; a closed one opens again when navigation lands in it. */
-function useOpenRoutes(current: string) {
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(routes.map((r) => r.id)));
-  const [shown, setShown] = useState(current);
-  if (shown !== current) {
-    setShown(current);
-    if (!open.has(current)) setOpen(new Set([...open, current]));
-  }
-  const toggle = (id: string, isOpen: boolean) =>
-    setOpen((was) => {
-      const next = new Set(was);
-      if (isOpen) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  return [open, toggle] as const;
-}
-
 type NavEntry = { key: string; label: string; icon: PageRoute["icon"]; href: string; on: boolean };
-type NavCategory = { id: string; label: string; icon: PageRoute["icon"]; entries: NavEntry[] };
 
-/**
- * The side nav's categories in route order: a route's views, or the route itself, are the items
- * of its category (`navGroup`, else its own id); the category's route comes first in it.
- */
-function navCategories(current: PageRoute, view: string | undefined): NavCategory[] {
-  const entriesOf = (r: PageRoute): NavEntry[] => {
-    if (!r.views) {
-      const label = r.navTitle?.() ?? r.title();
-      return [{ key: r.id, label, icon: r.icon, href: `#${r.id}`, on: r === current }];
-    }
-    const first = r.views[0].id;
-    const active = r === current ? (r.views.find((v) => v.id === view)?.id ?? first) : null;
-    return r.views.map((v) => ({
-      key: `${r.id}-${v.id}`,
-      label: v.title(),
-      icon: v.icon,
-      href: v.id === first ? `#${r.id}` : `#${r.id}?view=${v.id}`,
-      on: v.id === active,
-    }));
+/** The view a route shows for `?view=`: the named one when it has it, else its first. */
+const shownViewOf = (r: PageRoute, view?: string) =>
+  (r.views?.find((x) => x.id === view) ?? r.views?.[0])?.id;
+
+/** A side-nav item's name, icon, link and whether it is the page shown. */
+function navEntry({ route, view }: NavRef, current: PageRoute, shownView?: string): NavEntry {
+  const r = routes.find((x) => x.id === route);
+  if (!r) throw new Error(`side nav names an unknown route: ${route}`);
+  const v = r.views?.find((x) => x.id === view);
+  if (!v)
+    return {
+      key: r.id,
+      label: r.navTitle?.() ?? r.title(),
+      icon: r.icon,
+      href: `#${r.id}`,
+      on: r === current,
+    };
+  return {
+    key: `${r.id}-${v.id}`,
+    label: v.title(),
+    icon: v.icon,
+    href: v.id === r.views?.[0]?.id ? `#${r.id}` : `#${r.id}?view=${v.id}`,
+    on: r === current && v.id === shownViewOf(r, shownView),
   };
-  return routes
-    .filter((r) => !r.navGroup)
-    .map((r) => ({
-      id: r.id,
-      label: r.title(),
-      icon: r.groupIcon ?? r.icon,
-      entries: [r, ...routes.filter((m) => m.navGroup === r.id)].flatMap(entriesOf),
-    }));
 }
 
 /**
- * The pages: a category with more than one page is collapsible (open by default) with its pages
- * under it; a lone page is a plain item. In the collapsed rail every page is its own icon, so
- * reaching one is one click, never a flyout (owner, 2026-11-08: 「這個不人體工學」).
+ * The pages in `navSections`, each section's name a small heading over its items, never collapsed
+ * (owner, 2026-11-09). In the collapsed rail every page is its own icon, so reaching one is one
+ * click.
  */
-function PageItems({ current }: { current: PageRoute }) {
+function PageSections({ current }: { current: PageRoute }) {
   const { isCollapsed } = useSideNavCollapse();
   const [params] = useHashParams();
-  const [open, toggle] = useOpenRoutes(current.navGroup ?? current.id);
-  return navCategories(current, params.view).map((c) => {
-    const items = c.entries.map((e) => (
-      <SideNavItem key={e.key} label={e.label} icon={e.icon} href={e.href} isSelected={e.on} />
-    ));
-    if (isCollapsed || c.entries.length === 1) return items;
-    return (
-      <SideNavItem
-        key={c.id}
-        label={c.label}
-        icon={c.icon}
-        collapsible={{
-          isCollapsed: !open.has(c.id),
-          onCollapsedChange: (isClosed) => toggle(c.id, !isClosed),
-        }}
-      >
-        {/* SideNav spaces its top rows 2 px apart but stacks a category's pages flush, so a hovered
-            page's fill touched the selected one (owner, 2026-11-08: 「黏在一起了」). */}
-        <VStack gap={roles.nav.rowGap} paddingBlockStart={roles.nav.rowGap}>
-          {items}
-        </VStack>
-      </SideNavItem>
-    );
-  });
+  return navSections.map((section) => (
+    <SideNavSection key={section.id} title={section.title()} isHeaderHidden={isCollapsed}>
+      {section.items
+        .map((ref) => navEntry(ref, current, params.view))
+        .map((e) => (
+          <SideNavItem key={e.key} label={e.label} icon={e.icon} href={e.href} isSelected={e.on} />
+        ))}
+    </SideNavSection>
+  ));
 }
 
 function PageNav({ current }: { current: PageRoute }) {
@@ -244,7 +206,7 @@ function PageNav({ current }: { current: PageRoute }) {
       collapsible
       // Astryx keeps the width and the collapsed rail in localStorage under this key (read and
       // written in try/catch), so someone who prefers the rail keeps it across reloads. Collapsed,
-      // each page is one icon with its name as SideNavItem's own tooltip (PageItems).
+      // each page is one icon with its name as SideNavItem's own tooltip (PageSections).
       resizable={{ ...layout.sidebar, autoSaveId: "cliproxy-side-nav" }}
       header={
         <SideNavHeading
@@ -274,9 +236,7 @@ function PageNav({ current }: { current: PageRoute }) {
         </SideNavSection>
       }
     >
-      <SideNavSection title={t("app.nav.pages")} isHeaderHidden>
-        <PageItems current={current} />
-      </SideNavSection>
+      <PageSections current={current} />
     </SideNav>
   );
 }

@@ -1,8 +1,11 @@
 // The table-grouped body: one group per model name, its header a full-width row that folds the
 // group, then one row per rule (model pattern, action, number of fields, remove).
+import { icons } from "../../components/icons.ts";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
+import { rowStyles } from "../../components/rowStyles.ts";
+import { label } from "../../lib/credentials.ts";
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import * as stylex from "@stylexjs/stylex";
-import { Trash2 } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -30,11 +33,6 @@ export type RuleGroup = { name: string; rows: RuleRow[] };
 const styles = stylex.create({
   // table-grouped:66-70: the group header fills the row with the muted background.
   groupHeader: { cursor: "pointer", backgroundColor: colorVars["--color-background-muted"] },
-  clickableRow: { cursor: "pointer" },
-  activeRow: {
-    backgroundColor: colorVars["--color-overlay-pressed"],
-    "--table-row-overlay": colorVars["--color-overlay-pressed"],
-  },
 });
 
 export const groupName = (name: string) => {
@@ -66,7 +64,7 @@ function RemoveButton({ focused, onRemove }: { focused: boolean; onRemove: () =>
       tooltip={t("payload.row.remove")}
       variant={roles.rowAction.variant}
       size={roles.rowAction.size}
-      icon={<Icon icon={Trash2} size="sm" />}
+      icon={<Icon icon={icons.delete} size="sm" />}
       onClick={onRemove}
     />
   );
@@ -79,7 +77,13 @@ function Pattern({ row, isMobile }: { row: RuleRow; isMobile: boolean }) {
         <Text type={roles.textType.identifier}>
           {row.model ? row.model.name : groupName(row.rule ? NO_MODEL : UNREADABLE)}
         </Text>
-        {row.model?.protocol && <Token label={row.model.protocol} size="sm" />}
+        {row.model?.protocol && (
+          <Token
+            label={label(row.model.protocol)}
+            icon={<Icon icon={providerIcon(row.model.protocol)} size="xsm" />}
+            size="sm"
+          />
+        )}
       </HStack>
       {isMobile && (
         <Text type={roles.textType.supporting} color="secondary">
@@ -104,7 +108,7 @@ function RuleRowView({ row, isMobile, isOpen, focused, onOpen, onRemove }: RowPr
     <TableRow
       tabIndex={0}
       aria-current={isOpen ? true : undefined}
-      xstyle={[styles.clickableRow, isOpen && styles.activeRow]}
+      xstyle={[rowStyles.clickableRow, isOpen && rowStyles.activeRow]}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest("button, a")) return;
         onOpen();

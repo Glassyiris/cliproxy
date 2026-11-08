@@ -59,15 +59,18 @@ export default {
     "overview.sources.keys": "{provider} 金鑰",
     "overview.sources.summary":
       "請求最多的來源是 {source}，{total, number} 個請求中佔 {count, number} 個。",
+    "overview.sources.other": "其他（{count, number} 個）",
     "overview.sources.usage": "開啟用量頁",
 
     "overview.start.heading": "開始使用",
     "overview.start.key": "建立用戶端金鑰",
     "overview.start.connect": "連接帳號",
     "overview.start.test": "傳送測試請求",
-    "overview.start.done": "已完成",
-    "overview.start.next": "下一步",
-    "overview.start.later": "未開始",
+    "overview.start.progress": "已完成 {done, number}/{total, number}",
+    "overview.start.skip": "略過",
+    "overview.start.keyLine": "工具以這把金鑰連到代理。",
+    "overview.start.connectLine": "登入 Claude、Codex 或其他供應商的帳號。",
+    "overview.start.testLine": "傳送一個請求，確認整條連線路徑可用。",
     "overview.start.allSet": "設定完成",
   },
 };

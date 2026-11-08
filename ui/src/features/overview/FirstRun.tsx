@@ -1,18 +1,16 @@
-import { useEffect, useState } from "react";
-import { KeyRound, Plug, Send } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
-import { Grid } from "@astryxdesign/core/Grid";
-import { Icon, type IconProps } from "@astryxdesign/core/Icon";
+import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { Step as StepperStep, Stepper } from "@astryxdesign/core/Stepper";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { ReadError } from "../../components/ReadError.tsx";
-import { SectionHeading } from "../../components/SectionHeading.tsx";
 import type { Credential } from "../../lib/api/credentials.ts";
-import { flag } from "../../lib/first-run.ts";
+import { flag } from "../../lib/firstRun.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
-import { layout } from "../../themes/site/layout.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { LineSkeleton } from "./LineSkeleton.tsx";
 
@@ -60,8 +58,9 @@ export function useFirstRun(files: Credential[] | undefined, keys: number | unde
 
 type Step = {
   title: () => string;
-  icon: IconProps["icon"];
+  line: () => string;
   action: () => string;
+  icon: (typeof icons)[keyof typeof icons];
   /** Where the step is done; connecting goes through the one connect entry instead. */
   href?: string;
 };
@@ -69,80 +68,57 @@ type Step = {
 const steps: Step[] = [
   {
     title: () => t("overview.start.key"),
-    icon: KeyRound,
+    line: () => t("overview.start.keyLine"),
     action: () => t("keys.page.add"),
+    icon: icons.add,
     href: "#clients?open=new",
   },
   {
     title: () => t("overview.start.connect"),
-    icon: Plug,
+    line: () => t("overview.start.connectLine"),
     action: () => t("overview.page.connect"),
+    icon: icons.add,
   },
   {
     title: () => t("overview.start.test"),
-    icon: Send,
+    line: () => t("overview.start.testLine"),
     action: () => t("use.steps.test"),
+    icon: icons.test,
     href: "#clients?open=use&step=test",
   },
 ];
 
-const stateWord = {
-  done: () => t("overview.start.done"),
-  next: () => t("overview.start.next"),
-  later: () => t("overview.start.later"),
-};
-
-/** One step: its glyph (a check once done), its name, where it stands, and its one action. */
-function StepCard({
-  step,
-  state,
-  connect,
-}: {
-  step: Step;
-  state: keyof typeof stateWord | undefined;
-  connect: () => void;
-}) {
-  const isDone = state === "done";
+/** The card's title row: the heading, how many steps are done, and the low-key way out. */
+function Header({ count, onDismiss }: { count: number | undefined; onDismiss: () => void }) {
   return (
-    <Card padding={roles.card.padding} height="100%">
-      <VStack gap={2}>
-        <HStack gap={2} vAlign="center" wrap="nowrap">
-          <Icon
-            icon={isDone ? "success" : step.icon}
-            size="sm"
-            color={isDone ? "success" : "secondary"}
-          />
-          <Heading level={roles.heading.inCard} accessibilityLevel={roles.heading.card}>
-            {step.title()}
-          </Heading>
-        </HStack>
-        {state === undefined ? (
+    <HStack hAlign="between" vAlign="center" gap={3} wrap="wrap">
+      <Heading level={roles.heading.card} accessibilityLevel={roles.heading.section}>
+        {t("overview.start.heading")}
+      </Heading>
+      <HStack gap={2} vAlign="center" wrap="nowrap">
+        {count === undefined ? (
           <LineSkeleton role="supporting" />
         ) : (
-          <Text type={roles.textType.supporting} color="secondary">
-            {stateWord[state]()}
+          <Text type={roles.textType.supporting} color="secondary" hasTabularNumbers>
+            {t("overview.start.progress", { done: count, total: steps.length })}
           </Text>
         )}
-        {!isDone && (
-          <HStack hAlign="end">
-            <Button
-              label={step.action()}
-              variant="secondary"
-              href={step.href}
-              onClick={step.href ? undefined : connect}
-            />
-          </HStack>
-        )}
-      </VStack>
-    </Card>
+        <Button
+          label={t("overview.start.skip")}
+          variant={roles.rowAction.variant}
+          size={roles.rowAction.size}
+          onClick={onDismiss}
+        />
+      </HStack>
+    </HStack>
   );
 }
 
-const columns = { minWidth: layout.settingsColumnMin, max: 3 } as const;
-
 /**
- * Getting started, in the attention cards' place: create a client key, connect an account, send a
- * test request. Each card says whether its step is done or next and opens where it is done.
+ * Getting started, in the attention cards' place: one card listing the three steps in order
+ * (create a client key, connect an account, send a test request), after the onboarding pattern
+ * of a vertical Stepper. Only the next step carries its action; the steps after it wait muted, and
+ * a done step shows its check wherever it sits, since the test can pass before the key exists.
  */
 export function FirstRun({
   done,
@@ -156,25 +132,56 @@ export function FirstRun({
   onDismiss: () => void;
 }) {
   const next = done?.indexOf(false) ?? -1;
+  // A step finished here moves focus on to the next step's action, so a keyboard user keeps going.
+  const action = useRef<HTMLButtonElement>(null);
+  const shownNext = useRef(next);
+  useEffect(() => {
+    if (shownNext.current !== -1 && next > shownNext.current) action.current?.focus();
+    shownNext.current = next;
+  }, [next]);
   return (
-    <VStack gap={roles.gap.card}>
-      <SectionHeading
-        title={t("overview.start.heading")}
-        actions={<Button label={t("app.notice.dismiss")} variant="secondary" onClick={onDismiss} />}
-      />
+    <VStack as="section" gap={roles.gap.card}>
       {reads.map((read) => (
         <ReadError key={read.what} error={read.error} what={read.what} retry={read.retry} />
       ))}
-      <Grid columns={columns} gap={roles.gap.card}>
-        {steps.map((step, i) => (
-          <StepCard
-            key={i}
-            step={step}
-            connect={connect}
-            state={done && (done[i] ? "done" : i === next ? "next" : "later")}
-          />
-        ))}
-      </Grid>
+      <Card padding={roles.card.padding}>
+        <VStack gap={roles.gap.card}>
+          <Header count={done?.filter(Boolean).length} onDismiss={onDismiss} />
+          <Stepper
+            orientation="vertical"
+            // While the steps load none is current, so none draws as done or next.
+            activeStep={next}
+            label={t("overview.start.heading")}
+          >
+            {steps.map((step, i) => {
+              const isDone = done?.[i] === true;
+              return (
+                <StepperStep
+                  key={i}
+                  step={i}
+                  label={step.title()}
+                  description={step.line()}
+                  status={isDone ? "success" : undefined}
+                  indicator={isDone ? <Icon icon={icons.allClear} color="success" /> : "auto"}
+                >
+                  {i === next && (
+                    <HStack>
+                      <Button
+                        ref={action}
+                        label={step.action()}
+                        variant={roles.primaryAction.variant}
+                        icon={<Icon icon={step.icon} />}
+                        href={step.href}
+                        onClick={step.href ? undefined : connect}
+                      />
+                    </HStack>
+                  )}
+                </StepperStep>
+              );
+            })}
+          </Stepper>
+        </VStack>
+      </Card>
     </VStack>
   );
 }

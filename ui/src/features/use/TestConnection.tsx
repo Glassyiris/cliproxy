@@ -1,12 +1,14 @@
 import { useEffect } from "react";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { icons } from "../../components/icons.ts";
 import { useKeyTest, type KeyTest } from "../../app/useKeyTest.ts";
 import { Identifier } from "../../components/Identifier.tsx";
-import { mask } from "../../lib/client-keys.ts";
-import { flag } from "../../lib/first-run.ts";
+import { mask } from "../../lib/clientKeys.ts";
+import { flag } from "../../lib/firstRun.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 
@@ -65,6 +67,7 @@ export function TestConnection({ base, clientKey }: { base: string; clientKey: s
         <Button
           label={t("use.test.again")}
           variant="secondary"
+          icon={<Icon icon={icons.test} />}
           isLoading={result.status === "testing"}
           onClick={() => void test(clientKey)}
         />

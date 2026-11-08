@@ -1,0 +1,1 @@
+import{S as e,T as t}from"./tokens.stylex-BRBC-NZS.js";import{j as n}from"./Icon-CpbZT79_.js";var r=t(e(),1);function i(){return(0,r.use)(n).locale}export{i as t};

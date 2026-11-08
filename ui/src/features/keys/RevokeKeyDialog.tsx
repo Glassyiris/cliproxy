@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
-import { mask } from "../../lib/client-keys.ts";
+import { mask } from "../../lib/clientKeys.ts";
 import { t } from "../../lib/i18n.ts";
 
 /**

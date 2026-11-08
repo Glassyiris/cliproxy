@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { accountRow, buckets, credName, credState, level, sumBuckets, type Bar, type Limits } from "./credentials.ts";
-import type { Window, WindowLabel } from "./quota-windows.ts";
+import type { Window, WindowLabel } from "./quotaWindows.ts";
 
 const now = Date.parse("2026-10-02T12:00:00Z");
 const at = (ms: number) => new Date(now + ms).toISOString();

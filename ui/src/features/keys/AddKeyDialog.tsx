@@ -3,7 +3,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { FormDialog } from "../../components/FormDialog.tsx";
 import { KeyField } from "../../components/KeyField.tsx";
-import { newKey } from "../../lib/client-keys.ts";
+import { newKey } from "../../lib/clientKeys.ts";
 import { t } from "../../lib/i18n.ts";
 
 /** The add-key form. Mounted only while open, so every opening starts empty. */

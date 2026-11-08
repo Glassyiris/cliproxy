@@ -1,3 +1,4 @@
+import { Icon } from "@astryxdesign/core/Icon";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -6,6 +7,7 @@ import { Grid } from "@astryxdesign/core/Grid";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { CardHeading } from "../../components/CardHeading.tsx";
 import { placeholderRows } from "../../components/loadingRows.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
@@ -84,7 +86,14 @@ export function StorePanel({
 }) {
   if (error) return <ReadError error={error} what={t("plugins.store.what")} retry={retry} />;
   if (store && store.plugins.length === 0)
-    return <EmptyState title={t("plugins.store.empty")} headingLevel={3} isCompact />;
+    return (
+      <EmptyState
+        icon={<Icon icon={icons.plugins} size="lg" />}
+        title={t("plugins.store.empty")}
+        headingLevel={3}
+        isCompact
+      />
+    );
   return (
     <VStack gap={roles.gap.card}>
       {store?.source_errors?.map((e) => (

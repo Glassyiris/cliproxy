@@ -10,7 +10,12 @@ import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
 import { Theme, type DefinedTheme } from "@astryxdesign/core/theme";
 import { isLocale, localeName, locales, t } from "../../lib/i18n.ts";
-import { loadPalette, siteTheme, type Palette } from "../../themes/site/index.ts";
+import {
+  defaultPalette,
+  defaultTheme,
+  loadPalette,
+  type Palette,
+} from "../../themes/site/index.ts";
 import { usePreferences, type ThemeMode } from "../preferences.ts";
 import { SettingsCard, SettingsRow } from "./SettingsRows.tsx";
 import { layout } from "../../themes/site/layout.ts";
@@ -32,13 +37,16 @@ const preview = stylex.create({
 });
 
 const PALETTES: { value: Palette; label: () => string }[] = [
+  { value: "neutral", label: () => t("app.colors.neutral") },
   { value: "moon", label: () => t("app.colors.moon") },
   { value: "main", label: () => t("app.colors.main") },
 ];
 
-/** A palette's theme; Moon is in the entry, Main loads on first use (null while loading or failed). */
+/** A palette's theme; Neutral is in the entry, the others load on first use (null while loading or failed). */
 function usePaletteTheme(palette: Palette) {
-  const [theme, setTheme] = useState<DefinedTheme | null>(palette === "moon" ? siteTheme : null);
+  const [theme, setTheme] = useState<DefinedTheme | null>(
+    palette === defaultPalette ? defaultTheme : null,
+  );
   useEffect(() => {
     let isCurrent = true;
     void loadPalette(palette).then((loaded) => {

@@ -1,10 +1,10 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { fakeServer } from "./fake-server.test-support.ts";
+import { fakeServer } from "./fakeServer.testSupport.ts";
 
 const server = fakeServer();
 const { connect } = await import("./client.ts");
-const { absent, storedValue } = await import("../config-path.ts");
+const { absent, storedValue } = await import("../configPath.ts");
 const { ConfigChangedError, readConfigValue, replaceConfigValue, writeConfigYaml } =
   await import("./config.ts");
 connect("secret", { unauthorized() {}, server() {} });

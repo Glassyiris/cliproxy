@@ -7,6 +7,8 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
@@ -40,18 +42,21 @@ export function ModelPanel({
         <Button
           label={t("models.row.addAlias")}
           variant="secondary"
+          icon={<Icon icon={icons.add} />}
           onClick={() => actions.onAlias(row)}
         />
         {row.excludedBy ? (
           <Button
             label={t("models.row.allow")}
             variant="secondary"
+            icon={<Icon icon={icons.allow} />}
             onClick={() => actions.onAllow(row)}
           />
         ) : (
           <Button
             label={t("models.row.exclude")}
             variant="secondary"
+            icon={<Icon icon={icons.exclude} />}
             onClick={() => actions.onExclude(row)}
           />
         )}
@@ -60,7 +65,11 @@ export function ModelPanel({
         <MetadataListItem label={t("models.col.model")}>
           <ModelId id={row.id} />
         </MetadataListItem>
-        <MetadataListItem label={t("models.col.family")}>{label(row.channel)}</MetadataListItem>
+        <MetadataListItem label={t("models.col.family")}>
+          <ProviderLabel provider={row.channel} color="secondary">
+            {label(row.channel)}
+          </ProviderLabel>
+        </MetadataListItem>
         <MetadataListItem label={t("models.col.status")}>
           {row.excludedBy
             ? t("models.panel.excludedBy", { pattern: row.excludedBy })

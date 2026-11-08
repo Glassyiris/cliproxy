@@ -43,7 +43,6 @@ export function installProbe() {
   requestAnimationFrame(tick);
 }
 
-/** The page has its title and no loading placeholder left. */
 export function isReady() {
   const main = document.querySelector("[role=main]");
   return (

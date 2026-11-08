@@ -133,7 +133,7 @@ cliproxy --config ~/.cliproxy-rs/config.yaml --claude-login
 
 ## 8. Point the user's tools at it
 
-The dashboard's Use with tools page has copy-paste settings with the address and key filled in, and [CLIENTS.md](CLIENTS.md) covers each tool. Ask the user which tools they use before changing their settings.
+The dashboard's Use with tools dialog, on the Client keys page, has copy-paste settings with the address and key filled in, and [CLIENTS.md](CLIENTS.md) covers each tool. Ask the user which tools they use before changing their settings.
 
 For Claude Code, this adds the proxy to the `env` block of `~/.claude/settings.json`, keeps a backup, and reads the key from `keys.env` so it never appears in the conversation:
 

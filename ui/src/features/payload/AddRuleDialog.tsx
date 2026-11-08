@@ -4,6 +4,9 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { FormDialog } from "../../components/FormDialog.tsx";
+import { icons } from "../../components/icons.ts";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
+import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { kindMeaning, paramsMessage } from "./words.ts";
 import { kinds, parseParams, protocols, type Kind, type Rule } from "./rules.ts";
@@ -14,8 +17,8 @@ const ANY = "any";
 const kindOptions = () => kinds.map((k) => ({ value: k, label: k, description: kindMeaning(k) }));
 
 const protocolOptions = () => [
-  { value: ANY, label: t("payload.add.anyProtocol") },
-  ...protocols.map((p) => ({ value: p, label: p })),
+  { value: ANY, label: t("payload.add.anyProtocol"), icon: icons.all },
+  ...protocols.map((p) => ({ value: p, label: label(p), icon: providerIcon(p) })),
 ];
 
 /** The kind picker; a kind whose stored value is not a list says so. */

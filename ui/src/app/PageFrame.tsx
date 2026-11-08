@@ -37,7 +37,7 @@ const BottomSheet = lazy(() =>
 );
 
 /**
- * The open detail of a row; the page closes it by no longer passing it. Without `onClose` it is a
+ * The open detail of a row; omitting it closes the panel. Without `onClose` it is a
  * permanent rail the page always shows beside its content.
  */
 type DetailPanel = { label: string; content: ReactNode; onClose?: () => void };

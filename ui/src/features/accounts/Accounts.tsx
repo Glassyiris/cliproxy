@@ -16,17 +16,16 @@
 // - The reading pane is the shared detail panel (`roles.detailPanel`, a BottomSheet on phones),
 //   not the template's two-thirds pane: the list is what this page is for, the detail is short.
 // - The list is virtualized (DESIGN.md "Pages"), as LogRows.tsx does it.
+import { icons } from "../../components/icons.ts";
+import { ListFilters } from "../../components/ListFilters.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, Search } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
-import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { TextInput } from "@astryxdesign/core/TextInput";
-import { useConnectAccount } from "../../app/connect-entry.ts";
+import { useConnectAccount } from "../../app/connectEntry.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useQuota } from "../../app/QuotaProvider.tsx";
 import { useCredentials, usePlugins } from "../../app/serverQueries.ts";
@@ -35,6 +34,7 @@ import { CountedSelector } from "../../components/CountedSelector.tsx";
 import { MissingActions, useAvailable } from "../../components/MissingActions.tsx";
 import { useListShape, type ListShape } from "../../components/listShape.ts";
 import { ReadError } from "../../components/ReadError.tsx";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
@@ -236,6 +236,7 @@ function FilterSelectors({
         options={families.map((p) => ({
           value: p,
           label: label(p),
+          icon: providerIcon(p),
           count: familyCounts.get(p) ?? 0,
         }))}
       />
@@ -280,53 +281,32 @@ function FilterRow({
   /** A phone: the views take their own line, so their counts arriving never rewrap the row. */
   isStacked: boolean;
 }) {
-  const views = (
-    <SegmentedControl
-      label={t("app.list.view")}
-      value={filters.view}
-      onChange={(view) => setFilters({ view: view === "all" ? "all" : "needs" })}
-    >
-      <SegmentedControlItem value="needs" label={t("app.list.needs", { count: collected.needs })} />
-      <SegmentedControlItem
-        value="all"
-        label={t("app.list.all", { count: collected.scope.length })}
-      />
-    </SegmentedControl>
-  );
   return (
-    <VStack gap={3}>
-      {isStacked && views}
-      <HStack gap={3} vAlign="center" wrap="wrap">
-        {!isStacked && views}
-        <FilterSelectors rows={rows} filters={filters} setFilters={setFilters} />
-        <TextInput
-          type="search"
-          startIcon={<Icon icon={Search} size="sm" />}
-          label={t("accounts.filters.search")}
-          isLabelHidden
-          placeholder={t("accounts.filters.searchHint")}
-          value={filters.search}
-          onChange={(search) => setFilters(search ? { search, view: "all" } : { search })}
-          hasClear
+    <ListFilters
+      filters={filters}
+      setFilters={setFilters}
+      needs={collected.needs}
+      total={collected.scope.length}
+      isStacked={isStacked}
+      searchLabel={t("accounts.filters.search")}
+      searchHint={t("accounts.filters.searchHint")}
+      selectors={<FilterSelectors rows={rows} filters={filters} setFilters={setFilters} />}
+    >
+      <StackItem size="fill" />
+      <HStack gap={2} vAlign="center">
+        <UploadInput writes={writes} />
+        <Button
+          label={
+            collected.checking ? t("accounts.actions.checking") : t("accounts.actions.checkQuotas")
+          }
+          icon={<Icon icon={icons.refresh} size="sm" />}
+          tooltip={t("accounts.actions.checkQuotasHint")}
+          isLoading={collected.checking}
+          isDisabled={!rows.some((r) => quota.canCheck(r.account))}
+          onClick={() => void collected.checkAll()}
         />
-        <StackItem size="fill" />
-        <HStack gap={2} vAlign="center">
-          <UploadInput writes={writes} />
-          <Button
-            label={
-              collected.checking
-                ? t("accounts.actions.checking")
-                : t("accounts.actions.checkQuotas")
-            }
-            icon={<Icon icon={RefreshCw} size="sm" />}
-            tooltip={t("accounts.actions.checkQuotasHint")}
-            isLoading={collected.checking}
-            isDisabled={!rows.some((r) => quota.canCheck(r.account))}
-            onClick={() => void collected.checkAll()}
-          />
-        </HStack>
       </HStack>
-    </VStack>
+    </ListFilters>
   );
 }
 
@@ -342,6 +322,7 @@ function EmptyView({
   if (!filtered && filters.view === "needs")
     return (
       <EmptyState
+        icon={<Icon icon={icons.allClear} size="lg" />}
         title={t("accounts.empty.allServe")}
         headingLevel={roles.heading.section}
         actions={
@@ -351,6 +332,7 @@ function EmptyView({
     );
   return (
     <EmptyState
+      icon={<Icon icon={icons.search} size="lg" />}
       title={t("accounts.empty.noMatch")}
       headingLevel={roles.heading.section}
       actions={
@@ -366,12 +348,18 @@ function EmptyView({
 function NoAccounts({ writes, connect }: { writes: Writes; connect: () => void }) {
   return (
     <EmptyState
+      icon={<Icon icon={icons.accounts} size="lg" />}
       title={t("accounts.empty.title")}
       description={t("accounts.empty.description")}
       headingLevel={roles.heading.section}
       actions={
         <>
-          <Button label={t("accounts.page.connect")} variant="primary" onClick={connect} />
+          <Button
+            label={t("accounts.page.connect")}
+            variant="primary"
+            icon={<Icon icon={icons.add} />}
+            onClick={connect}
+          />
           <UploadInput writes={writes} />
         </>
       }
@@ -481,7 +469,7 @@ export default function Accounts() {
             label={t("accounts.page.connect")}
             variant={roles.primaryAction.variant}
             onClick={page.connect}
-            icon={<Icon icon={Plus} size="sm" />}
+            icon={<Icon icon={icons.add} size="sm" />}
           />
         )
       }

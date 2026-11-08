@@ -1,13 +1,13 @@
 // Template: settings-sidebar, its InfoRowItem rows (`settings-sidebar:122-139`): the name and one
 // secondary line at the start, the action at the end, a divider under each row. Deviations:
-// - Rows sit on SettingRow's two-column Grid, so the value and Edit line up with the controls above.
+// - Rows are SettingRow's, so the value and Edit end the row as the controls above do.
 // - Edit is a Button: it opens an editor, an action (DESIGN.md "Links"); the template's is a Link.
 // - The editor is the shared ConfigEditor dialog, not the template's expand-in-place row: a
 //   section is JSON of any size, and the editor shows the diff before it writes.
 // - The open editor is `?key=` in the hash, so links from other pages land on it and Back closes it.
 import { Button } from "@astryxdesign/core/Button";
 import { Divider } from "@astryxdesign/core/Divider";
-import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
+import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import type { Action } from "../../app/useAction.ts";
@@ -77,17 +77,15 @@ function Entry({
     <VStack gap={0}>
       <Row label={name} hint={purpose}>
         <HStack gap={3} vAlign="center">
-          <StackItem size="fill">
-            {value === undefined ? (
-              <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
-            ) : (
-              value && (
-                <Text type={roles.textType.body} hasTabularNumbers>
-                  {value}
-                </Text>
-              )
-            )}
-          </StackItem>
+          {value === undefined ? (
+            <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
+          ) : (
+            value && (
+              <Text type={roles.textType.body} color="secondary" hasTabularNumbers>
+                {value}
+              </Text>
+            )
+          )}
           <Button label={t("config.sections.edit")} variant="secondary" onClick={onEdit} />
         </HStack>
       </Row>

@@ -35,7 +35,7 @@ function keepFocus(event: MouseEvent<HTMLElement>) {
 /**
  * The layout every chart shares, loaded or not: the legend and the plot under the accessible name
  * `label`. The one-sentence `summary` is the plot's description for screen readers only: the
- * tiles beside the charts show the same numbers (owner, 2026-11-08: 「廢話太多了。」).
+ * tiles beside the charts show the same numbers.
  */
 export function ChartFrame({
   label,

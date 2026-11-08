@@ -1,4 +1,3 @@
-/** Save `blob` as a file named `name`, the way a download link does. */
 export function saveBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

@@ -1,17 +1,6 @@
 import { createElement, lazy, useState, type ComponentType } from "react";
 import type { IconProps } from "@astryxdesign/core/Icon";
-import {
-  Activity,
-  Boxes,
-  Braces,
-  ChartColumn,
-  Key,
-  KeyRound,
-  LayoutDashboard,
-  ScrollText,
-  ServerCog,
-  Users,
-} from "lucide-react";
+import { icons } from "../components/icons.ts";
 import { t } from "../lib/i18n.ts";
 import { PageLoadError, pageChunks, type Chunk } from "./chunks.ts";
 
@@ -24,18 +13,10 @@ export type PageRoute = {
   /** A semantic icon name from the theme or an icon component. */
   icon: IconProps["icon"];
   page: ComponentType;
-  /**
-   * The pages grouped under this route in the side nav, each `#<id>?view=<view>`; the first has
-   * no `?view=`. A route with views is a collapsible category; one without is a single item.
-   */
+  /** The route's pages, each `#<id>?view=<view>`; the first has no `?view=`. */
   views?: readonly RouteView[];
-  /** The side-nav category this route sits in when it is not its own (clients sit under Server). */
-  navGroup?: string;
-  /** The route's item in its own category when that differs from the category's title. */
+  /** The route's side-nav item when that differs from its title. */
   navTitle?: () => string;
-  /** The category's icon when the route's own icon marks its item. */
-  groupIcon?: IconProps["icon"];
-  /** Fetches the page's chunk ahead of the first visit. */
   preload(): Promise<unknown>;
 };
 
@@ -58,51 +39,49 @@ function page(source: Chunk<{ default: ComponentType }>) {
   };
 }
 
-// The side nav, in order; the first route is the landing page. A route with views is a collapsible
-// category whose pages are `?view=` of it (owner, 2026-11-08: 「側邊欄可以做之前那種收起」, after the
-// header tabs read as 「切換太離譜了」); dialogs are `?open=`. Old hashes land there (src/lib/hash.ts).
+// The pages; the first route is the landing page. A route's pages are `?view=` of it and dialogs
+// are `?open=`. Old hashes land there (src/lib/hash.ts). The side nav groups them in `navSections`.
 export const routes: readonly PageRoute[] = [
   {
     id: "overview",
     title: () => t("app.nav.overview"),
-    icon: LayoutDashboard,
+    icon: icons.overview,
     ...page(pageChunks.overview),
   },
   {
     id: "accounts",
     title: () => t("app.nav.accounts"),
-    icon: Users,
+    icon: icons.accounts,
     views: [
-      { id: "accounts", title: () => t("app.nav.accounts"), icon: Users },
-      { id: "providers", title: () => t("app.nav.providers"), icon: Key },
+      { id: "accounts", title: () => t("app.nav.accounts"), icon: icons.accounts },
+      { id: "providers", title: () => t("app.nav.providers"), icon: icons.providerKeys },
     ],
     ...page(pageChunks.accounts),
   },
   {
     id: "clients",
     title: () => t("app.nav.clients"),
-    navGroup: "settings",
     navTitle: () => t("keys.page.title"),
-    icon: KeyRound,
+    icon: icons.clientKeys,
     ...page(pageChunks.clients),
   },
   {
     id: "models",
     title: () => t("app.nav.models"),
-    icon: Boxes,
+    icon: icons.models,
     views: [
-      { id: "models", title: () => t("app.nav.models"), icon: Boxes },
-      { id: "payload", title: () => t("app.nav.payload"), icon: Braces },
+      { id: "models", title: () => t("app.nav.models"), icon: icons.models },
+      { id: "payload", title: () => t("app.nav.payload"), icon: icons.payload },
     ],
     ...page(pageChunks.models),
   },
   {
     id: "activity",
     title: () => t("app.nav.activity"),
-    icon: Activity,
+    icon: icons.activity,
     views: [
-      { id: "usage", title: () => t("app.nav.usage"), icon: ChartColumn },
-      { id: "logs", title: () => t("app.nav.logs"), icon: ScrollText },
+      { id: "usage", title: () => t("app.nav.usage"), icon: icons.traffic },
+      { id: "logs", title: () => t("app.nav.logs"), icon: icons.logs },
     ],
     ...page(pageChunks.activity),
   },
@@ -110,9 +89,44 @@ export const routes: readonly PageRoute[] = [
     id: "settings",
     title: () => t("app.nav.settings"),
     navTitle: () => t("app.nav.config"),
-    groupIcon: ServerCog,
-    icon: "wrench",
+    icon: icons.settings,
     ...page(pageChunks.settings),
+  },
+];
+
+/** One side-nav item: a route, or one of its views. */
+export type NavRef = { route: string; view?: string };
+
+/**
+ * The side nav, as the nbcards console draws it: a small heading per section over its items,
+ * never collapsed. Owner, 2026-11-09: Monitor first with Overview in it, and Logs under Server.
+ */
+export const navSections: readonly { id: string; title(): string; items: readonly NavRef[] }[] = [
+  {
+    id: "monitor",
+    title: () => t("app.nav.activity"),
+    items: [{ route: "overview" }, { route: "activity", view: "usage" }],
+  },
+  {
+    id: "accounts",
+    title: () => t("app.nav.accounts"),
+    items: [
+      { route: "accounts", view: "accounts" },
+      { route: "accounts", view: "providers" },
+    ],
+  },
+  {
+    id: "models",
+    title: () => t("app.nav.models"),
+    items: [
+      { route: "models", view: "models" },
+      { route: "models", view: "payload" },
+    ],
+  },
+  {
+    id: "server",
+    title: () => t("app.nav.settings"),
+    items: [{ route: "settings" }, { route: "clients" }, { route: "activity", view: "logs" }],
   },
 ];
 

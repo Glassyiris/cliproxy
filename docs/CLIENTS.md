@@ -1,6 +1,6 @@
 # Use cliproxy-rs with your tools
 
-The examples use `http://127.0.0.1:8317` and `your-client-key`. Replace both with the address and client key from `config.yaml`. The dashboard at `/management.html` has a Use with tools page that shows these values with copy buttons. Pick a model ID from the dashboard's Models page or from `GET /v1/models`. Available IDs depend on the accounts connected to your proxy.
+The examples use `http://127.0.0.1:8317` and `your-client-key`. Replace both with the address and client key from `config.yaml`. The dashboard at `/management.html` has a Use with tools dialog, on the Client keys page, that shows these values with copy buttons. Pick a model ID from the dashboard's Models page or from `GET /v1/models`. Available IDs depend on the accounts connected to your proxy.
 
 ## Claude Code
 

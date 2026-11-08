@@ -2,6 +2,7 @@
 // body is windowed with @tanstack/react-virtual as Accounts does: the table gets only the lines
 // in view, between two spacer rows as tall as the lines left out. The page's content region
 // scrolls; it follows new lines only while it is scrolled to the end.
+import { scrollParent, useScrollMargin } from "../../components/useScrollMargin.ts";
 import {
   useCallback,
   useEffect,
@@ -47,33 +48,6 @@ const END_SLACK = 48;
 type Spacer = { key: "above" | "below"; spacer: number };
 type Item = LogLine | Spacer;
 const isSpacer = (item: Item): item is Spacer => "spacer" in item;
-
-/** The nearest ancestor that scrolls vertically: the page's content region. */
-function scrollParent(el: HTMLElement | null) {
-  for (let p = el?.parentElement; p; p = p.parentElement)
-    if (/auto|scroll/.test(getComputedStyle(p).overflowY)) return p;
-  return null;
-}
-
-/** Where the table body starts in the scrolled content; the toolbar and banners above it change. */
-function useScrollMargin(scroller: HTMLElement | null, body: HTMLElement | null) {
-  const [margin, setMargin] = useState(0);
-  useEffect(() => {
-    if (!scroller || !body) return;
-    const measure = () => {
-      const top =
-        body.getBoundingClientRect().top -
-        scroller.getBoundingClientRect().top +
-        scroller.scrollTop;
-      setMargin((m) => (Math.abs(top - m) > 0.5 ? top : m));
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    for (const child of scroller.children) observer.observe(child);
-    return () => observer.disconnect();
-  }, [scroller, body]);
-  return margin;
-}
 
 /**
  * Keeps the scroller at its end while the reader leaves it there: whenever the content grows (new

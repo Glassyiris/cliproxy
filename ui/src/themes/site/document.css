@@ -6,9 +6,17 @@ body {
 
 /*
  * Scrollbars in the palette: scrollbar-color inherits, so every scroller takes it, and setting it
- * makes Chrome draw the standard bar without the grey track and arrow buttons the default has
- * (owner, 2026-11-08, screenshot of the accounts list beside an open panel).
+ * makes Chrome draw the standard bar without the grey track and arrow buttons the default has.
  */
 :root {
   scrollbar-color: var(--color-border-emphasized) transparent;
+}
+
+/*
+ * A stored palette other than the default loads with the entry; until the app mounts its theme,
+ * <html> is still the default theme (`site-neutral`) and the empty body would show Neutral's
+ * grey, a flash before Rosé Pine's base. The page shows the browser's canvas for the mode instead.
+ */
+html[data-palette][data-astryx-theme="site-neutral"] {
+  background-color: Canvas;
 }

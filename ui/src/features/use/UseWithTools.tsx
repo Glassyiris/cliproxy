@@ -28,14 +28,14 @@ import {
   VStack,
 } from "@astryxdesign/core/Layout";
 import { Step, Stepper } from "@astryxdesign/core/Stepper";
-import { Plus } from "lucide-react";
+import { icons } from "../../components/icons.ts";
 import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
 import { base } from "../../lib/api/client.ts";
-import { newKey } from "../../lib/client-keys.ts";
-import { readPath } from "../../lib/config-path.ts";
+import { newKey } from "../../lib/clientKeys.ts";
+import { readPath } from "../../lib/configPath.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
 import { roles } from "../../themes/site/roles.ts";
@@ -53,13 +53,14 @@ const LAST_STEP = 2;
 function NoKey({ busy, create }: { busy: boolean; create: () => void }) {
   return (
     <EmptyState
+      icon={<Icon icon={icons.clientKeys} size="lg" />}
       title={t("use.empty.title")}
       headingLevel={roles.heading.section}
       actions={
         <Button
           label={t("use.empty.create")}
           variant="secondary"
-          icon={<Icon icon={Plus} />}
+          icon={<Icon icon={icons.add} />}
           isLoading={busy}
           onClick={create}
         />

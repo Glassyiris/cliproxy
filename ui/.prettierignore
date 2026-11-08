@@ -18,12 +18,17 @@ src/themes/site/site-main.js
 src/themes/site/site-main.d.ts
 src/themes/site/site-main.css.d.ts
 src/themes/site/site-main.variants.d.ts
+src/themes/site/site-neutral.css
+src/themes/site/site-neutral.js
+src/themes/site/site-neutral.d.ts
+src/themes/site/site-neutral.css.d.ts
+src/themes/site/site-neutral.variants.d.ts
 # ponytail: files written before this gate and not yet formatted. The three src/lib files have
 # a function that formatting pushes over the 80-line limit; split it, format the file, then
 # delete its line. The tools are outside the dashboard work's write scope.
 src/lib/credentials.test.ts
 src/lib/credentials.ts
-src/lib/quota-windows.test.ts
+src/lib/quotaWindows.test.ts
 tools/api-allowlist.json
 tools/check-api.mjs
 tools/mock/server.mjs

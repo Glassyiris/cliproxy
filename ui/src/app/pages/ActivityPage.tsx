@@ -3,7 +3,6 @@ import Usage from "../../features/usage";
 import { t } from "../../lib/i18n.ts";
 import { TabbedPage } from "./TabbedPage.tsx";
 
-/** Usage and logs, one tab each. */
 export default function ActivityPage() {
   return (
     <TabbedPage

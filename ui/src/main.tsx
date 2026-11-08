@@ -8,7 +8,7 @@ import { App } from "./app/App.tsx";
 import { astryxMessages, initialLocale, initialPalette } from "./app/preferences.ts";
 import { t } from "./lib/i18n.ts";
 import { notify } from "./lib/notify.ts";
-import { defaultPalette, loadPalette, siteTheme } from "./themes/site/index.ts";
+import { defaultPalette, defaultTheme, loadPalette } from "./themes/site/index.ts";
 
 // A new build replaces the old one's chunks, and a tab opened before it gets the HTML page for
 // them: the next lazy page or dialog fails to load. Reload once to pick up the new build; the
@@ -35,7 +35,7 @@ const [messages, loaded] = await Promise.all([
 ]);
 const palette = loaded
   ? { name: wanted, theme: loaded }
-  : { name: defaultPalette, theme: siteTheme };
+  : { name: defaultPalette, theme: defaultTheme };
 
 // flushSync commits the first render and its effects, so the toast bridge is listening before
 // the failed-palette notice below.

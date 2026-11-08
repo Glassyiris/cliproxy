@@ -21,7 +21,9 @@ export const chartGeometry = {
   margin: { top: 12, right: 16, left: 0, bottom: 4 },
   tick: { fontSize: "var(--font-size-sm)", fill: "var(--color-text-secondary)" },
   grid: "var(--color-border)",
-  cursor: "var(--color-tint-hover)",
+  // The hover band behind a bar: the translucent overlay every theme defines. tint-hover is a
+  // mixing base in neutral (opaque black or white), so it drew a solid band there.
+  cursor: "var(--color-overlay-hover)",
   minTickGap: 16,
 } as const;
 
@@ -30,17 +32,18 @@ export const chartGeometry = {
 // sets the SVG's style itself, so the outline cannot be turned off on the SVG).
 export const chartPlot = stylex.create({
   // The nbcards admin's fixed plot height (card-v2 TrendChart.tsx): 14rem, 12rem on a phone (the
-  // media query is layout.phone; StyleX takes only a literal key).
-  traffic: {
+  // media query is layout.phone; StyleX takes only a literal key). Both overview charts take it,
+  // so the two cards beside each other end level.
+  plot: {
     height: { default: "14rem", "@media (max-width: 47.99rem)": "12rem" },
     width: "100%",
     overflow: "hidden",
   },
-  // A bar list: one band per source and room for the value axis under them, so it grows with its
-  // rows rather than squeezing them into the fixed height.
-  sources: (rows: number) => ({
-    height: `calc(${rows} * 2.25rem + 2rem)`,
-    width: "100%",
-    overflow: "hidden",
-  }),
 });
+
+// The bars the sources chart draws before folding the rest into one: at 12rem each band keeps
+// about 1.7rem, room for a label and its mark.
+export const SOURCE_BARS = 6;
+
+// The space between a source's mark and its bar, in px as recharts takes a tick margin.
+export const MARK_GAP = 6;

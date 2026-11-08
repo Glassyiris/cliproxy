@@ -1,7 +1,9 @@
 // The open account in the detail panel (a bottom sheet on phones), in the order an operator asks:
 // is it serving and when does it come back, what the upstream said, the quota windows, what can
 // be done, then its settings, models and file.
-import { useState, type ReactNode } from "react";
+import { icons } from "../../components/icons.ts";
+import { PanelBlock } from "../../components/PanelBlock.tsx";
+import { useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
@@ -18,6 +20,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useUnsavedChanges } from "../../app/useHashRoute.ts";
 import { Identifier } from "../../components/Identifier.tsx";
 import { useAvailable } from "../../components/MissingActions.tsx";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { QuotaWindow, quotaErrorText } from "../../components/QuotaWindow.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
@@ -32,16 +35,6 @@ import { PanelActions, type PanelProps } from "./PanelActions.tsx";
 import { useCredentialModels } from "./queries.ts";
 import { fieldPatch, fieldsOf, type FieldValues } from "./rows.ts";
 import { ageOf, cooldownOf, lastOf, reasonOf, recoveryOf, statusOf } from "./words.ts";
-
-/** A block of the panel: an h3 over its content. */
-function Block({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <VStack gap={2}>
-      <Heading level={3}>{title}</Heading>
-      {children}
-    </VStack>
-  );
-}
 
 function State({ row, now }: Pick<PanelProps, "row"> & { now: number }) {
   const r = recoveryOf(row.view, now);
@@ -76,7 +69,7 @@ function Upstream({ row, now }: Pick<PanelProps, "row"> & { now: number }) {
   const cooldowns = a.cooldowns ?? [];
   if (!a.status_message && !cooldowns.length) return null;
   return (
-    <Block title={t("accounts.panel.upstream")}>
+    <PanelBlock title={t("accounts.panel.upstream")}>
       {a.status_message && (
         <Text type={roles.textType.identifier} textWrap="wrap">
           {a.status_message}
@@ -99,7 +92,7 @@ function Upstream({ row, now }: Pick<PanelProps, "row"> & { now: number }) {
           ))}
         </List>
       )}
-    </Block>
+    </PanelBlock>
   );
 }
 
@@ -111,7 +104,7 @@ function Limits({ row, quota, now }: Pick<PanelProps, "row" | "quota"> & { now: 
   const signals = Object.entries(a.quota?.signals ?? {});
   if (!windows.length && !limits?.error && !signals.length) return null;
   return (
-    <Block title={t("accounts.panel.quota")}>
+    <PanelBlock title={t("accounts.panel.quota")}>
       <VStack gap={3}>
         {windows.map((w, i) => (
           <QuotaWindow key={i} bar={{ window: w, staleFor }} now={now} />
@@ -148,7 +141,7 @@ function Limits({ row, quota, now }: Pick<PanelProps, "row" | "quota"> & { now: 
           </Collapsible>
         )}
       </VStack>
-    </Block>
+    </PanelBlock>
   );
 }
 
@@ -183,7 +176,7 @@ function FieldsForm({ row, writes }: Pick<PanelProps, "row" | "writes">) {
     if (ok) setSaved(values);
   };
   return (
-    <Block title={t("accounts.panel.settings")}>
+    <PanelBlock title={t("accounts.panel.settings")}>
       <VStack gap={3}>
         <TextInput
           label={t("accounts.fields.note")}
@@ -200,20 +193,21 @@ function FieldsForm({ row, writes }: Pick<PanelProps, "row" | "writes">) {
           <Button
             label={t("accounts.fields.save")}
             size="sm"
+            icon={<Icon icon={icons.save} />}
             isLoading={writes.isBusy("fields")}
             isDisabled={!isAvailable(routes.setCredentialFields)}
             onClick={() => void save()}
           />
         </HStack>
       </VStack>
-    </Block>
+    </PanelBlock>
   );
 }
 
 function Models({ row }: Pick<PanelProps, "row">) {
   const models = useCredentialModels(row.id);
   return (
-    <Block title={t("accounts.panel.models")}>
+    <PanelBlock title={t("accounts.panel.models")}>
       {models.isPending ? (
         <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
       ) : models.isError ? (
@@ -237,7 +231,7 @@ function Models({ row }: Pick<PanelProps, "row">) {
           {t("accounts.panel.noModels")}
         </Text>
       )}
-    </Block>
+    </PanelBlock>
   );
 }
 
@@ -245,7 +239,7 @@ function File({ row }: Pick<PanelProps, "row">) {
   const a = row.account;
   const refreshed = Date.parse(a.last_refresh ?? "");
   return (
-    <Block title={t("accounts.panel.file")}>
+    <PanelBlock title={t("accounts.panel.file")}>
       <MetadataList>
         <MetadataListItem label={t("accounts.panel.fileName")}>
           <Identifier breakAt="name">{a.name}</Identifier>
@@ -269,7 +263,7 @@ function File({ row }: Pick<PanelProps, "row">) {
           </MetadataListItem>
         )}
       </MetadataList>
-    </Block>
+    </PanelBlock>
   );
 }
 
@@ -283,9 +277,11 @@ export function AccountPanel(props: PanelProps & { now: number; onClose: () => v
             <Heading level={roles.heading.section} maxLines={1}>
               {row.name}
             </Heading>
-            <Text type={roles.textType.supporting} color="secondary">
-              {label(row.provider)}
-            </Text>
+            <ProviderLabel provider={row.provider} size="xsm" color="secondary">
+              <Text type={roles.textType.supporting} color="secondary">
+                {label(row.provider)}
+              </Text>
+            </ProviderLabel>
           </VStack>
         </StackItem>
         <IconButton

@@ -3,7 +3,7 @@ import { windowLabel } from "../../components/QuotaWindow.tsx";
 import type { Cooldown, Credential } from "../../lib/api/credentials.ts";
 import type { AccountRow } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
-import { ago, span } from "../../lib/time.ts";
+import { ago, roughSpan, span } from "../../lib/time.ts";
 import type { Show } from "./rows.ts";
 
 const stateWords: Record<AccountRow["state"]["state"], () => string> = {
@@ -40,7 +40,7 @@ export function recoveryOf(v: AccountRow, now: number): { first: string; second:
   if (v.ready) return { first: t("accounts.recovery.none"), second: "" };
   if (s.until && s.until > now)
     return {
-      first: t("accounts.recovery.in", { time: span(s.until - now) }),
+      first: t("accounts.recovery.in", { time: roughSpan(s.until - now) }),
       second: t("accounts.recovery.at", { at: s.until }),
     };
   if (s.state === "signIn") return { first: t("accounts.recovery.afterSignIn"), second: "" };

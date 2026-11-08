@@ -2,6 +2,7 @@ import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { families, familyName, isFamily, type Family } from "../../components/keyFamilies.ts";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
 import { t } from "../../lib/i18n.ts";
 
 /** The Provider keys tab with the add form of `family` open. */
@@ -19,7 +20,7 @@ export function ApiKeyFamily({
     <FormLayout>
       <Selector
         label={t("connect.apiKey.family")}
-        options={families.map((f) => ({ value: f, label: familyName(f) }))}
+        options={families.map((f) => ({ value: f, label: familyName(f), icon: providerIcon(f) }))}
         value={family}
         onChange={(value) => isFamily(value) && onChange(value)}
       />

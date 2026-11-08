@@ -1,8 +1,17 @@
-import { mask } from "./client-keys.ts";
+import { mask } from "./clientKeys.ts";
 import type { Data } from "./json.ts";
 import type { QuotaError } from "./quota.ts";
-import type { Window, WindowLabel } from "./quota-windows.ts";
+import type { Window, WindowLabel } from "./quotaWindows.ts";
 import { spanParts } from "./time.ts";
+
+type CredentialData = Data & {
+  provider?: string;
+  type?: string;
+  account?: string;
+  status_message?: string;
+  status?: string;
+  next_retry_after?: string;
+};
 
 export type Lamp = "ok" | "warn" | "bad" | "off";
 
@@ -10,6 +19,7 @@ const names: Record<string, string> = {
   claude: "Claude",
   anthropic: "Claude",
   codex: "Codex",
+  openai: "OpenAI",
   gemini: "Gemini",
   vertex: "Vertex",
   aistudio: "AI Studio",
@@ -19,15 +29,19 @@ const names: Record<string, string> = {
   xai: "xAI",
   meta: "Meta",
   devin: "Devin",
+  qwen: "Qwen",
+  openrouter: "OpenRouter",
+  kiro: "Kiro",
+  copilot: "GitHub Copilot",
   "openai-compatibility": "OpenAI-compatible",
   interactions: "Interactions",
 };
 export const label = (id: string) => names[id] || id;
-export const provider = (a: Data) => String(a.provider || a.type || "unknown").replace("anthropic", "claude");
+export const provider = (a: CredentialData) => String(a.provider || a.type || "unknown").replace("anthropic", "claude");
 // An api_key credential's `account` is the provider key itself.
-const account = (a: Data): unknown =>
+const account = (a: CredentialData): unknown =>
   a.account_type === "api_key" && a.account ? mask(String(a.account)) : a.account;
-export const credName = (a: Data) => String(a.email || a.label || account(a) || a.name);
+export const credName = (a: CredentialData) => String(a.email || a.label || account(a) || a.name);
 
 /**
  * One state per credential. `state` names the lamp's word: "Disabled", "Limited until <until> ·
@@ -54,9 +68,13 @@ export type CredState = {
   modelsCooling?: number;
 };
 /** One state per credential, derived only from fields Go's /credentials reports. */
-export function credState(a: Data, now = Date.now()): CredState {
+export function credState(a: CredentialData, now = Date.now()): CredState {
   if (a.disabled) return { lamp: "off", state: "disabled", detail: "" };
-  const all: Data[] = Array.isArray(a.cooldowns) ? a.cooldowns : [];
+  const all = (Array.isArray(a.cooldowns) ? a.cooldowns : []) as {
+    scope?: unknown;
+    recover_at: string;
+    retry_at: string;
+  }[];
   // cliproxy-rs: recover_at is the upstream's stated reset when the trust bound cut it.
   const limited = all
     .filter((c) => c.scope !== "model" && Date.parse(c.recover_at) > now)
@@ -96,7 +114,7 @@ export function credState(a: Data, now = Date.now()): CredState {
 
 export type Buckets = { total: number[]; failed: number[] };
 /** Go reports 20 ten-minute buckets per credential. Null means the server did not report history. */
-export function buckets(a: Data): Buckets | null {
+export function buckets(a: CredentialData): Buckets | null {
   if (!Array.isArray(a.recent_requests)) return null;
   const rows = a.recent_requests as Data[];
   return {
@@ -190,7 +208,7 @@ const isAnyWeek = (w: Window) =>
   ("name" in w.label && w.label.name === "lengthLimit" && isSevenDays(w.label.seconds)) ||
   titled(w, /week|\b7 ?d\b|secondary/i);
 
-function why(a: Data, q: Limits, windows: Window[], source: boolean): QuotaWhy {
+function why(a: CredentialData, q: Limits, windows: Window[], source: boolean): QuotaWhy {
   if (a.disabled) return "notChecked";
   if (windows.length) return "notReported";
   if (q && "error" in q && q.error) return "readFailed";
@@ -215,7 +233,7 @@ function sub(s: CredState, ready: boolean, serving: boolean, disabled: boolean, 
  * one or when. Unknown quota is never 0% or 100%: it says why.
  * `live`: the windows came from a check made in this tab (else the server observed them).
  */
-export function accountRow(a: Data, q: Limits, live: boolean, source: boolean, now = Date.now()): AccountRow {
+export function accountRow(a: CredentialData, q: Limits, live: boolean, source: boolean, now = Date.now()): AccountRow {
   const s = credState(a, now);
   const b = buckets(a);
   const lastAt = b ? b.total.map((n) => n > 0).lastIndexOf(true) : -1;

@@ -75,6 +75,7 @@ Intentional designs that look like defects:
 | Quota checks run only on request, one at a time, at most once per account every 2 minutes | Each check is a real provider request | carried over |
 | Batch actions on accounts that share one file act on the whole file, and the dialog says so | The server deletes and toggles by file | carried over |
 | Polling pauses while the tab is hidden | No load for a dashboard nobody looks at | carried over |
+| Provider brand marks are drawn from vendored path data in `src/components/ProviderIcon.tsx`, the one file `check:ui` lets hold `<svg>` | lucide has no brand marks; the monochrome files of `@lobehub/icons-static-svg` 1.102.0 (MIT) are copied into `providerMarks.ts`, not installed, and take the text colour, so both themes follow without colour values | 2026-11-09, 「前端可以加這些知道的ai的圖示嗎」 (monochrome, theme colour) |
 
 Contrast below the limits (official Rosé Pine colours). The owner ruled that the official palette
 values are used unmodified and the limits above stay (2026-11-08, 「原色優先」). "Browser" rows were
@@ -120,6 +121,17 @@ to both palettes.
 | Dawn light | gold on base / surface / overlay | 2.05 / 2.16 / 1.87 | 5:1 | palette | Cooling text, warning banner | 「原色優先」 2026-11-08 |
 | Dawn light | foam on base / surface | 3.14 / 3.30 | 5:1 | palette | Info text | 「原色優先」 2026-11-08 |
 | Dawn light | iris on base / overlay | 3.47 / 3.16 | 5:1 | palette | Links | 「原色優先」 2026-11-08 |
+
+Neutral, the default palette (2026-11-09), computed from the built `site-neutral.css` values:
+body 18.59 light (on #f1f1f1) and 15.13 dark (on #262626), secondary 8.23 and 5.65, warning text
+10.27 and 8.65, the warning badge 7.70 and 6.46, chart volume and bar fills 3.15 (#919191 on
+white) and 3.85 (#777777 on #1b1b1b) against the 3:1 non-text limit. Two of neutral's own status
+colours miss the 5:1 limit on the light page and stay unmodified (they pass WCAG AA):
+
+| Mode | Foreground on background | Ratio | Limit | Measured | Where | Owner ruling |
+| --- | --- | --- | --- | --- | --- | --- |
+| Neutral light | success text #2f7d33 on page #f1f1f1 | 4.53 | 5:1 | palette | Ready text on the page (5.12 on white surfaces) | none yet |
+| Neutral light | info text #0067ce on page #f1f1f1 | 4.85 | 5:1 | palette | Info text on the page | none yet |
 
 ## Not yet enforced
 

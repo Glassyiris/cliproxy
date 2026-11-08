@@ -8,7 +8,7 @@ import { callProvider } from "./api/requests.ts";
 import { routes } from "./api/routes.ts";
 import { provider, type Limits } from "./credentials.ts";
 import type { Data } from "./json.ts";
-import { quotaWindows, signalWindows, type Window } from "./quota-windows.ts";
+import { quotaWindows, signalWindows, type Window } from "./quotaWindows.ts";
 
 // Usage endpoints the server calls with the credential's own token ($TOKEN$ is substituted server-side).
 const usageURL: Record<string, string> = {
