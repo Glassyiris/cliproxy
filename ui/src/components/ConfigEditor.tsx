@@ -8,6 +8,7 @@
 // for every editor, since code lines are long.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Icon } from "@astryxdesign/core/Icon";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -17,6 +18,7 @@ import { Dialog } from "@astryxdesign/core/Dialog";
 import { HStack, Layout, LayoutContent, LayoutFooter, VStack } from "@astryxdesign/core/Layout";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Text } from "@astryxdesign/core/Text";
+import { icons } from "./icons.ts";
 import { serverKeys } from "../app/serverQueries.ts";
 import { failureNotice, type Action } from "../app/useAction.ts";
 import { useUnsavedChanges } from "../app/useHashRoute.ts";
@@ -395,6 +397,7 @@ function EditorFooter({
             <Button
               label={t("app.editor.save")}
               variant="primary"
+              icon={<Icon icon={icons.save} />}
               isLoading={isSaving}
               onClick={onSave}
             />

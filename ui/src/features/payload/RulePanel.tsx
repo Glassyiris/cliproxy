@@ -9,6 +9,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { fieldsOf } from "./RuleTable.tsx";
@@ -41,7 +42,12 @@ export function RulePanel({
         />
       </HStack>
       <HStack gap={2} wrap="wrap">
-        <Button label={t("payload.row.remove")} variant="secondary" onClick={onRemove} />
+        <Button
+          label={t("payload.row.remove")}
+          variant="secondary"
+          icon={<Icon icon={icons.delete} />}
+          onClick={onRemove}
+        />
       </HStack>
       <MetadataList label={{ position: "start" }}>
         <MetadataListItem label={t("payload.col.kind")}>

@@ -34,6 +34,7 @@ import { RequestSparkline } from "../../components/RequestSparkline.tsx";
 import { listColumns, type ListShape } from "../../components/listShape.ts";
 import { ListSkeleton } from "../../components/loadingRows.tsx";
 import { isRowItself, onRowKey, rowAt, useReturnFocus } from "../../components/rowKeys.ts";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
 import { TwoLines } from "../../components/TwoLines.tsx";
 import { Words } from "../../components/Words.tsx";
@@ -111,9 +112,7 @@ function Summary({ row, now }: { row: Row; now: number }) {
   return (
     <VStack gap={0.5}>
       <Name row={row} />
-      <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
-        {accountLine(row)}
-      </Text>
+      <AccountLine row={row} />
       <HStack gap={2} vAlign="center" wrap="wrap">
         <StatusLamp status={lampStatus[row.view.lamp]} label={statusOf(row.view)} />
         {reason && (
@@ -148,10 +147,21 @@ const widths = {
 type Cell = (render: (r: Row) => ReactNode) => (r: Row) => ReactNode;
 
 /** The account's second line: provider and plan, then its note, else its file. */
-const accountLine = (r: Row) =>
-  [[label(r.provider), r.account.id_token?.plan_type].filter(Boolean).join(" "), r.account.note]
+function AccountLine({ row: r }: { row: Row }) {
+  const line = [
+    [label(r.provider), r.account.id_token?.plan_type].filter(Boolean).join(" "),
+    r.account.note,
+  ]
     .filter(Boolean)
     .join(", ");
+  return (
+    <ProviderLabel provider={r.provider} size="xsm" color="secondary">
+      <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
+        {line}
+      </Text>
+    </ProviderLabel>
+  );
+}
 
 /** The name column, with the selection checkbox in its header and in each row. */
 function accountColumn(
@@ -204,7 +214,7 @@ function columnsOf(
     ];
   const columns: TableColumn<Row>[] = [
     accountColumn(selection, allSelected, cell, (r) => (
-      <TwoLines first={<Name row={r} />} second={accountLine(r)} />
+      <TwoLines first={<Name row={r} />} second={<AccountLine row={r} />} />
     )),
     {
       key: "status",

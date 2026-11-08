@@ -25,6 +25,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { HStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
+import { icons } from "../../components/icons.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams, useHashRoute } from "../../app/useHashRoute.ts";
@@ -155,6 +156,7 @@ function ApplicationLog({
       {tail.isPending && !tail.isError && <LoadingRows isPanelOpen={!!view.openId} />}
       {kept === 0 && (
         <EmptyState
+          icon={<Icon icon={icons.logs} size="lg" />}
           title={t("logs.empty.title")}
           description={t("logs.empty.description", {
             setting: "observability.logs.logging-to-file",

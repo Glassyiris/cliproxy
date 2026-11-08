@@ -9,6 +9,7 @@ import { VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { defineSyntaxTheme, SyntaxTheme } from "@astryxdesign/core/theme/syntax";
 import { usePreferences } from "../app/preferences.ts";
+import type { Palette } from "../themes/site/index.ts";
 import { layout } from "../themes/site/layout.ts";
 import { dawn, main, moon, type RosePineVariant } from "../themes/site/rosePine.ts";
 
@@ -40,14 +41,15 @@ const syntaxTheme = (dark: RosePineVariant, name: string) => {
   });
 };
 
-const themes = {
+// Neutral has none: Astryx's syntax tokens default to the theme's palette tokens.
+const themes: Partial<Record<Palette, ReturnType<typeof syntaxTheme>>> = {
   moon: syntaxTheme(moon, "rose-pine-moon"),
   main: syntaxTheme(main, "rose-pine-main"),
 };
 
 export function CodeColors({ children }: { children: ReactNode }) {
-  const { palette } = usePreferences();
-  return <SyntaxTheme theme={themes[palette]}>{children}</SyntaxTheme>;
+  const theme = themes[usePreferences().palette];
+  return theme ? <SyntaxTheme theme={theme}>{children}</SyntaxTheme> : children;
 }
 
 const loadCodeMirror = () =>

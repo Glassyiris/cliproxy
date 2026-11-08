@@ -1,17 +1,19 @@
 import { useMemo } from "react";
-import { ChartBarDecreasing, ChartColumn, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Icon } from "@astryxdesign/core/Icon";
 import { VStack } from "@astryxdesign/core/Layout";
+import { icons } from "../../components/icons.ts";
 import { CardHeading } from "../../components/CardHeading.tsx";
 import { SourceChart, TrafficChart, type SourceRow } from "../../components/charts/index.ts";
 import { ReadError } from "../../components/ReadError.tsx";
 import { SectionHeading } from "../../components/SectionHeading.tsx";
 import { label, type Buckets } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
+import { SOURCE_BARS } from "../../themes/site/charts.ts";
 import { layout } from "../../themes/site/layout.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { failures, type Source } from "./summary.ts";
@@ -61,9 +63,9 @@ function TrafficCard({
   );
   const failedWithoutData = traffic === undefined && reads.length > 0;
   return (
-    <Card padding={roles.card.padding}>
+    <Card padding={roles.card.padding} height="100%">
       <VStack gap={roles.gap.card}>
-        <CardHeading icon={ChartColumn} title={t("overview.chart.label")} />
+        <CardHeading icon={icons.traffic} title={t("overview.chart.label")} />
         {reads.map((read) => (
           <ReadError key={read.what} error={read.error} what={read.what} retry={read.retry} />
         ))}
@@ -86,26 +88,38 @@ function TrafficCard({
 
 function SourcesCard({ sources, reads }: { sources: Source[] | null | undefined; reads: Read[] }) {
   // A source without requests in the window draws no bar; the Usage page lists every source.
-  const rows = useMemo(
-    () =>
-      sources
-        ?.filter((s) => s.total > 0)
-        .map((s) => ({
-          key: `${s.kind}:${s.provider}`,
-          label:
-            s.kind === "accounts"
-              ? t("overview.sources.accounts", { provider: label(s.provider) })
-              : t("overview.sources.keys", { provider: label(s.provider) }),
-          total: s.total,
-          failed: s.failed,
-        })),
-    [sources],
-  );
+  // Busiest first; past SOURCE_BARS the rest fold into one bar, and the Usage page lists them all.
+  const rows = useMemo(() => {
+    const busy = sources
+      ?.filter((s) => s.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .map((s) => ({
+        key: `${s.kind}:${s.provider}`,
+        label:
+          s.kind === "accounts"
+            ? t("overview.sources.accounts", { provider: label(s.provider) })
+            : t("overview.sources.keys", { provider: label(s.provider) }),
+        total: s.total,
+        failed: s.failed,
+        provider: s.provider,
+      }));
+    if (!busy || busy.length <= SOURCE_BARS) return busy;
+    const rest = busy.slice(SOURCE_BARS - 1);
+    return [
+      ...busy.slice(0, SOURCE_BARS - 1),
+      {
+        key: "other",
+        label: t("overview.sources.other", { count: rest.length }),
+        total: rest.reduce((n, r) => n + r.total, 0),
+        failed: rest.reduce((n, r) => n + r.failed, 0),
+      },
+    ];
+  }, [sources]);
   return (
-    <Card padding={roles.card.padding}>
+    <Card padding={roles.card.padding} height="100%">
       <VStack gap={roles.gap.card}>
         <CardHeading
-          icon={ChartBarDecreasing}
+          icon={icons.sources}
           title={t("overview.sources.heading")}
           actions={
             <Button
@@ -140,8 +154,8 @@ function SourcesCard({ sources, reads }: { sources: Source[] | null | undefined;
 }
 
 /**
- * The traffic section: its heading, then the template's two chart cards side by side, each at its
- * own height and aligned at the top, stacked where they do not fit: requests per ten-minute bucket
+ * The traffic section: its heading, then the template's two chart cards side by side at one plot
+ * height, so they end level, stacked where they do not fit: requests per ten-minute bucket
  * with failures on top, and requests per source. `traffic` and `sources` are
  * undefined while loading and null when the server reports no history; `reads` are the failed
  * reads both depend on, shown in the traffic card.
@@ -159,12 +173,12 @@ export function Charts({
 }) {
   return (
     <VStack gap={roles.gap.card}>
-      <SectionHeading title={t("overview.chart.heading")} hint={t("overview.chart.window")} />
-      <Grid
-        columns={{ minWidth: layout.settingsColumnMin, repeat: "fit" }}
-        gap={roles.gap.card}
-        align="start"
-      >
+      <SectionHeading
+        icon={icons.activity}
+        title={t("overview.chart.heading")}
+        hint={t("overview.chart.window")}
+      />
+      <Grid columns={{ minWidth: layout.settingsColumnMin, repeat: "fit" }} gap={roles.gap.card}>
         <TrafficCard traffic={traffic} times={times} reads={reads} />
         <SourcesCard sources={sources} reads={reads} />
       </Grid>

@@ -1,9 +1,11 @@
 import * as stylex from "@stylexjs/stylex";
 import { DropdownMenu, DropdownMenuItem } from "@astryxdesign/core/DropdownMenu";
+import type { IconType } from "@astryxdesign/core/Icon";
 import { HStack, StackItem } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { colorVars } from "@astryxdesign/core/theme/tokens.stylex";
 import { t } from "../lib/i18n.ts";
+import { icons } from "./icons.ts";
 import { layout } from "../themes/site/layout.ts";
 import { roles } from "../themes/site/roles.ts";
 
@@ -47,13 +49,16 @@ export function CountedSelector({
   allLabel: string;
   value: string;
   onChange: (value: string) => void;
-  options: { value: string; label: string; count: number }[];
+  /** `icon` marks a value (a family's brand mark); the first row has none. */
+  options: { value: string; label: string; count: number; icon?: IconType }[];
 }) {
   const chosen = options.find((o) => o.value === value);
   const trigger = chosen ? t("app.list.chosen", { field: label, value: chosen.label }) : label;
   const shown = options.filter((o) => o.count > 0 || o.value === value);
   const total = options.reduce((sum, o) => sum + o.count, 0);
-  const rows = [{ value: "", label: allLabel, count: total }, ...shown];
+  // Marked values give the first row a mark too, so every label starts at the same place.
+  const allIcon = options.some((o) => o.icon) ? icons.all : undefined;
+  const rows = [{ value: "", label: allLabel, count: total, icon: allIcon }, ...shown];
   return (
     <DropdownMenu
       button={{ label: trigger }}
@@ -63,6 +68,7 @@ export function CountedSelector({
       {rows.map((o) => (
         <DropdownMenuItem
           key={o.value}
+          icon={o.icon}
           label={<Row label={o.label} count={o.count} isChosen={o.value === value} />}
           xstyle={o.value === value ? styles.chosen : undefined}
           onClick={() => onChange(o.value)}

@@ -59,15 +59,18 @@ export default {
     "overview.sources.keys": "{provider} 密钥",
     "overview.sources.summary":
       "请求最多的来源是 {source}，{total, number} 个请求中占 {count, number} 个。",
+    "overview.sources.other": "其他（{count, number} 个）",
     "overview.sources.usage": "打开用量页",
 
     "overview.start.heading": "开始使用",
     "overview.start.key": "创建客户端密钥",
     "overview.start.connect": "连接账号",
     "overview.start.test": "发送测试请求",
-    "overview.start.done": "已完成",
-    "overview.start.next": "下一步",
-    "overview.start.later": "未开始",
+    "overview.start.progress": "已完成 {done, number}/{total, number}",
+    "overview.start.skip": "跳过",
+    "overview.start.keyLine": "工具用这个密钥访问代理。",
+    "overview.start.connectLine": "登录 Claude、Codex 或其他提供商的账号。",
+    "overview.start.testLine": "发送一个请求，确认整条链路可用。",
     "overview.start.allSet": "设置完成",
   },
 };

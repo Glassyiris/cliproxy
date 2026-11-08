@@ -14,6 +14,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { familyName } from "../../components/keyFamilies.ts";
 import { listColumns, type ListShape } from "../../components/listShape.ts";
 import { ListSkeleton } from "../../components/loadingRows.tsx";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { RequestSparkline } from "../../components/RequestSparkline.tsx";
 import { isRowItself, onRowKey, rowAt, useReturnFocus } from "../../components/rowKeys.ts";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
@@ -34,14 +35,18 @@ type Item = Entry & Record<string, unknown>;
 function GroupLine({ entry }: { entry: Entry }) {
   const family = familyName(entry.family);
   const url = entry.group["base-url"];
-  if (!url)
-    return (
-      <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
-        {family}
-      </Text>
-    );
-  const { head, tail } = endpointParts(url);
-  return <MiddleText head={`${family} · ${head}`} tail={tail} isSecondary />;
+  const parts = url ? endpointParts(url) : null;
+  return (
+    <ProviderLabel provider={entry.family} size="xsm" color="secondary">
+      {parts ? (
+        <MiddleText head={`${family} · ${parts.head}`} tail={parts.tail} isSecondary />
+      ) : (
+        <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
+          {family}
+        </Text>
+      )}
+    </ProviderLabel>
+  );
 }
 
 function Name({ entry }: { entry: Entry }) {

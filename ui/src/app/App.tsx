@@ -10,7 +10,7 @@ import { Theme, type DefinedTheme } from "@astryxdesign/core/theme";
 import { ToastViewport } from "@astryxdesign/core/Toast";
 import { setLocale as selectLocale, t, type Locale } from "../lib/i18n.ts";
 import { notify } from "../lib/notify.ts";
-import { defaultPalette, loadPalette, siteTheme, type Palette } from "../themes/site/index.ts";
+import { defaultPalette, defaultTheme, loadPalette, type Palette } from "../themes/site/index.ts";
 import { ToastBridge } from "./Notices.tsx";
 import {
   astryxMessages,
@@ -121,7 +121,7 @@ export function App({
         if (wantedPalette.current !== next) return;
         if (!theme) {
           notify("error", t("app.colors.failed"));
-          setPalette({ name: defaultPalette, theme: siteTheme });
+          setPalette({ name: defaultPalette, theme: defaultTheme });
           return;
         }
         setPalette({ name: next, theme });

@@ -1,5 +1,4 @@
 // The open request's log in the end panel (a bottom sheet on phones).
-import { Download } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -7,6 +6,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Heading } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { Identifier } from "../../components/Identifier.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { saveBlob } from "../../lib/download.ts";
@@ -35,7 +35,7 @@ function Body({ id }: { id: string }) {
         <Button
           label={t("logs.request.download")}
           size="sm"
-          icon={<Icon icon={Download} size="sm" />}
+          icon={<Icon icon={icons.download} size="sm" />}
           onClick={() => saveBlob(new Blob([text], { type: "text/plain" }), `request-${id}.log`)}
         />
       </HStack>

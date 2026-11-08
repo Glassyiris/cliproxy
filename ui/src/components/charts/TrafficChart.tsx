@@ -36,7 +36,7 @@ export function TrafficChart({
     <ChartFrame
       label={label}
       summary={summary}
-      plot={chartPlot.traffic}
+      plot={chartPlot.plot}
       legend={[
         { series: "volume", label: names.requests },
         { series: "failed", label: names.failed },

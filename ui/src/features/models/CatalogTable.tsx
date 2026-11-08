@@ -9,6 +9,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import {
+  pixel,
   proportional,
   Table,
   useTableSortable,
@@ -18,7 +19,9 @@ import {
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { Ellipsis } from "lucide-react";
+import { icons } from "../../components/icons.ts";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
@@ -28,6 +31,11 @@ import { useRowActivation } from "./rowActivation.ts";
 import { SkeletonTable } from "./SkeletonTable.tsx";
 
 export const share = (n: number) => proportional(n, { minWidth: layout.tableColumnFloor });
+/**
+ * A provider column at the fixed width of its mark and longest name. Not a share with that floor:
+ * the Table sizes every share by the largest floor per share, which would widen every column.
+ */
+export const providerShare = pixel(layout.providerColumn);
 
 export type ModelActions = {
   onAlias: (row: ModelRow) => void;
@@ -141,9 +149,13 @@ function columnsFor(isMobile: boolean, actions: ModelActions): TableColumn<Model
     },
     {
       key: "channel",
-      width: share(1),
+      width: providerShare,
       header: t("models.col.family"),
-      renderCell: (row) => label(row.channel),
+      renderCell: (row) => (
+        <ProviderLabel provider={row.channel} color="secondary">
+          <Text maxLines={1}>{label(row.channel)}</Text>
+        </ProviderLabel>
+      ),
     },
     { key: "aliases", width: share(2), header: t("models.col.aliases"), renderCell: aliasText },
     {
@@ -209,12 +221,17 @@ export function CatalogTable({
   if (!rows.length)
     return isFiltered ? (
       <EmptyState
+        icon={<Icon icon={icons.search} size="lg" />}
         title={t("models.empty.noMatch")}
         headingLevel={roles.heading.section}
         actions={<Button label={t("models.empty.clear")} variant="secondary" onClick={onClear} />}
       />
     ) : (
-      <EmptyState title={t("models.empty.catalog")} headingLevel={roles.heading.section} />
+      <EmptyState
+        icon={<Icon icon={icons.models} size="lg" />}
+        title={t("models.empty.catalog")}
+        headingLevel={roles.heading.section}
+      />
     );
   const shown = pageOf(sortedData, page);
   return (

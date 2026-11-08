@@ -41,6 +41,7 @@ function PaletteOptions() {
       value={palette}
       onChange={(value) => isPalette(value) && setPalette(value)}
     >
+      <DropdownMenuRadioItem value="neutral" label={t("app.colors.neutral")} />
       <DropdownMenuRadioItem value="moon" label={t("app.colors.moon")} />
       <DropdownMenuRadioItem value="main" label={t("app.colors.main")} />
     </DropdownMenuRadioGroup>

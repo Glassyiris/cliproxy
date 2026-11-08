@@ -11,10 +11,10 @@
 // - The empty state has the add action and no warning banner: Overview's attention card already
 //   says when no key exists and links here.
 import { useState, type ReactNode } from "react";
-import { Plug, Plus } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
+import { icons } from "../../components/icons.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
@@ -47,7 +47,7 @@ function HeaderActions({
       <Button
         label={t("app.nav.use")}
         variant="secondary"
-        icon={<Icon icon={Plug} />}
+        icon={<Icon icon={icons.use} />}
         onClick={onUse}
       />
       {showAdd && add}
@@ -85,7 +85,7 @@ export default function ClientKeys() {
     <Button
       label={t("keys.page.add")}
       variant={roles.primaryAction.variant}
-      icon={<Icon icon={Plus} />}
+      icon={<Icon icon={icons.add} />}
       onClick={() => setAdding(true)}
     />
   );
@@ -121,6 +121,7 @@ export default function ClientKeys() {
       )}
       {keys?.length === 0 && (
         <EmptyState
+          icon={<Icon icon={icons.clientKeys} size="lg" />}
           title={t("keys.empty.title")}
           headingLevel={roles.heading.section}
           actions={addButton}

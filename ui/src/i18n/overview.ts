@@ -59,15 +59,18 @@ export default {
     "overview.sources.keys": "{provider} keys",
     "overview.sources.summary":
       "{source} sent the most requests: {count, number} of {total, number}.",
+    "overview.sources.other": "Other ({count, number})",
     "overview.sources.usage": "Open Usage",
 
     "overview.start.heading": "Get started",
     "overview.start.key": "Create a client key",
     "overview.start.connect": "Connect an account",
     "overview.start.test": "Send a test request",
-    "overview.start.done": "Done",
-    "overview.start.next": "Next",
-    "overview.start.later": "Not yet",
+    "overview.start.progress": "{done, number} of {total, number} done",
+    "overview.start.skip": "Skip",
+    "overview.start.keyLine": "Tools use this key to reach the proxy.",
+    "overview.start.connectLine": "Sign in to Claude, Codex or another provider.",
+    "overview.start.testLine": "Send one request to check the whole path.",
     "overview.start.allSet": "All set.",
   },
 };

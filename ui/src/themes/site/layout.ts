@@ -41,6 +41,9 @@ export const layout = {
   // floor for such a column is 120, which pushes a table of short columns wider than a phone or
   // the list beside an open panel; this is the floor it gives a column with no width.
   tableColumnFloor: 60,
+  // A provider column: the brand mark, its gap and the longest provider name ("Antigravity")
+  // on one line, plus the cell's inline padding; the shared floor cut the names to "Cla…".
+  providerColumn: 140,
   // A column holding one short value (Logs' time, request id and level), which needs 78 to 100 on
   // one line; a share of the width broke them where the list is narrow.
   shortValueColumn: 100,
@@ -68,8 +71,9 @@ export const layout = {
     // The column the pinned close button floats over, so a long description wraps before it.
     closeColumn: 32,
     // Palette tiles: at least this wide each (the template's 96 holds one picture; a palette tile
-    // holds a light and a dark half), and the group capped so the pictures stay controls.
+    // holds a light and a dark half), and the group capped so the pictures stay controls: three
+    // tiles in one row, each as wide as two were under the old 480 cap.
     previewMin: 160,
-    previewsMax: 480,
+    previewsMax: 720,
   },
 } as const;

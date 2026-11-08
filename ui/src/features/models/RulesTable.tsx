@@ -1,7 +1,6 @@
 // The Rules view: the aliases and exclusion patterns of the chosen families, each removable after
 // a confirmation; focus then goes to the row that took the removed one's place.
 import type { RefObject } from "react";
-import { Trash2 } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
@@ -12,11 +11,13 @@ import { Pagination } from "@astryxdesign/core/Pagination";
 import { Table, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
+import { icons } from "../../components/icons.ts";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { PAGE_SIZE, pageOf, type RuleRow } from "./modelConfig.ts";
-import { share } from "./CatalogTable.tsx";
+import { providerShare, share } from "./CatalogTable.tsx";
 import { SkeletonTable } from "./SkeletonTable.tsx";
 import { useRemovalFocus } from "./useRemovalFocus.ts";
 
@@ -68,7 +69,7 @@ function columnsFor(
           tooltip={t("models.rules.remove")}
           variant={roles.rowAction.variant}
           size={roles.rowAction.size}
-          icon={<Icon icon={Trash2} size="sm" />}
+          icon={<Icon icon={icons.delete} size="sm" />}
           onClick={() => remove(row, position)}
         />
       );
@@ -91,9 +92,13 @@ function columnsFor(
     },
     {
       key: "channel",
-      width: share(1),
+      width: providerShare,
       header: t("models.col.family"),
-      renderCell: (row) => label(row.channel),
+      renderCell: (row) => (
+        <ProviderLabel provider={row.channel} color="secondary">
+          <Text maxLines={1}>{label(row.channel)}</Text>
+        </ProviderLabel>
+      ),
     },
     action,
   ];
@@ -133,12 +138,17 @@ export function RulesTable({
   if (!rows.length)
     return isFiltered ? (
       <EmptyState
+        icon={<Icon icon={icons.search} size="lg" />}
         title={t("models.empty.noRuleMatch")}
         headingLevel={roles.heading.section}
         actions={<Button label={t("models.empty.clear")} variant="secondary" onClick={onClear} />}
       />
     ) : (
-      <EmptyState title={t("models.empty.rules")} headingLevel={roles.heading.section} />
+      <EmptyState
+        icon={<Icon icon={icons.models} size="lg" />}
+        title={t("models.empty.rules")}
+        headingLevel={roles.heading.section}
+      />
     );
   return (
     <VStack gap={roles.gap.card}>

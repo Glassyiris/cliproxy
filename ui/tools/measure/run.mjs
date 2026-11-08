@@ -148,7 +148,7 @@ function declarations() {
           throw new CannotRun(`${route}: unknown measurement "${name}" (${OPTIONAL.join(", ")})`);
       const required = listed && [...ALWAYS, ...listed];
       const answer = answers[route] ?? ROUTES[route]?.answer;
-      return [route, { answer, required, pending: ROUTES[route]?.pending }];
+      return [route, { answer, required }];
     }),
   );
 }
@@ -263,19 +263,19 @@ function roleValues(label, route, result, required) {
 }
 
 /** One route's failures at one viewport, and the declared role values it measured. */
-function judgeRoute(label, route, result, { answer, required = ALWAYS, pending }) {
+function judgeRoute(label, route, result, { answer, required = ALWAYS }) {
   const { failures, values } = roleValues(label, route, result, required);
   for (const name of required)
     if (result[name] === null) failures.push(`${label} ${route}: no sample of ${name}`);
   for (const [name, want] of Object.entries(EXPECTED[label] ?? {}))
     if (name in values && values[name] !== want)
       failures.push(`${label} ${route}: ${name} is ${values[name]}, not ${want}`);
-  const load = [];
-  if (result.cls > LIMITS.cls) load.push(`${label} ${route}: CLS ${result.cls} > ${LIMITS.cls}`);
+  if (result.cls > LIMITS.cls)
+    failures.push(`${label} ${route}: CLS ${result.cls} > ${LIMITS.cls}`);
   if (result.skeletonShift > LIMITS.skeletonShift)
-    load.push(`${label} ${route}: first region moved ${result.skeletonShift} px from its skeleton`);
-  if (pending) for (const line of load) console.log(`NOTE (content, ${pending}) ${line}`);
-  else failures.push(...load);
+    failures.push(
+      `${label} ${route}: first region moved ${result.skeletonShift} px from its skeleton`,
+    );
   if (result.answer === false) failures.push(`${label} ${route}: answer ${answer} is not in view`);
   return { failures, values };
 }

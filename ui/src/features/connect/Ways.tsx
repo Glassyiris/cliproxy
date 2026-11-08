@@ -2,11 +2,14 @@ import { useId } from "react";
 import { Field } from "@astryxdesign/core/Field";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Grid } from "@astryxdesign/core/Grid";
-import { VStack } from "@astryxdesign/core/Layout";
+import { Icon, type IconType } from "@astryxdesign/core/Icon";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { SelectableCard } from "@astryxdesign/core/SelectableCard";
 import { Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { usePlugins } from "../../app/serverQueries.ts";
 import { useAvailable } from "../../components/MissingActions.tsx";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { label } from "../../lib/credentials.ts";
@@ -19,7 +22,7 @@ export type Way = { kind: "signIn"; provider: string } | { kind: "vertex" } | { 
 
 const wayKey = (way: Way) => (way.kind === "signIn" ? `signIn:${way.provider}` : way.kind);
 
-type Choice = { way: Way; name: string; line: string; reason: string | null };
+type Choice = { way: Way; name: string; icon: IconType; line: string; reason: string | null };
 
 /**
  * One labelled group of choice cards, one line each for the name and the description, the reason
@@ -58,9 +61,14 @@ function Choices({
             padding={3}
           >
             <VStack gap={1}>
-              <Text type="label" maxLines={1}>
-                {c.name}
-              </Text>
+              <HStack gap={1.5} vAlign="center" wrap="nowrap">
+                <Icon icon={c.icon} size="sm" />
+                <StackItem size="fill">
+                  <Text type="label" maxLines={1}>
+                    {c.name}
+                  </Text>
+                </StackItem>
+              </HStack>
               <Text type="supporting" color="secondary" maxLines={1}>
                 {/* A blank line keeps its height, so a reason arriving later moves nothing. */}
                 {c.reason ?? (c.line || "\u00a0")}
@@ -94,6 +102,7 @@ export function Ways({
   const providers = [...new Set([...builtIn, ...fromPlugins])].map((provider): Choice => ({
     way: { kind: "signIn", provider },
     name: label(provider),
+    icon: providerIcon(provider),
     // Only where the page is not the provider's own (Codex signs in on OpenAI's).
     line:
       owner(provider) === label(provider)
@@ -105,12 +114,14 @@ export function Ways({
     {
       way: { kind: "vertex" },
       name: t("connect.way.vertex"),
+      icon: providerIcon("vertex"),
       line: t("connect.way.vertexLine"),
       reason: available(routes.importOAuth) && !gone.includes("vertex") ? null : unavailable,
     },
     {
       way: { kind: "apiKey" },
       name: t("connect.way.apiKey"),
+      icon: icons.providerKeys,
       line: "",
       reason: null,
     },

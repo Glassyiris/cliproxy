@@ -181,7 +181,7 @@ export const siteAdaptations: ThemeConfig["adaptations"] = {
  * 20 px line, and radius 8 / 12 / 16 (inner, element, card). The metric value (display-3, 31 px)
  * is semibold, as card-v2's MetricCard draws it.
  */
-const sizeTokens = {
+export const siteSizes = {
   "--size-element-sm": "32px",
   "--size-element-md": "36px",
   "--size-element-lg": "40px",
@@ -197,7 +197,7 @@ const sizeTokens = {
 export const roseTokens = (dark: RosePineVariant) => {
   const r = roles(dark);
   return {
-    ...sizeTokens,
+    ...siteSizes,
     ...chromeTokens(r, dark),
     ...statusTokens(r),
     ...dataTokens(r),
@@ -205,8 +205,9 @@ export const roseTokens = (dark: RosePineVariant) => {
 };
 
 /**
- * The site theme, built twice: Moon (the default, this file) and Main (siteMainTheme.ts, loaded on
- * demand). Both extend Astryx's neutral theme and set tokens and the type scale only: fonts,
+ * The site theme, built three times: Moon (the default, this file), Main (siteMainTheme.ts) and
+ * Neutral (siteNeutralTheme.ts), the last two loaded on demand. All extend Astryx's neutral theme
+ * and set tokens and the type scale only: fonts,
  * components, icons (lucide) and motion come from neutral, so no Astryx component carries a style of this
  * app's own. Each file calls defineTheme itself: the build follows `extends` to carry neutral's
  * icon registry only through a direct defineTheme call.

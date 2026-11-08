@@ -1,13 +1,14 @@
 // What can be done to the open account: the two actions used most as buttons, the rest in one
 // menu after them, so the row stays one line in the panel. Unsupported actions render disabled
 // and are named in the page's one MissingActions line.
-import { Download, RefreshCw, RotateCcw, TimerReset, Trash2 } from "lucide-react";
+import { RotateCcw, TimerReset } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import type { DropdownMenuItemData, DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
 import { HStack } from "@astryxdesign/core/Layout";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Spinner } from "@astryxdesign/core/Spinner";
+import { icons } from "../../components/icons.ts";
 import type { useQuota } from "../../app/QuotaProvider.tsx";
 import { useAvailable } from "../../components/MissingActions.tsx";
 import { downloadCredential, refreshCredentials } from "../../lib/api/credentials.ts";
@@ -44,7 +45,7 @@ function CheckQuota({ row, quota, now }: Pick<PanelProps, "row" | "quota"> & { n
     <Button
       label={text}
       size="sm"
-      icon={<Icon icon={RefreshCw} size="sm" />}
+      icon={<Icon icon={icons.refresh} size="sm" />}
       isLoading={pending === "checking"}
       isDisabled={!quota.canCheck(a) || (!pending && wait > 0)}
       onClick={() => void quota.check(a)}
@@ -122,7 +123,7 @@ function menuActions(props: PanelProps, isAvailable: Available) {
   const rest: MenuAction[] = [
     {
       label: t("accounts.actions.refresh"),
-      icon: RefreshCw,
+      icon: icons.refresh,
       busy: "refresh",
       isDisabled: !isAvailable(routes.refreshCredentials),
       onClick: sendThenReload(
@@ -135,7 +136,7 @@ function menuActions(props: PanelProps, isAvailable: Available) {
     ...resets(props, isAvailable),
     {
       label: t("accounts.actions.download"),
-      icon: Download,
+      icon: icons.download,
       busy: "download",
       isDisabled: a.runtime_only,
       onClick: () =>
@@ -144,7 +145,7 @@ function menuActions(props: PanelProps, isAvailable: Available) {
   ];
   const remove: MenuAction = {
     label: t("accounts.actions.deleteOne"),
-    icon: Trash2,
+    icon: icons.delete,
     variant: "destructive",
     busy: "delete",
     isDisabled: a.runtime_only || !isAvailable(routes.deleteCredentials),

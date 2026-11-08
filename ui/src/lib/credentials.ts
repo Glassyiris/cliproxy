@@ -19,6 +19,7 @@ const names: Record<string, string> = {
   claude: "Claude",
   anthropic: "Claude",
   codex: "Codex",
+  openai: "OpenAI",
   gemini: "Gemini",
   vertex: "Vertex",
   aistudio: "AI Studio",
@@ -28,6 +29,10 @@ const names: Record<string, string> = {
   xai: "xAI",
   meta: "Meta",
   devin: "Devin",
+  qwen: "Qwen",
+  openrouter: "OpenRouter",
+  kiro: "Kiro",
+  copilot: "GitHub Copilot",
   "openai-compatibility": "OpenAI-compatible",
   interactions: "Interactions",
 };

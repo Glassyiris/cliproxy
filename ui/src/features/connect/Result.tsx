@@ -1,5 +1,4 @@
 import type { Ref } from "react";
-import { Plus, RefreshCw } from "lucide-react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -7,6 +6,7 @@ import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { useQuota } from "../../app/QuotaProvider.tsx";
 import { QuotaWindow, quotaErrorText } from "../../components/QuotaWindow.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
@@ -77,7 +77,7 @@ function Refused({ flow, signIn, lead }: Props) {
         <Button
           label={t("connect.result.tryAgain")}
           variant="secondary"
-          icon={<Icon icon={RefreshCw} />}
+          icon={<Icon icon={icons.refresh} />}
           isLoading={signIn.pending === "tryAgain"}
           onClick={() => void signIn.tryAgain()}
         />
@@ -125,7 +125,7 @@ function Connected({ flow, signIn, lead }: Props) {
           ref={lead}
           label={t("connect.result.another", { provider: label(flow.provider) })}
           variant="secondary"
-          icon={<Icon icon={Plus} />}
+          icon={<Icon icon={icons.add} />}
           isLoading={signIn.pending === flow.provider}
           onClick={() => void signIn.start(flow.provider)}
         />

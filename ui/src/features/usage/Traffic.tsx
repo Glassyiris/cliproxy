@@ -1,7 +1,6 @@
 // The Usage tab's first section: requests per ten minutes for every source or the chosen one, then
 // the sources compared, each count beside the share it makes up.
 import { useMemo, type ReactNode } from "react";
-import { ChartColumn } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Card } from "@astryxdesign/core/Card";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
@@ -12,10 +11,12 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
+import { icons } from "../../components/icons.ts";
 import { useApiKeyUsage, useCredentials } from "../../app/serverQueries.ts";
 import { CardHeading } from "../../components/CardHeading.tsx";
 import { TrafficChart } from "../../components/charts/index.ts";
 import { loadingCell, placeholderRows, type LoadingRow } from "../../components/loadingRows.tsx";
+import { ProviderLabel, providerIcon } from "../../components/ProviderIcon.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { SectionHeading } from "../../components/SectionHeading.tsx";
 import { notImplemented } from "../../lib/api/client.ts";
@@ -102,7 +103,7 @@ function TrafficCard({
     <Card padding={roles.card.padding}>
       <VStack gap={roles.gap.card} id="activity-traffic">
         <CardHeading
-          icon={ChartColumn}
+          icon={icons.traffic}
           title={t("usage.traffic.heading")}
           description={t("usage.page.window")}
           actions={
@@ -115,7 +116,7 @@ function TrafficCard({
                 { value: "", label: t("usage.traffic.all") },
                 ...(rows ?? [])
                   .filter((r) => r.buckets)
-                  .map((r) => ({ value: r.key, label: nameOf(r) })),
+                  .map((r) => ({ value: r.key, label: nameOf(r), icon: providerIcon(r.provider) })),
               ]}
             />
           }
@@ -177,7 +178,7 @@ function ChartToggle({
       isIconOnly
       size={roles.rowAction.size}
       isPressed={isChosen}
-      icon={<Icon icon={ChartColumn} size="sm" />}
+      icon={<Icon icon={icons.traffic} size="sm" />}
       onPressedChange={(pressed) => onChoose(pressed ? source.key : "")}
     />
   );
@@ -187,7 +188,11 @@ type Row = LoadingRow<Source>;
 
 const count = (n: number) => <Text hasTabularNumbers>{t("usage.tiles.count", { n })}</Text>;
 
-const name = (s: Source) => <Text weight={roles.textWeight.emphasis}>{nameOf(s)}</Text>;
+const name = (s: Source) => (
+  <ProviderLabel provider={s.provider} color="secondary">
+    <Text weight={roles.textWeight.emphasis}>{nameOf(s)}</Text>
+  </ProviderLabel>
+);
 
 const notReported = (
   <Text type={roles.textType.supporting} color="secondary">
@@ -357,11 +362,18 @@ export function TrafficSection({
       </VStack>
     ) : (
       !accountRead &&
-      keysAnswered && <EmptyState title={t("usage.sources.empty")} headingLevel={3} isCompact />
+      keysAnswered && (
+        <EmptyState
+          icon={<Icon icon={icons.sources} size="lg" />}
+          title={t("usage.sources.empty")}
+          headingLevel={3}
+          isCompact
+        />
+      )
     );
   return (
     <VStack gap={roles.gap.card}>
-      <SectionHeading title={t("usage.sources.heading")} />
+      <SectionHeading icon={icons.sources} title={t("usage.sources.heading")} />
       {accountRead && (
         <ReadError
           error={accountRead.error}

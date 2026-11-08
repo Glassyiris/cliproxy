@@ -7,9 +7,10 @@
     "tools/mock/server.mjs",
     "tools/perf/run.mjs",
     "tools/perf/adapters/*.mjs",
-    // The sources `astryx theme build` compiles into site.* and siteMainTokens.*, which the app imports.
+    // The sources `astryx theme build` compiles into site.*, site-main.* and site-neutral.*, which the app imports.
     "src/themes/site/siteTheme.ts",
-    "src/themes/site/siteMainTheme.ts"
+    "src/themes/site/siteMainTheme.ts",
+    "src/themes/site/siteNeutralTheme.ts"
   ],
   "project": ["src/**/*.{ts,tsx}", "tools/**/*.mjs"]
 }

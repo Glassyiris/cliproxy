@@ -16,9 +16,9 @@
 // - The reading pane is the shared detail panel (`roles.detailPanel`, a BottomSheet on phones),
 //   not the template's two-thirds pane: the list is what this page is for, the detail is short.
 // - The list is virtualized (DESIGN.md "Pages"), as LogRows.tsx does it.
+import { icons } from "../../components/icons.ts";
 import { ListFilters } from "../../components/ListFilters.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
@@ -34,6 +34,7 @@ import { CountedSelector } from "../../components/CountedSelector.tsx";
 import { MissingActions, useAvailable } from "../../components/MissingActions.tsx";
 import { useListShape, type ListShape } from "../../components/listShape.ts";
 import { ReadError } from "../../components/ReadError.tsx";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
@@ -235,6 +236,7 @@ function FilterSelectors({
         options={families.map((p) => ({
           value: p,
           label: label(p),
+          icon: providerIcon(p),
           count: familyCounts.get(p) ?? 0,
         }))}
       />
@@ -297,7 +299,7 @@ function FilterRow({
           label={
             collected.checking ? t("accounts.actions.checking") : t("accounts.actions.checkQuotas")
           }
-          icon={<Icon icon={RefreshCw} size="sm" />}
+          icon={<Icon icon={icons.refresh} size="sm" />}
           tooltip={t("accounts.actions.checkQuotasHint")}
           isLoading={collected.checking}
           isDisabled={!rows.some((r) => quota.canCheck(r.account))}
@@ -320,6 +322,7 @@ function EmptyView({
   if (!filtered && filters.view === "needs")
     return (
       <EmptyState
+        icon={<Icon icon={icons.allClear} size="lg" />}
         title={t("accounts.empty.allServe")}
         headingLevel={roles.heading.section}
         actions={
@@ -329,6 +332,7 @@ function EmptyView({
     );
   return (
     <EmptyState
+      icon={<Icon icon={icons.search} size="lg" />}
       title={t("accounts.empty.noMatch")}
       headingLevel={roles.heading.section}
       actions={
@@ -344,12 +348,18 @@ function EmptyView({
 function NoAccounts({ writes, connect }: { writes: Writes; connect: () => void }) {
   return (
     <EmptyState
+      icon={<Icon icon={icons.accounts} size="lg" />}
       title={t("accounts.empty.title")}
       description={t("accounts.empty.description")}
       headingLevel={roles.heading.section}
       actions={
         <>
-          <Button label={t("accounts.page.connect")} variant="primary" onClick={connect} />
+          <Button
+            label={t("accounts.page.connect")}
+            variant="primary"
+            icon={<Icon icon={icons.add} />}
+            onClick={connect}
+          />
           <UploadInput writes={writes} />
         </>
       }
@@ -459,7 +469,7 @@ export default function Accounts() {
             label={t("accounts.page.connect")}
             variant={roles.primaryAction.variant}
             onClick={page.connect}
-            icon={<Icon icon={Plus} size="sm" />}
+            icon={<Icon icon={icons.add} size="sm" />}
           />
         )
       }

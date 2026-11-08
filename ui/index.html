@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-astryx-theme="site">
+<html lang="en" data-astryx-theme="site-neutral">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -24,7 +24,10 @@
           locale = localStorage.getItem("cliproxy-locale");
         } catch (e) {}
         if (mode === "light" || mode === "dark") root.dataset.theme = mode;
-        if (palette === "main") root.dataset.palette = palette;
+        // Any stored palette but the default (Neutral, stored as nothing; a "neutral" kept from
+        // before it was the default counts as nothing too); initialPalette()
+        // (src/app/preferences.ts) keeps only a known one.
+        if (palette && palette !== "neutral") root.dataset.palette = palette;
         if (locale !== "en" && locale !== "zh-CN" && locale !== "zh-TW") {
           locale = "en";
           var asked = navigator.languages || [];

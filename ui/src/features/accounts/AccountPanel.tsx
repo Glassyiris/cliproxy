@@ -1,6 +1,7 @@
 // The open account in the detail panel (a bottom sheet on phones), in the order an operator asks:
 // is it serving and when does it come back, what the upstream said, the quota windows, what can
 // be done, then its settings, models and file.
+import { icons } from "../../components/icons.ts";
 import { PanelBlock } from "../../components/PanelBlock.tsx";
 import { useState } from "react";
 import { X } from "lucide-react";
@@ -19,6 +20,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useUnsavedChanges } from "../../app/useHashRoute.ts";
 import { Identifier } from "../../components/Identifier.tsx";
 import { useAvailable } from "../../components/MissingActions.tsx";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { QuotaWindow, quotaErrorText } from "../../components/QuotaWindow.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
@@ -186,10 +188,12 @@ function FieldsForm({ row, writes }: Pick<PanelProps, "row" | "writes">) {
           {number("weight", t("accounts.fields.weight"), t("accounts.fields.weightHint"))}
           {number("request_retry", t("accounts.fields.retries"), t("accounts.fields.retriesHint"))}
         </HStack>
+        {/* Buttons end on the right, at the panel's one button size. */}
         <HStack gap={2} hAlign="end">
           <Button
             label={t("accounts.fields.save")}
             size="sm"
+            icon={<Icon icon={icons.save} />}
             isLoading={writes.isBusy("fields")}
             isDisabled={!isAvailable(routes.setCredentialFields)}
             onClick={() => void save()}
@@ -273,9 +277,11 @@ export function AccountPanel(props: PanelProps & { now: number; onClose: () => v
             <Heading level={roles.heading.section} maxLines={1}>
               {row.name}
             </Heading>
-            <Text type={roles.textType.supporting} color="secondary">
-              {label(row.provider)}
-            </Text>
+            <ProviderLabel provider={row.provider} size="xsm" color="secondary">
+              <Text type={roles.textType.supporting} color="secondary">
+                {label(row.provider)}
+              </Text>
+            </ProviderLabel>
           </VStack>
         </StackItem>
         <IconButton

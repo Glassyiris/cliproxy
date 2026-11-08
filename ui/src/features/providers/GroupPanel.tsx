@@ -1,9 +1,10 @@
 // The open key group in the detail panel (a bottom sheet on phones), in the account panel's
 // anatomy: the title with its family, the facts, one row of actions at the end, then the sections
 // (each key with its weight, traffic, reveal and copy; the models, when the group restricts them).
+import { icons } from "../../components/icons.ts";
 import { PanelBlock } from "../../components/PanelBlock.tsx";
 import { useState } from "react";
-import { Eye, Trash2, X } from "lucide-react";
+import { Eye, X } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Divider } from "@astryxdesign/core/Divider";
 import { useClipboard } from "@astryxdesign/core/hooks";
@@ -16,6 +17,7 @@ import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Identifier } from "../../components/Identifier.tsx";
 import { familyName } from "../../components/keyFamilies.ts";
+import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { RequestSparkline } from "../../components/RequestSparkline.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
 import { mask } from "../../lib/clientKeys.ts";
@@ -30,6 +32,7 @@ import { statusOf } from "./words.ts";
 // The characters a revealed key keeps at its end when the line is too short for all of it.
 const KEY_TAIL = 4;
 
+/** The key on one line: masked, or revealed and cut in the middle, never wrapping. */
 function KeyText({ value, revealed }: { value: string; revealed: boolean }) {
   if (!revealed)
     return (
@@ -40,6 +43,7 @@ function KeyText({ value, revealed }: { value: string; revealed: boolean }) {
   return <MiddleText head={value.slice(0, -KEY_TAIL)} tail={value.slice(-KEY_TAIL)} />;
 }
 
+/** The row's end: the shared requests slot, then reveal and copy, as Clients draws a key. */
 function KeyEnd({
   value,
   traffic,
@@ -89,6 +93,7 @@ function KeyEnd({
   );
 }
 
+/** One key per row: the key with its weight (and whether it fails) under it, then its end. */
 function KeyRow({
   keyEntry: { key, traffic },
   revealed,
@@ -159,6 +164,7 @@ function Models({ entry }: { entry: Entry }) {
   );
 }
 
+/** Disable or Enable as a button, then the menu with Delete, at the row's end as on Accounts. */
 function Actions({
   entry,
   busy,
@@ -190,7 +196,7 @@ function Actions({
         items={[
           {
             label: t("providers.group.deleteOne"),
-            icon: Trash2,
+            icon: icons.delete,
             variant: "destructive",
             isDisabled: busy,
             onClick: () => onAction({ kind: "delete", family, index }),
@@ -224,9 +230,11 @@ export function GroupPanel({
             <Heading level={roles.heading.section} maxLines={1}>
               {entry.name}
             </Heading>
-            <Text type={roles.textType.supporting} color="secondary">
-              {familyName(entry.family)}
-            </Text>
+            <ProviderLabel provider={entry.family} size="xsm" color="secondary">
+              <Text type={roles.textType.supporting} color="secondary">
+                {familyName(entry.family)}
+              </Text>
+            </ProviderLabel>
           </VStack>
         </StackItem>
         <IconButton

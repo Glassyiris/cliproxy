@@ -1,6 +1,6 @@
 // The Usage tab's second section: the requests this tab took off the server's usage queue while
 // the live view ran, kept for one hour. Off and empty, it is one empty state with the start action.
-import { Activity, Coins, Radio, Timer } from "lucide-react";
+import { Activity, Coins, Timer } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
@@ -12,6 +12,7 @@ import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
+import { icons } from "../../components/icons.ts";
 import { Identifier } from "../../components/Identifier.tsx";
 import { MetricCard } from "../../components/MetricCard.tsx";
 import { MissingActions } from "../../components/MissingActions.tsx";
@@ -190,6 +191,7 @@ export function LiveSection({
   return (
     <VStack gap={roles.gap.card}>
       <SectionHeading
+        icon={icons.live}
         title={t("usage.live.heading")}
         actions={live && <StatusLamp status="ready" label={t("usage.live.listening")} isPulsing />}
       />
@@ -213,14 +215,14 @@ export function LiveSection({
         </>
       ) : live ? (
         <EmptyState
-          icon={<Icon icon={Radio} size="lg" />}
+          icon={<Icon icon={icons.live} size="lg" />}
           title={t("usage.live.waiting")}
           headingLevel={3}
           isCompact
         />
       ) : (
         <EmptyState
-          icon={<Icon icon={Radio} size="lg" />}
+          icon={<Icon icon={icons.live} size="lg" />}
           title={t("usage.live.off")}
           description={t("usage.live.offDescription")}
           headingLevel={3}

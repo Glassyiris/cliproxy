@@ -16,6 +16,7 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
+import { icons } from "../../components/icons.ts";
 import { useConfig } from "../../app/serverQueries.ts";
 import { useSession } from "../../app/Session.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
@@ -219,6 +220,7 @@ export function About() {
         <Button
           label={t("system.updates.check")}
           variant="secondary"
+          icon={<Icon icon={icons.refresh} />}
           isLoading={latest.isFetching}
           onClick={() => void latest.refetch()}
         />

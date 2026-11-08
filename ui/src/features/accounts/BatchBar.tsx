@@ -3,9 +3,11 @@
 // Deviation: an HStack of the same parts, not TableSelectionToolbar, whose full-bleed surface ran
 // over the header's description line in PageFrame's toolbar slot and did not wrap on a phone.
 import type { Dispatch, SetStateAction } from "react";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Button } from "@astryxdesign/core/Button";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { useAvailable } from "../../components/MissingActions.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { label } from "../../lib/credentials.ts";
@@ -56,6 +58,7 @@ function BatchActions({ rows, selected, setSelected, writes }: BatchProps) {
       <Button
         label={t("accounts.batch.refresh", { count: files.length })}
         variant="ghost"
+        icon={<Icon icon={icons.refresh} />}
         isLoading={writes.isBusy("refresh")}
         isDisabled={!isAvailable(routes.refreshCredentials)}
         onClick={() => void writes.refresh(files, selected)}
@@ -64,6 +67,7 @@ function BatchActions({ rows, selected, setSelected, writes }: BatchProps) {
         <Button
           label={t("accounts.batch.delete", { count: deletable.length })}
           variant="ghost"
+          icon={<Icon icon={icons.delete} />}
           isLoading={writes.isBusy("delete")}
           isDisabled={!isAvailable(routes.deleteCredentials)}
           onClick={() => writes.remove(files, drop)}

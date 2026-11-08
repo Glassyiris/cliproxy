@@ -39,8 +39,18 @@ function format<F extends Intl.NumberFormat | Intl.ListFormat | Intl.RelativeTim
 
 /** A duration as the app locale writes it: "45s", "2h 5m", "3d"; "2小时5分钟"; "2 小時 5 分鐘". */
 export function span(ms: number): string {
+  return spanOf(spanParts(ms));
+}
+
+/** `span` in one unit, rounded ("14h" for 13 h 58 min), for a table cell that holds one line. */
+export function roughSpan(ms: number): string {
+  const parts = spanParts(ms);
+  return spanOf(parts.length > 1 ? [[Math.round(ms / 3_600_000), "hour"]] : parts);
+}
+
+function spanOf(units: [number, Unit][]): string {
   const unitDisplay = style();
-  const parts = spanParts(ms).map(([n, unit]) =>
+  const parts = units.map(([n, unit]) =>
     format(
       `${unit} ${unitDisplay}`,
       (l) => new Intl.NumberFormat(l, { style: "unit", unit, unitDisplay }),

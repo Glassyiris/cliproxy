@@ -21,9 +21,9 @@
 // - First run: three step cards on the attention cards' grid, from the moment the server has no
 //   accounts until the steps are done or dismissed; while it has none they replace the rest.
 import { useMemo } from "react";
-import { Plus } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
+import { icons } from "../../components/icons.ts";
 import { useConnectAccount } from "../../app/connectEntry.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useApiKeyUsage, useConfig, useCredentials } from "../../app/serverQueries.ts";
@@ -105,7 +105,7 @@ export default function Overview() {
           label={t("overview.page.connect")}
           variant={roles.primaryAction.variant}
           size={roles.primaryAction.size}
-          icon={<Icon icon={Plus} />}
+          icon={<Icon icon={icons.add} />}
           onClick={connect}
         />
       }

@@ -1,11 +1,14 @@
 // Provider keys' filter row and list body, as Accounts lays out its own: the views, the family and
 // status Selectors and the search in one row; then the list, its skeleton, or why it is empty.
+import { icons } from "../../components/icons.ts";
 import { ListFilters } from "../../components/ListFilters.tsx";
 import type { ReactNode } from "react";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { CountedSelector } from "../../components/CountedSelector.tsx";
 import { familyName, isFamily } from "../../components/keyFamilies.ts";
+import { providerIcon } from "../../components/ProviderIcon.tsx";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { countBy, inScope, isShow, showOf, shows } from "./list.ts";
@@ -32,6 +35,7 @@ function FilterSelectors({ page }: { page: Page }) {
         options={[...familyCounts].map(([f, count]) => ({
           value: f,
           label: familyName(f),
+          icon: providerIcon(f),
           count,
         }))}
       />
@@ -79,6 +83,7 @@ function EmptyView({ page }: { page: Page }) {
   if (!filtered && filters.view === "needs")
     return (
       <EmptyState
+        icon={<Icon icon={icons.allClear} size="lg" />}
         title={t("providers.empty.allServe")}
         description={t("providers.empty.allServeDetail")}
         headingLevel={roles.heading.section}
@@ -92,6 +97,7 @@ function EmptyView({ page }: { page: Page }) {
     );
   return (
     <EmptyState
+      icon={<Icon icon={icons.search} size="lg" />}
       title={t("providers.empty.noMatch")}
       headingLevel={roles.heading.section}
       actions={
@@ -112,6 +118,7 @@ export function ProviderList({ page, addMenu }: { page: Page; addMenu: ReactNode
   if (!entries.length)
     return (
       <EmptyState
+        icon={<Icon icon={icons.providerKeys} size="lg" />}
         title={t("providers.empty.title")}
         headingLevel={roles.heading.section}
         actions={addMenu}

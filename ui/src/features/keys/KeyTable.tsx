@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Eye, Plug, Trash2 } from "lucide-react";
+import { Eye } from "lucide-react";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack } from "@astryxdesign/core/Layout";
 import { Table, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
+import { icons } from "../../components/icons.ts";
 import { loadingCell, placeholderRows, type LoadingRow } from "../../components/loadingRows.tsx";
 import { mask } from "../../lib/clientKeys.ts";
 import { t } from "../../lib/i18n.ts";
@@ -94,7 +95,7 @@ export function KeyTable({
               tooltip={t("app.nav.use")}
               size={roles.rowAction.size}
               variant={roles.rowAction.variant}
-              icon={<Icon icon={Plug} size="sm" />}
+              icon={<Icon icon={icons.use} size="sm" />}
               onClick={() => onUse(item.index)}
             />
             <IconButton
@@ -102,7 +103,7 @@ export function KeyTable({
               tooltip={t("keys.row.revoke")}
               size={roles.rowAction.size}
               variant={roles.rowAction.variant}
-              icon={<Icon icon={Trash2} size="sm" />}
+              icon={<Icon icon={icons.delete} size="sm" />}
               onClick={() => onRevoke(item.value)}
             />
           </HStack>
