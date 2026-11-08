@@ -92,7 +92,6 @@ const CARD_PADDING_EXCEPTIONS = {
   "src/features/system/System.tsx": "not yet rewritten",
   "src/features/usage/LiveTiles.tsx": "not yet rewritten",
   "src/features/usage/Sources.tsx": "not yet rewritten",
-  "src/features/use/SetUpTool.tsx": "not yet rewritten",
 };
 const DEFAULT_EXPORT = /export\s*\{\s*default\s*\}\s*from\s*["'](\.\/[^"']+)["']/;
 

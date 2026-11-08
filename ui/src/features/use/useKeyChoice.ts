@@ -1,59 +1,29 @@
-import { useEffect, useRef, useState } from "react";
-import { useKeyTest, type KeyTest } from "../../app/useKeyTest.ts";
+import { useState } from "react";
+import { useClientModels } from "./queries.ts";
 
-export type KeyChoice = {
-  keys: string[];
-  index: number;
-  onIndex: (index: number) => void;
-  models: string[];
-  model: string;
-  onModel: (model: string) => void;
-  result: KeyTest;
-  onTest: () => void;
-};
+export type KeyChoice = ReturnType<typeof useKeyChoice>;
 
 /**
- * The client key and model the page shows, and the test of that key. The key is tested when it
- * changes; the answer of an earlier key is dropped by `useKeyTest`. The last model list the key
- * returned stays through re-tests and failures and is dropped only when the key changes, so the
- * chosen model survives them. `choice` is undefined while there is no key to offer.
+ * The client key and model the dialog shows. `param` is the key's position from the hash (a key
+ * row opens the dialog with its own); a missing or stale position reads as the first key. The
+ * chosen model survives a key change when the new key reaches it too.
  */
-export function useKeyChoice(keys: string[] | undefined) {
-  const { result, test } = useKeyTest();
-  const [picked, setPicked] = useState(0);
+export function useKeyChoice(keys: string[] | undefined, param: string | undefined) {
   const [chosenModel, setChosenModel] = useState("");
-  const [kept, setKept] = useState<{ key: string; models: string[] }>({ key: "", models: [] });
-  const testedKey = useRef("");
-
-  const index = Math.min(picked, (keys?.length ?? 1) - 1);
+  const count = keys?.length ?? 0;
+  const asked = Number(param);
+  const index = Number.isInteger(asked) && asked >= 0 && asked < count ? asked : 0;
   const key = keys?.[index] ?? "";
-  const models = kept.key === key ? kept.models : [];
-  const model = models.includes(chosenModel) ? chosenModel : (models[0] ?? "");
-
-  useEffect(() => {
-    if (!key) return;
-    testedKey.current = key;
-    void test(key);
-  }, [key, test]);
-
-  useEffect(() => {
-    if (result.status === "ready") setKept({ key: testedKey.current, models: result.models });
-  }, [result]);
-
-  const choice: KeyChoice | undefined = key
-    ? {
-        keys: keys ?? [],
-        index,
-        onIndex: setPicked,
-        models,
-        model,
-        onModel: setChosenModel,
-        result,
-        onTest: () => {
-          testedKey.current = key;
-          void test(key);
-        },
-      }
-    : undefined;
-  return { key, model, choice };
+  const query = useClientModels(key);
+  const models = query.data ?? [];
+  return {
+    key,
+    index,
+    models,
+    model: models.includes(chosenModel) ? chosenModel : (models[0] ?? ""),
+    onModel: setChosenModel,
+    /** The list on screen belongs to another key, or no answer has arrived yet. */
+    checking: query.isFetching,
+    failed: query.isError && !query.isFetching,
+  };
 }

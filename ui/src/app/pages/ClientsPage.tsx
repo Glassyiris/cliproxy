@@ -1,38 +1,21 @@
-import { Plug } from "lucide-react";
-import { Button } from "@astryxdesign/core/Button";
-import { Icon } from "@astryxdesign/core/Icon";
 import ClientKeys from "../../features/keys";
-import UseWithTools from "../../features/use";
+import { UseWithTools } from "../../features/use";
 import { t } from "../../lib/i18n.ts";
 import { PageHostContext } from "../pageHost.ts";
-import { PageDialog, useDialogParam } from "./PageDialog.tsx";
+import { useDialogParam } from "./PageDialog.tsx";
 
-/** The client keys; "Use with a tool" opens over them from the header and from a key's menu. */
+/**
+ * The client keys; "Use with a tool" opens over them from the header and from a key's row. The
+ * keys page draws the header's controls itself, since a row opens the dialog with its own key.
+ */
 export default function ClientsPage() {
-  const use = useDialogParam("use", ["tool"]);
-  const title = t("app.nav.clients");
+  const use = useDialogParam("use", ["tool", "key"]);
   return (
     <>
-      <PageHostContext
-        value={{
-          kind: "tab",
-          title,
-          tabs: null,
-          actions: (
-            <Button
-              label={t("app.nav.use")}
-              variant="secondary"
-              icon={<Icon icon={Plug} />}
-              onClick={use.open}
-            />
-          ),
-        }}
-      >
+      <PageHostContext value={{ kind: "tab", title: t("app.nav.clients"), tabs: null }}>
         <ClientKeys />
       </PageHostContext>
-      <PageDialog isOpen={use.isOpen} title={t("app.nav.use")} onClose={use.close}>
-        <UseWithTools />
-      </PageDialog>
+      <UseWithTools isOpen={use.isOpen} onClose={use.close} />
     </>
   );
 }

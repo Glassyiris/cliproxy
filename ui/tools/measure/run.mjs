@@ -51,8 +51,7 @@ const ROUTES = {
   accounts: { answer: "[role=main] h1", measures: ["primaryButton"], pending: "R1" },
   clients: {
     answer: "[role=main] tbody tr",
-    measures: ["primaryButton", "headerControl", "rowAction"],
-    pending: "R2",
+    measures: ["primaryButton", "headerControl", "rowAction", "skeletonShift"],
   },
   models: {
     answer: "[role=main] tbody tr",

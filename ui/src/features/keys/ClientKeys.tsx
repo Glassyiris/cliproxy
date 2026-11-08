@@ -1,117 +1,111 @@
+// Client keys, on the `table-page` template in its minimal form: one flat table of uniform rows
+// under the page's title and its actions. Deviations from the template, one per line:
+// - The masthead is PageFrame's LayoutHeader, not a scrolling VStack: every route keeps its h1 in
+//   the one frame (DESIGN.md "Pages").
+// - No search, scope toggle, column filters, sorting, totals or record facts: a server holds a
+//   handful of keys and the API gives a key no field to sort or filter by.
+// - No name, created, last-used or request columns, and no Rename: the server stores client keys as
+//   a plain list of strings (config `access/api-keys`) and counts usage per upstream key only.
+// - Row dividers stay on (Table's default `rows`), not the template's `none`: lists are flat with
+//   hairline dividers (DESIGN.md "Pages").
+// - The empty state has the add action and no warning banner: Overview's attention card already
+//   says when no key exists and links here.
 import { useState, type ReactNode } from "react";
-import { Eye, Plus } from "lucide-react";
-import { Badge } from "@astryxdesign/core/Badge";
-import { Banner } from "@astryxdesign/core/Banner";
+import { Plug, Plus } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
-import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
+import { useHashParams } from "../../app/useHashRoute.ts";
 import { Identifier } from "../../components/Identifier.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
+import { roles } from "../../themes/site/roles.ts";
 import { AddKeyDialog } from "./AddKeyDialog.tsx";
 import { KeyTable } from "./KeyTable.tsx";
-import { RemoveKeyDialog } from "./RemoveKeyDialog.tsx";
+import { RevokeKeyDialog } from "./RevokeKeyDialog.tsx";
 
-function NoKeys({ add }: { add: ReactNode }) {
+const KEYS_PATH = "access/api-keys";
+const apiKeyHeader = "x-api-key";
+
+/** Add key only once there is a key (the empty state has it); Use with a tool always: it can create one. */
+function HeaderActions({
+  hasKeys,
+  onUse,
+  add,
+}: {
+  hasKeys: boolean;
+  onUse: () => void;
+  add: ReactNode;
+}) {
   return (
     <>
-      <Banner
-        status="warning"
-        title={t("keys.empty.bannerTitle")}
-        description={t("keys.empty.bannerDescription")}
+      <Button
+        label={t("app.nav.use")}
+        variant="secondary"
+        icon={<Icon icon={Plug} />}
+        onClick={onUse}
       />
-      <EmptyState
-        title={t("keys.empty.title")}
-        description={t("keys.empty.description")}
-        headingLevel={2}
-        actions={add}
-      />
+      {hasKeys && add}
     </>
   );
 }
 
-/** The reveal switch and the table; `keys` is undefined while the config loads. */
-function KeyList({
-  keys,
-  onRemove,
-}: {
-  keys: string[] | undefined;
-  onRemove: (key: string) => void;
-}) {
-  const [revealed, setRevealed] = useState(false);
-  return (
-    <VStack gap={3}>
-      {keys && (
-        <HStack>
-          <ToggleButton
-            label={t("keys.page.show")}
-            icon={<Icon icon={Eye} />}
-            pressedIcon={<Icon icon="eyeSlash" />}
-            isPressed={revealed}
-            onPressedChange={setRevealed}
-          />
-        </HStack>
-      )}
-      <KeyTable keys={keys} revealed={revealed} onRemove={onRemove} />
-    </VStack>
-  );
-}
+const Intro = () => (
+  <Text type={roles.textType.supporting} color="secondary">
+    {t("keys.page.introBefore")}
+    <Identifier>{apiKeyHeader}</Identifier>
+    {t("keys.page.introAfter")}
+  </Text>
+);
 
-const KEYS_PATH = "access/api-keys";
-const apiKeyHeader = "x-api-key";
+/** Opens "Use with a tool" over the page, with a key row's own key when given its position. */
+function useOpenUse() {
+  const [, setParams] = useHashParams();
+  return (index?: number) =>
+    setParams({ open: "use", key: index === undefined ? undefined : String(index) }, "push");
+}
 
 export default function ClientKeys() {
   const config = useConfig();
   const action = useAction();
   const write = useConfigWrite(action);
   const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState<string | null>(null);
-
+  const [revoking, setRevoking] = useState<string | null>(null);
   // A key the file lacks and an explicit null both show as no keys.
   const keys = config.data ? (readPath(config.data, KEYS_PATH, []) as string[]) : undefined;
+  const hasKeys = !!keys?.length;
+  const openUse = useOpenUse();
   const addButton = (
     <Button
       label={t("keys.page.add")}
-      variant="primary"
+      variant={roles.primaryAction.variant}
       icon={<Icon icon={Plus} />}
       onClick={() => setAdding(true)}
     />
   );
 
-  const remove = async () => {
-    if (keys && removing !== null)
+  const revoke = async () => {
+    if (keys && revoking !== null)
       await write(
         KEYS_PATH,
-        keys.filter((k) => k !== removing),
-        t("keys.remove.removed"),
+        keys.filter((k) => k !== revoking),
+        t("keys.revoke.revoked"),
       );
-    setRemoving(null);
+    setRevoking(null);
   };
 
   return (
     <PageFrame
       title={t("keys.page.title")}
-      meta={
-        keys && (
-          <HStack>
-            <Badge variant="neutral" label={keys.length} />
-          </HStack>
-        )
-      }
-      actions={keys?.length ? addButton : undefined}
+      width="full"
+      meta={<Intro />}
+      actions={<HeaderActions hasKeys={hasKeys} onUse={() => openUse()} add={addButton} />}
     >
-      <Text type="supporting" color="secondary">
-        {t("keys.page.introBefore")}
-        <Identifier>{apiKeyHeader}</Identifier>
-        {t("keys.page.introAfter")}
-      </Text>
       {config.isError && (
         <ReadError
           error={config.error}
@@ -119,8 +113,17 @@ export default function ClientKeys() {
           retry={() => void config.refetch()}
         />
       )}
-      {keys?.length === 0 && <NoKeys add={addButton} />}
-      {(config.isPending || !!keys?.length) && <KeyList keys={keys} onRemove={setRemoving} />}
+      {keys?.length === 0 && (
+        <EmptyState
+          title={t("keys.empty.title")}
+          description={t("keys.empty.description")}
+          headingLevel={roles.heading.section}
+          actions={addButton}
+        />
+      )}
+      {(config.isPending || hasKeys) && (
+        <KeyTable keys={keys} onUse={openUse} onRevoke={setRevoking} />
+      )}
       {adding && keys && (
         <AddKeyDialog
           keys={keys}
@@ -129,11 +132,11 @@ export default function ClientKeys() {
           onClose={() => setAdding(false)}
         />
       )}
-      <RemoveKeyDialog
-        target={removing}
+      <RevokeKeyDialog
+        target={revoking}
         busy={action.busy}
-        onConfirm={() => void remove()}
-        onClose={() => setRemoving(null)}
+        onConfirm={() => void revoke()}
+        onClose={() => setRevoking(null)}
       />
     </PageFrame>
   );

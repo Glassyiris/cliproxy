@@ -1,1 +1,1 @@
-export { default } from "./UseWithTools.tsx";
+export { UseWithTools } from "./UseWithTools.tsx";
