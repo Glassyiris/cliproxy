@@ -1,0 +1,1 @@
+import{a as e,o as t,u as n}from"./Icon-CpbZT79_.js";function r(t){let r=n();return e(t,r)}function i(e,r,i){let a=n();return t(e,r,i,a)}export{r as n,i as t};

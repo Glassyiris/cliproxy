@@ -1,1 +1,0 @@
-import{S as e,T as t}from"./tokens.stylex-BRBC-NZS.js";import{h as n}from"./usePressFeedback-B8e87TV6.js";var r=t(e(),1);function i(){return(0,r.use)(n).locale}export{i as t};

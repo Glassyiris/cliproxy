@@ -1,1 +1,0 @@
-import{t as e}from"./Icon-Dx6w17XB.js";import{t}from"./useIcon-DYGNYJgF.js";import{x as n}from"./tokens.stylex-BRBC-NZS.js";var r=n();function i({content:e,...t}){return e===void 0?(0,r.jsx)(a,{...t}):e}function a({slot:n,state:i,fallback:a,color:o}){let{icon:s,variant:c,size:l}=t(n,i,a);return s==null?null:(0,r.jsx)(e,{icon:s,variant:c,size:l,color:o})}export{i as t};
