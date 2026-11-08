@@ -27,7 +27,7 @@ import { RulePanel } from "./RulePanel.tsx";
 import { groupName, RuleTable, type RuleGroup } from "./RuleTable.tsx";
 import { groupByModel, type Group } from "./rules.ts";
 import { useRemoveRule } from "./useRemoveRule.ts";
-import { useRules } from "./useRules.ts";
+import { editHref, useRules } from "./useRules.ts";
 
 const search = (groups: RuleGroup[], query: string) => {
   const q = query.trim().toLowerCase();
@@ -42,7 +42,7 @@ function NotListBanners({ groups }: { groups: Group[] }) {
         key={g.kind}
         status="warning"
         title={t("payload.group.storedNotList", { kind: g.kind })}
-        endContent={<Link href="#settings">{t("payload.page.editLink")}</Link>}
+        endContent={<Link href={editHref}>{t("payload.page.editLink")}</Link>}
       />
     ));
 }
@@ -94,7 +94,7 @@ function Body({ page, addButton }: { page: Page; addButton: ReactNode }) {
   return (
     <>
       <Text type={roles.textType.supporting} color="secondary">
-        {t("payload.page.intro")} <Link href="#settings">{t("payload.page.editLink")}</Link>
+        {t("payload.page.intro")} <Link href={editHref}>{t("payload.page.editLink")}</Link>
       </Text>
       {config.isError && (
         <ReadError

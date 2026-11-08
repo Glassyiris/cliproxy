@@ -20,7 +20,8 @@
 // - The chart grid's columns are at least layout.settingsColumnMin wide (320, the template's
 //   value): check:ui keeps size literals in the theme and that is the theme's 320 two-column floor.
 // - Tile labels lead with a status-coloured icon instead of the StatusDot, which would repeat it.
-// - First run (no accounts): the template's EmptyState, in a card, replaces the tiles and chart.
+// - First run: three step cards on the attention cards' grid, from the moment the server has no
+//   accounts until the steps are done or dismissed; while it has none they replace the rest.
 import { useMemo } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
@@ -37,7 +38,7 @@ import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { Attention } from "./Attention.tsx";
-import { FirstRun } from "./FirstRun.tsx";
+import { FirstRun, useFirstRun } from "./FirstRun.tsx";
 import { bucketTimes, sources, summarize, totalTraffic } from "./summary.ts";
 import { Tiles } from "./Tiles.tsx";
 import { Charts, type Read } from "./Traffic.tsx";
@@ -81,6 +82,7 @@ function useOverviewData() {
   const accounts = failedRead(credentials, t("overview.read.accounts"));
   return {
     files,
+    keys,
     now,
     summary,
     traffic,
@@ -114,7 +116,9 @@ function Reachability() {
 export default function Overview() {
   const data = useOverviewData();
   const connect = useConnectAccount();
-  const isFirstRun = data.files?.length === 0;
+  const firstRun = useFirstRun(data.files, data.keys);
+  // While the server has no accounts, or before that is known, the steps are the whole page.
+  const isFirstRun = firstRun.isShown && !data.files?.length;
   return (
     <PageFrame
       title={t("overview.page.title")}
@@ -130,9 +134,16 @@ export default function Overview() {
         />
       }
     >
-      {isFirstRun ? (
-        <FirstRun connect={connect} />
-      ) : data.unread ? (
+      {firstRun.isShown && (
+        <FirstRun
+          done={firstRun.done}
+          // With the rest of the page shown, its own regions report these.
+          reads={isFirstRun ? present([data.unread, data.config]) : []}
+          connect={connect}
+          onDismiss={firstRun.dismiss}
+        />
+      )}
+      {isFirstRun ? null : data.unread ? (
         <ReadError {...data.unread} />
       ) : (
         <Tiles summary={data.summary} traffic={data.traffic} />

@@ -70,11 +70,20 @@ function useOpenUse() {
     setParams({ open: "use", key: index === undefined ? undefined : String(index) }, "push");
 }
 
+/** The add-key dialog is `?open=new`, so Overview's first run can open it from another page. */
+function useAdding() {
+  const [params, setParams] = useHashParams();
+  return [
+    params.open === "new",
+    (open: boolean) => setParams({ open: open ? "new" : undefined }, "push"),
+  ] as const;
+}
+
 export default function ClientKeys() {
   const config = useConfig();
   const action = useAction();
   const write = useConfigWrite(action);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useAdding();
   const [revoking, setRevoking] = useState<string | null>(null);
   // A key the file lacks and an explicit null both show as no keys.
   const keys = config.data ? (readPath(config.data, KEYS_PATH, []) as string[]) : undefined;

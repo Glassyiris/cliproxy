@@ -9,7 +9,7 @@ import { useDialogParam } from "./PageDialog.tsx";
  * keys page draws the header's controls itself, since a row opens the dialog with its own key.
  */
 export default function ClientsPage() {
-  const use = useDialogParam("use", ["tool", "key"]);
+  const use = useDialogParam("use", ["tool", "key", "step"]);
   return (
     <>
       <PageHostContext value={{ kind: "tab", title: t("keys.page.title"), tabs: null }}>

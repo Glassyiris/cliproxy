@@ -16,6 +16,7 @@ import { roles } from "../../themes/site/roles.ts";
 import { fieldsOf } from "./RuleTable.tsx";
 import { modelsOf, type RuleRow } from "./rules.ts";
 import { entryLabel, kindMeaning, modelWord } from "./words.ts";
+import { editHref } from "./useRules.ts";
 
 export function RulePanel({
   row,
@@ -67,7 +68,7 @@ export function RulePanel({
       </MetadataList>
       <CodeBlock code={code} language="json" hasLanguageLabel={false} isWrapped width="100%" />
       <Text type={roles.textType.supporting} color="secondary">
-        {t("payload.panel.editHint")} <Link href="#settings">{t("payload.page.editLink")}</Link>
+        {t("payload.panel.editHint")} <Link href={editHref}>{t("payload.page.editLink")}</Link>
       </Text>
     </VStack>
   );

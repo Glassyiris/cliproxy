@@ -7,6 +7,9 @@ import { strategies } from "../../lib/routing.ts";
 export const groups = ["routing", "access", "network", "requests", "logging", "advanced"] as const;
 export type Group = (typeof groups)[number];
 
+/** `?key=` that opens the whole file in Advanced; any other value is a config key path. */
+export const YAML_KEY = "config.yaml";
+
 type Unit = "seconds" | "megabytes" | "bytes";
 
 type Base = {

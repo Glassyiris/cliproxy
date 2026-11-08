@@ -8,6 +8,7 @@ import { FormDialog } from "../../components/FormDialog.tsx";
 import { t } from "../../lib/i18n.ts";
 import { kindMeaning, paramsMessage } from "./words.ts";
 import { kinds, parseParams, protocols, type Kind, type Rule } from "./rules.ts";
+import { editHref } from "./useRules.ts";
 
 // Selector holds no empty value, so "Any protocol" has a name of its own.
 const ANY = "any";
@@ -42,7 +43,7 @@ function KindField({
         }
         onChange={(value) => onChange(value as Kind)}
       />
-      {blocked && <Link href="#settings">{t("payload.page.editLink")}</Link>}
+      {blocked && <Link href={editHref}>{t("payload.page.editLink")}</Link>}
     </VStack>
   );
 }

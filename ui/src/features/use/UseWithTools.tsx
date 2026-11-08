@@ -65,15 +65,20 @@ function NoKey({ busy, create }: { busy: boolean; create: () => void }) {
   );
 }
 
-/** The step and whether Continue was refused; both start over each time the dialog opens. */
+/**
+ * The step and whether Continue was refused; both start over each time the dialog opens, on the
+ * test step when the hash asks for it (`step=test`, from Overview's first run).
+ */
 function useDraft(isOpen: boolean) {
-  const [step, setStep] = useState(0);
+  const [params] = useHashParams();
+  const first = params.step === "test" ? LAST_STEP : 0;
+  const [step, setStep] = useState(first);
   const [blocked, setBlocked] = useState(false);
   const [shownOpen, setShownOpen] = useState(isOpen);
   if (shownOpen !== isOpen) {
     setShownOpen(isOpen);
     if (isOpen) {
-      setStep(0);
+      setStep(first);
       setBlocked(false);
     }
   }

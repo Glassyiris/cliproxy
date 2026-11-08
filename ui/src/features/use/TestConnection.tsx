@@ -6,6 +6,7 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { useKeyTest, type KeyTest } from "../../app/useKeyTest.ts";
 import { Identifier } from "../../components/Identifier.tsx";
 import { mask } from "../../lib/client-keys.ts";
+import { flag } from "../../lib/first-run.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 
@@ -50,6 +51,10 @@ export function TestConnection({ base, clientKey }: { base: string; clientKey: s
   useEffect(() => {
     void test(clientKey);
   }, [clientKey, test]);
+  // Overview's first run counts its test step done once a test here has served models.
+  useEffect(() => {
+    if (result.status === "ready") flag.set("start-test", "1");
+  }, [result.status]);
   return (
     <VStack gap={roles.gap.card}>
       <MetadataList columns="single">

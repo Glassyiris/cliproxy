@@ -152,7 +152,7 @@ function useCollapsed() {
 
 function Meta() {
   return (
-    <Link href="#settings" type="supporting">
+    <Link href="#settings?section=advanced&key=api-keys" type="supporting">
       {t("providers.page.edit")}
       <Icon icon="chevronRight" size="sm" />
     </Link>

@@ -68,10 +68,14 @@ export default {
       "{source} sent the most requests: {count, number} of {total, number}.",
     "overview.sources.usage": "Open Usage",
 
-    "overview.start.title": "Connect your first account",
-    "overview.start.text":
-      "Sign in on the provider’s page or add a provider key, then set up your tools to use this proxy.",
-    "overview.start.useTools": "Use with tools",
+    "overview.start.heading": "Get started",
+    "overview.start.key": "Create a client key",
+    "overview.start.connect": "Connect an account",
+    "overview.start.test": "Send a test request",
+    "overview.start.done": "Done",
+    "overview.start.next": "Next",
+    "overview.start.later": "Not yet",
+    "overview.start.allSet": "All set. Your tools can use this proxy now.",
   },
   "zh-CN": {
     "overview.page.title": "概览",
@@ -142,9 +146,14 @@ export default {
       "请求最多的来源是 {source}，{total, number} 个请求中占 {count, number} 个。",
     "overview.sources.usage": "打开用量页",
 
-    "overview.start.title": "连接第一个账号",
-    "overview.start.text": "在供应商页面登录或添加供应商密钥，然后设置工具使用此代理。",
-    "overview.start.useTools": "接入工具",
+    "overview.start.heading": "开始使用",
+    "overview.start.key": "创建客户端密钥",
+    "overview.start.connect": "连接账号",
+    "overview.start.test": "发送测试请求",
+    "overview.start.done": "已完成",
+    "overview.start.next": "下一步",
+    "overview.start.later": "未开始",
+    "overview.start.allSet": "设置完成，工具现在可以使用此代理。",
   },
   "zh-TW": {
     "overview.page.title": "概覽",
@@ -215,8 +224,13 @@ export default {
       "請求最多的來源是 {source}，{total, number} 個請求中佔 {count, number} 個。",
     "overview.sources.usage": "開啟用量頁",
 
-    "overview.start.title": "連接第一個帳號",
-    "overview.start.text": "在供應商頁面登入或新增供應商金鑰，然後設定工具使用此代理。",
-    "overview.start.useTools": "串接工具",
+    "overview.start.heading": "開始使用",
+    "overview.start.key": "建立用戶端金鑰",
+    "overview.start.connect": "連接帳號",
+    "overview.start.test": "傳送測試請求",
+    "overview.start.done": "已完成",
+    "overview.start.next": "下一步",
+    "overview.start.later": "未開始",
+    "overview.start.allSet": "設定完成，工具現在可以使用此代理。",
   },
 };

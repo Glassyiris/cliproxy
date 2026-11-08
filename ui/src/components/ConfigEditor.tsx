@@ -1,7 +1,7 @@
-// The one editor for a config value as JSON or the whole file as YAML: a fullscreen form dialog
-// (a plugin's settings) or inline (Settings, Advanced). Review shows the change as a diff and Save
-// rereads the server copy first, refusing when it changed since the editor opened (REQUIREMENTS
-// intentional design).
+// The one editor for a config value as JSON or the whole file as YAML, in a fullscreen form
+// dialog (a plugin's settings; a section or the file under Settings, Advanced). Review shows the
+// change as a diff and Save rereads the server copy first, refusing when it changed since the
+// editor opened (REQUIREMENTS intentional design).
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
@@ -88,7 +88,7 @@ export function ConfigEditor({
 }
 
 /** The copy the editor opened, the draft over it, and saving it. */
-function useEditor(source: ConfigSource, action: Action, onSaved?: () => void) {
+function useEditor(source: ConfigSource, action: Action, onSaved: () => void) {
   // Read when the editor opens, and again after a save or when one is refused: this copy is what
   // Save compares the server against.
   const read = useQuery({
@@ -108,7 +108,7 @@ function useEditor(source: ConfigSource, action: Action, onSaved?: () => void) {
     onSaved: () => {
       setDraft(null);
       void read.refetch();
-      onSaved?.();
+      onSaved();
     },
     // The draft stays, so Review shows it against the new server copy.
     onRefused: () => void read.refetch(),
@@ -171,7 +171,10 @@ function Editor({
     <Dialog isOpen onOpenChange={(open) => !open && close()} variant="fullscreen" purpose="form">
       <FormDialogHeader
         title={title}
-        subtitle={<Text type="code">{sourceName(source)}</Text>}
+        // A section's title is its path already.
+        subtitle={
+          title === sourceName(source) ? undefined : <Text type="code">{sourceName(source)}</Text>
+        }
         busy={editor.isSaving}
         busyLabel={t("app.editor.closeWhileSaving")}
         onClose={close}
@@ -188,20 +191,6 @@ function Editor({
       />
     </Dialog>
   );
-}
-
-/** The editor in the page itself; after a save it goes on from the saved copy. */
-export function InlineConfigEditor({
-  source,
-  title,
-  action,
-}: {
-  source: ConfigSource;
-  title: string;
-  action: Action;
-}) {
-  const editor = useEditor(source, action);
-  return <EditorContent source={source} title={title} editor={editor} />;
 }
 
 /**

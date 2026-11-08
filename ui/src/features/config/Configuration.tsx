@@ -156,14 +156,15 @@ function useDraft(config: Config | undefined) {
 }
 
 /**
- * The open group, `?section=` in the hash; the first by default. An old
- * `#config/<section>` or `#config/config.yaml` link lands on the YAML, which holds it.
+ * The open group, `?section=` in the hash; the first by default. An old `#config/<section>` or
+ * `#config/config.yaml` link lands on Advanced with that section's editor open (`?key=`).
  */
 function useGroup() {
   const [params, setParams] = useHashParams();
   const legacy = useHashRoute().arg;
   useEffect(() => {
-    if (legacy) location.replace("#settings?section=advanced");
+    if (legacy)
+      location.replace(`#settings?${new URLSearchParams({ section: "advanced", key: legacy })}`);
   }, [legacy]);
   const group: Group = isGroup(params.section) ? params.section : legacy ? "advanced" : groups[0];
   const select = (next: Group) => setParams({ section: next }, "push");
@@ -214,7 +215,7 @@ export default function Configuration() {
       {config.isError && !config.data ? null : (
         <VStack gap={0} key={draft.round} id={panelId} role="tabpanel">
           <GroupRows group={group} config={config.data} draft={draft.draft} onChange={draft.set} />
-          {group === "advanced" && <Advanced action={action} />}
+          {group === "advanced" && <Advanced action={action} config={config.data} />}
         </VStack>
       )}
       {isReviewing && (

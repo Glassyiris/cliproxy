@@ -23,7 +23,8 @@ export function Row({
   children,
 }: {
   label: string;
-  hint: string;
+  /** The label is a config key, set in the mono family (DESIGN.md "Text types"). */
+  hint?: string;
   note?: string;
   children: ReactNode;
 }) {
@@ -34,9 +35,11 @@ export function Row({
           <Text type="body" weight="semibold">
             {label}
           </Text>
-          <Text type="supporting" color="secondary">
-            {hint}
-          </Text>
+          {hint && (
+            <Text type="supporting" color="secondary">
+              {hint}
+            </Text>
+          )}
           {note && (
             <Text type="supporting" color="secondary">
               {note}
