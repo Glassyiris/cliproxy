@@ -3,22 +3,12 @@
 // Deviation: the template's About panel is a product blurb; this one lists what an operator
 // checks (DESIGN.md "Pages").
 import type { ReactNode } from "react";
-import {
-  Folder,
-  GitCommitHorizontal,
-  Globe,
-  LayoutDashboard,
-  Route,
-  Server,
-  Tag,
-  FileCog,
-} from "lucide-react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Divider } from "@astryxdesign/core/Divider";
 import { useClipboard } from "@astryxdesign/core/hooks";
-import { Icon, type IconProps } from "@astryxdesign/core/Icon";
+import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
@@ -56,7 +46,7 @@ function CommitValue({ commit }: { commit: string }) {
   const { copy, isCopied } = useClipboard({ announce: t("system.facts.commitCopied") });
   return (
     <HStack gap={1} vAlign="center">
-      <Text type="code">{commit.slice(0, 7)}</Text>
+      <Text type="body">{commit.slice(0, 7)}</Text>
       <IconButton
         label={t("system.facts.copyCommit")}
         tooltip={t("system.facts.copyCommit")}
@@ -87,23 +77,14 @@ function RemoteManagement({ config }: { config: Config }) {
 
 const path = (config: Config, key: string) => {
   const value: unknown = readPath(config, key);
-  return typeof value === "string" && value ? <Text type="code">{value}</Text> : null;
+  return typeof value === "string" && value ? <Text type="body">{value}</Text> : null;
 };
 
-function Item({
-  icon,
-  label,
-  children,
-}: {
-  icon: IconProps["icon"];
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <MetadataListItem label={label} icon={<Icon icon={icon} size="sm" />}>
-      {children}
-    </MetadataListItem>
-  );
+// No icon before the label: with one, MetadataList drops every value 3 px below its label
+// (owner, 2026-11-08: 「完全沒對齊」). Values are body text for the same reason: the code type sits
+// 5 px lower again.
+function Item({ label, children }: { label: string; children: ReactNode }) {
+  return <MetadataListItem label={label}>{children}</MetadataListItem>;
 }
 
 /** The eight facts: the build from the session, the rest from the config. */
@@ -118,45 +99,43 @@ function Facts({ config }: { config: UseQueryResult<Config> }) {
         ? notReported()
         : valueSkeleton();
   return (
-    <MetadataList aria-busy={config.isPending}>
-      <Item icon={Tag} label={t("system.facts.version")}>
-        {version ? <Text type="code">{version}</Text> : notReported()}
+    <MetadataList aria-busy={config.isPending} label={{ width: layout.metadataLabelWidth }}>
+      <Item label={t("system.facts.version")}>
+        {version ? <Text type="body">{version}</Text> : notReported()}
       </Item>
-      <Item icon={GitCommitHorizontal} label={t("system.facts.commit")}>
+      <Item label={t("system.facts.commit")}>
         {commit && commit !== "none" ? <CommitValue commit={commit} /> : notReported()}
       </Item>
-      <Item icon="calendar" label={t("system.facts.built")}>
+      <Item label={t("system.facts.built")}>
         {builtAt ? (
           <Timestamp value={builtAt} format="relative" type="body" color="primary" />
         ) : (
           notReported()
         )}
       </Item>
-      <Item icon={FileCog} label={t("system.facts.configLayout")}>
+      <Item label={t("system.facts.configLayout")}>
         {fromConfig((c) =>
           c["config-version"]
             ? t("system.facts.configVersion", { version: c["config-version"] })
             : t("system.facts.legacyLayout"),
         )}
       </Item>
-      <Item icon={Route} label={t("system.config.routingStrategy")}>
+      <Item label={t("system.config.routingStrategy")}>
         {fromConfig((c) => strategyName(strategy(readPath(c, "routing/strategy"))))}
       </Item>
-      <Item icon={Folder} label={t("system.config.authDirectory")}>
+      <Item label={t("system.config.authDirectory")}>
         {fromConfig((c) => path(c, "oauth/auth-dir"))}
       </Item>
-      <Item icon={Globe} label={t("system.config.remoteManagement")}>
+      <Item label={t("system.config.remoteManagement")}>
         {fromConfig((c) => (
           <RemoteManagement config={c} />
         ))}
       </Item>
       {/* Where this page's code comes from: it runs with the management key. */}
-      <Item icon={Server} label={t("system.config.managementApi")}>
-        <Text type="code">{managementApi}</Text>
+      <Item label={t("system.config.managementApi")}>
+        <Text type="body">{managementApi}</Text>
       </Item>
-      <Item icon={LayoutDashboard} label={t("system.config.dashboard")}>
-        {t("system.config.builtIn")}
-      </Item>
+      <Item label={t("system.config.dashboard")}>{t("system.config.builtIn")}</Item>
     </MetadataList>
   );
 }
@@ -234,7 +213,7 @@ function Links() {
     </Link>
   );
   return (
-    <MetadataList>
+    <MetadataList label={{ width: layout.metadataLabelWidth }}>
       <MetadataListItem label={t("system.links.repository")}>
         {link(repository.url, repository.name)}
       </MetadataListItem>

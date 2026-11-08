@@ -1,6 +1,9 @@
 // Fixed sizes of the app frame, in the units the Astryx props take: numbers are pixels.
 export const layout = {
   signInWidth: 400,
+  // One label column for every MetadataList on a surface, so stacked lists line up their values
+  // (About: facts and links). Fits "Remote management" and 程式碼儲存庫 at 15 px.
+  metadataLabelWidth: 160,
   // card-v2 layout.ts SIDE_WIDTH: a side column of cards beside the main column.
   sideColumn: 340,
   // The phone breakpoint at which the page padding drops to 16 px: Astryx `md` (AppShell's phone
