@@ -1,10 +1,10 @@
 // The app frame, as the owner's BoothDex console has it (admin/admin-shell.tsx) from the Astryx page
 // template shell-side-nav: AppShell with one collapsible, resizable SideNav: its heading on top, the
-// page sections from routes.ts, the session rows in the footer and the appearance controls in the
-// footer icon row beside the collapse button. On phones AppShell turns the nav into its drawer
+// page sections from routes.ts, the session rows in the footer, and the colour-mode toggle and the
+// settings button in the footer icon row beside the collapse button. On phones AppShell turns the nav into its drawer
 // behind its own bar. There is no top bar.
 
-import { LogOut, Plug, Route } from "lucide-react";
+import { LogOut, Plug, Server } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState, type AnchorHTMLAttributes } from "react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { AppShell } from "@astryxdesign/core/AppShell";
@@ -25,11 +25,13 @@ import { lampVariant, StatusLamp } from "../components/StatusLamp.tsx";
 import { t } from "../lib/i18n.ts";
 import { repository } from "../lib/repository.ts";
 import { layout } from "../themes/site/layout.ts";
+import { useConnectAccount } from "./connect-entry.ts";
 import { PageWarning } from "./Notices.tsx";
 import { FooterPreferences } from "./PreferenceMenus.tsx";
 import { usePreferences } from "./preferences.ts";
 import { QueryBoundary } from "./QueryBoundary.tsx";
 import { navGroups, routes, type PageRoute } from "./routes.ts";
+import { shortcuts } from "./settings/ShortcutsPanel.tsx";
 import { useSession } from "./Session.tsx";
 import { useDocumentTitle } from "./useDocumentTitle.ts";
 import { leaveOrAsk, useBlockedNavigation, useHashRoute } from "./useHashRoute.ts";
@@ -101,13 +103,14 @@ function GoToPage() {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- locale changes what t() returns
   }, [locale]);
-  useHotkeys([{ keys: "mod+k", onPress: () => setOpen(true), allowInInputs: true }]);
+  const connectAccount = useConnectAccount();
+  useHotkeys([{ keys: shortcuts.goToPage, onPress: () => setOpen(true), allowInInputs: true }]);
   return (
     <>
       <SideNavItem
         label={t("app.palette.label")}
         icon="search"
-        endContent={<Kbd keys="mod+k" />}
+        endContent={<Kbd keys={shortcuts.goToPage} />}
         onClick={() => setOpen(true)}
       />
       <CommandPalette
@@ -118,7 +121,8 @@ function GoToPage() {
         emptySearchText={t("app.palette.empty")}
         onValueChange={(id) => {
           setOpen(false);
-          location.hash = `#${id}`;
+          if (id === "connect") connectAccount();
+          else location.hash = `#${id}`;
         }}
       />
     </>
@@ -135,7 +139,7 @@ function PageNav({ current }: { current: PageRoute }) {
         <SideNavHeading
           heading={t("app.brand.name")}
           // The mark itself, as BoothDex's heading: NavIcon would paint an accent disc behind it.
-          icon={<Icon icon={Route} />}
+          icon={<Icon icon={Server} />}
           headingHref={`#${routes[0].id}`}
         />
       }

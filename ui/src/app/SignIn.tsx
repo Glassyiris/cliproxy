@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Route } from "lucide-react";
+import { Server } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
@@ -45,7 +45,7 @@ function CardTop() {
   return (
     <VStack gap={6}>
       <HStack gap={2} vAlign="center" hAlign="center">
-        <Icon icon={Route} size="lg" />
+        <Icon icon={Server} size="lg" />
         <Text type="body" weight="semibold" size="lg">
           {t("app.brand.name")}
         </Text>

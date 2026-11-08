@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { Languages, Moon, Palette, Sun } from "lucide-react";
 import {
   DropdownMenu,
@@ -12,6 +11,7 @@ import { HStack } from "@astryxdesign/core/Layout";
 import { isLocale, localeName, locales, t } from "../lib/i18n.ts";
 import { isPalette } from "../themes/site/index.ts";
 import { usePreferences } from "./preferences.ts";
+import { SettingsButton } from "./settings/SettingsDialog.tsx";
 
 /**
  * Flips light and dark relative to what is shown, as BoothDex's ColorModeToggle; until the first
@@ -95,50 +95,15 @@ export function PreferenceMenus() {
   );
 }
 
-/** One appearance menu: a ghost icon button with a tooltip, as BoothDex's header-controls.tsx. */
-function FooterMenu({
-  label,
-  icon,
-  children,
-}: {
-  label: string;
-  icon: IconProps["icon"];
-  children: ReactNode;
-}) {
-  return (
-    <DropdownMenu
-      placement="above"
-      alignment="start"
-      renderTrigger={(props) => (
-        <IconButton
-          {...props}
-          label={label}
-          tooltip={label}
-          variant="ghost"
-          icon={<Icon icon={icon} size="sm" />}
-        />
-      )}
-    >
-      {children}
-    </DropdownMenu>
-  );
-}
-
 /**
- * The appearance controls of the side nav: language, colour mode and palette, as BoothDex's admin
- * shell has the first two. They sit in SideNav's `footerIcons` row beside its collapse button,
- * which also stacks them in the collapsed rail; inside the footer section they overflowed it.
+ * The side nav's footer icon row, beside its collapse button: the colour-mode toggle and the
+ * settings button. `footerIcons` is the slot SideNav also stacks in the collapsed rail.
  */
 export function FooterPreferences() {
   return (
     <>
-      <FooterMenu label={t("app.locale.label")} icon={Languages}>
-        <LanguageOptions />
-      </FooterMenu>
       <ColorModeToggle iconSize="sm" />
-      <FooterMenu label={t("app.colors.label")} icon={Palette}>
-        <PaletteOptions />
-      </FooterMenu>
+      <SettingsButton />
     </>
   );
 }

@@ -11,7 +11,7 @@ import {
   PlugZap,
   Puzzle,
   ScrollText,
-  Server,
+  Info,
   Users,
 } from "lucide-react";
 import { t } from "../lib/i18n.ts";
@@ -132,7 +132,7 @@ export const routes: readonly PageRoute[] = [
     id: "system",
     group: "server",
     title: () => t("app.nav.system"),
-    icon: Server,
+    icon: Info,
     page: page(() => import("../features/system/index.ts")),
   },
   // Reached from Overview and Accounts, as in the legacy dashboard; the command palette lists it.
