@@ -31,6 +31,7 @@ import { lampVariant, StatusLamp } from "../components/StatusLamp.tsx";
 import { t } from "../lib/i18n.ts";
 import { repository } from "../lib/repository.ts";
 import { layout } from "../themes/site/layout.ts";
+import { roles } from "../themes/site/roles.ts";
 import { PageDialog, useDialogParam } from "./pages/PageDialog.tsx";
 import { PageWarning } from "./Notices.tsx";
 import { FooterPreferences } from "./PreferenceMenus.tsx";
@@ -212,7 +213,11 @@ function PageItems({ current }: { current: PageRoute }) {
           onCollapsedChange: (isClosed) => toggle(c.id, !isClosed),
         }}
       >
-        {items}
+        {/* SideNav spaces its top rows 2 px apart but stacks a category's pages flush, so a hovered
+            page's fill touched the selected one (owner, 2026-11-08: 「黏在一起了」). */}
+        <VStack gap={roles.nav.rowGap} paddingBlockStart={roles.nav.rowGap}>
+          {items}
+        </VStack>
       </SideNavItem>
     );
   });

@@ -50,5 +50,7 @@ export const roles = {
   // (table-filter:4313).
   detailPanel: layout.detailPanel,
   detailSheet: { height: "tall", padding: 0 },
+  // SideNav's own gap between its top rows (2 px), repeated inside a category.
+  nav: { rowGap: 0.5 },
   compactSurface: "(max-width: 768px), (max-width: 1024px) and (pointer: coarse) and (hover: none)",
 } as const;
