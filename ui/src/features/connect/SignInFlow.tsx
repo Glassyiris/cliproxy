@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
-import { Card } from "@astryxdesign/core/Card";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { span } from "../../lib/time.ts";
+import { roles } from "../../themes/site/roles.ts";
 import { phaseStatus } from "./flow.ts";
 import { Ended, Result, Verifying } from "./Result.tsx";
 import type { Flow, SignIn } from "./useSignIn.ts";
@@ -22,28 +22,25 @@ function Expiry({ flow, polledAt }: { flow: Flow; polledAt: number }) {
   );
 }
 
-/** The current sign-in, from waiting for approval to its result. */
-export function SignInPanel({ signIn }: { signIn: SignIn }) {
-  const { flow } = signIn;
+/** The current sign-in, steps 2 and 3 of the dialog: waiting for approval, then its result. */
+export function SignInFlow({ flow, signIn }: { flow: Flow; signIn: SignIn }) {
   // The control to land on: the sign-in link when a sign-in starts, and the next step's first
   // button when the focused control went away with the previous step. A step with no button
-  // (Verifying) lands on the panel's heading, and its first button takes over from there.
+  // (Verifying) lands on the heading, and its first button takes over from there.
   const lead = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
-  const id = flow?.id;
-  const phase = flow?.phase;
+  const { id, phase } = flow;
   useEffect(() => {
-    if (id) lead.current?.focus();
+    lead.current?.focus();
   }, [id]);
   useEffect(() => {
     const at = document.activeElement;
     if (at === document.body || at === heading.current) (lead.current ?? heading.current)?.focus();
   }, [phase]);
-  if (!flow) return null;
-  const waiting = flow.phase === "wait";
-  const result = waiting ? null : flow.phase === "verifying" ? (
+  const waiting = phase === "wait";
+  const result = waiting ? null : phase === "verifying" ? (
     <Verifying flow={flow} />
-  ) : flow.phase === "ok" || flow.phase === "refused" ? (
+  ) : phase === "ok" || phase === "refused" ? (
     <Result flow={flow} signIn={signIn} lead={lead} />
   ) : (
     <Ended flow={flow} signIn={signIn} lead={lead} />
@@ -52,28 +49,20 @@ export function SignInPanel({ signIn }: { signIn: SignIn }) {
   // steps stay out of the live regions. Waiting is keyed by its sign-in, so a replacing sign-in
   // starts with an empty callback form.
   return (
-    <Card>
-      <VStack gap={4}>
-        <HStack gap={2} vAlign="center" wrap="wrap">
-          <StackItem size="fill">
-            <Heading level={3} ref={heading} tabIndex={-1}>
-              {label(flow.provider)}
-            </Heading>
-          </StackItem>
-          <Expiry flow={flow} polledAt={signIn.polledAt} />
-          <HStack aria-live="polite">
-            <StatusLamp
-              status={phaseStatus[flow.phase]}
-              label={phaseWord(flow.phase)}
-              isPulsing={waiting}
-            />
-          </HStack>
+    <VStack gap={roles.gap.card}>
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        <StackItem size="fill">
+          <Heading level={roles.heading.card} ref={heading} tabIndex={-1}>
+            {label(flow.provider)}
+          </Heading>
+        </StackItem>
+        <Expiry flow={flow} polledAt={signIn.polledAt} />
+        <HStack aria-live="polite">
+          <StatusLamp status={phaseStatus[phase]} label={phaseWord(phase)} isPulsing={waiting} />
         </HStack>
-        <VStack>
-          {waiting && <Waiting key={flow.id} flow={flow} signIn={signIn} lead={lead} />}
-          <VStack aria-live="polite">{result}</VStack>
-        </VStack>
-      </VStack>
-    </Card>
+      </HStack>
+      {waiting && <Waiting key={id} flow={flow} signIn={signIn} lead={lead} />}
+      <VStack aria-live="polite">{result}</VStack>
+    </VStack>
   );
 }

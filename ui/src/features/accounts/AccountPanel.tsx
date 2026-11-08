@@ -1,6 +1,7 @@
-// The open account in the template's end panel (a bottom sheet on phones): its facts, quota,
-// cooldowns, fields and models, then what can be done to it.
-import { useState } from "react";
+// The open account in the detail panel (a bottom sheet on phones), in the order an operator asks:
+// is it serving and when does it come back, what the upstream said, the quota windows, what can
+// be done, then its settings, models and file.
+import { useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Code } from "@astryxdesign/core/Code";
@@ -18,6 +19,7 @@ import { Token } from "@astryxdesign/core/Token";
 import { useUnsavedChanges } from "../../app/useHashRoute.ts";
 import { useAvailable } from "../../components/MissingActions.tsx";
 import { QuotaWindow, quotaErrorText } from "../../components/QuotaWindow.tsx";
+import { ReadError } from "../../components/ReadError.tsx";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
 import { setCredentialFields } from "../../lib/api/credentials.ts";
 import { routes } from "../../lib/api/routes.ts";
@@ -25,42 +27,71 @@ import { equal } from "../../lib/compare.ts";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
-import { ReadError } from "../../components/ReadError.tsx";
+import { roles } from "../../themes/site/roles.ts";
 import { PanelActions, type PanelProps } from "./PanelActions.tsx";
 import { useCredentialModels } from "./queries.ts";
 import { fieldPatch, fieldsOf, type FieldValues } from "./rows.ts";
-import { cooldownOf, subOf, wordOf } from "./words.ts";
+import { ageOf, cooldownOf, lastOf, reasonOf, recoveryOf, statusOf } from "./words.ts";
 
-function Facts({ row }: Pick<PanelProps, "row">) {
-  const a = row.account;
-  const refreshed = Date.parse(a.last_refresh ?? "");
+/** A block of the panel: an h3 over its content. */
+function Block({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <VStack gap={2}>
+      <Heading level={3}>{title}</Heading>
+      {children}
+    </VStack>
+  );
+}
+
+function State({ row, now }: Pick<PanelProps, "row"> & { now: number }) {
+  const r = recoveryOf(row.view, now);
+  const reason = row.view.ready ? "" : reasonOf(row.view, row.account);
   return (
     <MetadataList>
-      <MetadataListItem label={t("accounts.panel.file")}>
-        <Code>{a.name}</Code>
+      <MetadataListItem label={t("accounts.columns.status")}>
+        <StatusLamp status={lampStatus[row.view.lamp]} label={statusOf(row.view)} />
       </MetadataListItem>
-      <MetadataListItem label={t("accounts.panel.authIndex")}>
-        {a.auth_index ? <Code>{a.auth_index}</Code> : t("accounts.panel.none")}
-      </MetadataListItem>
-      <MetadataListItem label={t("accounts.panel.source")}>
-        {a.source === "memory" ? t("accounts.panel.sourceMemory") : t("accounts.panel.sourceFile")}
-      </MetadataListItem>
-      <MetadataListItem label={t("accounts.panel.lifetime")}>
-        {a.success === undefined
-          ? t("app.quota.notReported")
-          : t("accounts.panel.lifetimeCounts", { ok: a.success, failed: a.failed || 0 })}
-      </MetadataListItem>
-      {refreshed > 0 && (
-        <MetadataListItem label={t("accounts.panel.refreshed")}>
-          {t("accounts.panel.at", { at: refreshed })}
+      {reason && <MetadataListItem label={t("accounts.panel.reason")}>{reason}</MetadataListItem>}
+      {!row.view.ready && (
+        <MetadataListItem label={t("accounts.columns.recovery")}>
+          {r.second ? t("accounts.panel.recoveryAt", { when: r.first, at: r.second }) : r.first}
         </MetadataListItem>
       )}
-      {a.status_message && (
-        <MetadataListItem label={t("accounts.panel.statusMessage")}>
-          {a.status_message}
-        </MetadataListItem>
-      )}
+      <MetadataListItem label={t("accounts.panel.lastUsed")}>{lastOf(row.view)}</MetadataListItem>
+      <MetadataListItem label={t("accounts.panel.quotaRead")}>
+        {ageOf(row.view, now)}
+      </MetadataListItem>
     </MetadataList>
+  );
+}
+
+/**
+ * What the upstream answered, as the server kept it: its message, and each cooldown with the HTTP
+ * status that started it (REQUIREMENTS exception: operators see upstream error detail).
+ */
+function Upstream({ row, now }: Pick<PanelProps, "row"> & { now: number }) {
+  const a = row.account;
+  const cooldowns = a.cooldowns ?? [];
+  if (!a.status_message && !cooldowns.length) return null;
+  return (
+    <Block title={t("accounts.panel.upstream")}>
+      {a.status_message && (
+        <Text type={roles.textType.identifier} textWrap="wrap">
+          {a.status_message}
+        </Text>
+      )}
+      {cooldowns.length > 0 && (
+        <List density="compact" hasDividers>
+          {cooldowns.map((c, i) => (
+            <ListItem
+              key={i}
+              label={c.model_key ? <Code>{c.model_key}</Code> : t("accounts.cooldown.wholeAccount")}
+              description={cooldownOf(c, now)}
+            />
+          ))}
+        </List>
+      )}
+    </Block>
   );
 }
 
@@ -70,29 +101,28 @@ function Limits({ row, quota, now }: Pick<PanelProps, "row" | "quota"> & { now: 
   const windows = limits && "windows" in limits ? limits.windows : [];
   const staleFor = row.view.stale && limits && "at" in limits ? now - limits.at : null;
   const signals = Object.entries(a.quota?.signals ?? {});
-  const cooldowns = a.cooldowns ?? [];
+  if (!windows.length && !limits?.error && !signals.length) return null;
   return (
-    <VStack gap={3}>
-      {windows.map((w, i) => (
-        <QuotaWindow key={i} bar={{ window: w, staleFor }} now={now} />
-      ))}
-      {limits?.error && (
-        <StatusLamp
-          status="failing"
-          label={t("accounts.panel.usageFailed", { error: quotaErrorText(limits.error) })}
-        />
-      )}
-      {(cooldowns.length > 0 || signals.length > 0) && (
-        <HStack gap={1} wrap="wrap">
-          {cooldowns.map((c, i) => (
-            <Token key={`c${i}`} size="sm" label={cooldownOf(c, now)} />
-          ))}
-          {signals.map(([k, v]) => (
-            <Token key={k} size="sm" label={t("accounts.panel.signal", { name: k, value: v })} />
-          ))}
-        </HStack>
-      )}
-    </VStack>
+    <Block title={t("accounts.panel.quota")}>
+      <VStack gap={3}>
+        {windows.map((w, i) => (
+          <QuotaWindow key={i} bar={{ window: w, staleFor }} now={now} />
+        ))}
+        {limits?.error && (
+          <StatusLamp
+            status="failing"
+            label={t("accounts.panel.usageFailed", { error: quotaErrorText(limits.error) })}
+          />
+        )}
+        {signals.length > 0 && (
+          <HStack gap={1} wrap="wrap">
+            {signals.map(([k, v]) => (
+              <Token key={k} size="sm" label={t("accounts.panel.signal", { name: k, value: v })} />
+            ))}
+          </HStack>
+        )}
+      </VStack>
+    </Block>
   );
 }
 
@@ -125,34 +155,35 @@ function FieldsForm({ row, writes }: Pick<PanelProps, "row" | "writes">) {
     if (ok) setSaved(values);
   };
   return (
-    <VStack gap={3}>
-      <TextInput
-        label={t("accounts.fields.note")}
-        value={values.note}
-        onChange={(note) => set({ note })}
-      />
-      <HStack gap={2} wrap="wrap">
-        {number("priority", t("accounts.fields.priority"), t("accounts.fields.priorityHint"))}
-        {number("weight", t("accounts.fields.weight"), t("accounts.fields.weightHint"))}
-        {number("request_retry", t("accounts.fields.retries"), t("accounts.fields.retriesHint"))}
-      </HStack>
-      <HStack gap={2}>
-        <Button
-          label={t("accounts.fields.save")}
-          isLoading={writes.isBusy("fields")}
-          isDisabled={!isAvailable(routes.setCredentialFields)}
-          onClick={() => void save()}
+    <Block title={t("accounts.panel.settings")}>
+      <VStack gap={3}>
+        <TextInput
+          label={t("accounts.fields.note")}
+          value={values.note}
+          onChange={(note) => set({ note })}
         />
-      </HStack>
-    </VStack>
+        <HStack gap={2} wrap="wrap">
+          {number("priority", t("accounts.fields.priority"), t("accounts.fields.priorityHint"))}
+          {number("weight", t("accounts.fields.weight"), t("accounts.fields.weightHint"))}
+          {number("request_retry", t("accounts.fields.retries"), t("accounts.fields.retriesHint"))}
+        </HStack>
+        <HStack gap={2}>
+          <Button
+            label={t("accounts.fields.save")}
+            isLoading={writes.isBusy("fields")}
+            isDisabled={!isAvailable(routes.setCredentialFields)}
+            onClick={() => void save()}
+          />
+        </HStack>
+      </VStack>
+    </Block>
   );
 }
 
 function Models({ row }: Pick<PanelProps, "row">) {
   const models = useCredentialModels(row.id);
   return (
-    <VStack gap={2}>
-      <Heading level={3}>{t("accounts.panel.models")}</Heading>
+    <Block title={t("accounts.panel.models")}>
       {models.isPending ? (
         <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
       ) : models.isError ? (
@@ -168,44 +199,78 @@ function Models({ row }: Pick<PanelProps, "row">) {
           ))}
         </List>
       ) : (
-        <Text type="supporting" color="secondary">
+        <Text type={roles.textType.supporting} color="secondary">
           {t("accounts.panel.noModels")}
         </Text>
       )}
-    </VStack>
+    </Block>
+  );
+}
+
+function File({ row }: Pick<PanelProps, "row">) {
+  const a = row.account;
+  const refreshed = Date.parse(a.last_refresh ?? "");
+  return (
+    <Block title={t("accounts.panel.file")}>
+      <MetadataList>
+        <MetadataListItem label={t("accounts.panel.fileName")}>
+          <Code>{a.name}</Code>
+        </MetadataListItem>
+        <MetadataListItem label={t("accounts.panel.authIndex")}>
+          {a.auth_index ? <Code>{a.auth_index}</Code> : t("accounts.panel.none")}
+        </MetadataListItem>
+        <MetadataListItem label={t("accounts.panel.source")}>
+          {a.source === "memory"
+            ? t("accounts.panel.sourceMemory")
+            : t("accounts.panel.sourceFile")}
+        </MetadataListItem>
+        <MetadataListItem label={t("accounts.panel.lifetime")}>
+          {a.success === undefined
+            ? t("app.quota.notReported")
+            : t("accounts.panel.lifetimeCounts", { ok: a.success, failed: a.failed || 0 })}
+        </MetadataListItem>
+        {refreshed > 0 && (
+          <MetadataListItem label={t("accounts.panel.refreshed")}>
+            {t("accounts.panel.at", { at: refreshed })}
+          </MetadataListItem>
+        )}
+      </MetadataList>
+    </Block>
   );
 }
 
 export function AccountPanel(props: PanelProps & { now: number; onClose: () => void }) {
   const { row, quota, writes, now, onClose } = props;
-  const sub = subOf(row.view);
   return (
-    <VStack gap={4}>
-      <HStack gap={2}>
+    <VStack gap={roles.gap.card}>
+      <HStack gap={2} vAlign="start">
         <StackItem size="fill">
-          <VStack gap={1}>
-            <StatusLamp status={lampStatus[row.view.lamp]} label={wordOf(row.view, now)} />
-            <Heading level={2}>{row.name}</Heading>
-            <Text type="supporting" color="secondary">
-              {[label(row.provider), sub].filter(Boolean).join(" · ")}
+          <VStack gap={0.5}>
+            <Heading level={roles.heading.section} maxLines={1}>
+              {row.name}
+            </Heading>
+            <Text type={roles.textType.supporting} color="secondary">
+              {label(row.provider)}
             </Text>
           </VStack>
         </StackItem>
         <IconButton
           label={t("accounts.panel.close")}
-          variant="ghost"
-          size="sm"
+          variant={roles.rowAction.variant}
+          size={roles.rowAction.size}
           icon={<Icon icon={X} size="sm" />}
           onClick={onClose}
         />
       </HStack>
+      <State row={row} now={now} />
       <PanelActions {...props} />
       <Divider />
-      <Facts row={row} />
+      <Upstream row={row} now={now} />
       <Limits row={row} quota={quota} now={now} />
       {/* A runtime-only account takes the same fields, kept in memory (Rust auth_files.rs). */}
       <FieldsForm row={row} writes={writes} />
       <Models row={row} />
+      <File row={row} />
     </VStack>
   );
 }

@@ -4,6 +4,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { FormDialog } from "../../components/FormDialog.tsx";
 import { KeyField } from "../../components/KeyField.tsx";
 import { t } from "../../lib/i18n.ts";
+import { familyName, type Family } from "../../components/keyFamilies.ts";
 import { formErrors, newGroup, type FormErrors, type Group } from "./groups.ts";
 
 const urlMessage = {
@@ -69,18 +70,19 @@ function Fields({
 
 /** The add-group form. Mounted only while open, so every opening starts empty. */
 export function AddGroupDialog({
-  compat,
+  family,
   busy,
   add,
   onClose,
 }: {
-  /** An OpenAI-compatible group has no default endpoint, so its base URL is required. */
-  compat: boolean;
+  family: Family;
   busy: boolean;
   /** Writes the new list; true when it was stored. */
   add: (group: Group) => Promise<boolean>;
   onClose: () => void;
 }) {
+  // An OpenAI-compatible group has no default endpoint, so its base URL is required.
+  const compat = family === "openai-compatibility";
   const [values, setValues] = useState<Values>({ name: "", baseUrl: "", key: "" });
   const [errors, setErrors] = useState<FormErrors>({});
   const change = (field: keyof Values) => (value: string) => {
@@ -103,7 +105,7 @@ export function AddGroupDialog({
 
   return (
     <FormDialog
-      title={t("providers.add.title")}
+      title={t("providers.add.title", { family: familyName(family) })}
       submitLabel={t("providers.add.submit")}
       busy={busy}
       onSubmit={() => void submit()}

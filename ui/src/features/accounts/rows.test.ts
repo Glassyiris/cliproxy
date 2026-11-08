@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Credential } from "../../lib/api/credentials.ts";
-import { fieldPatch, hiddenSelection, matches, reach, toRows, toSwitch, type Row } from "./rows.ts";
+import {
+  fieldPatch,
+  hiddenSelection,
+  inScope,
+  inView,
+  matches,
+  reach,
+  toRows,
+  toSwitch,
+  type Row,
+} from "./rows.ts";
 
 const account = (fields: Partial<Credential>) =>
   ({ id: "", auth_index: "", status: "active", ...fields }) as Credential;
@@ -65,4 +75,17 @@ test("saving fields trims the note and sends null only for a number that was set
     fieldPatch(a, { note: " team ", priority: null, weight: null, request_retry: 2 }),
     { note: "team", priority: null, request_retry: 2 },
   );
+});
+
+test("the default view keeps accounts that cannot serve; a status narrows to that state", () => {
+  const list = rows([
+    { name: "ok.json", auth_index: "1" },
+    { name: "off.json", auth_index: "2", disabled: true },
+    { name: "bad.json", auth_index: "3", status: "error", status_message: "HTTP 401" },
+  ]);
+  const scope = inScope(list, { provider: "", show: "", search: "" });
+  assert.deepEqual(keys(inView(scope, "needs")).sort(), ["2", "3"]);
+  assert.equal(inView(scope, "all").length, 3);
+  assert.deepEqual(keys(inScope(list, { provider: "", show: "signIn", search: "" })), ["3"]);
+  assert.deepEqual(keys(inScope(list, { provider: "", show: "ready", search: "" })), ["1"]);
 });

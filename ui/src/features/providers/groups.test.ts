@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ApiKeyUsage } from "../../lib/api/observability.ts";
 import {
-  busiest,
+  entriesOf,
   formErrors,
   groupNames,
   groupsOf,
+  isFailing,
   isHttpUrl,
   keyTraffic,
   modelText,
@@ -55,19 +56,36 @@ test("modelText shows an alias only when it differs", () => {
 
 test("keyTraffic finds usage by family, or by lower-cased name for OpenAI-compatible groups", () => {
   const claude = keyTraffic(usage, "claude", { name: "team" }, { "api-key": "sk-a" });
-  assert.deepEqual(claude, { total: [3, 0], failed: [1, 0] });
+  assert.deepEqual(claude, { total: [3, 0], failed: [1, 0], times: ["", ""] });
   const compat = { name: "OpenRouter", "base-url": "https://r.example/v1" };
   assert.deepEqual(keyTraffic(usage, "openai-compatibility", compat, { "api-key": "sk-b" }), {
     total: [9],
     failed: [0],
+    times: [""],
   });
   assert.equal(keyTraffic(usage, "claude", { name: "team" }, { "api-key": "sk-x" }), null);
   assert.equal(keyTraffic(undefined, "claude", {}, { "api-key": "sk-a" }), null);
 });
 
-test("busiest is at least 1 and covers every key of the family", () => {
-  assert.equal(busiest(undefined, "claude", []), 1);
-  assert.equal(busiest(usage, "claude", [{ keys: [{ "api-key": "sk-a" }] }]), 3);
+test("entriesOf lists configured families in order and adds up each group's keys", () => {
+  const config = {
+    "api-keys": {
+      codex: [],
+      claude: [{ name: "team", keys: [{ "api-key": "sk-a" }, { "api-key": "sk-x" }] }],
+    },
+  };
+  const entries = entriesOf(config, usage, (n) => `Group ${n}`);
+  assert.deepEqual(
+    entries.map(([family, list]) => [family, list.map((e) => e.name)]),
+    [["claude", ["team"]]],
+  );
+  assert.deepEqual(entries[0][1][0].traffic, { total: [3, 0], failed: [1, 0], times: ["", ""] });
+});
+
+test("a key is failing when at least half of its requests failed", () => {
+  assert.equal(isFailing(null), false);
+  assert.equal(isFailing({ total: [4, 0], failed: [1, 0] }), false);
+  assert.equal(isFailing({ total: [2, 2], failed: [1, 1] }), true);
 });
 
 test("newGroup leaves the base URL out when empty", () => {

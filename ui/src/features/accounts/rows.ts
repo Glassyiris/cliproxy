@@ -20,6 +20,8 @@ export interface Row extends Record<string, unknown> {
   name: string;
   view: AccountRow;
   buckets: Buckets | null;
+  /** Each bucket's span as the server writes it, oldest first. */
+  times: string[];
 }
 
 export const rowKey = (a: Credential) => `${a.name}\u0000${a.auth_index}`;
@@ -44,16 +46,35 @@ export function toRows(list: Credential[], quota: QuotaView, now: number): Row[]
       name: credName(a),
       view: accountRow(a, quota.limits(a), quota.isLive(a), quota.hasSource(a), now),
       buckets: buckets(a),
+      times: (a.recent_requests ?? []).map((b) => b.time),
     }))
     .sort((x, y) => x.view.next - y.view.next || collator.compare(x.name, y.name));
 }
 
-export const shows = ["ready", "low", "attention"] as const;
+/** The inbox views: accounts that cannot serve now (the default), or every account. */
+export type View = "needs" | "all";
+
+/** Why an account cannot serve, as `credState` names it; the Overview cards link with these. */
+const reasons = [
+  "signIn",
+  "unavailable",
+  "error",
+  "limited",
+  "cooling",
+  "disabled",
+  "other",
+] as const;
+
+/** The status filter (`show=`): it can serve, it serves with a window near its limit, or a reason. */
+export const shows = ["ready", "low", ...reasons] as const;
 export type Show = (typeof shows)[number];
 export const isShow = (value: string | undefined): value is Show => shows.includes(value as Show);
 
-/** The filters in the hash: provider tab ("" is All), quick filter and search text. */
-export type Filters = { provider: string; show: Show | ""; search: string };
+export const hasShow = (row: Row, show: Show) =>
+  show === "ready" ? row.view.ready : show === "low" ? row.view.low : row.view.state.state === show;
+
+/** The filters in the hash: family ("" is every family), view, status ("" is any) and search. */
+export type Filters = { provider: string; view: View; show: Show | ""; search: string };
 
 /** Name, email or note contains every word of `search`, ignoring case. */
 export function matches(row: Row, search: string) {
@@ -64,19 +85,27 @@ export function matches(row: Row, search: string) {
   return words.every((w) => text.includes(w));
 }
 
-/** The provider tabs: each provider in list order, with its account count. */
-export function providerCounts(rows: Row[]) {
-  const counts = new Map<string, number>();
-  for (const r of rows) counts.set(r.provider, (counts.get(r.provider) ?? 0) + 1);
-  return [...counts];
-}
+/** The families with accounts, in the order their first account sorts. */
+export const familiesOf = (rows: Row[]) => [...new Set(rows.map((r) => r.provider))];
 
-/** Rows in the provider tab that match the search, before the quick filter. */
-export const inTab = (rows: Row[], f: Pick<Filters, "provider" | "search">) =>
-  rows.filter((r) => (!f.provider || r.provider === f.provider) && matches(r, f.search));
+/** Rows of the family that match the search and the status, before the view. */
+export const inScope = (rows: Row[], f: Omit<Filters, "view">) =>
+  rows.filter(
+    (r) =>
+      (!f.provider || r.provider === f.provider) &&
+      (!f.show || hasShow(r, f.show)) &&
+      matches(r, f.search),
+  );
 
-export const shownRows = (tab: Row[], show: Filters["show"]) =>
-  show ? tab.filter((r) => r.view[show]) : tab;
+/** How many of `rows` each status filter keeps, and each family holds. */
+export const countBy = <K extends string>(
+  rows: Row[],
+  keys: readonly K[],
+  has: (r: Row, k: K) => boolean,
+) => new Map(keys.map((k) => [k, rows.filter((r) => has(r, k)).length]));
+
+export const inView = (rows: Row[], view: View) =>
+  view === "all" ? rows : rows.filter((r) => !r.view.ready);
 
 // Accounts that share one file change together: a delete removes the file, and a plugin
 // source's status change reaches every account it expands to (Go auth_files_fields.go
@@ -108,8 +137,8 @@ export function toSwitch(files: Row[][], selected: ReadonlySet<string>, disabled
 }
 
 /**
- * Selected rows the view does not show, and where they are: on one other provider's tab
- * (`provider`), or hidden by the filters (`provider` null).
+ * Selected rows the view does not show, and where they are: all in one family other than the one
+ * filtered to (`provider`), or hidden by the filters (`provider` null).
  */
 export function hiddenSelection(picked: Row[], shown: Row[], tab: string) {
   const visible = new Set(shown.map((r) => r.key));

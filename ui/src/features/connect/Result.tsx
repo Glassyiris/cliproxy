@@ -18,10 +18,7 @@ import type { Flow, SignIn } from "./useSignIn.ts";
 
 type Props = { flow: Flow; signIn: SignIn; lead: Ref<HTMLButtonElement> };
 
-const openAccounts = (
-  variant: "primary" | "secondary" | "ghost",
-  lead?: Ref<HTMLButtonElement>,
-) => (
+const openAccounts = (variant: "secondary" | "ghost", lead?: Ref<HTMLButtonElement>) => (
   <Button ref={lead} label={t("connect.result.openAccounts")} variant={variant} href="#accounts" />
 );
 
@@ -59,9 +56,6 @@ function Account({ flow }: { flow: Flow }) {
         <>
           <QuotaWindow bar={row.session} now={flow.at} />
           <QuotaWindow bar={row.weekly} now={flow.at} />
-          <Text type="supporting" color="secondary">
-            {t("connect.result.checked")}
-          </Text>
         </>
       )}
     </VStack>
@@ -90,7 +84,7 @@ function Refused({ flow, signIn, lead }: Props) {
         <Button
           ref={lead}
           label={t("connect.result.signInAgain")}
-          variant="primary"
+          variant="secondary"
           isLoading={signIn.pending === flow.provider}
           onClick={() => void signIn.start(flow.provider)}
         />
@@ -130,12 +124,12 @@ function Connected({ flow, signIn, lead }: Props) {
         <Button
           ref={lead}
           label={t("connect.result.another", { provider: label(flow.provider) })}
-          variant="primary"
+          variant="secondary"
           icon={<Icon icon={Plus} />}
           isLoading={signIn.pending === flow.provider}
           onClick={() => void signIn.start(flow.provider)}
         />
-        {openAccounts("secondary")}
+        {openAccounts("ghost")}
       </HStack>
     </>
   );
@@ -171,7 +165,7 @@ export function Ended({ flow, signIn, lead }: Props) {
         />
       )}
       <HStack gap={2} wrap="wrap">
-        {unknown && openAccounts("primary", lead)}
+        {unknown && openAccounts("secondary", lead)}
         <Button
           ref={unknown ? undefined : lead}
           label={t("connect.ended.again")}

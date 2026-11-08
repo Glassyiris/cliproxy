@@ -19,6 +19,7 @@ import {
   credentialNames,
   reason,
   reloadCredentials,
+  useGone,
   useSignInStatus,
   type StatusAnswer,
 } from "./queries.ts";
@@ -234,7 +235,7 @@ export function useSignIn(action: Action) {
   const quota = useQuota();
   const [flow, setFlow] = useState<Flow | null>(null);
   const [latest] = useState(latestFlow);
-  const [gone, setGone] = useState<string[]>([]);
+  const [gone, addGone] = useGone();
   const [pressed, setPressed] = useState("");
   const mounted = useRef(false);
   const { beforeSignOut } = useSession();
@@ -277,8 +278,7 @@ export function useSignIn(action: Action) {
     statusError: status.isError ? status.error : null,
     retryStatus: () => void status.refetch(),
     pending: pressed,
-    start: (provider: string) =>
-      run(provider, () => begin(ctx, provider, () => setGone((g) => [...g, provider]))),
+    start: (provider: string) => run(provider, () => begin(ctx, provider, () => addGone(provider))),
     cancel: () =>
       run("cancel", async () => {
         const current = latest.get();

@@ -88,7 +88,6 @@ const CARD_PADDING_EXCEPTIONS = {
   // A chart tooltip is a popover drawn as a small card, as card-v2's TrendTip draws it.
   "src/components/charts/plots.tsx": "chart tooltip",
   // Pages R1 to R5 rewrite next; each leaves this list when it is rewritten.
-  "src/features/connect/SignInPanel.tsx": "not yet rewritten",
 };
 const DEFAULT_EXPORT = /export\s*\{\s*default\s*\}\s*from\s*["'](\.\/[^"']+)["']/;
 

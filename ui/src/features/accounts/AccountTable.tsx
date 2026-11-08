@@ -1,33 +1,31 @@
-// The account table of the table-filter template: Astryx Table with its grouped rows, the
-// template's row activation, and the selection checkbox in the first column as the
-// TableLeadingMarkSelection block places it. Astryx Table has no virtualizer, so its body rows
-// are windowed with @tanstack/react-virtual: the table gets only the rows in view, between two
-// spacer rows as tall as the rows left out, and keeps one fixed column layout. Every column sits on
-// Table's default column floor, so on a phone the table scrolls in its own region instead of
-// squeezing; the account column takes one and a half shares, the most that still fits the floors
-// of all six beside the open panel at its default width.
+// The account list of the table-inbox template: Astryx Table in `balanced` density with no column
+// dividers, every row a doorway to the detail (click, Enter or Space; `isRowItself` keeps the
+// checkbox from opening it), the open row one step past hover. The columns follow the room the
+// list has, as the template's do (`STACK_ROWS_BELOW`, `TIGHTEN_COLUMNS_BELOW`): wide, the quota
+// windows, recovery and requests; tight (beside the open panel), the quota windows only; stacked
+// (a phone), one summary cell per row with the name first. Deviation: the stacked rows keep their
+// checkbox, which the template drops, so batch actions still reach every account on a phone. Astryx Table has no virtualizer, so the body is windowed with @tanstack/react-virtual
+// as LogRows.tsx does it: the table gets the rows in view between two spacer rows as tall as the
+// rows left out.
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type Dispatch,
-  type KeyboardEvent,
   type ReactNode,
   type SetStateAction,
 } from "react";
 import * as stylex from "@stylexjs/stylex";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import {
   Table,
   TableCell,
   proportional,
-  useTableGroupedRows,
   useTableSelectionState,
   type TableColumn,
   type TablePlugin,
@@ -35,16 +33,17 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { colorVars } from "@astryxdesign/core/theme/tokens.stylex";
 import { QuotaWindow } from "../../components/QuotaWindow.tsx";
+import { RequestSparkline } from "../../components/RequestSparkline.tsx";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
-import { TrafficStrip } from "../../components/TrafficStrip.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
+import type { ListShape } from "../../components/listShape.ts";
 import { layout } from "../../themes/site/layout.ts";
+import { roles } from "../../themes/site/roles.ts";
 import type { Row } from "./rows.ts";
-import { ageOf, lastOf, subOf, wordOf } from "./words.ts";
+import { reasonOf, recoveryOf, statusOf } from "./words.ts";
 
 const styles = stylex.create({
-  // From the template: a row opens the panel, and the open row is one step past hover.
   clickableRow: { cursor: "pointer" },
   activeRow: {
     backgroundColor: colorVars["--color-overlay-pressed"],
@@ -53,24 +52,25 @@ const styles = stylex.create({
   spacer: (height: number) => ({ height, paddingBlock: 0 }),
 });
 
-// A first guess for a row's height; each rendered row is measured, so it only steers the
-// scrollbar until then. Rows are two lines in every column.
+// A first guess for a row's height; every rendered row is measured, so it only steers the
+// scrollbar until then.
 const ROW_ESTIMATE = 64;
 const OVERSCAN = 8;
 
 /** A spacer stands for the rows above or below the window; it has no account. */
 type Spacer = { spacer: number; key: string };
-// Group header rows answer "" for any field they lack, so only a number marks a spacer.
 const spacerOf = (item: Row) => {
   const height = (item as unknown as Partial<Spacer>).spacer;
   return typeof height === "number" ? height : undefined;
 };
-const isAccount = (item: Row) => !!item.account && spacerOf(item) === undefined;
 
-/**
- * Where the table body starts in the scrolled content. Banners and the batch bar above it come
- * and go, and each changes the content's height, so it is measured again on every resize.
- */
+/** table-inbox `INTERACTIVE_WITHIN_ROW`: controls inside the row that are not the row. */
+const isRowItself = (target: EventTarget | null) =>
+  !(target as HTMLElement | null)?.closest(
+    'button, input, a, label, [role="checkbox"], [role="button"], [role="img"]',
+  );
+
+/** Where the table body starts in the scrolled content, measured again on every resize. */
 function useScrollMargin(scroller: HTMLElement | null, body: HTMLElement | null) {
   const [margin, setMargin] = useState(0);
   useEffect(() => {
@@ -104,167 +104,205 @@ export type TableProps = {
   openId: string;
   onToggle: (row: Row) => void;
   now: number;
-  /** Accounts that can serve, per provider, for the group rows. */
-  ready: Map<string, number>;
-  /** The open account's panel sits beside the table (not a bottom sheet). */
-  isPanelBeside: boolean;
+  shape: ListShape;
 };
 
 type Selection = ReturnType<typeof useTableSelectionState<Row>>["selectionConfig"];
 
-function StatusCell({ row, selection, now }: { row: Row; selection: Selection; now: number }) {
-  return (
-    <HStack gap={2} vAlign="start">
-      <CheckboxInput
-        label={t("accounts.table.select", { name: row.name })}
-        isLabelHidden
-        value={selection.getIsItemSelected(row)}
-        onChange={(checked) => selection.onSelectItem({ item: row, isSelected: checked })}
-      />
-      <VStack gap={0.5}>
-        <StatusLamp status={lampStatus[row.view.lamp]} label={wordOf(row.view, now)} />
-        <Text type="supporting" color="secondary" maxLines={2}>
-          {subOf(row.view)}
-        </Text>
-      </VStack>
-    </HStack>
-  );
-}
-
 /** A cell of two lines: the value, and a secondary line under it. */
-function TwoLines({ first, second }: { first: string; second: string }) {
+function TwoLines({ first, second }: { first: ReactNode; second: string }) {
   return (
     <VStack gap={0.5}>
-      <Text type="body" maxLines={1} hasTabularNumbers>
-        {first}
-      </Text>
-      <Text type="supporting" color="secondary" maxLines={1} hasTabularNumbers>
+      {first}
+      <Text type={roles.textType.supporting} color="secondary" maxLines={1} hasTabularNumbers>
         {second}
       </Text>
     </VStack>
   );
 }
 
-/**
- * The fixed column set. Beside the panel only Status, Account, Session and Weekly remain: six
- * columns on Table's default floor leave no header or cell its whole text in the width the panel
- * leaves, and the panel's facts cover the account in detail.
- */
+function Name({ row }: { row: Row }) {
+  return (
+    <Text type={roles.textType.body} maxLines={1}>
+      {row.name}
+    </Text>
+  );
+}
+
+function Status({ row }: { row: Row }) {
+  return (
+    <TwoLines
+      first={<StatusLamp status={lampStatus[row.view.lamp]} label={statusOf(row.view)} />}
+      second={reasonOf(row.view, row.account)}
+    />
+  );
+}
+
+function Recovery({ row, now }: { row: Row; now: number }) {
+  const r = recoveryOf(row.view, now);
+  return (
+    <TwoLines
+      first={
+        <Text type={roles.textType.body} maxLines={1} hasTabularNumbers>
+          {r.first}
+        </Text>
+      }
+      second={r.second}
+    />
+  );
+}
+
+/** The phone's summary row: name and provider, then status and reason, then when it comes back. */
+function Summary({ row, now }: { row: Row; now: number }) {
+  const r = recoveryOf(row.view, now);
+  const reason = reasonOf(row.view, row.account);
+  return (
+    <VStack gap={0.5}>
+      <Name row={row} />
+      <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
+        {accountLine(row)}
+      </Text>
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        <StatusLamp status={lampStatus[row.view.lamp]} label={statusOf(row.view)} />
+        {reason && (
+          <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
+            {reason}
+          </Text>
+        )}
+      </HStack>
+      {!row.view.ready && (
+        <Text type={roles.textType.supporting} color="secondary" hasTabularNumbers>
+          {r.second
+            ? t("accounts.row.recoveryAt", { when: r.first, at: r.second })
+            : t("accounts.row.recovery", { when: r.first })}
+        </Text>
+      )}
+    </VStack>
+  );
+}
+
+const share = (n: number) => proportional(n, { minWidth: layout.tableColumnFloor });
+
+type Cell = (render: (r: Row) => ReactNode) => (r: Row) => ReactNode;
+
+/** The account's second line: provider and plan, then its note, else its file. */
+const accountLine = (r: Row) =>
+  [[label(r.provider), r.account.id_token?.plan_type].filter(Boolean).join(" "), r.account.note]
+    .filter(Boolean)
+    .join(", ");
+
+/** The name column, with the selection checkbox in its header and in each row. */
+function accountColumn(
+  selection: Selection,
+  allSelected: boolean,
+  cell: Cell,
+  content: (r: Row) => ReactNode,
+  width: number,
+): TableColumn<Row> {
+  return {
+    key: "account",
+    width: share(width),
+    header: (
+      <HStack gap={2} vAlign="center">
+        <CheckboxInput
+          label={t("accounts.table.selectShown")}
+          isLabelHidden
+          value={allSelected ? true : selection.getIsIndeterminate?.() ? "indeterminate" : false}
+          onChange={(checked) => selection.onSelectAll({ isAllSelected: checked })}
+        />
+        {t("accounts.columns.account")}
+      </HStack>
+    ),
+    renderCell: cell((r) => (
+      <HStack gap={2} vAlign="start">
+        <CheckboxInput
+          label={t("accounts.table.select", { name: r.name })}
+          isLabelHidden
+          value={selection.getIsItemSelected(r)}
+          onChange={(checked) => selection.onSelectItem({ item: r, isSelected: checked })}
+        />
+        <StackItem size="fill">{content(r)}</StackItem>
+      </HStack>
+    )),
+  };
+}
+
 function columnsOf(
   selection: Selection,
-  all: boolean,
-  max: number,
+  allSelected: boolean,
   now: number,
-  isPanelBeside: boolean,
+  shape: ListShape,
 ): TableColumn<Row>[] {
-  const cell = (render: (r: Row) => ReactNode) => (r: Row) => (isAccount(r) ? render(r) : null);
+  const cell: Cell = (render) => (r) => (spacerOf(r) === undefined ? render(r) : null);
+  if (shape === "stacked")
+    return [accountColumn(selection, allSelected, cell, (r) => <Summary row={r} now={now} />, 1)];
   const columns: TableColumn<Row>[] = [
+    accountColumn(
+      selection,
+      allSelected,
+      cell,
+      (r) => <TwoLines first={<Name row={r} />} second={accountLine(r)} />,
+      2,
+    ),
     {
       key: "status",
-      width: proportional(1),
-      header: (
-        <HStack gap={2} vAlign="center">
-          <CheckboxInput
-            label={t("accounts.table.selectShown")}
-            isLabelHidden
-            value={all ? true : selection.getIsIndeterminate?.() ? "indeterminate" : false}
-            onChange={(checked) => selection.onSelectAll({ isAllSelected: checked })}
-          />
-          {t("accounts.columns.status")}
-        </HStack>
-      ),
-      renderCell: cell((r) => <StatusCell row={r} selection={selection} now={now} />),
-    },
-    {
-      key: "account",
-      header: t("accounts.columns.account"),
-      width: proportional(1.5),
-      renderCell: cell((r) => (
-        <TwoLines
-          first={r.name}
-          second={
-            [r.account.id_token?.plan_type, r.account.note].filter(Boolean).join(" · ") ||
-            r.account.name
-          }
-        />
-      )),
+      width: share(2),
+      header: t("accounts.columns.status"),
+      renderCell: cell((r) => <Status row={r} />),
     },
     ...(["session", "weekly"] as const).map((k) => ({
       key: k,
-      width: proportional(1),
+      width: share(1.25),
       header: k === "session" ? t("accounts.columns.session") : t("accounts.columns.weekly"),
       renderCell: cell((r) => <QuotaWindow bar={r.view[k]} now={now} isCompact />),
     })),
   ];
-  if (isPanelBeside) return columns;
+  if (shape === "tight") return columns;
   return [
     ...columns,
     {
+      key: "recovery",
+      width: share(1.25),
+      header: t("accounts.columns.recovery"),
+      renderCell: cell((r) => <Recovery row={r} now={now} />),
+    },
+    {
       key: "requests",
-      width: proportional(1.5),
+      width: share(1.5),
       header: t("accounts.columns.requests"),
       renderCell: cell((r) =>
         r.buckets ? (
-          <TrafficStrip buckets={r.buckets} max={max} />
+          <RequestSparkline buckets={r.buckets} times={r.times} />
         ) : (
-          <Text type="supporting" color="secondary">
+          <Text type={roles.textType.supporting} color="secondary">
             {t("app.quota.notReported")}
           </Text>
         ),
       ),
     },
-    {
-      key: "lastUsed",
-      width: proportional(1),
-      header: t("accounts.columns.lastUsed"),
-      renderCell: cell((r) => <TwoLines first={lastOf(r.view)} second={ageOf(r.view, now)} />),
-    },
   ];
 }
 
-function useColumns({ shown, selected, setSelected, now, isPanelBeside }: TableProps) {
+function useColumns({ shown, selected, setSelected, now, shape }: TableProps) {
   const { selectionConfig } = useTableSelectionState<Row>({
     data: shown,
     idKey: "key",
     selectedKeys: selected,
     setSelectedKeys: setSelected,
   });
-  // The busiest bucket of the whole list, so strips side by side compare.
-  const max = useMemo(() => Math.max(1, ...shown.flatMap((r) => r.buckets?.total ?? [])), [shown]);
   const all = selectionConfig.getIsAllSelected();
   return useMemo(
-    () => columnsOf(selectionConfig, all, max, now, isPanelBeside),
-    [selectionConfig, all, max, now, isPanelBeside],
+    () => columnsOf(selectionConfig, all, now, shape),
+    [selectionConfig, all, now, shape],
   );
 }
 
-/** Where the arrow keys move from the row at `index`, or null for any other key. */
-function moveOf(key: string, index: number, count: number) {
-  if (key === "ArrowDown") return Math.min(count - 1, index + 1);
-  if (key === "ArrowUp") return Math.max(0, index - 1);
-  if (key === "Home") return 0;
-  if (key === "End") return count - 1;
-  return null;
-}
-
-type Roving = {
-  active: number;
-  count: number;
-  /** Marks the row active, as focus landing in it does. */
-  activate: (index: number) => void;
-  /** Scrolls the row into the window and focuses it. */
-  moveTo: (index: number) => void;
-};
-
-/**
- * The template's row activation, what the virtualizer needs to measure each row, and the roving
- * focus: only the active row is in the tab order, and the arrow keys, Home and End move it.
- */
+/** The template's row activation, and what the virtualizer needs to measure each row. */
 function useRowPlugin(
   { openId, onToggle }: TableProps,
   measure: (el: HTMLTableRowElement | null) => void,
   indexOf: Map<Row, number>,
-  { active, count, activate, moveTo }: Roving,
+  moveTo: (index: number) => void,
 ) {
   return useMemo<TablePlugin<Row>>(
     () => ({
@@ -276,45 +314,26 @@ function useRowPlugin(
             htmlProps: { ...props.htmlProps, "aria-hidden": true },
             children: <TableCell colSpan={999} xstyle={styles.spacer(height)} />,
           };
-        const index = indexOf.get(item) ?? 0;
-        const measured = {
+        const isOpen = item.id === openId;
+        return {
           ...props,
           ref: measure,
           htmlProps: {
             ...props.htmlProps,
-            "data-index": index,
-            tabIndex: index === active ? 0 : -1,
-            onFocus: () => {
-              if (index !== active) activate(index);
-            },
-            onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
-              if (event.target !== event.currentTarget) return;
-              const next = moveOf(event.key, index, count);
-              if (next === null) return;
-              event.preventDefault();
-              moveTo(next);
-            },
-          },
-        };
-        if (!isAccount(item)) return measured;
-        const isOpen = item.id === openId;
-        return {
-          ...measured,
-          htmlProps: {
-            ...measured.htmlProps,
+            "data-index": indexOf.get(item) ?? 0,
+            "data-account": item.id,
+            tabIndex: 0,
             "aria-current": isOpen ? true : undefined,
             onClick: (event) => {
-              // Checkboxes and other cell controls own their own clicks.
-              if ((event.target as HTMLElement).closest("input, button, a, label")) return;
-              onToggle(item);
+              if (isRowItself(event.target)) onToggle(item);
             },
-            onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
-              // Only when the row itself has focus, so a checkbox keeps Space.
-              if (event.target !== event.currentTarget) return;
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onToggle(item);
-              } else measured.htmlProps.onKeyDown(event);
+            onKeyDown: (event) => {
+              if (!isRowItself(event.target)) return;
+              const to = moveOf(event.key, indexOf.get(item) ?? 0);
+              if (to === null && event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              if (to === null) onToggle(item);
+              else moveTo(to);
             },
           },
           xstyle: props.xstyle.concat(
@@ -323,92 +342,46 @@ function useRowPlugin(
         };
       },
     }),
-    [openId, onToggle, measure, indexOf, active, count, activate, moveTo],
+    [openId, onToggle, measure, indexOf, moveTo],
   );
 }
 
-/**
- * The roving focus over the windowed rows. Moving scrolls the row into the window first, then
- * focuses it once it is rendered. Controls inside other rows leave the tab order, so Tab enters
- * and leaves the table once. Closing the panel brings focus back to the row that opened it.
- */
-function useRoving(
-  items: Row[],
-  keyOf: (row: Row) => string,
+/** Where an arrow, Home or End key moves from the row at `index` (clamped later); else null. */
+function moveOf(key: string, index: number) {
+  if (key === "ArrowDown") return index + 1;
+  if (key === "ArrowUp") return index - 1;
+  if (key === "Home") return 0;
+  if (key === "End") return Infinity;
+  return null;
+}
+
+/** Closing the panel brings focus back to the row that opened it, scrolled into the window. */
+function useReturnFocus(
+  shown: Row[],
+  openId: string,
   holder: HTMLElement | null,
   scrollToIndex: (index: number) => void,
-  openId: string,
-): Roving {
-  // By key, since every poll and clock tick builds new row objects.
-  const [activeKey, setActiveKey] = useState("");
-  const active = Math.max(
-    0,
-    items.findIndex((r) => keyOf(r) === activeKey),
-  );
-  const rowAt = useCallback(
-    (index: number) => holder?.querySelector<HTMLElement>(`tbody tr[data-index="${index}"]`),
-    [holder],
-  );
-  const activate = useCallback(
-    (index: number) => setActiveKey(items[index] ? keyOf(items[index]) : ""),
-    [items, keyOf],
-  );
-  const moveTo = useCallback(
-    (index: number) => {
-      activate(index);
-      const rendered = rowAt(index);
-      // A rendered row takes focus at once, so a held arrow key never acts twice from one row.
-      if (rendered) return rendered.focus();
-      scrollToIndex(index);
-      let tries = 60;
-      const focus = () => {
-        const row = rowAt(index);
-        if (row) row.focus();
-        else if (tries-- > 0) requestAnimationFrame(focus);
-      };
-      requestAnimationFrame(focus);
-    },
-    [activate, rowAt, scrollToIndex],
-  );
-  useLayoutEffect(() => {
-    for (const control of holder?.querySelectorAll<HTMLElement>(
-      "tbody tr[data-index] :is(input, button, a)",
-    ) ?? [])
-      control.tabIndex = control.closest("tr")?.dataset.index === String(active) ? 0 : -1;
-  });
+) {
   const opened = useRef(openId);
   useEffect(() => {
     const was = opened.current;
     opened.current = openId;
     if (!was || openId) return;
-    const index = items.findIndex((r) => isAccount(r) && r.id === was);
-    if (index >= 0) moveTo(index);
-  }, [openId, items, moveTo]);
-  return { active, count: items.length, activate, moveTo };
+    const index = shown.findIndex((r) => r.id === was);
+    if (index < 0) return;
+    scrollToIndex(index);
+    requestAnimationFrame(() =>
+      holder
+        ?.querySelector<HTMLElement>(`tbody tr[data-account="${CSS.escape(was)}"]`)
+        ?.focus({ preventScroll: true }),
+    );
+  }, [openId, shown, holder, scrollToIndex]);
 }
 
 export function AccountTable(props: TableProps) {
-  const { shown, ready } = props;
+  const { shown } = props;
   const columns = useColumns(props);
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const grouped = useTableGroupedRows<Row>({
-    data: shown,
-    groupBy: (r) => r.provider,
-    collapsedGroups: collapsed,
-    onToggleGroup: (p) =>
-      setCollapsed((s) => (s.has(p) ? new Set([...s].filter((x) => x !== p)) : new Set(s).add(p))),
-    getRowKey: (r) => r.key,
-    renderGroupHeader: (p, count) => (
-      <HStack gap={2} vAlign="center">
-        <Text type="label">{label(p)}</Text>
-        <Text type="supporting" color="secondary">
-          {t("accounts.table.group", { count, ready: ready.get(p) ?? 0 })}
-        </Text>
-      </HStack>
-    ),
-  });
-  const items = grouped.data;
-  const indexOf = useMemo(() => new Map(items.map((r, i) => [r, i])), [items]);
+  const indexOf = useMemo(() => new Map(shown.map((r, i) => [r, i])), [shown]);
 
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [body, setBody] = useState<HTMLElement | null>(null);
@@ -421,12 +394,12 @@ export function AccountTable(props: TableProps) {
   const margin = useScrollMargin(scroller, body);
   // eslint-disable-next-line react-hooks/incompatible-library -- the virtualizer's functions are read on every render, which is what this table wants
   const virtualizer = useVirtualizer({
-    count: items.length,
+    count: shown.length,
     getScrollElement: () => scroller,
     estimateSize: () => ROW_ESTIMATE,
     overscan: OVERSCAN,
     scrollMargin: margin,
-    getItemKey: (i) => grouped.idKey(items[i]),
+    getItemKey: (i) => shown[i].key,
   });
 
   const windowed = virtualizer.getVirtualItems();
@@ -437,86 +410,94 @@ export function AccountTable(props: TableProps) {
   const spacer = (key: string, height: number) => ({ key, spacer: height }) as unknown as Row;
   const data = [
     ...(above > 0 ? [spacer("above", above)] : []),
-    ...windowed.map((v) => items[v.index]),
+    ...windowed.map((v) => shown[v.index]),
     ...(below > 0 ? [spacer("below", below)] : []),
   ];
   const scrollToIndex = useCallback(
     (index: number) => virtualizer.scrollToIndex(index, { align: "auto" }),
     [virtualizer],
   );
-  const roving = useRoving(items, grouped.idKey, holder, scrollToIndex, props.openId);
-  const rowPlugin = useRowPlugin(props, virtualizer.measureElement, indexOf, roving);
-  const plugins = useMemo(
-    () => ({ rows: rowPlugin, grouped: grouped.plugin }),
-    [rowPlugin, grouped.plugin],
+  useReturnFocus(shown, props.openId, holder, scrollToIndex);
+  // A row outside the window is scrolled in first and focused once it is rendered.
+  const moveTo = useCallback(
+    (index: number) => {
+      const to = Math.max(0, Math.min(shown.length - 1, index));
+      const rowAt = () => holder?.querySelector<HTMLElement>(`tbody tr[data-index="${to}"]`);
+      const rendered = rowAt();
+      if (rendered) return rendered.focus();
+      scrollToIndex(to);
+      let tries = 60;
+      const focus = () => {
+        const row = rowAt();
+        if (row) row.focus();
+        else if (tries-- > 0) requestAnimationFrame(focus);
+      };
+      requestAnimationFrame(focus);
+    },
+    [shown.length, holder, scrollToIndex],
   );
+  const rowPlugin = useRowPlugin(props, virtualizer.measureElement, indexOf, moveTo);
+  const plugins = useMemo(() => ({ rows: rowPlugin }), [rowPlugin]);
 
   return (
     <VStack gap={0} ref={anchor}>
       <Table<Row>
         data={data}
         columns={columns}
-        idKey={(r) => (spacerOf(r) !== undefined ? `__spacer_${r.key}` : grouped.idKey(r))}
+        idKey={(r) => (spacerOf(r) !== undefined ? `__spacer_${r.key}` : r.key)}
+        density={roles.table.density}
         dividers="rows"
         hasHover
         verticalAlign="top"
         plugins={plugins}
-        rowIndexStart={first ? Math.max(1, first.index) : 1}
-        rowCount={items.length}
+        rowIndexStart={first ? first.index + 1 : 1}
+        rowCount={shown.length}
       />
     </VStack>
   );
 }
 
+const headers: Record<string, () => string> = {
+  account: () => t("accounts.columns.account"),
+  status: () => t("accounts.columns.status"),
+  session: () => t("accounts.columns.session"),
+  weekly: () => t("accounts.columns.weekly"),
+  recovery: () => t("accounts.columns.recovery"),
+  requests: () => t("accounts.columns.requests"),
+};
+
 const LOADING_ROWS = 8;
 const placeholders = Array.from({ length: LOADING_ROWS }, (_, i) => ({ key: String(i) }));
 
-/** The table's shape while the first list loads: its columns over eight skeleton rows. */
-export function LoadingTable() {
+/** The list's shape while the first read is pending: its columns over eight skeleton rows. */
+export function LoadingTable({ shape }: { shape: ListShape }) {
   const cell = (r: { key: string }) => (
-    <Skeleton width="100%" height={layout.valueSkeleton.height} index={Number(r.key)} />
+    <TwoLines
+      first={<Skeleton width="100%" height={layout.valueSkeleton.height} index={Number(r.key)} />}
+      second={" "}
+    />
   );
-  const columns: TableColumn<{ key: string }>[] = [
-    {
-      key: "status",
-      width: proportional(1),
-      header: t("accounts.columns.status"),
-      renderCell: cell,
-    },
-    {
-      key: "account",
-      header: t("accounts.columns.account"),
-      width: proportional(1.5),
-      renderCell: cell,
-    },
-    {
-      key: "session",
-      width: proportional(1),
-      header: t("accounts.columns.session"),
-      renderCell: cell,
-    },
-    {
-      key: "weekly",
-      width: proportional(1),
-      header: t("accounts.columns.weekly"),
-      renderCell: cell,
-    },
-    {
-      key: "requests",
-      width: proportional(1.5),
-      header: t("accounts.columns.requests"),
-      renderCell: cell,
-    },
-    {
-      key: "lastUsed",
-      width: proportional(1),
-      header: t("accounts.columns.lastUsed"),
-      renderCell: cell,
-    },
-  ];
+  const keys =
+    shape === "stacked"
+      ? ["account"]
+      : shape === "tight"
+        ? ["account", "status", "session", "weekly"]
+        : ["account", "status", "session", "weekly", "recovery", "requests"];
+  const columns: TableColumn<{ key: string }>[] = keys.map((key) => ({
+    key,
+    header: headers[key](),
+    width: share(key === "account" || key === "status" ? 2 : 1.25),
+    renderCell: cell,
+  }));
   return (
     <VStack gap={0} aria-busy aria-label={t("accounts.page.loading")}>
-      <Table data={placeholders} columns={columns} idKey="key" dividers="rows" />
+      <Table
+        data={placeholders}
+        columns={columns}
+        idKey="key"
+        density={roles.table.density}
+        dividers="rows"
+      />
     </VStack>
   );
 }

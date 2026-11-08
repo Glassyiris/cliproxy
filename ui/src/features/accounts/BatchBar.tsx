@@ -1,9 +1,10 @@
 // The TableBulkActionsTable block's selection toolbar: the batch actions at the start, the count
 // and Clear at the end. Every action acts on whole files and says which accounts it reaches.
+// Deviation: an HStack of the same parts, not TableSelectionToolbar, whose full-bleed surface ran
+// over the header's description line in PageFrame's toolbar slot and did not wrap on a phone.
 import type { Dispatch, SetStateAction } from "react";
 import { Button } from "@astryxdesign/core/Button";
-import { VStack } from "@astryxdesign/core/Layout";
-import { TableSelectionToolbar } from "@astryxdesign/core/Table";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { useAvailable } from "../../components/MissingActions.tsx";
 import { routes } from "../../lib/api/routes.ts";
@@ -94,20 +95,25 @@ export function BatchBar(props: BatchProps) {
   const picked = rows.filter((r) => selected.has(r.key));
   if (!picked.length) return null;
   const note = reachNote(props, picked);
+  const count = t("accounts.batch.selected", { count: picked.length });
   return (
     <VStack gap={1}>
-      <TableSelectionToolbar
-        label={t("accounts.batch.label")}
-        selection={{
-          selectedKeys: selected,
-          selectedCount: picked.length,
-          hasSelection: true,
-          clearSelection: () => setSelected(new Set()),
-        }}
-        renderSelectionLabel={() => t("accounts.batch.selected", { count: picked.length })}
-        clearLabel={t("accounts.batch.clear")}
-        startContent={<BatchActions {...props} />}
-      />
+      <HStack
+        gap={2}
+        vAlign="center"
+        wrap="wrap"
+        role="toolbar"
+        aria-label={t("accounts.batch.label")}
+      >
+        <BatchActions {...props} />
+        <StackItem size="fill" />
+        <Text type="label">{count}</Text>
+        <Button
+          label={t("accounts.batch.clear")}
+          variant="ghost"
+          onClick={() => setSelected(new Set())}
+        />
+      </HStack>
       {note && (
         <Text type="supporting" color="secondary">
           {note}

@@ -1,4 +1,4 @@
-import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { serverKeys } from "../../app/serverQueries.ts";
 import { failureNotice } from "../../app/useAction.ts";
 import type { Credential } from "../../lib/api/credentials.ts";
@@ -8,7 +8,26 @@ import { forgottenAccount, type Seen } from "./flow.ts";
 
 const connectKeys = {
   status: (id: number) => ["connect", "status", id] as const,
+  gone: ["connect", "gone"] as const,
 };
+
+/**
+ * The ways this server answered as not available (a provider, or "vertex"), kept in the query cache
+ * until sign-out so the next opening of the dialog draws them disabled from the start.
+ */
+export function useGone() {
+  const queryClient = useQueryClient();
+  const gone = useQuery({
+    queryKey: connectKeys.gone,
+    queryFn: () => [] as string[],
+    initialData: [] as string[],
+    staleTime: Infinity,
+    gcTime: Infinity,
+  }).data;
+  const add = (way: string) =>
+    queryClient.setQueryData<string[]>(connectKeys.gone, (list = []) => [...list, way]);
+  return [gone, add] as const;
+}
 
 /**
  * What one status read says about a sign-in, with the server's forgetting already resolved. Only
@@ -62,8 +81,8 @@ async function readStatus(flow: Polled, signal: AbortSignal): Promise<StatusAnsw
 
 /**
  * The status of the waiting sign-in, every 2 s while the tab is shown and at once when it is
- * shown again. A failed read stops the polling until `refetch`. Each answer goes to `onAnswer` with the sign-in it was read for, so an answer for
- * a replaced sign-in can be told apart.
+ * shown again. A failed read stops the polling until `refetch`. Each answer goes to `onAnswer`
+ * with the sign-in it was read for, so an answer for a replaced sign-in can be told apart.
  */
 export const useSignInStatus = (
   flow: Polled | null,

@@ -1,50 +1,60 @@
-// Accounts, from the table-filter template: the filter row in the header above the table, the
-// table grouped by provider, the selection toolbar while rows are selected, and the open row in
-// the end panel.
-// The template's own LayoutHeader is PageFrame's; its saved views, power search and column and
-// grouping options are dropped (PAGE-MAP "Accounts").
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type Dispatch,
-  type ReactNode,
-  type SetStateAction,
-} from "react";
-import { Plus } from "lucide-react";
+// Accounts, from the table-inbox template: which accounts cannot serve, and when they come back.
+// The header holds the h1, Connect account as the one primary action, and the
+// inbox's views; the list indexes the detail, which opens beside it (a bottom sheet on phones).
+// Deviations from the template, each with its reason:
+// - The views ("Needs attention", "All") are a SegmentedControl in the header's filter row, not
+//   a TabList: a tab strip reads as switching place, which is the side nav's job (R-addendum-nav),
+//   and a choice inside one view is a SegmentedControl or Select in its toolbar.
+// - The family and the status filters are one Selector each beside the views; an Overview card's
+//   reason (`?show=<reason>`) lands in the status Selector, whose first option clears it. The
+//   template has one dimension of views, the accounts list has three (family, view, status). The
+//   views' counts show on the row; the per-family and per-status counts only in the open menus.
+// - The selection band replaces the filter row in place, as the template swaps it for the tabs,
+//   so ticking a box never moves the list under the pointer.
+// - No hover row actions: a 1,000-row list would mount four buttons per row; the batch band and
+//   the detail panel carry the actions.
+// - The reading pane is the shared detail panel (`roles.detailPanel`, a BottomSheet on phones),
+//   not the template's two-thirds pane: the list is what this page is for, the detail is short.
+// - The list is virtualized (DESIGN.md "Pages"), as LogRows.tsx does it.
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus, RefreshCw } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
-import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { FileInput } from "@astryxdesign/core/FileInput";
 import { Icon } from "@astryxdesign/core/Icon";
-import { HStack } from "@astryxdesign/core/Layout";
-import { Text } from "@astryxdesign/core/Text";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Selector } from "@astryxdesign/core/Selector";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { useConnectAccount } from "../../app/connect-entry.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useQuota } from "../../app/QuotaProvider.tsx";
-import { useConfig, useCredentials, usePlugins } from "../../app/serverQueries.ts";
+import { useCredentials, usePlugins } from "../../app/serverQueries.ts";
 import { useHashParams, useHashRoute } from "../../app/useHashRoute.ts";
-import { MissingActions } from "../../components/MissingActions.tsx";
+import { MissingActions, useAvailable } from "../../components/MissingActions.tsx";
+import { useListShape, type ListShape } from "../../components/listShape.ts";
 import { ReadError } from "../../components/ReadError.tsx";
 import { routes } from "../../lib/api/routes.ts";
-import { readPath } from "../../lib/config-path.ts";
+import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
-import { strategy, strategyName } from "../../lib/routing.ts";
+import { roles } from "../../themes/site/roles.ts";
 import { AccountPanel } from "./AccountPanel.tsx";
 import { AccountTable, LoadingTable } from "./AccountTable.tsx";
 import { BatchBar } from "./BatchBar.tsx";
 import {
-  inTab,
+  countBy,
+  familiesOf,
+  hasShow,
+  inScope,
+  inView,
   isShow,
-  providerCounts,
-  shownRows,
   shows,
   toRows,
   type Filters,
   type Row,
-  type Show,
 } from "./rows.ts";
-import { Toolbar, UploadInput } from "./Toolbar.tsx";
+import { showWord } from "./words.ts";
 import { useWrites, type Writes } from "./writes.tsx";
 
 const missing = () => [
@@ -72,12 +82,16 @@ function useNow(isFast: boolean) {
   return now;
 }
 
-/** The filters and the open row, kept in the hash (`#accounts/<id>?provider=codex&show=low&q=`). */
+/**
+ * The filters and the open row, kept in the hash (`#accounts/<id>?provider=codex&list=all&show=
+ * cooling&q=`). `view` names the route's view (Accounts, Provider keys), so the inbox view is `list`.
+ */
 function useFilters() {
   const [params, setParams] = useHashParams();
   const { arg } = useHashRoute();
   const filters: Filters = {
     provider: params.provider ?? "",
+    view: params.list === "all" ? "all" : "needs",
     show: isShow(params.show) ? params.show : "",
     search: params.q ?? "",
   };
@@ -95,9 +109,14 @@ function useFilters() {
 /** Only the keys a change names, so setting one filter leaves the others. */
 const pick = (f: Partial<Filters>) =>
   Object.fromEntries(
-    Object.entries({ provider: f.provider, show: f.show, q: f.search }).filter(
-      ([, v]) => v !== undefined,
-    ),
+    Object.entries({
+      provider: f.provider,
+      list: f.view === undefined ? undefined : f.view === "all" ? "all" : "",
+      show: f.show,
+      q: f.search,
+    })
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, v || undefined]),
   );
 
 function useRows(now: number) {
@@ -135,37 +154,233 @@ function PluginsError() {
   );
 }
 
-function SortNote() {
-  const config = useConfig();
-  if (config.isError)
-    return (
-      <ReadError
-        error={config.error}
-        what={t("accounts.page.configWhat")}
-        retry={() => void config.refetch()}
-      />
-    );
-  if (!config.data) return null;
-  const value: unknown = readPath(config.data, "routing/strategy", "");
-  const resetFirst = strategy(value) === "soonest-reset";
+/** Upload credential JSON files; the field empties again once they are sent. */
+function UploadInput({ writes }: { writes: Writes }) {
+  const isAvailable = useAvailable();
   return (
-    <Text type="supporting" color="secondary">
-      {resetFirst
-        ? t("accounts.page.sortResetFirst", { strategy: strategyName("soonest-reset") })
-        : t("accounts.page.sort")}
-    </Text>
+    <FileInput
+      label={t("accounts.actions.upload")}
+      isLabelHidden
+      placeholder={t("accounts.actions.upload")}
+      accept=".json,application/json"
+      isMultiple
+      value={[]}
+      isLoading={writes.isBusy("upload")}
+      isDisabled={!isAvailable(routes.uploadCredentials)}
+      onChange={(files) => {
+        const list = Array.isArray(files) ? files : files ? [files] : [];
+        if (list.length) void writes.upload(list);
+      }}
+    />
   );
 }
 
-function Empty({ writes }: { writes: Writes }) {
+type Collected = {
+  scope: Row[];
+  shown: Row[];
+  needs: number;
+  checking: boolean;
+  checkAll: () => Promise<void>;
+};
+
+/** The rows the filters leave, the views' counts, and the quota check of every row. */
+function useCollection(
+  rows: Row[],
+  filters: Filters,
+  quota: ReturnType<typeof useQuota>,
+): Collected {
+  const [checking, setChecking] = useState(false);
+  const { provider, show, search, view } = filters;
+  const scope = useMemo(
+    () => inScope(rows, { provider, show, search }),
+    [rows, provider, show, search],
+  );
+  const shown = useMemo(() => inView(scope, view), [scope, view]);
+  const needs = useMemo(() => scope.filter((r) => !r.view.ready).length, [scope]);
+  const checkAll = async () => {
+    setChecking(true);
+    await quota.checkAll(rows.map((r) => r.account));
+    setChecking(false);
+  };
+  return { scope, shown, needs, checking, checkAll };
+}
+
+/** The family and status Selectors, each option with how many accounts it keeps. */
+function FilterSelectors({
+  rows,
+  filters,
+  setFilters,
+}: {
+  rows: Row[];
+  filters: Filters;
+  setFilters: (changes: Partial<Filters>) => void;
+}) {
+  const families = familiesOf(rows);
+  const familyCounts = countBy(rows, families, (r, p) => r.provider === p);
+  // Each status as it would narrow the current family and search.
+  const unfiltered = inScope(rows, {
+    provider: filters.provider,
+    show: "",
+    search: filters.search,
+  });
+  const statusCounts = countBy(unfiltered, shows, hasShow);
+  const all = "\u0000all";
+  return (
+    <>
+      {/* Drawn with one family too, so the row does not grow once the accounts arrive. */}
+      <Selector
+        label={t("accounts.filters.family")}
+        isLabelHidden
+        value={filters.provider || all}
+        onChange={(p) => setFilters({ provider: p === all ? "" : p })}
+        options={[
+          { value: all, label: t("accounts.filters.allFamilies") },
+          ...families.map((p) => ({
+            value: p,
+            label: label(p),
+            description: t("accounts.filters.accounts", { count: familyCounts.get(p) ?? 0 }),
+          })),
+        ]}
+      />
+      <Selector
+        label={t("accounts.filters.status")}
+        isLabelHidden
+        value={filters.show || all}
+        onChange={(s) =>
+          // Ready and low-quota accounts can serve, so the "needs attention" view would hide them.
+          setFilters(
+            isShow(s)
+              ? { show: s, ...(s === "ready" || s === "low" ? { view: "all" } : {}) }
+              : { show: "" },
+          )
+        }
+        options={[
+          { value: all, label: t("accounts.filters.anyStatus") },
+          ...shows.map((s) => ({
+            value: s,
+            label: showWord(s),
+            description: t("accounts.filters.accounts", { count: statusCounts.get(s) ?? 0 }),
+          })),
+        ]}
+      />
+    </>
+  );
+}
+
+/** The inbox's filter row: views, family, status and search, then the list's own actions. */
+function FilterRow({
+  rows,
+  filters,
+  setFilters,
+  collected,
+  quota,
+  writes,
+  isStacked,
+}: {
+  rows: Row[];
+  filters: Filters;
+  setFilters: (changes: Partial<Filters>) => void;
+  collected: Collected;
+  quota: ReturnType<typeof useQuota>;
+  writes: Writes;
+  /** A phone: the views take their own line, so their counts arriving never rewrap the row. */
+  isStacked: boolean;
+}) {
+  const views = (
+    <SegmentedControl
+      label={t("accounts.filters.view")}
+      value={filters.view}
+      onChange={(view) => setFilters({ view: view === "all" ? "all" : "needs" })}
+    >
+      <SegmentedControlItem
+        value="needs"
+        label={t("accounts.filters.needs", { count: collected.needs })}
+      />
+      <SegmentedControlItem
+        value="all"
+        label={t("accounts.filters.all", { count: collected.scope.length })}
+      />
+    </SegmentedControl>
+  );
+  return (
+    <VStack gap={3}>
+      {isStacked && views}
+      <HStack gap={3} vAlign="center" wrap="wrap">
+        {!isStacked && views}
+        <FilterSelectors rows={rows} filters={filters} setFilters={setFilters} />
+        <TextInput
+          type="search"
+          label={t("accounts.filters.search")}
+          isLabelHidden
+          placeholder={t("accounts.filters.searchHint")}
+          value={filters.search}
+          onChange={(search) => setFilters({ search })}
+          hasClear
+        />
+        <StackItem size="fill" />
+        <HStack gap={2} vAlign="center">
+          <UploadInput writes={writes} />
+          <Button
+            label={
+              collected.checking
+                ? t("accounts.actions.checking")
+                : t("accounts.actions.checkQuotas")
+            }
+            icon={<Icon icon={RefreshCw} size="sm" />}
+            tooltip={t("accounts.actions.checkQuotasHint")}
+            isLoading={collected.checking}
+            isDisabled={!rows.some((r) => quota.canCheck(r.account))}
+            onClick={() => void collected.checkAll()}
+          />
+        </HStack>
+      </HStack>
+    </VStack>
+  );
+}
+
+/** Why the views leave no rows, and the way back to rows. */
+function EmptyView({
+  filters,
+  setFilters,
+}: {
+  filters: Filters;
+  setFilters: (changes: Partial<Filters>) => void;
+}) {
+  const filtered = !!(filters.provider || filters.show || filters.search);
+  if (!filtered && filters.view === "needs")
+    return (
+      <EmptyState
+        title={t("accounts.empty.allServe")}
+        description={t("accounts.empty.allServeDetail")}
+        headingLevel={roles.heading.section}
+        actions={
+          <Button label={t("accounts.empty.showAll")} onClick={() => setFilters({ view: "all" })} />
+        }
+      />
+    );
+  return (
+    <EmptyState
+      title={t("accounts.empty.noMatch")}
+      headingLevel={roles.heading.section}
+      actions={
+        <Button
+          label={t("accounts.empty.clear")}
+          onClick={() => setFilters({ provider: "", show: "", search: "" })}
+        />
+      }
+    />
+  );
+}
+
+function NoAccounts({ writes, connect }: { writes: Writes; connect: () => void }) {
   return (
     <EmptyState
       title={t("accounts.empty.title")}
       description={t("accounts.empty.description")}
-      headingLevel={2}
+      headingLevel={roles.heading.section}
       actions={
         <>
-          <Button label={t("accounts.page.connect")} variant="primary" href="#connect" />
+          <Button label={t("accounts.page.connect")} variant="primary" onClick={connect} />
           <UploadInput writes={writes} />
         </>
       }
@@ -173,136 +388,79 @@ function Empty({ writes }: { writes: Writes }) {
   );
 }
 
-type CollectionProps = {
-  rows: Row[];
-  filters: Filters;
-  setFilters: (changes: Partial<Filters>) => void;
-  selected: Set<string>;
-  setSelected: Dispatch<SetStateAction<Set<string>>>;
-  openId: string;
-  isPanelBeside: boolean;
-  onToggle: (row: Row) => void;
-  now: number;
-  quota: ReturnType<typeof useQuota>;
-  writes: Writes;
-};
+type Page = ReturnType<typeof useAccountsPage>;
 
-/** The rows the filters leave, their counts per quick filter, and the quota check of every row. */
-function useCollection(rows: Row[], filters: Filters, quota: ReturnType<typeof useQuota>) {
-  const [checking, setChecking] = useState(false);
-  const { provider, search, show } = filters;
-  const tab = useMemo(() => inTab(rows, { provider, search }), [rows, provider, search]);
-  const shown = useMemo(() => shownRows(tab, show), [tab, show]);
-  const ready = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of shown) if (r.view.ready) m.set(r.provider, (m.get(r.provider) ?? 0) + 1);
-    return m;
-  }, [shown]);
-  const quick = Object.fromEntries(shows.map((s) => [s, tab.filter((r) => r.view[s]).length]));
-  const checkAll = async () => {
-    setChecking(true);
-    await quota.checkAll(rows.map((r) => r.account));
-    setChecking(false);
-  };
-  return { shown, ready, quick: quick as Record<Show, number>, checking, checkAll };
-}
-
-type Collected = ReturnType<typeof useCollection>;
-
-/** The filter row, kept in the page header while the table scrolls. */
-function CollectionToolbar({
-  rows,
-  filters,
-  setFilters,
-  collected,
-  quota,
-  writes,
-}: Pick<CollectionProps, "rows" | "filters" | "setFilters" | "quota" | "writes"> & {
-  collected: Collected;
-}) {
-  return (
-    <Toolbar
-      filters={filters}
-      setFilters={setFilters}
-      tabs={providerCounts(rows)}
-      total={rows.length}
-      quick={collected.quick}
-      writes={writes}
-      checking={collected.checking}
-      canCheck={rows.some((r) => quota.canCheck(r.account))}
-      onCheck={() => void collected.checkAll()}
-    />
-  );
-}
-
-/**
- * The selection toolbar and the table, or why the filters leave no rows. On a phone the filter row
- * (`toolbar`) leads it, as the header there would take most of the screen.
- */
-function Collection(props: CollectionProps & { collected: Collected; toolbar: ReactNode }) {
-  const { rows, setFilters, writes, collected } = props;
-  const { shown, ready } = collected;
-  const { provider } = props.filters;
-  return (
-    <>
-      {props.toolbar}
-      <PluginsError />
-      <SortNote />
-      <BatchBar
-        rows={rows}
-        shown={shown}
-        tab={provider}
-        selected={props.selected}
-        setSelected={props.setSelected}
-        writes={writes}
-      />
-      {shown.length ? (
-        <AccountTable {...props} shown={shown} ready={ready} />
-      ) : (
-        <EmptyState
-          title={t("accounts.empty.noMatch")}
-          headingLevel={2}
-          actions={
-            <Button
-              label={t("accounts.empty.clear")}
-              onClick={() => setFilters({ provider: "", show: "", search: "" })}
-            />
-          }
-        />
-      )}
-    </>
-  );
-}
-
-function Meta({ rows }: { rows: Row[] }) {
-  return (
-    <HStack gap={2} vAlign="center">
-      <Badge label={rows.length} />
-      <Text type="supporting" color="secondary">
-        {t("accounts.page.canServe", { count: rows.filter((r) => r.view.ready).length })}
-      </Text>
-    </HStack>
-  );
-}
-
-export default function Accounts() {
+/** Everything the page reads and keeps, so the frame below only lays it out. */
+function useAccountsPage(listShape: ListShape) {
   const { filters, setFilters, openId, go } = useFilters();
   const now = useNow(!!openId);
   const { credentials, quota, rows } = useRows(now);
   const writes = useWrites();
+  const connect = useConnectAccount();
   const collected = useCollection(rows, filters, quota);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const open = rows.find((r) => r.id === openId);
   const { isMobile } = useAppShellMobile();
-  const isPanelBeside = !!open && !isMobile;
-  const toolbar = rows.length > 0 && (
-    <CollectionToolbar {...{ rows, filters, setFilters, collected, quota, writes }} />
-  );
+  const shape: ListShape = isMobile ? "stacked" : listShape;
   const onToggle = useCallback((r: Row) => go(r.id === openId ? "" : r.id), [go, openId]);
   const onDeleted = (keys: string[]) => {
     setSelected((s) => new Set([...s].filter((k) => !keys.includes(k))));
     if (open && keys.includes(open.key)) go("");
   };
+  return {
+    ...{ filters, setFilters, openId, go, now, credentials, quota, rows, writes, connect },
+    ...{ collected, selected, setSelected, open, isMobile, shape, onToggle, onDeleted },
+  };
+}
+
+/** The filter row, or in its place the selection band while rows are ticked. */
+function Band({ page }: { page: Page }) {
+  const { rows, filters, setFilters, collected, quota, writes, selected, setSelected } = page;
+  if (selected.size > 0)
+    return (
+      <BatchBar
+        rows={rows}
+        shown={collected.shown}
+        tab={filters.provider}
+        selected={selected}
+        setSelected={setSelected}
+        writes={writes}
+      />
+    );
+  // Drawn while the list loads too, so the rows land where the skeleton was.
+  if (!rows.length && !page.credentials.isPending) return null;
+  return (
+    <FilterRow
+      {...{ rows, filters, setFilters, collected, quota, writes }}
+      isStacked={page.shape === "stacked"}
+    />
+  );
+}
+
+/** The list, its skeleton, or why it is empty. */
+function List({ page }: { page: Page }) {
+  const { credentials, rows, collected, filters, setFilters, writes, connect } = page;
+  if (credentials.isPending) return <LoadingTable shape={page.shape} />;
+  if (!credentials.data) return null;
+  if (!rows.length) return <NoAccounts writes={writes} connect={connect} />;
+  if (!collected.shown.length) return <EmptyView filters={filters} setFilters={setFilters} />;
+  return (
+    <AccountTable
+      shown={collected.shown}
+      selected={page.selected}
+      setSelected={page.setSelected}
+      openId={page.openId}
+      onToggle={page.onToggle}
+      now={page.now}
+      shape={page.shape}
+    />
+  );
+}
+
+export default function Accounts() {
+  const [listRef, listShape] = useListShape();
+  const page = useAccountsPage(listShape);
+  const { credentials, rows, open, go, isMobile } = page;
   const panel = open && {
     label: t("accounts.panel.label", { name: open.name }),
     content: (
@@ -310,10 +468,10 @@ export default function Accounts() {
         key={open.id}
         row={open}
         rows={rows}
-        quota={quota}
-        writes={writes}
-        now={now}
-        onDeleted={onDeleted}
+        quota={page.quota}
+        writes={page.writes}
+        now={page.now}
+        onDeleted={page.onDeleted}
         onClose={() => go("")}
       />
     ),
@@ -323,20 +481,19 @@ export default function Accounts() {
     <PageFrame
       title={t("accounts.page.title")}
       width="full"
-      meta={credentials.data && <Meta rows={rows} />}
       actions={
         // The empty state carries Connect itself, so the page keeps one primary action.
         (!credentials.data || rows.length > 0) && (
           <Button
             label={t("accounts.page.connect")}
-            variant="primary"
-            href="#connect"
+            variant={roles.primaryAction.variant}
+            onClick={page.connect}
             icon={<Icon icon={Plus} size="sm" />}
           />
         )
       }
       panel={panel}
-      toolbar={!isMobile && toolbar}
+      toolbar={!isMobile && <Band page={page} />}
     >
       <MissingActions actions={missing()} />
       {credentials.isError && (
@@ -346,18 +503,12 @@ export default function Accounts() {
           retry={() => void credentials.refetch()}
         />
       )}
-      {credentials.isPending && <LoadingTable />}
-      {credentials.data && !rows.length && <Empty writes={writes} />}
-      {rows.length > 0 && (
-        <Collection
-          {...{ rows, filters, setFilters, selected, setSelected, openId, onToggle, now, quota }}
-          isPanelBeside={isPanelBeside}
-          writes={writes}
-          collected={collected}
-          toolbar={isMobile && toolbar}
-        />
-      )}
-      {writes.dialog}
+      <PluginsError />
+      {isMobile && <Band page={page} />}
+      <VStack gap={0} ref={listRef}>
+        <List page={page} />
+      </VStack>
+      {page.writes.dialog}
     </PageFrame>
   );
 }

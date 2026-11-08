@@ -48,7 +48,10 @@ const ROUTES = {
     answer: "#overview-attention a[href], #overview-attention-clear",
     measures: ["primaryButton", "cardPadding", "skeletonShift"],
   },
-  accounts: { answer: "[role=main] h1", measures: ["primaryButton"], pending: "R1" },
+  accounts: {
+    answer: "[role=main] tbody tr[data-account]",
+    measures: ["primaryButton", "skeletonShift"],
+  },
   clients: {
     answer: "[role=main] tbody tr",
     measures: ["primaryButton", "headerControl", "rowAction", "skeletonShift"],

@@ -79,7 +79,7 @@ function CallbackFallback({ signIn }: { signIn: SignIn }) {
   );
 }
 
-/** Waiting for approval: the steps on the provider's page, the fallback and Cancel. */
+/** Waiting for approval: the steps on the provider's page and the fallback; Back cancels. */
 export function Waiting({
   flow,
   signIn,
@@ -122,9 +122,6 @@ export function Waiting({
             onCopy={() => notify("success", t("connect.wait.codeCopied"))}
             onCopyError={() => notify("error", t("connect.wait.copyFailed"))}
           />
-          <Text type="supporting" color="secondary">
-            {t("connect.wait.polling")}
-          </Text>
         </Step>
       ) : (
         <Step title={t("connect.wait.approveStep")}>
@@ -141,14 +138,6 @@ export function Waiting({
           retry={signIn.retryStatus}
         />
       )}
-      <HStack>
-        <Button
-          label={t("connect.wait.cancel")}
-          variant="ghost"
-          isLoading={signIn.pending === "cancel"}
-          onClick={() => void signIn.cancel()}
-        />
-      </HStack>
     </VStack>
   );
 }
