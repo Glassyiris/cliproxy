@@ -1,0 +1,1 @@
+import{S as e,T as t}from"./tokens.stylex-BRBC-NZS.js";var n=(0,t(e(),1).createContext)(!0);n.displayName=`BottomSheetEscapeContext`;export{n as t};

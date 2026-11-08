@@ -5,7 +5,7 @@
 //   npx vite build && npm run measure [-- --routes overview,accounts] [--out <dir>]
 //     [--answer route=selector]... [--measures route=tableRow,rowAction,...]...
 //
-// Serves dist-next with `vite preview` against the mock Management API and, for each route at
+// Serves dist with `vite preview` against the mock Management API and, for each route at
 // 1440x900 and 390x844, signs in on that route and reads the role values once the page is ready.
 // API responses are held 300 ms so the skeleton stays on screen for some frames. Every measured
 // route needs an answer selector and its list of OPTIONAL measurements, from ROUTES or from
@@ -112,7 +112,7 @@ const ui = fileURLToPath(new URL("../..", import.meta.url));
 const { values: opt } = parseArgs({
   options: {
     routes: { type: "string" },
-    dist: { type: "string", default: path.join(ui, "dist-next") },
+    dist: { type: "string", default: path.join(ui, "dist") },
     out: { type: "string" },
     chrome: { type: "string" },
     answer: { type: "string", multiple: true, default: [] },

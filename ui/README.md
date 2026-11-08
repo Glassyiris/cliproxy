@@ -1,9 +1,6 @@
 # cliproxy-rs dashboard
 
-The management dashboard for cliproxy-rs, written in React 19 with the Astryx design system. It talks to the v8 Management API defined by Go CLIProxyAPI, and it has two outputs built from one source tree:
-
-- `dist/` is embedded by the Rust binary (`crates/cpa-server/build.rs`) and served at `/management.html`.
-- `dist-panel/management.html` is one self-contained file for existing Go CLIProxyAPI servers. See [PANEL.md](PANEL.md).
+The management dashboard for cliproxy-rs, written in React 19 with the Astryx design system. It talks to the v8 Management API defined by Go CLIProxyAPI. `dist/` is the build output, checked in: the Rust binary embeds it (`crates/cpa-server/build.rs`) and serves it at `/management.html`. The dashboard ships only inside that binary.
 
 Product rules are in [PRODUCT.md](PRODUCT.md) and the visual system in [DESIGN.md](DESIGN.md).
 
@@ -16,17 +13,17 @@ npm ci
 npm run dev        # Vite on :5173, proxies /v8 and /healthz to 127.0.0.1:8317 (override with CPA_BACKEND=...)
 npm run typecheck  # tsc --noEmit, 0 errors expected
 npm test           # unit tests under src/ and scripts/private-auth-dir.test.mjs
-npm run build      # vite build into dist-next/
+npm run build      # vite build into dist/
 npm run check:api  # src/lib/api/routes.ts against the Rust management router
 ```
 
-The React rewrite builds into `dist-next/`, which is not checked in. `ui/dist` is still the embedded Svelte build: the Rust binary embeds it at compile time, so leave it unchanged until the rewrite replaces it.
+`ui/dist` is committed because the Rust binary embeds it at compile time. After a source change run `npm run build` and commit the result; CI rebuilds and fails when `ui/dist` differs from the source.
 
 `npm run check:api` reads `fn router` in `crates/cpa-server/src/management.rs` and fails (exit 1) when the registry names a route the server lacks, or when a `/v8/management` route has neither a registry entry nor a line with a reason in `tools/api-allowlist.json`. It exits 2 when the router uses a construct it cannot follow.
 
 ## Structure
 
-The React dashboard in `dist-next/`. Code rules are in [CONVENTIONS.md](CONVENTIONS.md).
+The React dashboard source. Code rules are in [CONVENTIONS.md](CONVENTIONS.md).
 
 | Path | Role |
 | --- | --- |
@@ -74,7 +71,6 @@ Config list writes reread the target first and refuse to write if it changed sin
 Both scripts are for disposable servers with fake credentials only: they edit configuration and credential files. Fixture requirements: management key `orb-dashboard-test-only`, a disabled fake Claude credential with email `operator@example.invalid`, routing strategy `round-robin`, and an empty `requests.payload.default`.
 
 - `node scripts/browser-check-rust.mjs [url] [capture-dir]` drives the dashboard with agent-browser against the Rust binary (or Go): nine screens in both themes, unsupported actions disabled on Rust, a payload rule written and removed, a YAML diff discarded, 390 px layout, and no key in storage.
-- `CHROME_PATH=... node scripts/panel-check-go.mjs [url] [capture-dir]` drives the single-file panel with Playwright against Go: all 13 screens in both themes, credential edits, a Codex OAuth start and cancel, config list writes, the section editor, request logs, the live usage view, phone layouts, and asserts that no request leaves the serving origin, Go is never probed, there are no console errors, and the key is not stored. `playwright-core` is a dev dependency for this script only; it downloads no browser.
 - `node scripts/fake-logins.mjs [port]` serves fake provider login endpoints (Claude, Codex, Kimi, Meta token, profile, device-code and key-mint routes) and a Claude usage endpoint that echoes its `Authorization` header. Fake tokens and `@example.invalid` emails only.
 - `scripts/login-harness/` is a test build of cliproxy-rs whose only change is `Options.login_base`, which points every provider login endpoint at the fake. It is never shipped. Build it with `cp ../../../Cargo.lock . && CARGO_TARGET_DIR=../../../target cargo build` inside that directory.
 - `CHROME_PATH=... node scripts/oauth-check.mjs <url> --mode fake` drives Claude and Codex sign-in through a pasted callback URL and Kimi and Meta through the device code against the harness, and checks each new credential appears and that a provider the server lacks gets an honest message. `--mode dead` runs against the shipped binary with a dead `requests.proxy-url` and checks that a pasted callback ends in an honest failure.

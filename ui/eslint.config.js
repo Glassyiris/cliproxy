@@ -32,7 +32,6 @@ export default defineConfig(
   {
     ignores: [
       "dist/**",
-      "dist-next/**",
       "node_modules/**",
       "public/**",
       "src/themes/site/site.js",

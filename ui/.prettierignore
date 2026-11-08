@@ -1,5 +1,4 @@
 dist
-dist-next
 node_modules
 public
 package-lock.json

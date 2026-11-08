@@ -12,9 +12,8 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 const ui = fileURLToPath(new URL("..", import.meta.url));
-// ponytail: the React build goes to dist-next/ until P4 swaps it for dist/; pass the directory
-// as the first argument or change this default then.
-const dist = resolve(ui, process.argv[2] ?? "dist-next");
+// The first argument names another build directory; the default is the committed ui/dist.
+const dist = resolve(ui, process.argv[2] ?? "dist");
 const budgetFile = fileURLToPath(new URL("./size-budget.json", import.meta.url));
 const STATIC_IMPORT =
   /\b(?:import|export)\s*(?:\*\s*as\s+[\w$]+|\{[^}]*\}|[\w$]+(?:\s*,\s*(?:\{[^}]*\}|\*\s*as\s+[\w$]+))?)?\s*(?:from\s*)?["'`]([^"'`]+\.js)["'`]/g;

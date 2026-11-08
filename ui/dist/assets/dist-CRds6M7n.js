@@ -1,0 +1,1 @@
+export{t as Tag,n as classHighlighter,r as getStyleTags,i as highlightCode,a as highlightTree,o as styleTags,s as tagHighlighter,c as tags}from"./dist-CvP6-jAl.js";

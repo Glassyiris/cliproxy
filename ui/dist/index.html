@@ -1,15 +1,112 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-astryx-theme="site">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- The dashboard has its own dark theme; tell Dark Reader not to filter it again. -->
+    <meta name="darkreader-lock" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="preload" as="font" href="./fonts/host-grotesk.woff2" type="font/woff2" crossorigin />
     <title>cliproxy-rs</title>
-    <script>try { document.documentElement.dataset.theme = localStorage.getItem('cliproxy-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'); } catch {}</script>
-    <script type="module" crossorigin src="./assets/index-CjS7PEwu.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-_mj6dGvz.css">
+    <!-- The Figtree faces every first screen draws (src/themes/site/index.ts), fetched with the
+         entry instead of after the stylesheet and the first render ask for them. -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="./assets/figtree-latin-400-normal-g7Dtegnw.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="./assets/figtree-latin-500-normal-BWnGEVsr.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="./assets/figtree-latin-600-normal-Cv_xCTDl.woff2" />
+    <!-- Before first paint: the stored theme, palette and language (src/app/preferences.ts), else
+         the system's and the default palette. -->
+    <script>
+      (function () {
+        var root = document.documentElement, mode = null, palette = null, locale = null;
+        try {
+          mode = localStorage.getItem("cliproxy-theme");
+          palette = localStorage.getItem("cliproxy-palette");
+          locale = localStorage.getItem("cliproxy-locale");
+        } catch (e) {}
+        if (mode === "light" || mode === "dark") root.dataset.theme = mode;
+        if (palette === "main") root.dataset.palette = palette;
+        if (locale !== "en" && locale !== "zh-CN" && locale !== "zh-TW") {
+          locale = "en";
+          var asked = navigator.languages || [];
+          for (var i = 0; i < asked.length; i++) {
+            var tag = asked[i].toLowerCase();
+            if (tag.indexOf("en") === 0) break;
+            if (tag.indexOf("zh") === 0) {
+              locale = /^zh-(hant|tw|hk|mo)\b/.test(tag) ? "zh-TW" : "zh-CN";
+              break;
+            }
+          }
+        }
+        root.lang = locale;
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-ClIUApkH.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/tokens.stylex-BRBC-NZS.js">
+    <link rel="modulepreload" crossorigin href="./assets/tokenReferences-Bm3Wd_ay.js">
+    <link rel="modulepreload" crossorigin href="./assets/coarsePointer-BrFMwQE8.js">
+    <link rel="modulepreload" crossorigin href="./assets/padding.stylex-Nfq09GFM.js">
+    <link rel="modulepreload" crossorigin href="./assets/useMediaQuery-ClYh0flB.js">
+    <link rel="modulepreload" crossorigin href="./assets/sharedMutationObserver-CX1BQnaB.js">
+    <link rel="modulepreload" crossorigin href="./assets/defineTheme-BNIpxlLQ.js">
+    <link rel="modulepreload" crossorigin href="./assets/devWarning-DxuplmRl.js">
+    <link rel="modulepreload" crossorigin href="./assets/Icon-Dx6w17XB.js">
+    <link rel="modulepreload" crossorigin href="./assets/VStack-CArwwfIX.js">
+    <link rel="modulepreload" crossorigin href="./assets/defineSyntaxTheme-BByoHgx-.js">
+    <link rel="modulepreload" crossorigin href="./assets/createLucideIcon-uWdoGzyZ.js">
+    <link rel="modulepreload" crossorigin href="./assets/x-y_sFsTEE.js">
+    <link rel="modulepreload" crossorigin href="./assets/chevron-right-yY2QcqKk.js">
+    <link rel="modulepreload" crossorigin href="./assets/ellipsis-CU6Oa7C7.js">
+    <link rel="modulepreload" crossorigin href="./assets/square-B4ZUAP6F.js">
+    <link rel="modulepreload" crossorigin href="./assets/source-DAWA-Re5.js">
+    <link rel="modulepreload" crossorigin href="./assets/preferences-BCODABuN.js">
+    <link rel="modulepreload" crossorigin href="./assets/useLayerDismissal-B_fwFNH9.js">
+    <link rel="modulepreload" crossorigin href="./assets/useTooltip-CiURNfij.js">
+    <link rel="modulepreload" crossorigin href="./assets/usePressFeedback-B8e87TV6.js">
+    <link rel="modulepreload" crossorigin href="./assets/VisuallyHidden-DPaO79QX.js">
+    <link rel="modulepreload" crossorigin href="./assets/Button-BEtUnbpN.js">
+    <link rel="modulepreload" crossorigin href="./assets/layout-KFXjIQTa.js">
+    <link rel="modulepreload" crossorigin href="./assets/focusReturn-CwGGL2zF.js">
+    <link rel="modulepreload" crossorigin href="./assets/scrollGeometry-ydoXf6Zg.js">
+    <link rel="modulepreload" crossorigin href="./assets/chainEventHandlers-CZZCA0zM.js">
+    <link rel="modulepreload" crossorigin href="./assets/isRtlElement-BG33-k_H.js">
+    <link rel="modulepreload" crossorigin href="./assets/useFocusTrap-BdLa01wU.js">
+    <link rel="modulepreload" crossorigin href="./assets/Divider-CdopBUVA.js">
+    <link rel="modulepreload" crossorigin href="./assets/useDevWarning-q3nkgMTT.js">
+    <link rel="modulepreload" crossorigin href="./assets/useMenuPress-C9UBDptQ.js">
+    <link rel="modulepreload" crossorigin href="./assets/useAdaptivePresentation-kzVhVu3u.js">
+    <link rel="modulepreload" crossorigin href="./assets/reducedMotion.stylex-AI2jRgrD.js">
+    <link rel="modulepreload" crossorigin href="./assets/useAttachment-CONZX29f.js">
+    <link rel="modulepreload" crossorigin href="./assets/menuItemRoles-Bod0knkp.js">
+    <link rel="modulepreload" crossorigin href="./assets/menuBottomSheet.stylex-Cpq6Zl00.js">
+    <link rel="modulepreload" crossorigin href="./assets/PanGestureRecognizer-CrQNNU6k.js">
+    <link rel="modulepreload" crossorigin href="./assets/EmptyState-D2xMhgKx.js">
+    <link rel="modulepreload" crossorigin href="./assets/DropdownMenu-CfvRA9Vb.js">
+    <link rel="modulepreload" crossorigin href="./assets/IconButton-DfRo1fIl.js">
+    <link rel="modulepreload" crossorigin href="./assets/useDocumentTitle--6daMH_c.js">
+    <link rel="modulepreload" crossorigin href="./assets/Center-DfGS3_o1.js">
+    <link rel="modulepreload" crossorigin href="./assets/useCalendarSystem-Bp-ke2IP.js">
+    <link rel="modulepreload" crossorigin href="./assets/Session-SNY2ZC5j.js">
+    <link rel="modulepreload" crossorigin href="./assets/container.stylex-Dq-GT7Ih.js">
+    <link rel="modulepreload" crossorigin href="./assets/Card-CvYp7guB.js">
+    <link rel="modulepreload" crossorigin href="./assets/disabledInteraction-u9yjM5Jo.js">
+    <link rel="modulepreload" crossorigin href="./assets/CheckboxInput-CL0lsJi2.js">
+    <link rel="modulepreload" crossorigin href="./assets/roles-BKEEOh4q.js">
+    <link rel="modulepreload" crossorigin href="./assets/themeTiming-BbwPZT6h.js">
+    <link rel="modulepreload" crossorigin href="./assets/animatedLayout-7QIM9hw8.js">
+    <link rel="modulepreload" crossorigin href="./assets/Collapsible-DaPdjeXq.js">
+    <link rel="modulepreload" crossorigin href="./assets/Tooltip-PvWQab65.js">
+    <link rel="modulepreload" crossorigin href="./assets/useInteractiveRole-BLHT8KUG.js">
+    <link rel="modulepreload" crossorigin href="./assets/Link-DhUvRyxw.js">
+    <link rel="modulepreload" crossorigin href="./assets/TextInput-DXHPhKIx.js">
+    <link rel="modulepreload" crossorigin href="./assets/KeyField-B9UCM725.js">
+    <link rel="modulepreload" crossorigin href="./assets/time-vBe2cYuq.js">
+    <link rel="modulepreload" crossorigin href="./assets/StatusLamp-92aeVLIf.js">
+    <link rel="modulepreload" crossorigin href="./assets/system-BGtmxsMY.js">
+    <link rel="modulepreload" crossorigin href="./assets/repository-DAYopMXu.js">
+    <link rel="stylesheet" crossorigin href="./assets/preferences-CHCYL1TX.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-DdMUEfWK.css">
   </head>
-  <body><svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol><symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4M7 9l5-5 5 5M5 20h14"/></symbol><symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol><symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></symbol><symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol><symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol><symbol id="i-search" viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14M16 16l4 4"/></symbol><symbol id="i-sun" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6 19 19M5 19l1.4-1.4M17.6 6.4 19 5"/></symbol><symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5"/></symbol><symbol id="i-out" viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4M18 12H9"/></symbol><symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h11v11H9zM5 15V4h11"/></symbol><symbol id="i-open" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></symbol><symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM13 7l4 4"/></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol></svg><div id="app"></div></body>
+  <body>
+    <div id="app"></div>
+  </body>
 </html>

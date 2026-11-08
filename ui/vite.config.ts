@@ -22,6 +22,6 @@ export default defineConfig({
     cors: false,
     proxy: { "/v8": backend, "/v1": backend, "/healthz": backend },
   },
-  // ui/dist is the embedded Svelte build until the final phase; the React build goes beside it.
-  build: { target: "es2022", sourcemap: false, outDir: "dist-next" },
+  // ui/dist is committed: the Rust binary embeds it at compile time (crates/cpa-server/build.rs).
+  build: { target: "es2022", sourcemap: false, outDir: "dist" },
 });
