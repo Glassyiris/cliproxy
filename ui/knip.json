@@ -9,7 +9,9 @@
     "tools/perf/adapters/*.mjs",
     // The sources `astryx theme build` compiles into site.* and site-main.*, which the app imports.
     "src/themes/site/siteTheme.ts",
-    "src/themes/site/siteMainTheme.ts"
+    "src/themes/site/siteMainTheme.ts",
+    // The charts module, until the first page imports it (the Overview rewrite); remove then.
+    "src/components/charts/index.ts"
   ],
   "project": ["src/**/*.{ts,tsx}", "tools/**/*.mjs"]
 }
