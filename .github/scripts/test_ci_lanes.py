@@ -14,6 +14,7 @@ _spec.loader.exec_module(ci_lanes)
 
 ALL = set(ci_lanes.LANES)
 RUST = {"tests", "lint", "windows", "perf"}
+DEPS = RUST | {"notices"}
 EMBED = {"dashboard", "tests", "perf"}
 
 
@@ -35,7 +36,7 @@ class Paths(unittest.TestCase):
 
     def test_markdown_inside_shipped_paths_is_not_documentation(self):
         self.assertEqual(lanes("crates/cpa-server/README.md"), RUST)
-        self.assertEqual(lanes("vendor/README.md"), RUST)
+        self.assertEqual(lanes("vendor/README.md"), DEPS)
         self.assertEqual(lanes("ui/DESIGN.md"), {"dashboard"})
         self.assertEqual(lanes("bench/results/x.md"), {"tests", "perf"})
         self.assertEqual(lanes("harness/README.md"), {"lint"})
@@ -63,18 +64,31 @@ class Paths(unittest.TestCase):
 
     def test_dashboard(self):
         self.assertEqual(lanes("ui/src/App.tsx", "ui/package.json", "ui/package-lock.json"),
-                         {"dashboard"})
+                         {"dashboard", "notices"})
+        self.assertEqual(lanes("ui/vite.config.ts"), {"dashboard", "notices"})
+        self.assertEqual(lanes("ui/tools/notices-plugin.ts"), {"dashboard", "notices"})
+        self.assertEqual(lanes("ui/DESIGN.md", "ui/scripts/measure.mjs"), {"dashboard"})
         self.assertEqual(lanes("ui/dist/index.html"), EMBED)
-        self.assertEqual(lanes("ui/src/App.tsx", "ui/dist/assets/index-CVrXTE9e.js"), EMBED)
+        self.assertEqual(lanes("ui/src/App.tsx", "ui/dist/assets/index-CVrXTE9e.js"),
+                         EMBED | {"notices"})
         self.assertEqual(lanes(".gitignore"), {"dashboard"})
 
     def test_rust(self):
         for path in ("crates/cpa-server/src/main.rs", "crates/cpa-server/build.rs",
-                     "crates/cliproxy/Cargo.toml", "crates/cpa-server/LICENSE", "Cargo.toml",
-                     "Cargo.lock", "vendor/gjson.patch", "vendor/gjson/src/lib.rs",
-                     ".config/nextest.toml", "clippy.toml", "rustfmt.toml", "rust-toolchain.toml"):
+                     "crates/cpa-server/LICENSE", ".config/nextest.toml", "clippy.toml",
+                     "rustfmt.toml", "rust-toolchain.toml"):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), RUST)
+        # The dependency set also decides THIRD-PARTY-NOTICES.
+        for path in ("crates/cliproxy/Cargo.toml", "Cargo.toml", "Cargo.lock",
+                     "vendor/gjson.patch", "vendor/gjson/src/lib.rs"):
+            with self.subTest(path=path):
+                self.assertEqual(lanes(path), DEPS)
+
+    def test_notices(self):
+        for path in ("about.toml", "tools/third-party-notices.py", "THIRD-PARTY-NOTICES"):
+            with self.subTest(path=path):
+                self.assertEqual(lanes(path), {"notices"})
 
     def test_test_only_rust_skips_the_release_gates(self):
         for path in ("crates/cpa-server/tests/management.rs",
@@ -92,14 +106,14 @@ class Paths(unittest.TestCase):
         self.assertEqual(lanes("bench/gate.sh"), {"tests", "perf"})
 
     def test_unknown_paths_run_everything(self):
-        for path in ("about.toml", "tools/x.py", "newdir/file", ".github/scripts/new.sh",
+        for path in ("tools/x.py", "newdir/file", ".github/scripts/new.sh",
                      ".github/other.yml", "crates"):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), ALL)
 
     def test_union_and_empty(self):
-        self.assertEqual(lanes("README.md", "ui/src/a.ts"), {"dashboard"})
-        self.assertEqual(lanes("README.md", "Cargo.lock"), RUST)
+        self.assertEqual(lanes("README.md", "ui/src/a.ts"), {"dashboard", "notices"})
+        self.assertEqual(lanes("README.md", "Cargo.lock"), DEPS)
         self.assertEqual(lanes(), ALL)
         self.assertEqual(lanes(""), ALL)
 

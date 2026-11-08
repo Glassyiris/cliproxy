@@ -1,5 +1,6 @@
 # Formatting, lints, the full test suite and the harness build, clippy and the file writer
-# tests on Windows, the Linux size and idle gates, the dashboard's checks and actionlint.
+# tests on Windows, the Linux size and idle gates, the dashboard's checks, actionlint and the
+# THIRD-PARTY-NOTICES check.
 # Every push to master, every manual run and the call from release.yml (so a tagged release
 # runs the same checks before it builds anything) run all of them. A pull request runs the
 # lanes its changed paths can affect (.github/scripts/ci-lanes.py, which lists the rules);
@@ -51,6 +52,7 @@ jobs:
       windows: ${{ steps.select.outputs.windows }}
       perf: ${{ steps.select.outputs.perf }}
       workflows: ${{ steps.select.outputs.workflows }}
+      notices: ${{ steps.select.outputs.notices }}
     steps:
       # The test merge commit and its first parent, the base branch tip.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -342,7 +344,7 @@ jobs:
         if: matrix.auth-files == 1
         run: |
           name=cliproxy-ci-x86_64-unknown-linux-gnu
-          mkdir -p "$name" && cp target/release/cliproxy README.md LICENSE LICENSE-MIT NOTICE "$name/"
+          mkdir -p "$name" && cp target/release/cliproxy README.md LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES "$name/"
           tar -czf "$name.tar.gz" "$name"
           bench/gate.sh size x86_64-unknown-linux-gnu target/release/cliproxy "$name.tar.gz"
       - name: Idle
@@ -416,8 +418,45 @@ jobs:
   # The one check to require. It passes when the lane selection succeeded, every selected
   # lane's jobs succeeded and every other lane's jobs were skipped; a docs-only pull
   # request selects none and passes on the selection alone.
+  # THIRD-PARTY-NOTICES must list the dependency set and license texts the binary ships:
+  # tools/third-party-notices.py regenerates it from cargo-about and the dashboard build and
+  # fails on any difference. cargo-about is pinned in .github/ci/pins.env and cached.
+  notices:
+    name: third-party notices
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.notices == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Read the cargo-about pin
+        id: pin
+        run: |
+          . .github/ci/pins.env
+          echo "version=$CARGO_ABOUT_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Cache cargo-about
+        id: about
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo-about
+          key: cargo-about-${{ steps.pin.outputs.version }}-${{ runner.os }}
+      # Without --features cli, cargo-about installs no binary and still exits 0.
+      - name: Install cargo-about
+        if: steps.about.outputs.cache-hit != 'true'
+        run: cargo install cargo-about --version "${{ steps.pin.outputs.version }}" --locked --features cli --root ~/.cargo-about
+      - name: Install the dashboard's packages
+        working-directory: ui
+        run: npm ci
+      - name: THIRD-PARTY-NOTICES matches the dependencies
+        run: CARGO_ABOUT="$HOME/.cargo-about/bin/cargo-about" python3 -I tools/third-party-notices.py --check
+
   ci-ok:
-    needs: [changes, linux, test-counts, lint, dashboard, perf, windows, workflows]
+    needs: [changes, linux, test-counts, lint, dashboard, perf, windows, workflows, notices]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -430,7 +469,8 @@ jobs:
           import json, os, sys
           needs = json.loads(os.environ["NEEDS"])
           jobs = {"dashboard": ["dashboard"], "tests": ["linux", "test-counts"], "lint": ["lint"],
-                  "windows": ["windows"], "perf": ["perf"], "workflows": ["workflows"]}
+                  "windows": ["windows"], "perf": ["perf"], "workflows": ["workflows"],
+                  "notices": ["notices"]}
           ok = needs["changes"]["result"] == "success"
           selected = set(json.loads(needs["changes"]["outputs"].get("lanes") or "null") or []) if ok else set()
           rows = [f"| changes | lane selection | {needs['changes']['result']} | success |"]

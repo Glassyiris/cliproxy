@@ -21,6 +21,7 @@ Lanes and the jobs they run:
   windows    clippy and the file writer tests on Windows
   perf       the size gate and both idle gates on the release binary
   workflows  actionlint over every workflow
+  notices    THIRD-PARTY-NOTICES against the dependency set
 """
 import json
 import os
@@ -28,7 +29,7 @@ import re
 import subprocess
 import sys
 
-LANES = ("dashboard", "tests", "lint", "windows", "perf", "workflows")
+LANES = ("dashboard", "tests", "lint", "windows", "perf", "workflows", "notices")
 ALL = frozenset(LANES)
 NONE = frozenset()
 # Everything that compiles the workspace.
@@ -62,12 +63,18 @@ RULES = (
     # harness are not affected: the generated asset table has the same code for any file
     # set, so fmt, clippy (Linux and Windows) and the media relay tests see no change.
     (r"ui/dist/.*", frozenset({"dashboard", "tests", "perf"})),
+    # THIRD-PARTY-NOTICES lists the npm packages the bundle pulls in, so the manifests, the
+    # build config and the source (a new import can add a package) can each make it stale.
+    (r"ui/(package(-lock)?\.json|vite\.config\.ts|tools/.*|src/.*)", frozenset({"dashboard", "notices"})),
     (r"ui/.*", frozenset({"dashboard"})),
     # Integration tests, examples and benches are test and clippy targets only; nothing
     # under them reaches the release binary (src/ includes fixtures from tests/ only in
     # #[cfg(test)] code), so the size and idle gates are not affected.
     (r"crates/[^/]+/(tests|examples|benches)/.*", frozenset({"tests", "lint", "windows"})),
-    (r"crates/.*|vendor/.*|Cargo\.(toml|lock)|\.config/.*|\.cargo/.*|clippy\.toml|rustfmt\.toml"
+    # The dependency set, which THIRD-PARTY-NOTICES lists (tools/third-party-notices.py).
+    (r"Cargo\.(toml|lock)|crates/[^/]+/Cargo\.toml|vendor/.*", RUST | {"notices"}),
+    (r"about\.toml|tools/third-party-notices\.py|THIRD-PARTY-NOTICES", frozenset({"notices"})),
+    (r"crates/.*|\.config/.*|\.cargo/.*|clippy\.toml|rustfmt\.toml"
      r"|rust-toolchain(\.toml)?", RUST),
     # harness/rust is checked by the lint job only.
     (r"harness/.*", frozenset({"lint"})),
