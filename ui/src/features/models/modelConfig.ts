@@ -20,17 +20,12 @@ export type Section = "model-alias" | "excluded-models";
 
 export const configPath = (section: Section, channel: Channel) => `oauth/${section}/${channel}`;
 
-/**
- * One channel's list as the server holds it: `stored` is what a write compares against, so a
- * stored `null` stays `null` and a key the file lacks is the empty list (the server's 404
- * fallback); `list` is what the page shows.
- */
-export function readList<T>(config: Config, section: Section, channel: Channel) {
+/** One channel's list as the page shows it: a stored `null` and a key the file lacks are empty. */
+export function readList<T>(config: Config, section: Section, channel: Channel): T[] {
   let node: unknown = config;
   for (const key of ["oauth", section, channel])
     node = node && typeof node === "object" ? (node as Record<string, unknown>)[key] : undefined;
-  const stored = (node === undefined ? [] : node) as T[] | null;
-  return { stored, list: stored ?? [] };
+  return (node ?? []) as T[];
 }
 
 export type AliasProblems = { name?: "required"; alias?: "required" | "duplicate" | "same" };

@@ -40,18 +40,18 @@ function useLogsView() {
   const [filter, setFilter] = useState("");
   const hasOldFilter = params.q !== undefined;
   useEffect(() => {
-    if (hasOldFilter) setParams({ q: undefined });
+    if (hasOldFilter) setParams({ q: undefined }, "replace");
   });
   const query = new URLSearchParams(params).toString();
   const suffix = query ? `?${query}` : "";
   return {
     tab: params.tab === "errors" ? "errors" : "app",
-    setTab: (tab: string) => setParams({ tab: tab === "errors" ? tab : undefined }),
+    setTab: (tab: string) => setParams({ tab: tab === "errors" ? tab : undefined }, "push"),
     filters: { filter, withManagement: params.management === "1" },
     setFilters: (f: Partial<Filters>) => {
       if (f.filter !== undefined) setFilter(f.filter);
       if (f.withManagement !== undefined)
-        setParams({ management: f.withManagement ? "1" : undefined });
+        setParams({ management: f.withManagement ? "1" : undefined }, "replace");
     },
     openId: arg,
     suffix,
@@ -177,7 +177,7 @@ export default function Logs() {
   const hash = useLogsView();
   const [isFollowing, setIsFollowing] = useState(true);
   const action = useAction();
-  const tail = useLogTail(isFollowing);
+  const tail = useLogTail(isFollowing, hash.tab === "app");
   const lines = tail.data?.lines;
   const { filter, withManagement } = hash.filters;
   const shown = useMemo(

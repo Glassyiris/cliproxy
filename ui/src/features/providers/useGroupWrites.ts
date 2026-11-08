@@ -5,15 +5,17 @@ import { t } from "../../lib/i18n.ts";
 import type { Family, Group } from "./groups.ts";
 import type { GroupAction } from "./ProviderTable.tsx";
 
+type Write = ReturnType<typeof useConfigWrite>;
+
 /**
  * What the delete confirmation showed when it opened: the family, the group at `index` of
- * `groups`, and `stored`, the value the server held then. The delete writes against this and
- * nothing later, so a page that moved on underneath it makes the write refuse, never hit another
- * group.
+ * `groups`, and `write`, whose compare baseline is the config of that render. The delete writes
+ * against this and nothing later, so a page that moved on underneath it makes the write refuse,
+ * never hit another group.
  */
 type DeleteSnapshot = {
   family: Family;
-  stored: unknown;
+  write: Write;
   groups: Group[];
   index: number;
   name: string;
@@ -21,14 +23,12 @@ type DeleteSnapshot = {
 
 /**
  * The page's group writes, each replacing `api-keys/<family>` through one reread-and-compare, and
- * the state of the controls that start them. `stored` is the value as the server holds it;
- * `focusAfter` moves focus somewhere that still exists once the control that had it is gone. A
+ * the state of the controls that start them. `focusAfter` moves focus somewhere that still exists once the control that had it is gone. A
  * press while a write is pending is rejected before it touches any state.
  */
 export function useGroupWrites(
   action: Action,
   family: Family,
-  stored: unknown,
   groups: Group[] | undefined,
   names: string[],
   focusAfter: () => void,
@@ -42,7 +42,6 @@ export function useGroupWrites(
     setToggling(index);
     await write(
       `api-keys/${family}`,
-      stored,
       current.map((g, i) => (i === index ? { ...g, disabled } : g)),
       disabled ? t("providers.toggle.disabled") : t("providers.toggle.enabled"),
     );
@@ -57,7 +56,6 @@ export function useGroupWrites(
     add: async (group: Group) => {
       const ok = await write(
         `api-keys/${family}`,
-        stored,
         [...(groups ?? []), group],
         t("providers.add.added"),
       );
@@ -66,15 +64,14 @@ export function useGroupWrites(
     },
     press: ({ kind, index }: GroupAction) => {
       if (action.busy || !groups) return;
-      if (kind === "delete") setDeleting({ family, stored, groups, index, name: names[index] });
+      if (kind === "delete") setDeleting({ family, write, groups, index, name: names[index] });
       else void toggle(index, groups);
     },
     cancelDelete: () => setDeleting(null),
     confirmDelete: async () => {
       if (!deleting || action.busy) return;
-      const ok = await write(
+      const ok = await deleting.write(
         `api-keys/${deleting.family}`,
-        deleting.stored,
         deleting.groups.filter((_, i) => i !== deleting.index),
         t("providers.delete.deleted"),
       );

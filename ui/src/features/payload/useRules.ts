@@ -24,7 +24,7 @@ export function useRules() {
     if (!config.data) return false;
     const stored = storedRules(config.data, kind);
     if (!isList(stored)) return false;
-    return write(rulesPath(kind), stored, next(rulesOf(stored)), success);
+    return write(rulesPath(kind), next(rulesOf(stored)), success);
   };
 
   return { config, action, groups, change };

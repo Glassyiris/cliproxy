@@ -10,8 +10,8 @@ import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { base } from "../../lib/api/client.ts";
-import type { Config } from "../../lib/api/config.ts";
 import { newKey } from "../../lib/client-keys.ts";
+import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
 import { isLocalHost, toolTarget } from "./address.ts";
 import { AddressKey } from "./AddressKey.tsx";
@@ -21,15 +21,6 @@ import { useKeyChoice } from "./useKeyChoice.ts";
 
 const KEYS_PATH = "access/api-keys";
 const local = isLocalHost(location.hostname);
-
-/**
- * What the server holds, for the compare in `replaceConfigValue`: `null` stays `null`, and a key
- * the file lacks reads as the empty list, which is what the server's 404 fallback reads as.
- */
-function storedKeys(config: Config): string[] | null {
-  const access = config.access as Record<string, unknown> | null | undefined;
-  return (access && "api-keys" in access ? access["api-keys"] : []) as string[] | null;
-}
 
 function NoKey({ busy, create }: { busy: boolean; create: () => void }) {
   return (
@@ -58,8 +49,8 @@ export default function UseWithTools() {
   const tool = toolFromParam(params.tool);
   const createdFrom = useRef<{ control: Element | null } | null>(null);
 
-  const stored = config.data ? storedKeys(config.data) : undefined;
-  const keys = stored === undefined ? undefined : (stored ?? []);
+  // A key the file lacks and an explicit null both show as no keys.
+  const keys = config.data ? (readPath(config.data, KEYS_PATH, []) as string[]) : undefined;
   const { key, model, choice } = useKeyChoice(keys);
 
   useEffect(() => {
@@ -79,7 +70,7 @@ export default function UseWithTools() {
   const create = async () => {
     if (!keys) return;
     createdFrom.current = { control: document.activeElement };
-    if (!(await write(KEYS_PATH, stored, [...keys, newKey()], t("use.empty.created"))))
+    if (!(await write(KEYS_PATH, [...keys, newKey()], t("use.empty.created"))))
       createdFrom.current = null;
   };
 
@@ -105,7 +96,7 @@ export default function UseWithTools() {
       {key && (
         <SetUpTool
           tool={tool}
-          onTool={(next) => setParams({ tool: toolParam(next) })}
+          onTool={(next) => setParams({ tool: toolParam(next) }, "push")}
           target={toolTarget(tool, base, local)}
           clientKey={key}
           model={model}

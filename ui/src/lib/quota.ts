@@ -1,6 +1,6 @@
 // Live quota checks. A check asks the provider through the server (/requests/api-call with the
 // credential's own token, or a quota plugin), so it only ever runs when the user presses a button.
-import { available } from "./api/client.ts";
+import { ApiError, available, ConnectionError } from "./api/client.ts";
 import type { Credential } from "./api/credentials.ts";
 import type { Plugin } from "./api/plugins.ts";
 import { fetchPluginQuota } from "./api/plugins.ts";
@@ -19,11 +19,49 @@ const usageURL: Record<string, string> = {
 };
 const GAP = 120_000;
 
+/**
+ * Why a check failed, as a code the page words: the provider's HTTP status for a refused read
+ * (`usageDenied` is Claude refusing a setup token), the connection to this server, an answer
+ * that is not usage data (`malformed`), or the server's own message, which may carry the
+ * provider's.
+ */
+export type QuotaError =
+  | { reason: "usageDenied" | "tokenRefused" | "status"; status: number }
+  | { reason: "timeout" | "unreachable" | "malformed" }
+  | { reason: "failed"; detail: string };
+
 export type QuotaReading =
-  | { at: number; windows: Window[]; error?: string; code?: number }
-  | { error: string; code?: number };
+  | { at: number; windows: Window[]; error?: QuotaError; code?: number }
+  | { error: QuotaError; code?: number };
+
+/** Usage endpoint or quota plugin for this account's provider, whether or not this server offers the route a check needs. */
+export const quotaApplies = (a: Credential, plugins: Plugin[]) =>
+  !!quotaPlugin(plugins, provider(a)) || !!usageURL[provider(a)];
+
+const quotaPlugin = (plugins: Plugin[], p: string) =>
+  plugins.find((x) => x.supports_quota && (x.quota_provider || x.id) === p);
+
+const refusal = (p: string, status: number): QuotaError => ({
+  reason:
+    p === "claude" && status === 403
+      ? "usageDenied"
+      : status === 401 || status === 403
+        ? "tokenRefused"
+        : "status",
+  status,
+});
+
+/** What a failed request records; null for an ended session, whose answer has no reader. */
+function failure(e: unknown): QuotaError | null {
+  if (e instanceof ConnectionError) {
+    if (e.reason === "signed-out" || e.reason === "session-changed") return null;
+    return { reason: e.reason === "timeout" ? "timeout" : "unreachable" };
+  }
+  if (e instanceof ApiError) return { reason: "failed", detail: e.message };
+  return { reason: "malformed" };
+}
 export type QuotaPending = "queued" | "checking";
-export const quotaKey = (a: Credential) => a.auth_index || a.name;
+const quotaKey = (a: Credential) => a.auth_index || a.name;
 
 /** Where the checker reads the current plugins and credentials from. */
 export type QuotaSources = { plugins(): Plugin[]; credentials(): Credential[] };
@@ -43,8 +81,7 @@ export function createQuotaChecker(sources: QuotaSources) {
   let epoch = 0;
   const changed = () => listeners.forEach((l) => l());
 
-  const plugin = (p: string) =>
-    sources.plugins().find((x) => x.supports_quota && (x.quota_provider || x.id) === p);
+  const plugin = (p: string) => quotaPlugin(sources.plugins(), p);
   /** The provider has a usage endpoint or quota plugin this server can call. */
   const hasSource = (a: Credential) =>
     !!plugin(provider(a)) || (!!usageURL[provider(a)] && available(routes.callProvider));
@@ -66,8 +103,12 @@ export function createQuotaChecker(sources: QuotaSources) {
 
   async function read(a: Credential) {
     const p = provider(a);
+    // A failed read keeps the last windows beside it. `code` lets Connect tell a refused token
+    // (401/403) from any other failed read.
+    const fail = (error: QuotaError, code?: number) =>
+      void readings.set(quotaKey(a), { ...readings.get(quotaKey(a)), error, code });
+    let raw: unknown;
     try {
-      let raw: Data;
       const pl = plugin(p);
       if (pl) raw = await fetchPluginQuota(pl.id, a.auth_index);
       else {
@@ -92,27 +133,20 @@ export function createQuotaChecker(sources: QuotaSources) {
           header,
         });
         if (r.status_code < 200 || r.status_code >= 300)
-          // `code` lets Connect tell a refused token (401/403) from any other failed read.
-          throw Object.assign(
-            new Error(
-              p === "claude" && r.status_code === 403
-                ? "Claude denied access to usage (HTTP 403). Setup tokens cannot read usage. Connect Claude through the dashboard's OAuth flow for usage checks."
-                : r.status_code === 401 || r.status_code === 403
-                  ? `The provider rejected the account's token (HTTP ${r.status_code}). Refresh the token, or connect the account again.`
-                  : `The provider answered HTTP ${r.status_code}. Try again later.`,
-            ),
-            { code: r.status_code },
-          );
-        raw = typeof r.body === "string" ? JSON.parse(r.body) : r.body;
+          return fail(refusal(p, r.status_code), r.status_code);
+        raw = r.body;
       }
-      readings.set(quotaKey(a), { at: Date.now(), windows: quotaWindows(p, raw) });
     } catch (e) {
-      const error = e instanceof Error ? e.message : String(e);
-      readings.set(quotaKey(a), {
-        ...readings.get(quotaKey(a)),
-        error,
-        code: (e as { code?: number }).code,
-      });
+      const error = failure(e);
+      return error ? fail(error) : undefined;
+    }
+    // The provider's answer is checked here, not the server's: a body that does not parse or
+    // has an unexpected shape is `malformed`, never the browser's own message.
+    try {
+      const data = (typeof raw === "string" ? JSON.parse(raw) : raw) as Data;
+      readings.set(quotaKey(a), { at: Date.now(), windows: quotaWindows(p, data) });
+    } catch {
+      fail({ reason: "malformed" });
     }
   }
 

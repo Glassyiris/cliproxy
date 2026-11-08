@@ -10,16 +10,16 @@ import {
   isExcluded,
 } from "./modelConfig.ts";
 
-test("readList keeps a stored null and reads a missing key as the empty list", () => {
+test("readList reads a stored null and a missing key as the empty list", () => {
   const config = {
     oauth: { "model-alias": { claude: null, codex: [{ name: "a", alias: "b" }] } },
   };
-  assert.deepEqual(readList(config, "model-alias", "claude"), { stored: null, list: [] });
-  assert.deepEqual(readList(config, "model-alias", "codex").list, [{ name: "a", alias: "b" }]);
-  assert.deepEqual(readList(config, "model-alias", "kimi"), { stored: [], list: [] });
-  assert.deepEqual(readList(config, "excluded-models", "claude"), { stored: [], list: [] });
-  assert.deepEqual(readList({ oauth: null }, "model-alias", "claude"), { stored: [], list: [] });
-  assert.deepEqual(readList({}, "model-alias", "claude"), { stored: [], list: [] });
+  assert.deepEqual(readList(config, "model-alias", "claude"), []);
+  assert.deepEqual(readList(config, "model-alias", "codex"), [{ name: "a", alias: "b" }]);
+  assert.deepEqual(readList(config, "model-alias", "kimi"), []);
+  assert.deepEqual(readList(config, "excluded-models", "claude"), []);
+  assert.deepEqual(readList({ oauth: null }, "model-alias", "claude"), []);
+  assert.deepEqual(readList({}, "model-alias", "claude"), []);
 });
 
 test("an alias sets fork only when the original is kept", () => {

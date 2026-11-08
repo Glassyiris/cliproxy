@@ -27,7 +27,7 @@ import { ReadError } from "../../components/ReadError.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
-import { strategy } from "../../lib/routing.ts";
+import { strategy, strategyName } from "../../lib/routing.ts";
 import { AccountPanel } from "./AccountPanel.tsx";
 import { AccountTable, LoadingTable } from "./AccountTable.tsx";
 import { BatchBar } from "./BatchBar.tsx";
@@ -79,7 +79,7 @@ function useFilters() {
     show: isShow(params.show) ? params.show : "",
     search: params.q ?? "",
   };
-  const setFilters = (f: Partial<Filters>) => setParams(pick(f));
+  const setFilters = (f: Partial<Filters>) => setParams(pick(f), "replace");
   const query = new URLSearchParams(params).toString();
   const go = useCallback(
     (id: string) => {
@@ -145,11 +145,12 @@ function SortNote() {
     );
   if (!config.data) return null;
   const value: unknown = readPath(config.data, "routing/strategy", "");
-  // The dashboard is served only by cliproxy-rs, where an unset strategy is soonest reset.
-  const resetFirst = strategy(value, true).value === "soonest-reset";
+  const resetFirst = strategy(value) === "soonest-reset";
   return (
     <Text type="supporting" color="secondary">
-      {resetFirst ? t("accounts.page.sortResetFirst") : t("accounts.page.sort")}
+      {resetFirst
+        ? t("accounts.page.sortResetFirst", { strategy: strategyName("soonest-reset") })
+        : t("accounts.page.sort")}
     </Text>
   );
 }

@@ -14,21 +14,12 @@ import type { ErrorLogFile } from "../../lib/api/logs.ts";
 import type { PluginList } from "../../lib/api/plugins.ts";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
-import { strategy } from "../../lib/routing.ts";
+import { strategy, strategyName } from "../../lib/routing.ts";
 import { layout } from "../../themes/site/layout.ts";
 
-const strategyName: Record<ReturnType<typeof strategy>["value"], () => string> = {
-  "round-robin": () => t("overview.strategy.roundRobin"),
-  "fill-first": () => t("overview.strategy.fillFirst"),
-  "weighted-round-robin": () => t("overview.strategy.weightedRoundRobin"),
-  "soonest-reset": () => t("overview.strategy.soonestReset"),
-};
-
 /** Strategy, retries and session affinity; the typed config layer does not fix their shape. */
-function routingLine(config: Config, rust: boolean) {
-  const parts = [
-    strategyName[strategy(readPath(config, "routing/strategy") as unknown, rust).value](),
-  ];
+function routingLine(config: Config) {
+  const parts = [strategyName(strategy(readPath(config, "routing/strategy") as unknown))];
   const retries = readPath(config, "routing/retry/request-retry") as unknown;
   if (retries !== undefined) parts.push(t("overview.facts.retries", { count: Number(retries) }));
   if (readPath(config, "routing/session-affinity")) parts.push(t("overview.facts.sessionAffinity"));
@@ -52,12 +43,10 @@ export function ServerFacts({
   config,
   plugins,
   errorLogs,
-  rust,
 }: {
   config: Read<Config>;
   plugins: Read<PluginList>;
   errorLogs: Read<{ files: ErrorLogFile[] }>;
-  rust: boolean;
 }) {
   const failed = [
     { read: config, what: t("overview.facts.config") },
@@ -81,7 +70,7 @@ export function ServerFacts({
           icon={<Icon icon={Route} size="sm" />}
         >
           {fact(config, (c) => (
-            <Link href="#config">{routingLine(c, rust).join(" · ")}</Link>
+            <Link href="#config">{routingLine(c).join(" · ")}</Link>
           ))}
         </MetadataListItem>
         <MetadataListItem

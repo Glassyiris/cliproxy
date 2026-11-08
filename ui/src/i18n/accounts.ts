@@ -10,7 +10,7 @@ export default {
     "accounts.page.sort":
       "Sorted by soonest weekly reset. Quota checks go one account at a time, each at most once every 2 minutes.",
     "accounts.page.sortResetFirst":
-      "Sorted by soonest weekly reset, the order Soonest reset first uses. Quota checks go one account at a time, each at most once every 2 minutes.",
+      "Sorted by soonest weekly reset, the order {strategy} uses. Quota checks go one account at a time, each at most once every 2 minutes.",
     "accounts.missing.upload": "upload",
     "accounts.missing.refresh": "token refresh",
     "accounts.missing.fields": "editing fields",
@@ -158,7 +158,7 @@ export default {
     "accounts.page.sort":
       "按每周额度最早重置排序。额度检查一次只查一个账号，每个账号每 2 分钟最多一次。",
     "accounts.page.sortResetFirst":
-      "按每周额度最早重置排序，即最早重置优先策略的顺序。额度检查一次只查一个账号，每个账号每 2 分钟最多一次。",
+      "按每周额度最早重置排序，即{strategy}策略的顺序。额度检查一次只查一个账号，每个账号每 2 分钟最多一次。",
     "accounts.missing.upload": "上传",
     "accounts.missing.refresh": "刷新令牌",
     "accounts.missing.fields": "编辑字段",
@@ -300,7 +300,7 @@ export default {
     "accounts.page.sort":
       "依每週額度最早重設排序。額度檢查一次只查一個帳號，每個帳號每 2 分鐘最多一次。",
     "accounts.page.sortResetFirst":
-      "依每週額度最早重設排序，即最早重設優先策略的順序。額度檢查一次只查一個帳號，每個帳號每 2 分鐘最多一次。",
+      "依每週額度最早重設排序，即{strategy}策略的順序。額度檢查一次只查一個帳號，每個帳號每 2 分鐘最多一次。",
     "accounts.missing.upload": "上傳",
     "accounts.missing.refresh": "重新整理權杖",
     "accounts.missing.fields": "編輯欄位",

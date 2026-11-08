@@ -24,7 +24,7 @@ export type Cooldown = {
 export type RequestBucket = { time: string; success: number; failed: number };
 
 /** Rate-limit headers and quota fields the server saw on real traffic, without asking the provider. */
-export type QuotaObservation = { observed_at?: string; signals: Record<string, string> };
+type QuotaObservation = { observed_at?: string; signals: Record<string, string> };
 
 export type Credential = {
   id: string;

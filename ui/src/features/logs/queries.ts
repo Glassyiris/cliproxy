@@ -17,12 +17,13 @@ const PAGE_LINES = 300;
 /**
  * The application log tail: each read asks only for lines after the last one this tab holds.
  * While following it is read every 3 s, paused while the tab is hidden and reread when it is
- * shown again; paused, it is not read at all.
+ * shown again; paused, it is not read at all. While its page tab is not shown (`isShown`, the
+ * Error logs tab is open) it is not read either, not even once on entry.
  */
-export function useLogTail(isFollowing: boolean) {
+export function useLogTail(isFollowing: boolean, isShown: boolean) {
   const client = useQueryClient();
   const isAvailable = useAvailable();
-  const polls = isFollowing && isAvailable(routes.readLogs);
+  const polls = isShown && isFollowing && isAvailable(routes.readLogs);
   return useQuery({
     queryKey: logKeys.tail,
     queryFn: async ({ signal }): Promise<Tail> => {
@@ -30,6 +31,7 @@ export function useLogTail(isFollowing: boolean) {
       const page = await readLogs({ limit: PAGE_LINES, cursor: prev?.cursor || undefined }, signal);
       return appendPage(prev, page);
     },
+    enabled: isShown,
     refetchInterval: polls ? FOLLOW_MS : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: polls,

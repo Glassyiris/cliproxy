@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Plugin } from "../../lib/api/plugins.ts";
-import { capabilities, pluginState, storedEnabled } from "./rows.ts";
+import { capabilities, pluginState } from "./rows.ts";
 
 const plugin = (over: Partial<Plugin>) =>
   ({
@@ -39,17 +39,4 @@ test("capabilities list sign-in before quota", () => {
     "quota",
   ]);
   assert.deepEqual(capabilities(plugin({})), []);
-});
-
-test("storedEnabled keeps null and false, and reads an absent key as {}", () => {
-  const config = {
-    plugins: { enabled: false, configs: { a: { enabled: null }, b: {}, c: null } },
-  };
-  assert.equal(storedEnabled(config), false);
-  assert.equal(storedEnabled(config, "a"), null);
-  assert.deepEqual(storedEnabled(config, "b"), {});
-  assert.deepEqual(storedEnabled(config, "c"), {});
-  assert.deepEqual(storedEnabled(config, "missing"), {});
-  assert.deepEqual(storedEnabled({}), {});
-  assert.deepEqual(storedEnabled({ plugins: null }, "a"), {});
 });

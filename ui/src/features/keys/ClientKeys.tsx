@@ -12,8 +12,8 @@ import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
-import type { Config } from "../../lib/api/config.ts";
 import { ReadError } from "../../components/ReadError.tsx";
+import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
 import { AddKeyDialog } from "./AddKeyDialog.tsx";
 import { KeyTable } from "./KeyTable.tsx";
@@ -64,15 +64,6 @@ function KeyList({
   );
 }
 
-/**
- * What the server holds, for the compare in `replaceConfigValue`: `null` stays `null`, and a key
- * the file lacks reads as the empty list, which is what the server's 404 fallback reads as.
- */
-function storedKeys(config: Config): string[] | null {
-  const access = config.access as Record<string, unknown> | null | undefined;
-  return (access && "api-keys" in access ? access["api-keys"] : []) as string[] | null;
-}
-
 const KEYS_PATH = "access/api-keys";
 const apiKeyHeader = "x-api-key";
 
@@ -83,8 +74,8 @@ export default function ClientKeys() {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
 
-  const stored = config.data ? storedKeys(config.data) : undefined;
-  const keys = stored === undefined ? undefined : (stored ?? []);
+  // A key the file lacks and an explicit null both show as no keys.
+  const keys = config.data ? (readPath(config.data, KEYS_PATH, []) as string[]) : undefined;
   const addButton = (
     <Button
       label={t("keys.page.add")}
@@ -98,7 +89,6 @@ export default function ClientKeys() {
     if (keys && removing !== null)
       await write(
         KEYS_PATH,
-        stored,
         keys.filter((k) => k !== removing),
         t("keys.remove.removed"),
       );
@@ -135,7 +125,7 @@ export default function ClientKeys() {
         <AddKeyDialog
           keys={keys}
           busy={action.busy}
-          add={(key) => write(KEYS_PATH, stored, [...keys, key], t("keys.add.added"))}
+          add={(key) => write(KEYS_PATH, [...keys, key], t("keys.add.added"))}
           onClose={() => setAdding(false)}
         />
       )}

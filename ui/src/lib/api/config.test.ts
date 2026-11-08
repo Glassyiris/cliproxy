@@ -4,6 +4,7 @@ import { fakeServer } from "./fake-server.test-support.ts";
 
 const server = fakeServer();
 const { connect } = await import("./client.ts");
+const { absent, storedValue } = await import("../config-path.ts");
 const { ConfigChangedError, readConfigValue, replaceConfigValue, writeConfigYaml } =
   await import("./config.ts");
 connect("secret", { unauthorized() {}, server() {} });
@@ -46,4 +47,31 @@ test("config.yaml goes as YAML text, other writes as JSON", async () => {
   await writeConfigYaml("debug: true\n");
   const s = server.sent.at(-1)!;
   assert.deepEqual([s.headers["Content-Type"], s.body], ["application/yaml", "debug: true\n"]);
+});
+
+test("the write baseline keeps a stored null apart from an absent key", async () => {
+  const path = "access/api-keys";
+  const notFound = () => Response.json({ error: "not_found" }, { status: 404 });
+  const withNull = { access: { "api-keys": null } };
+  const without = { access: {} };
+  const baseline = (config: object) => storedValue(config, path);
+  assert.equal(baseline(withNull), null);
+  assert.equal(baseline(without), absent);
+  assert.equal(baseline({ access: null }), absent);
+
+  // The server holds null: a baseline of null writes, one of absent refuses.
+  server.answer = (s) => (s.method === "PUT" ? Response.json(ok) : Response.json(null));
+  await replaceConfigValue(path, baseline(withNull), ["k"], absent);
+  await assert.rejects(
+    replaceConfigValue(path, baseline(without), ["k"], absent),
+    ConfigChangedError,
+  );
+
+  // The server lacks the key: the other way round.
+  server.answer = (s) => (s.method === "PUT" ? Response.json(ok) : notFound());
+  await replaceConfigValue(path, baseline(without), ["k"], absent);
+  await assert.rejects(
+    replaceConfigValue(path, baseline(withNull), ["k"], absent),
+    ConfigChangedError,
+  );
 });

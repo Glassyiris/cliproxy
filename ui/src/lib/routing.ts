@@ -1,37 +1,45 @@
-/** routing.strategy values, with a one-line explanation each. `rust`: offered only by cliproxy-rs. */
+import { t } from "./i18n.ts";
+
+/** routing.strategy values, in the order the dashboard offers them. */
 export const strategies = [
-  {
-    value: "round-robin",
-    name: "Round robin",
-    rust: false,
-    help: "Takes the accounts in turn, one request each.",
-  },
-  {
-    value: "fill-first",
-    name: "Fill first",
-    rust: false,
-    help: "Uses one account until it cools down or reaches a limit, then moves to the next.",
-  },
-  {
-    value: "weighted-round-robin",
-    name: "Weighted round robin",
-    rust: false,
-    help: "Takes the accounts in turn in proportion to each account's weight, set on Accounts.",
-  },
-  {
-    value: "soonest-reset",
-    name: "Soonest reset first",
-    rust: true,
-    help: "Uses the account whose weekly limit resets soonest until it cools down or uses up a window, then moves to the next. Conversations bound to an account stay on it. This is the default.",
-  },
+  "round-robin",
+  "fill-first",
+  "weighted-round-robin",
+  "soonest-reset",
 ] as const;
-/** The strategy a configured value selects, aliases included, as the server reads it: unset is soonest reset on cliproxy-rs (`rust`) and round robin on Go; anything else is round robin. */
-export function strategy(value: unknown, rust: boolean): (typeof strategies)[number] {
+export type Strategy = (typeof strategies)[number];
+
+const words: Record<Strategy, { name: () => string; help: () => string }> = {
+  "round-robin": {
+    name: () => t("app.strategy.roundRobin"),
+    help: () => t("app.strategyHelp.roundRobin"),
+  },
+  "fill-first": {
+    name: () => t("app.strategy.fillFirst"),
+    help: () => t("app.strategyHelp.fillFirst"),
+  },
+  "weighted-round-robin": {
+    name: () => t("app.strategy.weightedRoundRobin"),
+    help: () => t("app.strategyHelp.weightedRoundRobin"),
+  },
+  "soonest-reset": {
+    name: () => t("app.strategy.soonestReset"),
+    help: () => t("app.strategyHelp.soonestReset"),
+  },
+};
+
+/** A strategy's name in the current language. */
+export const strategyName = (s: Strategy) => words[s].name();
+/** A strategy's one-line explanation in the current language. */
+export const strategyHelp = (s: Strategy) => words[s].help();
+
+/** The strategy a configured value selects, aliases included, as cliproxy-rs reads it: unset is soonest reset; anything else unknown is round robin. */
+export function strategy(value: unknown): Strategy {
   const v =
     String(value ?? "")
       .trim()
-      .toLowerCase() || (rust ? "soonest-reset" : "round-robin");
-  const alias: Record<string, string> = {
+      .toLowerCase() || "soonest-reset";
+  const alias: Record<string, Strategy> = {
     rr: "round-robin",
     roundrobin: "round-robin",
     ff: "fill-first",
@@ -40,5 +48,5 @@ export function strategy(value: unknown, rust: boolean): (typeof strategies)[num
     weightedroundrobin: "weighted-round-robin",
     "reset-first": "soonest-reset",
   };
-  return strategies.find((s) => s.value === (alias[v] || v)) || strategies[0];
+  return strategies.find((s) => s === (alias[v] || v)) || "round-robin";
 }

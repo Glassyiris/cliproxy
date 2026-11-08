@@ -248,7 +248,7 @@ export function GetStarted({
     tested,
     action,
     createKey: () =>
-      arm(write("access/api-keys", keys, [...keys, newKey()], t("overview.start.keyCreated"))),
+      arm(write("access/api-keys", [...keys, newKey()], t("overview.start.keyCreated"))),
     test: { result, run: () => arm(test(keys[0])) },
   });
   const left = list.filter((s) => !s.done).length;

@@ -17,7 +17,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { Token } from "@astryxdesign/core/Token";
 import { useUnsavedChanges } from "../../app/useHashRoute.ts";
 import { useAvailable } from "../../components/MissingActions.tsx";
-import { QuotaWindow } from "../../components/QuotaWindow.tsx";
+import { QuotaWindow, quotaErrorText } from "../../components/QuotaWindow.tsx";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
 import { setCredentialFields } from "../../lib/api/credentials.ts";
 import { routes } from "../../lib/api/routes.ts";
@@ -79,7 +79,7 @@ function Limits({ row, quota, now }: Pick<PanelProps, "row" | "quota"> & { now: 
       {limits?.error && (
         <StatusLamp
           status="failing"
-          label={t("accounts.panel.usageFailed", { error: limits.error })}
+          label={t("accounts.panel.usageFailed", { error: quotaErrorText(limits.error) })}
         />
       )}
       {(cooldowns.length > 0 || signals.length > 0) && (

@@ -102,7 +102,7 @@ export default function Overview() {
   const { credentials, keyRead, config, files, now, summary, keys } = useOverviewData();
   const plugins = usePlugins();
   const errorLogs = useErrorLogs();
-  const { online, version } = useSession();
+  const { online } = useSession();
   const action = useAction();
   const isNarrow = useMediaQuery(RAIL_FOLDS);
   const firstRun = useFirstRun(files?.length);
@@ -158,13 +158,15 @@ export default function Overview() {
         <Divider />
         <TrafficCard traffic={summary.traffic} keyRead={keyRead} />
         {isNarrow && <Card padding={0}>{rail(false)}</Card>}
-        {files && <LimitsSection files={files} now={now} action={action} />}
-        <ServerFacts
-          config={config}
-          plugins={plugins}
-          errorLogs={errorLogs}
-          rust={version.startsWith("cliproxy-rs")}
-        />
+        {files && (
+          <LimitsSection
+            files={files}
+            plugins={plugins.data?.plugins ?? []}
+            now={now}
+            action={action}
+          />
+        )}
+        <ServerFacts config={config} plugins={plugins} errorLogs={errorLogs} />
       </VStack>
     </PageFrame>
   );

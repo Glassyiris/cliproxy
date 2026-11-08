@@ -40,7 +40,7 @@ export async function readConfigValue<T = unknown>(
   }
 }
 
-export const writeConfigValue = (path: string, value: unknown) =>
+const writeConfigValue = (path: string, value: unknown) =>
   request<ConfigWrite>(routes.writeConfigValue, { params: params(path), body: value });
 
 /** Nothing was written: the value on the server is no longer the one the page showed. */
@@ -54,7 +54,8 @@ export class ConfigChangedError extends Error {
 
 /**
  * Replace one config value only if the server still holds `before`. `unset` is what an absent
- * value reads as: an empty list or map unless given. Callers reread the config either way.
+ * value reads as: an empty list or map unless given, or `absent` from `storedValue` to tell it
+ * from a stored `null`. Callers reread the config either way.
  */
 export async function replaceConfigValue(
   path: string,

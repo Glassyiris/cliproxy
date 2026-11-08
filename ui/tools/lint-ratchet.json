@@ -23,7 +23,6 @@
     "src/lib/api/proxy.ts": 1,
     "src/lib/credentials.ts": 1,
     "src/lib/quota-windows.ts": 11,
-    "src/lib/quota.ts": 1,
     "src/lib/tool-setup.test.ts": 3
   },
   "@typescript-eslint/no-unsafe-call": {

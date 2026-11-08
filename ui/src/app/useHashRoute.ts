@@ -86,23 +86,29 @@ export function useHashRoute() {
 }
 
 /**
+ * How a query change enters history: `push` for a choice the operator would go Back from (a tab,
+ * a family, an open store), `replace` for typing and filters, so a search does not add a Back
+ * step per key.
+ */
+export type HashMode = "push" | "replace";
+
+/**
  * The query after the route (`#accounts?provider=codex`) and a setter that merges changes into
- * it; an empty or undefined value removes the key. A change replaces the current history entry,
- * so typing a search does not add a Back step per key.
+ * it; an empty or undefined value removes the key.
  */
 export function useHashParams() {
   const current = useSyncExternalStore(subscribe, () => params);
-  const set = (changes: Record<string, string | undefined>) => {
+  const set = (changes: Record<string, string | undefined>, mode: HashMode) => {
     const next = new URLSearchParams(params);
     for (const [key, value] of Object.entries(changes))
       if (value) next.set(key, value);
       else next.delete(key);
     const search = next.toString();
-    history.replaceState(
-      history.state,
-      "",
-      here(`#${parsed.path || place.route.id}${search ? `?${search}` : ""}`),
-    );
+    const to = `#${parsed.path || place.route.id}${search ? `?${search}` : ""}`;
+    if (to === location.hash) return;
+    // A pushed entry carries its position, so sync() counts it as this app's own step.
+    if (mode === "push") history.pushState({ ...history.state, index: index + 1 }, "", here(to));
+    else history.replaceState(history.state, "", here(to));
     sync();
   };
   return [current, set] as const;

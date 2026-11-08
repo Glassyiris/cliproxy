@@ -126,6 +126,23 @@ export default {
     "app.quota.readFailed": "Usage read failed",
     "app.quota.noWindows": "No usage windows reported",
     "app.quota.noSource": "No usage source",
+    "app.quota.usageDenied":
+      "Claude denied access to usage (HTTP {status}). Setup tokens cannot read usage. Connect Claude through the dashboard's OAuth flow for usage checks.",
+    "app.quota.tokenRefused":
+      "The provider rejected the account's token (HTTP {status}). Refresh the token, or connect the account again.",
+    "app.quota.providerStatus": "The provider answered HTTP {status}. Try again later.",
+    "app.quota.malformed": "The usage answer is not in the expected format.",
+    "app.strategy.roundRobin": "Round robin",
+    "app.strategy.fillFirst": "Fill first",
+    "app.strategy.weightedRoundRobin": "Weighted round robin",
+    "app.strategy.soonestReset": "Soonest reset first",
+    "app.strategyHelp.roundRobin": "Takes the accounts in turn, one request each.",
+    "app.strategyHelp.fillFirst":
+      "Uses one account until it cools down or reaches a limit, then moves to the next.",
+    "app.strategyHelp.weightedRoundRobin":
+      "Takes the accounts in turn in proportion to each account's weight, set on Accounts.",
+    "app.strategyHelp.soonestReset":
+      "Uses the account whose weekly limit resets soonest until it cools down or uses up a window, then moves to the next. Conversations bound to an account stay on it. This is the default.",
     "app.editor.text": "{format} text",
     "app.editor.review": "Review changes",
     "app.editor.save": "Save",
@@ -259,6 +276,21 @@ export default {
     "app.quota.readFailed": "无法读取用量",
     "app.quota.noWindows": "未报告任何额度",
     "app.quota.noSource": "无用量来源",
+    "app.quota.usageDenied":
+      "Claude 拒绝读取用量（HTTP {status}）。用 setup-token 生成的令牌无法读取用量。如需检查用量，请通过面板的 OAuth 流程连接 Claude。",
+    "app.quota.tokenRefused":
+      "提供商拒绝了此账号的令牌（HTTP {status}）。请刷新令牌，或重新连接此账号。",
+    "app.quota.providerStatus": "提供商返回 HTTP {status}。请稍后重试。",
+    "app.quota.malformed": "返回的用量数据格式不符合预期。",
+    "app.strategy.roundRobin": "轮询",
+    "app.strategy.fillFirst": "先用满",
+    "app.strategy.weightedRoundRobin": "加权轮询",
+    "app.strategy.soonestReset": "最早重置优先",
+    "app.strategyHelp.roundRobin": "依次使用各账号，每个账号处理一个请求。",
+    "app.strategyHelp.fillFirst": "持续使用一个账号，直到它进入冷却或达到限额，再换下一个。",
+    "app.strategyHelp.weightedRoundRobin": "按各账号的权重依次使用账号，权重在账号页设置。",
+    "app.strategyHelp.soonestReset":
+      "优先使用每周额度最早重置的账号，直到它进入冷却或用尽一个额度窗口，再换下一个。已绑定账号的会话保持在该账号上。这是默认策略。",
     "app.editor.text": "{format} 内容",
     "app.editor.review": "检查更改",
     "app.editor.save": "保存",
@@ -392,6 +424,21 @@ export default {
     "app.quota.readFailed": "無法讀取用量",
     "app.quota.noWindows": "未回報任何額度",
     "app.quota.noSource": "無用量來源",
+    "app.quota.usageDenied":
+      "Claude 拒絕讀取用量（HTTP {status}）。以 setup-token 產生的權杖無法讀取用量。如需檢查用量，請透過面板的 OAuth 流程連接 Claude。",
+    "app.quota.tokenRefused":
+      "供應商拒絕了此帳號的權杖（HTTP {status}）。請重新整理權杖，或重新連接此帳號。",
+    "app.quota.providerStatus": "供應商回應 HTTP {status}。請稍後重試。",
+    "app.quota.malformed": "回傳的用量資料格式不符合預期。",
+    "app.strategy.roundRobin": "輪詢",
+    "app.strategy.fillFirst": "先用滿",
+    "app.strategy.weightedRoundRobin": "加權輪詢",
+    "app.strategy.soonestReset": "最早重設優先",
+    "app.strategyHelp.roundRobin": "依序使用各帳號，每個帳號處理一個請求。",
+    "app.strategyHelp.fillFirst": "持續使用一個帳號，直到它進入冷卻或達到上限，再換下一個。",
+    "app.strategyHelp.weightedRoundRobin": "依各帳號的權重輪流使用帳號，權重在帳號頁設定。",
+    "app.strategyHelp.soonestReset":
+      "優先使用每週額度最早重設的帳號，直到它進入冷卻或用盡一個額度視窗，再換下一個。已綁定帳號的對話會留在該帳號。這是預設策略。",
     "app.editor.text": "{format} 內容",
     "app.editor.review": "檢查變更",
     "app.editor.save": "儲存",

@@ -1,7 +1,7 @@
 // Every Management API route the dashboard calls, relative to /v8/management, in the
 // router's path syntax. tools/check-api.mjs compares this table with the Rust router,
 // so it must stay a plain object literal with no imports.
-export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type Route = { readonly method: Method; readonly path: string };
 
 export const routes = {

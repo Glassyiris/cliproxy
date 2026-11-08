@@ -7,13 +7,15 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuota } from "../../app/QuotaProvider.tsx";
 import type { Action } from "../../app/useAction.ts";
 import { MissingActions, useAvailable } from "../../components/MissingActions.tsx";
-import { QuotaWindow } from "../../components/QuotaWindow.tsx";
+import { QuotaWindow, quotaErrorText } from "../../components/QuotaWindow.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
 import type { Credential } from "../../lib/api/credentials.ts";
+import type { Plugin } from "../../lib/api/plugins.ts";
 import { routes } from "../../lib/api/routes.ts";
 import { credName, credState, label, provider, type Limits } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
+import { quotaApplies } from "../../lib/quota.ts";
 import { ago } from "../../lib/time.ts";
 import { layout } from "../../themes/site/layout.ts";
 
@@ -65,7 +67,7 @@ function LimitRow({
               ))}
             </Grid>
           )}
-          {limits?.error && <StatusLamp status="failing" label={limits.error} />}
+          {limits?.error && <StatusLamp status="failing" label={quotaErrorText(limits.error)} />}
         </VStack>
       }
     />
@@ -74,14 +76,17 @@ function LimitRow({
 
 /**
  * Accounts with a quota reading, passive or from this tab's checks, and those waiting for their
- * first; checks run only on press. Without the provider-call route, Check limits stays, disabled.
+ * first; checks run only on press. Without the provider-call route, Check limits stays, disabled,
+ * when an enabled account has a check that needs it; with no such account there is no check.
  */
 export function LimitsSection({
   files,
+  plugins,
   now,
   action,
 }: {
   files: Credential[];
+  plugins: Plugin[];
   now: number;
   action: Action;
 }) {
@@ -92,7 +97,9 @@ export function LimitsSection({
     return limits || quota.pending(account) ? [{ account, limits }] : [];
   });
   const checkable = files.some(quota.canCheck);
-  const routeMissing = !isAvailable(routes.callProvider) && files.some((a) => !a.disabled);
+  const routeMissing =
+    !isAvailable(routes.callProvider) &&
+    files.some((a) => !a.disabled && quotaApplies(a, plugins) && !quota.canCheck(a));
   if (!rows.length && !checkable && !routeMissing) return null;
   const checkLimits = () =>
     void action.run(async () => {
@@ -115,7 +122,7 @@ export function LimitsSection({
           />
         )}
       </HStack>
-      {!checkable && (
+      {!checkable && routeMissing && (
         <MissingActions
           actions={[{ route: routes.callProvider, label: t("overview.limits.check") }]}
         />

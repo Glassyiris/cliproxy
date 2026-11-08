@@ -74,9 +74,9 @@ test("account rows: status words, honest unknowns, low, last used and weekly ord
 
   // Unknown quota says why and is never a number.
   assert.equal(used(row({}).session), "notChecked");
-  assert.equal(used(row({}, { error: "HTTP 500" }).weekly), "readFailed");
+  assert.equal(used(row({}, { error: { reason: "status", status: 500 } }).weekly), "readFailed");
   assert.equal(used(row({}, null, false, false).weekly), "noSource");
-  assert.equal(used(row({ disabled: true }, { error: "x" }).session), "notChecked");
+  assert.equal(used(row({ disabled: true }, { error: { reason: "failed", detail: "x" } }).session), "notChecked");
   assert.equal(used(row({}, checked([w(session, 40)])).weekly), "notReported");
   assert.equal(used(row({}, checked([])).session), "noWindows");
   assert.deepEqual(row({}).age, { kind: "never" });

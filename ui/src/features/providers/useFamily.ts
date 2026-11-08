@@ -35,5 +35,5 @@ export function useFamily(family: Family) {
     [report, family],
   );
   const max = useMemo(() => busiest(report, family, groups ?? []), [report, family, groups]);
-  return { config, usage, stored, groups, names, traffic, max };
+  return { config, usage, groups, names, traffic, max };
 }

@@ -1,5 +1,6 @@
 import { mask } from "./client-keys.ts";
 import type { Data } from "./json.ts";
+import type { QuotaError } from "./quota.ts";
 import type { Window, WindowLabel } from "./quota-windows.ts";
 import { spanParts } from "./time.ts";
 
@@ -118,7 +119,10 @@ export const sum = (v: number[]) => v.reduce((a, b) => a + b, 0);
 export const level = (n: number, max: number) => (n <= 0 || max <= 0 ? 0 : Math.max(1, Math.ceil((n / max) * 4)));
 
 /** A quota read for one credential: windows with when they were read, or only an error. */
-export type Limits = { windows: Window[]; at: number; error?: string } | { error: string } | null;
+export type Limits =
+  | { windows: Window[]; at: number; error?: QuotaError }
+  | { error: QuotaError }
+  | null;
 /**
  * Why a quota cell has no number: "not checked", "not reported", "usage read failed", "no usage
  * windows reported", "no usage source". Unknown quota is never shown as 0% or 100%.

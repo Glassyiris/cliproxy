@@ -112,7 +112,7 @@ const money = (minor: number, places: number, currency: string): Money => ({
  * Percentages are percent used, 0 to 100; null means the limit does not apply and is left
  * out, never shown as 0%. Extra usage is in cents and shows only when enabled.
  */
-export function claudeWindows(payload: Data): Window[] {
+function claudeWindows(payload: Data): Window[] {
   const out: Window[] = [];
   const limits: Data[] = Array.isArray(payload.limits) ? payload.limits : [];
   if (limits.length) {

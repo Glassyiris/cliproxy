@@ -6,6 +6,7 @@ import { listCredentials, type Credential, type CredentialList } from "../lib/ap
 import { apiKeyUsage } from "../lib/api/observability.ts";
 import { listPlugins } from "../lib/api/plugins.ts";
 import { reconcile } from "../lib/compare.ts";
+import { absent, storedValue } from "../lib/config-path.ts";
 import type { Action } from "./useAction.ts";
 
 export const serverKeys = {
@@ -66,16 +67,22 @@ export const useApiKeyUsage = ({ poll }: { poll?: boolean } = {}) =>
 /**
  * Replace one config value through the page's action: reread and compare first, refuse when the
  * server copy changed (REQUIREMENTS intentional design), and reread the config either way, so a
- * refused write leaves the page showing the server copy.
+ * refused write leaves the page showing the server copy. The compare baseline is the value at
+ * `path` in the config this render shows, `null` and an absent key kept apart, so no page can
+ * hand in a baseline that a read with a fallback has collapsed.
  */
 export function useConfigWrite(action: Action) {
   const queryClient = useQueryClient();
-  return (path: string, before: unknown, next: unknown, success?: string) =>
-    action.run(async () => {
-      try {
-        await replaceConfigValue(path, before, next);
-      } finally {
-        await queryClient.invalidateQueries({ queryKey: serverKeys.config });
-      }
-    }, success);
+  const config = useConfig().data;
+  // Before the first read there is nothing shown to write over; pages offer no write then.
+  return (path: string, next: unknown, success?: string) =>
+    config
+      ? action.run(async () => {
+          try {
+            await replaceConfigValue(path, storedValue(config, path), next, absent);
+          } finally {
+            await queryClient.invalidateQueries({ queryKey: serverKeys.config });
+          }
+        }, success)
+      : Promise.resolve(false);
 }

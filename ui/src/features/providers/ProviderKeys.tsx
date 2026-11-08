@@ -21,9 +21,9 @@ export default function ProviderKeys() {
   const family: Family = isFamily(params.family) ? params.family : "claude";
   const [revealed, setRevealed] = useState(false);
   const [adding, setAdding] = useState(false);
-  const { config, usage, stored, groups, names, traffic, max } = useFamily(family);
+  const { config, usage, groups, names, traffic, max } = useFamily(family);
   const picker = usePickerFocus();
-  const writes = useGroupWrites(action, family, stored, groups, names, picker.focus);
+  const writes = useGroupWrites(action, family, groups, names, picker.focus);
 
   const addButton = (
     <Button
@@ -51,7 +51,7 @@ export default function ProviderKeys() {
       <ProviderToolbar
         family={family}
         config={config.data}
-        onChange={(value) => setParams({ family: value === "claude" ? undefined : value })}
+        onChange={(value) => setParams({ family: value === "claude" ? undefined : value }, "push")}
         pickerRef={picker.ref}
         canReveal={!!groups?.length}
         revealed={revealed}

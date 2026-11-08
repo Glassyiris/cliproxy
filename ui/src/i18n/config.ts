@@ -27,17 +27,6 @@ export default {
     "config.section.observability": "Logs and usage statistics.",
     "config.section.plugins": "Native plugins.",
     "config.section.other": "Saved section.",
-    "config.strategy.roundRobin": "Round robin",
-    "config.strategy.fillFirst": "Fill first",
-    "config.strategy.weightedRoundRobin": "Weighted round robin",
-    "config.strategy.soonestReset": "Soonest reset first",
-    "config.strategyHelp.roundRobin": "Takes the accounts in turn, one request each.",
-    "config.strategyHelp.fillFirst":
-      "Uses one account until it cools down or reaches a limit, then moves to the next.",
-    "config.strategyHelp.weightedRoundRobin":
-      "Takes the accounts in turn in proportion to each account's weight, set on Accounts.",
-    "config.strategyHelp.soonestReset":
-      "Uses the account whose weekly limit resets soonest until it cools down or uses up a window, then moves to the next. Conversations bound to an account stay on it. This is the default.",
   },
   "zh-CN": {
     "config.page.title": "配置",
@@ -67,15 +56,6 @@ export default {
     "config.section.observability": "日志与用量统计。",
     "config.section.plugins": "原生插件。",
     "config.section.other": "已保存的配置段。",
-    "config.strategy.roundRobin": "轮询",
-    "config.strategy.fillFirst": "先用满",
-    "config.strategy.weightedRoundRobin": "加权轮询",
-    "config.strategy.soonestReset": "最早重置优先",
-    "config.strategyHelp.roundRobin": "依次使用各账号，每个账号处理一个请求。",
-    "config.strategyHelp.fillFirst": "持续使用一个账号，直到它进入冷却或达到限额，再换下一个。",
-    "config.strategyHelp.weightedRoundRobin": "按各账号的权重依次使用账号，权重在账号页设置。",
-    "config.strategyHelp.soonestReset":
-      "优先使用每周额度最早重置的账号，直到它进入冷却或用尽一个额度窗口，再换下一个。已绑定账号的会话保持在该账号上。这是默认策略。",
   },
   "zh-TW": {
     "config.page.title": "設定",
@@ -105,14 +85,5 @@ export default {
     "config.section.observability": "日誌與用量統計。",
     "config.section.plugins": "原生外掛。",
     "config.section.other": "已儲存的設定區段。",
-    "config.strategy.roundRobin": "輪詢",
-    "config.strategy.fillFirst": "先用滿",
-    "config.strategy.weightedRoundRobin": "加權輪詢",
-    "config.strategy.soonestReset": "最早重設優先",
-    "config.strategyHelp.roundRobin": "依序使用各帳號，每個帳號處理一個請求。",
-    "config.strategyHelp.fillFirst": "持續使用一個帳號，直到它進入冷卻或達到上限，再換下一個。",
-    "config.strategyHelp.weightedRoundRobin": "依各帳號的權重輪流使用帳號，權重在帳號頁設定。",
-    "config.strategyHelp.soonestReset":
-      "優先使用每週額度最早重設的帳號，直到它進入冷卻或用盡一個額度視窗，再換下一個。已綁定帳號的對話會留在該帳號。這是預設策略。",
   },
 };

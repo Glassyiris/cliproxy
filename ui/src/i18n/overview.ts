@@ -70,11 +70,6 @@ export default {
     "overview.facts.pluginsLoaded": "{loaded, number} of {installed, number} loaded",
     "overview.facts.logFiles": "{count, plural, =0 {No files} one {# file} other {# files}}",
 
-    "overview.strategy.roundRobin": "Round robin",
-    "overview.strategy.fillFirst": "Fill first",
-    "overview.strategy.weightedRoundRobin": "Weighted round robin",
-    "overview.strategy.soonestReset": "Soonest reset first",
-
     "overview.start.heading": "Get started",
     "overview.start.progress": "{done} of {total, number} done",
     "overview.start.dismiss": "Dismiss",
@@ -171,11 +166,6 @@ export default {
     "overview.facts.pluginsLoaded": "已加载 {loaded, number} / {installed, number}",
     "overview.facts.logFiles": "{count, plural, =0 {没有文件} other {# 个文件}}",
 
-    "overview.strategy.roundRobin": "轮询",
-    "overview.strategy.fillFirst": "先用满",
-    "overview.strategy.weightedRoundRobin": "加权轮询",
-    "overview.strategy.soonestReset": "最早重置优先",
-
     "overview.start.heading": "开始使用",
     "overview.start.progress": "已完成 {done} / {total, number}",
     "overview.start.dismiss": "关闭",
@@ -268,11 +258,6 @@ export default {
     "overview.facts.sessionAffinity": "同一工作階段使用同一帳號",
     "overview.facts.pluginsLoaded": "已載入 {loaded, number} / {installed, number}",
     "overview.facts.logFiles": "{count, plural, =0 {沒有檔案} other {# 個檔案}}",
-
-    "overview.strategy.roundRobin": "輪詢",
-    "overview.strategy.fillFirst": "先用滿",
-    "overview.strategy.weightedRoundRobin": "加權輪詢",
-    "overview.strategy.soonestReset": "最早重設優先",
 
     "overview.start.heading": "開始使用",
     "overview.start.progress": "已完成 {done} / {total, number}",

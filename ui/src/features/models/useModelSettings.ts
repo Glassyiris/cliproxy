@@ -8,8 +8,8 @@ export function useModelSettings(channel: Channel) {
   const config = useConfig();
   const action = useAction();
   const write = useConfigWrite(action);
-  const aliasRead = config.data ? readList<Alias>(config.data, "model-alias", channel) : undefined;
-  const excludedRead = config.data
+  const aliases = config.data ? readList<Alias>(config.data, "model-alias", channel) : undefined;
+  const excluded = config.data
     ? readList<string>(config.data, "excluded-models", channel)
     : undefined;
   const aliasPath = configPath("model-alias", channel);
@@ -18,39 +18,31 @@ export function useModelSettings(channel: Channel) {
   return {
     config,
     busy: action.busy,
-    aliases: aliasRead?.list,
-    excluded: excludedRead?.list,
+    aliases,
+    excluded,
     addAlias: async (alias: Alias) =>
-      !!aliasRead &&
-      (await write(
-        aliasPath,
-        aliasRead.stored,
-        [...aliasRead.list, alias],
-        t("models.add.added", { alias: alias.alias }),
-      )),
+      !!aliases &&
+      (await write(aliasPath, [...aliases, alias], t("models.add.added", { alias: alias.alias }))),
     removeAlias: async (index: number) =>
-      !!aliasRead &&
+      !!aliases &&
       (await write(
         aliasPath,
-        aliasRead.stored,
-        aliasRead.list.filter((_, i) => i !== index),
-        t("models.alias.removed", { model: aliasRead.list[index].name }),
+        aliases.filter((_, i) => i !== index),
+        t("models.alias.removed", { model: aliases[index].name }),
       )),
     exclude: async (pattern: string) =>
-      !!excludedRead &&
+      !!excluded &&
       (await write(
         excludedPath,
-        excludedRead.stored,
-        [...excludedRead.list, pattern],
+        [...excluded, pattern],
         t("models.excluded.added", { model: pattern }),
       )),
     allow: async (index: number) =>
-      !!excludedRead &&
+      !!excluded &&
       (await write(
         excludedPath,
-        excludedRead.stored,
-        excludedRead.list.filter((_, i) => i !== index),
-        t("models.excluded.allowed", { model: excludedRead.list[index] }),
+        excluded.filter((_, i) => i !== index),
+        t("models.excluded.allowed", { model: excluded[index] }),
       )),
   };
 }

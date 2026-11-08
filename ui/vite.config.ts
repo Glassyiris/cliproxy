@@ -17,7 +17,11 @@ export default defineConfig({
     react(),
   ],
   // cors: false lets OPTIONS capability probes reach the backend instead of Vite.
-  server: { port: 5173, cors: false, proxy: { "/v8": backend, "/healthz": backend } },
+  server: {
+    port: 5173,
+    cors: false,
+    proxy: { "/v8": backend, "/v1": backend, "/healthz": backend },
+  },
   // ui/dist is the embedded Svelte build until the final phase; the React build goes beside it.
   build: { target: "es2022", sourcemap: false, outDir: "dist-next" },
 });

@@ -1,11 +1,12 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { Credential } from "./api/credentials.ts";
+import type { Plugin } from "./api/plugins.ts";
 import { fakeServer } from "./api/fake-server.test-support.ts";
 
 const server = fakeServer();
 const { connect } = await import("./api/client.ts");
-const { createQuotaChecker } = await import("./quota.ts");
+const { createQuotaChecker, quotaApplies } = await import("./quota.ts");
 connect("secret", { unauthorized() {}, server() {} });
 
 const account = (auth_index: string, extra: Partial<Credential> = {}) =>
@@ -83,6 +84,44 @@ test("a refused token keeps its status code next to the last known limits", asyn
   const reading = checker.limits(list[0]);
   assert.ok(reading && "windows" in reading && reading.windows[0].used === 50);
   assert.equal(checker.reading(list[0])?.code, 401);
+  assert.deepEqual(checker.reading(list[0])?.error, { reason: "tokenRefused", status: 401 });
+});
+
+test("a failed read is a code with its status, never a sentence", async () => {
+  const list = [account("g"), account("h", { provider: "codex" })];
+  const checker = createQuotaChecker({ plugins: () => [], credentials: () => list });
+  server.answer = (s) =>
+    Response.json({
+      status_code: s.body && JSON.stringify(s.body).includes("chatgpt") ? 500 : 403,
+      header: {},
+      body: "",
+    });
+  await checker.checkAll(list);
+  assert.deepEqual(checker.reading(list[0])?.error, { reason: "usageDenied", status: 403 });
+  assert.deepEqual(checker.reading(list[1])?.error, { reason: "status", status: 500 });
+});
+
+test("an answer that is not usage data is malformed; an ended session records nothing", async () => {
+  const list = [account("m"), account("n")];
+  const checker = createQuotaChecker({ plugins: () => [], credentials: () => list });
+  server.answer = () => Response.json({ status_code: 200, header: {}, body: "<html>" });
+  await checker.checkAll([list[0]]);
+  assert.deepEqual(checker.reading(list[0])?.error, { reason: "malformed" });
+
+  // A new session starts while the request is out: its answer belongs to the old one.
+  server.answer = () => {
+    connect("secret", { unauthorized() {}, server() {} });
+    return Response.json({ status_code: 401, header: {}, body: "" });
+  };
+  await checker.checkAll([list[1]]);
+  assert.equal(checker.reading(list[1]), undefined);
+});
+
+test("whether a quota check applies does not depend on the server's routes", () => {
+  const plugin = { id: "q", supports_quota: true, quota_provider: "gemini" } as Plugin;
+  assert.equal(quotaApplies(account("i"), []), true);
+  assert.equal(quotaApplies(account("j", { provider: "gemini" }), []), false);
+  assert.equal(quotaApplies(account("k", { provider: "gemini" }), [plugin]), true);
 });
 
 test("a stopped checker drops its queue: no source read and no request after stop", async () => {

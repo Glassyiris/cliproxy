@@ -8,7 +8,7 @@ import { List, ListItem } from "@astryxdesign/core/List";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Text } from "@astryxdesign/core/Text";
 import { useQuota } from "../../app/QuotaProvider.tsx";
-import { QuotaWindow } from "../../components/QuotaWindow.tsx";
+import { QuotaWindow, quotaErrorText } from "../../components/QuotaWindow.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { stateWord } from "../../components/StatusLamp.tsx";
 import { accountRow, credName, label } from "../../lib/credentials.ts";
@@ -74,7 +74,7 @@ function Refused({ flow, signIn, lead }: Props) {
       <Banner
         status="error"
         title={t("connect.result.refusedTitle", { provider: label(flow.provider) })}
-        description={flow.read?.error}
+        description={flow.read?.error && quotaErrorText(flow.read.error)}
       />
       <Text type="supporting" color="secondary">
         {t("connect.result.refusedNote")}
@@ -112,7 +112,11 @@ function Connected({ flow, signIn, lead }: Props) {
           retry={() => void signIn.reread()}
         />
       ) : read?.error ? (
-        <Banner status="error" title={t("connect.result.readFailed")} description={read.error} />
+        <Banner
+          status="error"
+          title={t("connect.result.readFailed")}
+          description={quotaErrorText(read.error)}
+        />
       ) : (
         !read &&
         account &&

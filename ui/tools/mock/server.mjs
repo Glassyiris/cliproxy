@@ -9,6 +9,7 @@
 // answer like the real server and change what the next read returns. GET /credentials changes about
 // 5% of the accounts per call (request counts, last-used bucket) so the dashboard sees live traffic;
 // every other account serialises to identical bytes. Unknown routes answer Go's empty 404.
+// GET /v1/models answers a client key from access.api-keys as the proxy does, for the Use page's test.
 import http from "node:http";
 import { parseArgs } from "node:util";
 
@@ -751,6 +752,17 @@ on("DELETE", "/plugins/([^/]+)", (ctx) => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// The proxy's model list for a client key; an unknown key gets 401, as from the proxy.
+function clientModels(req, send) {
+  const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || String(req.headers["x-api-key"] || "");
+  const keys = config.access?.["api-keys"] || [];
+  const type = { "Content-Type": "application/json; charset=utf-8" };
+  if (!given || !keys.includes(given)) return send(401, type, '{"error":{"message":"invalid api key","type":"authentication_error"}}'), 401;
+  const ids = [...new Set(Object.values(MODELS).flat())];
+  send(200, type, JSON.stringify({ object: "list", data: ids.map((id) => ({ id, object: "model", created: 0, owned_by: "cliproxy" })) }));
+  return 200;
+}
+
 const PREFIX = "/v8/management";
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://mock");
@@ -765,6 +777,7 @@ const server = http.createServer((req, res) => {
     let status = 404;
     try {
       if (url.pathname === "/healthz") return (status = 200), send(200, { "Content-Type": "application/json" }, '{"status":"ok"}');
+      if (url.pathname === "/v1/models" && req.method === "GET") return (status = clientModels(req, send));
       if (!url.pathname.startsWith(PREFIX + "/") && url.pathname !== PREFIX) return send(404, {}, "");
       const headers = { "X-CPA-VERSION": VERSION, "X-CPA-COMMIT": "0000000", "X-CPA-BUILD-DATE": BUILD_DATE, "Cache-Control": "no-store" };
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");

@@ -48,7 +48,10 @@ export default function Models() {
         )
       }
     >
-      <ChannelPicker channel={channel} onChange={(value) => setParams({ channel: value })} />
+      <ChannelPicker
+        channel={channel}
+        onChange={(value) => setParams({ channel: value }, "push")}
+      />
       <AliasSection
         config={settings.config}
         aliases={settings.aliases}
@@ -73,7 +76,7 @@ export default function Models() {
             : undefined
         }
         query={params.q ?? ""}
-        onQuery={(q) => setParams({ q })}
+        onQuery={(q) => setParams({ q }, "replace")}
       />
       {adding && settings.aliases && (
         <AddAliasDialog

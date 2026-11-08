@@ -3,6 +3,7 @@ import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Text } from "@astryxdesign/core/Text";
 import type { Bar, QuotaWhy } from "../lib/credentials.ts";
 import { money, t } from "../lib/i18n.ts";
+import type { QuotaError } from "../lib/quota.ts";
 import type { Window, WindowLabel } from "../lib/quota-windows.ts";
 import { span } from "../lib/time.ts";
 
@@ -34,6 +35,26 @@ export function windowLabel(label: WindowLabel): string {
       return t("app.quota.daily");
     case "weekly":
       return t("app.quota.weekly");
+  }
+}
+
+/** Why a quota check failed, in the current language; other failures keep their own text. */
+export function quotaErrorText(error: QuotaError): string {
+  switch (error.reason) {
+    case "usageDenied":
+      return t("app.quota.usageDenied", { status: error.status });
+    case "tokenRefused":
+      return t("app.quota.tokenRefused", { status: error.status });
+    case "status":
+      return t("app.quota.providerStatus", { status: error.status });
+    case "timeout":
+      return t("app.connection.timeout");
+    case "unreachable":
+      return t("app.connection.unreachable");
+    case "malformed":
+      return t("app.quota.malformed");
+    case "failed":
+      return error.detail;
   }
 }
 

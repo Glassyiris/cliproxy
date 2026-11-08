@@ -12,7 +12,6 @@ import {
   type StorePlugin,
 } from "../../lib/api/plugins.ts";
 import { t } from "../../lib/i18n.ts";
-import { storedEnabled } from "./rows.ts";
 
 const storeKey = ["plugins", "store"] as const;
 
@@ -35,7 +34,7 @@ export function useBrowse() {
     store,
     press: () => {
       if (browsing) void store.refetch();
-      else setParams({ store: "1" });
+      else setParams({ store: "1" }, "push");
       setReveal((n) => n + 1);
     },
   };
@@ -56,18 +55,12 @@ export function usePluginWrites(action: Action, config: Config | undefined) {
   const reload = (...keys: readonly (readonly string[])[]) =>
     Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
 
-  const toggle = async (
-    id: string | undefined,
-    path: string,
-    stored: unknown,
-    next: boolean,
-    ok: string,
-  ) => {
+  const toggle = async (id: string | undefined, path: string, next: boolean, ok: string) => {
     if (action.busy || inFlight.current) return;
     inFlight.current = true;
     setPending({ id });
     try {
-      await writeConfig(path, stored, next, ok);
+      await writeConfig(path, next, ok);
     } finally {
       await reload(serverKeys.plugins);
       setPending(null);
@@ -83,19 +76,11 @@ export function usePluginWrites(action: Action, config: Config | undefined) {
       toggle(
         undefined,
         "plugins/enabled",
-        storedEnabled(config),
         on,
         on ? t("plugins.page.switchedOn") : t("plugins.page.switchedOff"),
       ),
     one: (p: Plugin) =>
-      config &&
-      toggle(
-        p.id,
-        `plugins/configs/${p.id}/enabled`,
-        storedEnabled(config, p.id),
-        !p.enabled,
-        t("plugins.row.saved"),
-      ),
+      config && toggle(p.id, `plugins/configs/${p.id}/enabled`, !p.enabled, t("plugins.row.saved")),
     remove: (id: string) =>
       action.run(async () => {
         try {
