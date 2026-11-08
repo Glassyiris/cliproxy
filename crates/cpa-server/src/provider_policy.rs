@@ -63,6 +63,11 @@ fn login(c: &Credential) -> bool {
 }
 
 impl Providers {
+    /// Whether this block excludes or orders anything; an empty one leaves Go's behaviour.
+    pub fn is_set(&self) -> bool {
+        !self.exclude.is_empty() || !self.order.is_empty()
+    }
+
     /// `routing.providers`.
     pub fn global(cfg: &Config) -> Self {
         let (exclude, order, _) = parse(&cfg.document["routing"]["providers"]);
