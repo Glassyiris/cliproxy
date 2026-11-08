@@ -71,8 +71,8 @@ function useOverviewData() {
     [files, usage, traffic],
   );
   const times = useMemo(
-    () => (files && traffic ? bucketTimes(files, traffic.total.length) : []),
-    [files, traffic],
+    () => (files && traffic ? bucketTimes(files, traffic.total.length, usage ?? null) : []),
+    [files, traffic, usage],
   );
   const accounts = failedRead(credentials, t("overview.read.accounts"));
   return {

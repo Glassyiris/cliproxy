@@ -100,8 +100,15 @@ export function totalTraffic(files: Credential[], usage: ApiKeyUsage | null): Bu
 }
 
 /** Each bucket's time span as the server writes it ("14:50-15:00"), oldest first. */
-export function bucketTimes(files: Credential[], length: number): string[] {
-  const reported = files.find((a) => a.recent_requests?.length === length)?.recent_requests;
+export function bucketTimes(
+  files: Credential[],
+  length: number,
+  usage: ApiKeyUsage | null = null,
+): string[] {
+  const keys = Object.values(usage ?? {}).flatMap((perKey) => Object.values(perKey));
+  const reported = [...files, ...keys].find(
+    (a) => a.recent_requests?.length === length,
+  )?.recent_requests;
   return Array.from({ length }, (_, i) => reported?.[i]?.time ?? "");
 }
 

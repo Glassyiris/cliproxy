@@ -4,6 +4,8 @@ import type { Credential } from "../../lib/api/credentials.ts";
 import {
   countBy,
   fieldPatch,
+  fieldsOf,
+  pruneSelection,
   hasShow,
   hiddenSelection,
   inScope,
@@ -75,7 +77,7 @@ test("hidden selected accounts are on one other tab or hidden by the filters", (
 test("saving fields trims the note and sends null only for a number that was set", () => {
   const a = account({ name: "a.json", priority: 3, note: "x" });
   assert.deepEqual(
-    fieldPatch(a, { note: " team ", priority: null, weight: null, request_retry: 2 }),
+    fieldPatch(fieldsOf(a), { note: " team ", priority: null, weight: null, request_retry: 2 }),
     { note: "team", priority: null, request_retry: 2 },
   );
 });
@@ -119,4 +121,28 @@ test("the status options partition the accounts: a Low account is not also Ready
   // Low still serves: it is not in the needs view, and its row reads the filter's word.
   assert.deepEqual([low.view.ready, low.view.lamp, low.view.word], [true, "warn", { kind: "low" }]);
   assert.deepEqual(keys(inView(list, "needs")).sort(), ["3", "4"]);
+});
+
+test("selection drops disappeared accounts but keeps rows hidden by filters", () => {
+  const [runtime, hidden] = rows([
+    { name: "a", auth_index: "1", runtime_only: true },
+    { name: "b", auth_index: "2", provider: "claude" },
+  ]);
+  assert.equal(inScope([hidden], { provider: "codex", show: "", search: "" }).length, 0);
+  const selected = new Set([runtime.key, hidden.key]);
+  const pruned = pruneSelection([hidden], selected);
+  assert.deepEqual([...pruned], [hidden.key]);
+  assert.equal(pruneSelection([hidden], pruned), pruned);
+  assert.equal(pruneSelection([], pruned).size, 0);
+});
+
+test("saving a note sends only fields changed from the form snapshot", () => {
+  const saved = fieldsOf(account({ note: "old", priority: 3, weight: 2, request_retry: 1 }));
+  assert.deepEqual(fieldPatch(saved, { ...saved, note: " team " }), { note: "team" });
+  assert.deepEqual(fieldPatch(saved, { ...saved, priority: null }), { priority: null });
+  assert.deepEqual(fieldPatch(saved, { ...saved, weight: 0 }), { weight: 0 });
+  assert.deepEqual(fieldPatch(saved, { ...saved, note: " old " }), {});
+  assert.deepEqual(fieldPatch(saved, saved), {});
+  const submitted = { ...saved, note: " team " };
+  assert.deepEqual(fieldPatch(submitted, { ...submitted, priority: 4 }), { priority: 4 });
 });

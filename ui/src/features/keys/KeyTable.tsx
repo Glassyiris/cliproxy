@@ -61,20 +61,23 @@ export function KeyTable({
 }) {
   const loading = keys === undefined;
   // Row actions sit together at the end (owner, 2026-11-08: 「為什麼按鈕不放右邊」), so the
-  // reveal state lives here and the key cell only draws the key.
-  const [shown, setShown] = useState<ReadonlySet<number>>(() => new Set());
-  const toggle = (index: number) =>
+  // reveal state lives here and the key cell only draws the key. It holds key values, not row
+  // positions: revoking an earlier key moves the rows up and must not reveal another key.
+  const [shown, setShown] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (key: Key) =>
     setShown((was) => {
       const next = new Set(was);
-      if (!next.delete(index)) next.add(index);
+      if (!next.delete(key.value)) next.add(key.value);
       return next;
     });
   const columns: TableColumn<Row>[] = [
     {
       key: "value",
       header: t("keys.table.key"),
-      renderCell: loadingCell(({ value, index }: Key) => (
-        <Text type={roles.textType.identifier}>{shown.has(index) ? value : mask(value)}</Text>
+      renderCell: loadingCell((key: Key) => (
+        <Text type={roles.textType.identifier}>
+          {shown.has(key.value) ? key.value : mask(key.value)}
+        </Text>
       )),
     },
     {
@@ -84,7 +87,7 @@ export function KeyTable({
       renderCell: ({ item }) =>
         item === null ? null : (
           <HStack gap={1} vAlign="center" hAlign="end">
-            <RevealKey isShown={shown.has(item.index)} onToggle={() => toggle(item.index)} />
+            <RevealKey isShown={shown.has(item.value)} onToggle={() => toggle(item)} />
             <CopyKey value={item.value} />
             <IconButton
               label={t("app.nav.use")}

@@ -9,7 +9,7 @@
 //   the operator acts on the provider's page, and the step's one primary is the link there.
 // - The API key way hands over to the Provider keys tab's add form, where key groups are stored;
 //   it has no step 3 here.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { FieldStatus } from "@astryxdesign/core/FieldStatus";
 import { HStack, StackItem } from "@astryxdesign/core/Layout";
@@ -39,6 +39,7 @@ function useWizard() {
   const [gone, addGone] = useGone();
   const vertex = useVertexImport(action, () => addGone("vertex"));
   const [way, setWay] = useState<Way | null>(null);
+  const current = useRef<Way | null>(null);
   const [family, setFamily] = useState<Family>("claude");
   const [step, setStep] = useState(0);
   const [unchosen, setUnchosen] = useState(false);
@@ -59,6 +60,7 @@ function useWizard() {
     at,
     unchosen,
     choose: (next: Way) => {
+      current.current = next;
       setWay(next);
       setUnchosen(false);
     },
@@ -70,7 +72,8 @@ function useWizard() {
     next: async () => {
       if (!way) return setUnchosen(true);
       if (way.kind !== "signIn") return setStep(1);
-      if (await signIn.start(way.provider)) setStep(1);
+      // A start answered after the operator chose another way does not move on.
+      if ((await signIn.start(way.provider)) && current.current === way) setStep(1);
     },
   };
 }

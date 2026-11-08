@@ -184,14 +184,20 @@ export const fieldsOf = (a: Credential): FieldValues => ({
   request_retry: a.request_retry ?? null,
 });
 
-/** The fields to write: the trimmed note, each set number, and null for a number emptied. */
-export function fieldPatch(a: Credential, values: FieldValues): CredentialFields {
-  const patch: CredentialFields = { note: values.note.trim() };
+/** Only operator edits are sent, so a stale form cannot overwrite another operator's fields. */
+export function fieldPatch(saved: FieldValues, values: FieldValues): CredentialFields {
+  const patch: CredentialFields = {};
+  if (values.note.trim() !== saved.note.trim()) patch.note = values.note.trim();
   for (const k of numberFields) {
-    const v = values[k];
     // An emptied field clears the override (Go deletes the key on null).
-    if (v !== null) patch[k] = v;
-    else if (a[k] !== undefined) patch[k] = null;
+    if (values[k] !== saved[k]) patch[k] = values[k];
   }
   return patch;
+}
+
+export function pruneSelection(rows: Row[], selected: Set<string>): Set<string> {
+  if (!selected.size) return selected;
+  const keys = new Set(rows.map((r) => r.key));
+  const kept = new Set([...selected].filter((key) => keys.has(key)));
+  return kept.size === selected.size ? selected : kept;
 }

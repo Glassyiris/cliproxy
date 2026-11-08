@@ -71,3 +71,14 @@ test("failures: none without requests, else the failed share", () => {
     share: 0.25,
   });
 });
+
+test("key-only traffic supplies bucket times without OAuth accounts", () => {
+  const history = bucketsOf([4, 1], [2, 0]);
+  const usage = { openrouter: { key: { success: 6, failed: 1, recent_requests: history } } };
+  assert.deepEqual(bucketTimes([], 2, usage), ["t0", "t1"]);
+  assert.deepEqual(bucketTimes([account("a", { recent_requests: bucketsOf([1, 0]) })], 2, usage), [
+    "t0",
+    "t1",
+  ]);
+  assert.deepEqual(bucketTimes([], 3, usage), ["", "", ""]);
+});

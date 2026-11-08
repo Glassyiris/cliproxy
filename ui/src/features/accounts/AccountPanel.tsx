@@ -24,7 +24,6 @@ import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
 import { Words } from "../../components/Words.tsx";
 import { setCredentialFields } from "../../lib/api/credentials.ts";
 import { routes } from "../../lib/api/routes.ts";
-import { equal } from "../../lib/compare.ts";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
@@ -157,7 +156,7 @@ function FieldsForm({ row, writes }: Pick<PanelProps, "row" | "writes">) {
   const isAvailable = useAvailable();
   const [saved, setSaved] = useState(() => fieldsOf(row.account));
   const [values, setValues] = useState(saved);
-  const dirty = !equal(values, saved);
+  const dirty = Object.keys(fieldPatch(saved, values)).length > 0;
   useUnsavedChanges(dirty);
   const set = (changes: Partial<FieldValues>) => setValues((v) => ({ ...v, ...changes }));
   const number = (k: "priority" | "weight" | "request_retry", text: string, hint: string) => (
@@ -171,10 +170,12 @@ function FieldsForm({ row, writes }: Pick<PanelProps, "row" | "writes">) {
     />
   );
   const save = async () => {
+    const patch = fieldPatch(saved, values);
+    if (!Object.keys(patch).length) return;
     const ok = await writes.run(
       "fields",
       async () => {
-        await setCredentialFields(row.id, fieldPatch(row.account, values));
+        await setCredentialFields(row.id, patch);
         await writes.reload();
       },
       t("accounts.done.saved"),

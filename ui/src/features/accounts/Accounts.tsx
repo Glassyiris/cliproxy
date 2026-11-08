@@ -49,6 +49,7 @@ import {
   inScope,
   inView,
   isShow,
+  pruneSelection,
   shows,
   toRows,
   type Filters,
@@ -389,6 +390,8 @@ function useAccountsPage(listShape: ListShape) {
   const connect = useConnectAccount();
   const collected = useCollection(rows, filters, quota);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const present = pruneSelection(rows, selected);
+  if (present !== selected) setSelected(present);
   const open = rows.find((r) => r.id === openId);
   const { isMobile } = useAppShellMobile();
   const shape: ListShape = isMobile ? "stacked" : listShape;
