@@ -135,7 +135,10 @@ function GoToPage() {
  * Adjusted while rendering when the page changes, as React's docs do for state derived from a prop.
  */
 function useOpenGroups(current: NavGroup) {
-  const [open, setOpen] = useState<ReadonlySet<NavGroup>>(() => new Set([current]));
+  // Every category starts open; a closed one opens again when navigation lands in it.
+  const [open, setOpen] = useState<ReadonlySet<NavGroup>>(
+    () => new Set(navGroups.map((group) => group.id)),
+  );
   const [shown, setShown] = useState(current);
   if (shown !== current) {
     setShown(current);
