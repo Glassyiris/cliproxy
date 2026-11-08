@@ -1,29 +1,43 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import type { IconProps } from "@astryxdesign/core/Icon";
 import {
+  Activity,
   Boxes,
   Braces,
   ChartColumn,
   Key,
   KeyRound,
   LayoutDashboard,
+  MonitorSmartphone,
+  Network,
   Plug,
   PlugZap,
   Puzzle,
+  Route,
   ScrollText,
+  ServerCog,
   Info,
   Users,
 } from "lucide-react";
 import { t } from "../lib/i18n.ts";
 
-export type NavGroup = "overview" | "traffic" | "observe" | "server";
+export type NavGroup = "overview" | "upstream" | "clients" | "routing" | "monitor" | "server";
 
-/** Side navigation sections, in order. A section with no page is not shown. */
-export const navGroups: readonly { id: NavGroup; title(): string }[] = [
-  { id: "overview", title: () => t("app.navGroup.overview") },
-  { id: "traffic", title: () => t("app.navGroup.traffic") },
-  { id: "observe", title: () => t("app.navGroup.observe") },
-  { id: "server", title: () => t("app.navGroup.server") },
+/**
+ * Side navigation categories, in order. The first holds the landing page and is drawn as plain
+ * items; every other one is a collapsible parent row (owner, 2026-11-08: 「側邊欄搞個大分類不然太亂了」).
+ */
+export const navGroups: readonly {
+  id: NavGroup;
+  title(): string;
+  icon: IconProps["icon"];
+}[] = [
+  { id: "overview", title: () => t("app.navGroup.overview"), icon: LayoutDashboard },
+  { id: "upstream", title: () => t("app.navGroup.upstream"), icon: Network },
+  { id: "clients", title: () => t("app.navGroup.clients"), icon: MonitorSmartphone },
+  { id: "routing", title: () => t("app.navGroup.routing"), icon: Route },
+  { id: "monitor", title: () => t("app.navGroup.monitor"), icon: Activity },
+  { id: "server", title: () => t("app.navGroup.server"), icon: ServerCog },
 ];
 
 export type PageRoute = {
@@ -60,56 +74,56 @@ export const routes: readonly PageRoute[] = [
   },
   {
     id: "use",
-    group: "overview",
+    group: "clients",
     title: () => t("app.nav.use"),
     icon: Plug,
     page: page(() => import("../features/use/index.ts")),
   },
   {
     id: "accounts",
-    group: "traffic",
+    group: "upstream",
     title: () => t("app.nav.accounts"),
     icon: Users,
     page: page(() => import("../features/accounts/index.ts")),
   },
   {
     id: "providers",
-    group: "traffic",
+    group: "upstream",
     title: () => t("app.nav.providers"),
     icon: KeyRound,
     page: page(() => import("../features/providers/index.ts")),
   },
   {
     id: "keys",
-    group: "traffic",
+    group: "clients",
     title: () => t("app.nav.keys"),
     icon: Key,
     page: page(() => import("../features/keys/index.ts")),
   },
   {
     id: "models",
-    group: "traffic",
+    group: "routing",
     title: () => t("app.nav.models"),
     icon: Boxes,
     page: page(() => import("../features/models/index.ts")),
   },
   {
     id: "payload",
-    group: "traffic",
+    group: "routing",
     title: () => t("app.nav.payload"),
     icon: Braces,
     page: page(() => import("../features/payload/index.ts")),
   },
   {
     id: "usage",
-    group: "observe",
+    group: "monitor",
     title: () => t("app.nav.usage"),
     icon: ChartColumn,
     page: page(() => import("../features/usage/index.ts")),
   },
   {
     id: "logs",
-    group: "observe",
+    group: "monitor",
     title: () => t("app.nav.logs"),
     icon: ScrollText,
     page: page(() => import("../features/logs/index.ts")),
@@ -138,7 +152,7 @@ export const routes: readonly PageRoute[] = [
   // Reached from Overview and Accounts, as in the legacy dashboard; the command palette lists it.
   {
     id: "connect",
-    group: "traffic",
+    group: "upstream",
     title: () => t("app.nav.connect"),
     icon: PlugZap,
     page: page(() => import("../features/connect/index.ts")),

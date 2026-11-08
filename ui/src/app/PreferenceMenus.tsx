@@ -17,7 +17,7 @@ import { SettingsButton } from "./settings/SettingsDialog.tsx";
  * Flips light and dark relative to what is shown, as BoothDex's ColorModeToggle; until the first
  * press the page follows the system.
  */
-function ColorModeToggle({ iconSize }: { iconSize?: "sm" }) {
+function ColorModeToggle({ iconSize = "md" }: { iconSize?: "sm" | "md" }) {
   const { mode, setMode } = usePreferences();
   const prefersDark = useMediaQuery("(prefers-color-scheme: dark)");
   const isDark = mode === "dark" || (mode === "system" && prefersDark);
@@ -67,7 +67,7 @@ function LanguageOptions() {
 const trigger = (label: string, icon: IconProps["icon"]) => ({
   label,
   tooltip: label,
-  icon: <Icon icon={icon} />,
+  icon: <Icon icon={icon} size="md" />,
   isIconOnly: true,
   variant: "ghost" as const,
 });

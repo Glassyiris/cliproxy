@@ -30,7 +30,7 @@ import { PageWarning } from "./Notices.tsx";
 import { FooterPreferences } from "./PreferenceMenus.tsx";
 import { usePreferences } from "./preferences.ts";
 import { QueryBoundary } from "./QueryBoundary.tsx";
-import { navGroups, routes, type PageRoute } from "./routes.ts";
+import { navGroups, routes, type NavGroup, type PageRoute } from "./routes.ts";
 import { shortcuts } from "./settings/ShortcutsPanel.tsx";
 import { useSession } from "./Session.tsx";
 import { useDocumentTitle } from "./useDocumentTitle.ts";
@@ -129,8 +129,31 @@ function GoToPage() {
   );
 }
 
+/**
+ * The nav categories that are open. The current page's opens whenever the page changes, so a page
+ * reached by link or from the palette is never hidden; the others keep what the operator chose.
+ * Adjusted while rendering when the page changes, as React's docs do for state derived from a prop.
+ */
+function useOpenGroups(current: NavGroup) {
+  const [open, setOpen] = useState<ReadonlySet<NavGroup>>(() => new Set([current]));
+  const [shown, setShown] = useState(current);
+  if (shown !== current) {
+    setShown(current);
+    if (!open.has(current)) setOpen(new Set([...open, current]));
+  }
+  const toggle = (id: NavGroup, isOpen: boolean) =>
+    setOpen((was) => {
+      const next = new Set(was);
+      if (isOpen) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  return [open, toggle] as const;
+}
+
 function PageNav({ current }: { current: PageRoute }) {
   const { signOut } = useSession();
+  const [open, toggle] = useOpenGroups(current.group);
   return (
     <SideNav
       collapsible
@@ -163,23 +186,35 @@ function PageNav({ current }: { current: PageRoute }) {
         </SideNavSection>
       }
     >
-      {navGroups.map((group) => {
-        const pages = routes.filter((r) => r.group === group.id && !r.selects);
-        if (!pages.length) return null;
-        return (
-          <SideNavSection key={group.id} title={group.title()}>
-            {pages.map((r) => (
-              <SideNavItem
-                key={r.id}
-                label={r.title()}
-                icon={r.icon}
-                href={`#${r.id}`}
-                isSelected={r === current || r.id === current.selects}
-              />
-            ))}
-          </SideNavSection>
-        );
-      })}
+      <SideNavSection title={t("app.nav.pages")} isHeaderHidden>
+        {navGroups.map((group) => {
+          const pages = routes.filter((r) => r.group === group.id && !r.selects);
+          if (!pages.length) return null;
+          const items = pages.map((r) => (
+            <SideNavItem
+              key={r.id}
+              label={r.title()}
+              icon={r.icon}
+              href={`#${r.id}`}
+              isSelected={r === current || r.id === current.selects}
+            />
+          ));
+          if (group.id === navGroups[0].id) return items;
+          return (
+            <SideNavItem
+              key={group.id}
+              label={group.title()}
+              icon={group.icon}
+              collapsible={{
+                isCollapsed: !open.has(group.id),
+                onCollapsedChange: (isCollapsed) => toggle(group.id, !isCollapsed),
+              }}
+            >
+              {items}
+            </SideNavItem>
+          );
+        })}
+      </SideNavSection>
     </SideNav>
   );
 }

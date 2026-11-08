@@ -14,6 +14,7 @@ import { healthz } from "../lib/api/system.ts";
 import { t } from "../lib/i18n.ts";
 import { repository } from "../lib/repository.ts";
 import { layout } from "../themes/site/layout.ts";
+import { roles } from "../themes/site/roles.ts";
 import { PreferenceMenus } from "./PreferenceMenus.tsx";
 import { useSession } from "./Session.tsx";
 import { useDocumentTitle } from "./useDocumentTitle.ts";
@@ -40,21 +41,43 @@ function ServerReachability() {
   );
 }
 
-/** Brand, heading and the server's reachability, at the top of the card. */
+/** Brand mark and name above the card, as login-card:92-97. */
+function Brand() {
+  return (
+    <VStack gap={2} hAlign="center">
+      <Icon icon={Server} size="lg" />
+      <Text type="body" weight="bold" size="lg">
+        {t("app.brand.name")}
+      </Text>
+    </VStack>
+  );
+}
+
+/** Card heading and the server's reachability, as login-card:102-107. */
 function CardTop() {
   return (
-    <VStack gap={6}>
-      <HStack gap={2} vAlign="center" hAlign="center">
-        <Icon icon={Server} size="lg" />
-        <Text type="body" weight="semibold" size="lg">
-          {t("app.brand.name")}
-        </Text>
-      </HStack>
-      <VStack gap={2} hAlign="center">
-        <Heading level={1}>{t("app.signIn.heading")}</Heading>
-        <ServerReachability />
-      </VStack>
+    <VStack gap={1} hAlign="center">
+      <Heading level={roles.heading.section}>{t("app.signIn.heading")}</Heading>
+      <ServerReachability />
     </VStack>
+  );
+}
+
+/** Where the management key comes from, folded under a supporting-size line. */
+function KeyHelp() {
+  return (
+    <Collapsible
+      trigger={
+        <Text type="supporting" color="secondary">
+          {t("app.signIn.helpTitle")}
+        </Text>
+      }
+      defaultIsOpen={false}
+    >
+      <Text type="supporting" color="secondary">
+        {t("app.signIn.help", { setting: "management.secret-key" })}
+      </Text>
+    </Collapsible>
   );
 }
 
@@ -96,9 +119,10 @@ export function SignIn() {
       {/* Two growing spacers centre the card in the space below the controls and let it scroll. */}
       <StackItem size="fill" />
       <VStack hAlign="center" gap={4}>
+        <Brand />
         <Card padding={8} width="100%" maxWidth={layout.signInWidth}>
           {/* Enter is handled by the field's IME-safe onEnter; the form's own submit is dropped. */}
-          <VStack as="form" gap={6} onSubmit={(event) => event.preventDefault()}>
+          <VStack as="form" gap={4} onSubmit={(event) => event.preventDefault()}>
             <CardTop />
             <VStack gap={4}>
               <KeyField
@@ -122,11 +146,7 @@ export function SignIn() {
                 onClick={() => void submit()}
               />
             </VStack>
-            <Collapsible trigger={t("app.signIn.helpTitle")} defaultIsOpen={false}>
-              <Text type="supporting" color="secondary">
-                {t("app.signIn.help", { setting: "management.secret-key" })}
-              </Text>
-            </Collapsible>
+            <KeyHelp />
           </VStack>
         </Card>
         <Link href={repository.url} target="_blank" type="supporting" color="secondary">
