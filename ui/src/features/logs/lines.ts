@@ -1,4 +1,4 @@
-import type { LogPage } from "../../lib/api/logs.ts";
+import type { ErrorLogFile, LogPage } from "../../lib/api/logs.ts";
 
 /** One application log line; `key` stays with the line while the tail grows and is trimmed. */
 export type LogLine = {
@@ -47,13 +47,37 @@ export function appendPage(prev: Tail | undefined, page: LogPage): Tail {
 // The dashboard's own reads (this tail among them) go through the Management API.
 const isManagementCall = (line: LogLine) => line.text.includes("/management/");
 
-/** The lines to show: management calls only when asked for, then those containing `filter`. */
-export function shownLines(lines: LogLine[], filter: string, withManagement: boolean) {
+/** The level filter: every line, warnings and worse, or errors and worse (logrus levels). */
+export type LevelFilter = "" | "warn" | "error";
+
+const AT_LEAST: Record<Exclude<LevelFilter, "">, ReadonlySet<string>> = {
+  error: new Set(["error", "fatal", "panic"]),
+  warn: new Set(["warn", "warning", "error", "fatal", "panic"]),
+};
+
+/**
+ * The lines to show: management calls only when asked for, lines of `level` or worse when set
+ * (a line without a level is then left out), then those containing `filter`.
+ */
+export function shownLines(
+  lines: LogLine[],
+  filter: string,
+  withManagement: boolean,
+  level: LevelFilter = "",
+) {
   const needle = filter.trim().toLowerCase();
-  if (!needle && withManagement) return lines;
+  const levels = level ? AT_LEAST[level] : null;
+  if (!needle && withManagement && !levels) return lines;
   return lines.filter(
     (l) =>
       (withManagement || !isManagementCall(l)) &&
+      (!levels || levels.has(l.parsed?.level ?? "")) &&
       (!needle || l.text.toLowerCase().includes(needle)),
   );
+}
+
+/** The error log files whose name contains `filter`, ignoring case. */
+export function filesMatching(files: ErrorLogFile[], filter: string) {
+  const needle = filter.trim().toLowerCase();
+  return needle ? files.filter((f) => f.name.toLowerCase().includes(needle)) : files;
 }

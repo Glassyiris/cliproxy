@@ -13,7 +13,6 @@ import {
 } from "react";
 import * as stylex from "@stylexjs/stylex";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Code } from "@astryxdesign/core/Code";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
@@ -112,7 +111,7 @@ function useStickToEnd(scroller: HTMLElement | null, holder: HTMLElement | null)
 
 function Time({ line }: { line: LogLine }) {
   return (
-    <Text type="code" color="secondary" hasTabularNumbers>
+    <Text color="secondary" hasTabularNumbers textWrap="nowrap">
       {line.parsed?.time}
     </Text>
   );
@@ -122,8 +121,10 @@ function RequestLink({ line, query }: { line: LogLine; query: string }) {
   const id = line.parsed?.requestId;
   return (
     id && (
-      <Link href={`#logs/${encodeURIComponent(id)}${query}`}>
-        <Code color="inherit">{id}</Code>
+      <Link href={`#activity/${encodeURIComponent(id)}${query}`}>
+        <Text type="code" color="inherit" textWrap="nowrap">
+          {id}
+        </Text>
       </Link>
     )
   );
@@ -237,7 +238,9 @@ function useRoving(
   const moveTo = useCallback(
     (index: number) => {
       setActiveKey(lines[index]?.key ?? null);
-      if (rowAt(index) === document.activeElement) return;
+      // Focus already in the line (a clicked request link) stays there: scrolling and focusing the
+      // row would move the link from under the pointer before its click lands.
+      if (rowAt(index)?.contains(document.activeElement)) return;
       scrollToIndex(index);
       let tries = 10;
       const focus = () => {

@@ -46,9 +46,10 @@ export const useRequestLog = (id: string) =>
     enabled: !!id,
   });
 
-/** Read each time the Error logs tab opens. */
-export const useErrorLogs = () =>
+/** Read each time the error logs are chosen (`isShown`), not while the application log shows. */
+export const useErrorLogs = (isShown: boolean) =>
   useQuery({
     queryKey: logKeys.errors,
     queryFn: async ({ signal }) => (await listErrorLogs(signal)).files ?? [],
+    enabled: isShown,
   });

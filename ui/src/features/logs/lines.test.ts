@@ -68,3 +68,20 @@ test("shown: management calls only when asked for; the filter ignores case", () 
   assert.deepEqual(texts(shownLines(lines, " error ", true)), ["upstream Error 502"]);
   assert.deepEqual(texts(shownLines(lines, "logs", false)), []);
 });
+
+test("shown: a level keeps that level and worse, and drops lines without one", () => {
+  const lines = [
+    "[2026-11-08 12:00:01] [a1] [debug] picked",
+    "[2026-11-08 12:00:02] [a1] [warn ] cooling",
+    "[2026-11-08 12:00:03] [a1] [error] upstream 502",
+    "plain text",
+  ].map((t, i) => parseLine(t, i));
+  assert.deepEqual(
+    shownLines(lines, "", true, "warn").map((l) => l.parsed?.level),
+    ["warn", "error"],
+  );
+  assert.deepEqual(
+    shownLines(lines, "a1", true, "error").map((l) => l.parsed?.message),
+    ["upstream 502"],
+  );
+});

@@ -3,9 +3,15 @@ import type { ApiKeyUsage, UsageRecord } from "../../lib/api/observability.ts";
 import { buckets, provider, sum, sumBuckets, type Buckets } from "../../lib/credentials.ts";
 import { cleanEvent, type UsageEvent } from "../../lib/usage.ts";
 
-export type Source = { via: "accounts" | "keys"; provider: string; buckets: Buckets | null };
-
-const total = (s: Source) => (s.buckets ? sum(s.buckets.total) : 0);
+export type Source = {
+  key: string;
+  via: "accounts" | "keys";
+  provider: string;
+  /** Null when the server reports no history for this source. */
+  buckets: Buckets | null;
+  total: number;
+  failed: number;
+};
 
 function byProvider(via: Source["via"], entries: [string, Buckets | null][]): Source[] {
   const groups = new Map<string, (Buckets | null)[]>();
@@ -14,15 +20,25 @@ function byProvider(via: Source["via"], entries: [string, Buckets | null][]): So
     if (list) list.push(b);
     else groups.set(p, [b]);
   }
-  return [...groups].map(([p, list]) => ({ via, provider: p, buckets: sumBuckets(list) }));
+  return [...groups].map(([p, list]) => {
+    const b = sumBuckets(list);
+    return {
+      key: `${via}:${p}`,
+      via,
+      provider: p,
+      buckets: b,
+      total: b ? sum(b.total) : 0,
+      failed: b ? sum(b.failed) : 0,
+    };
+  });
 }
 
 /**
  * One row per provider through accounts and per provider through provider keys, busiest first.
- * A source that is not read (null) contributes no rows; `max` is the busiest bucket of every row.
+ * A source that is not read (null) contributes no rows.
  */
-export function sources(files: Credential[] | null, usage: ApiKeyUsage | null) {
-  const rows = [
+export function sources(files: Credential[] | null, usage: ApiKeyUsage | null): Source[] {
+  return [
     ...byProvider(
       "accounts",
       (files ?? []).map((a) => [provider(a), buckets(a)]),
@@ -33,8 +49,51 @@ export function sources(files: Credential[] | null, usage: ApiKeyUsage | null) {
         Object.values(perKey).map((entry): [string, Buckets | null] => [p, buckets(entry)]),
       ),
     ),
-  ].sort((x, y) => total(y) - total(x));
-  return { rows, max: Math.max(1, ...rows.flatMap((r) => r.buckets?.total ?? [])) };
+  ].sort((x, y) => y.total - x.total);
+}
+
+/** The buckets of the source `key`, or of every source when it is empty or unknown. */
+export function trafficOf(rows: Source[], key: string): Buckets | null {
+  const one = rows.find((r) => r.key === key);
+  return one ? one.buckets : sumBuckets(rows.map((r) => r.buckets));
+}
+
+/** Each bucket's time span as the server writes it ("14:50-15:00"), oldest first. */
+export function bucketTimes(files: Credential[] | null, length: number): string[] {
+  const reported = files?.find((a) => a.recent_requests?.length === length)?.recent_requests;
+  return Array.from({ length }, (_, i) => reported?.[i]?.time ?? "");
+}
+
+/**
+ * The facts the written conclusions name: the busiest bucket and the one with the most failures
+ * (null without any), or the source with the most requests and the one failing most often.
+ */
+export function peaks(b: Buckets) {
+  const top = (v: number[]) => {
+    const max = Math.max(0, ...v);
+    return max > 0 ? { at: v.indexOf(max), count: max } : null;
+  };
+  return {
+    total: sum(b.total),
+    failed: sum(b.failed),
+    busiest: top(b.total),
+    worst: top(b.failed),
+  };
+}
+
+export function leaders(rows: Source[]) {
+  const all = rows.reduce((n, r) => n + r.total, 0);
+  const served = rows.filter((r) => r.total > 0);
+  if (!served.length) return null;
+  const share = (r: Source) => r.failed / r.total;
+  const busiest = served.reduce((a, b) => (b.total > a.total ? b : a));
+  const worst = served.reduce((a, b) => (share(b) > share(a) ? b : a));
+  return {
+    busiest,
+    busiestShare: busiest.total / all,
+    worst: worst.failed > 0 ? worst : null,
+    worstShare: share(worst),
+  };
 }
 
 const HOUR_MS = 3_600_000;

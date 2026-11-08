@@ -1,4 +1,4 @@
-// The Error logs tab: one row per file the server kept for a failed request, newest as listed.
+// The error logs: one row per file the server kept for a failed request, newest as listed.
 import { useState } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
@@ -7,7 +7,6 @@ import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { List, ListItem } from "@astryxdesign/core/List";
-
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
@@ -17,7 +16,8 @@ import { downloadErrorLog, type ErrorLogFile } from "../../lib/api/logs.ts";
 import { saveBlob } from "../../lib/download.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
-import { useErrorLogs } from "./queries.ts";
+import { roles } from "../../themes/site/roles.ts";
+import type { useErrorLogs } from "./queries.ts";
 
 /** Downloads are reads: they wait for one another, not for the page's writes. */
 function useDownload() {
@@ -57,7 +57,8 @@ function FileRow({
       endContent={
         <Button
           label={t("logs.errors.download")}
-          size="sm"
+          variant={roles.rowAction.variant}
+          size={roles.rowAction.size}
           icon={<Icon icon={Download} size="sm" />}
           isLoading={isPending}
           onClick={onDownload}
@@ -67,8 +68,16 @@ function FileRow({
   );
 }
 
-export function ErrorLogs() {
-  const files = useErrorLogs();
+/** The error log files: `files` is their read, `shown` those matching the search. */
+export function ErrorLogs({
+  files,
+  shown,
+  onShowAll,
+}: {
+  files: ReturnType<typeof useErrorLogs>;
+  shown: ErrorLogFile[] | undefined;
+  onShowAll: () => void;
+}) {
   const { pending, download } = useDownload();
   if (files.isError)
     return (
@@ -78,7 +87,7 @@ export function ErrorLogs() {
         retry={() => void files.refetch()}
       />
     );
-  if (!files.data)
+  if (!files.data || !shown)
     return (
       <VStack gap={3} aria-busy aria-label={t("logs.errors.loading")}>
         {[0, 1, 2].map((i) => (
@@ -86,10 +95,20 @@ export function ErrorLogs() {
         ))}
       </VStack>
     );
-  if (!files.data.length) return <EmptyState title={t("logs.errors.empty")} headingLevel={2} />;
+  if (!files.data.length)
+    return <EmptyState title={t("logs.errors.empty")} headingLevel={roles.heading.section} />;
+  if (!shown.length)
+    return (
+      <EmptyState
+        icon={<Icon icon="search" size="lg" />}
+        title={t("logs.errors.noMatch")}
+        headingLevel={roles.heading.section}
+        actions={<Button label={t("logs.errors.showAll")} onClick={onShowAll} />}
+      />
+    );
   return (
     <List hasDividers>
-      {files.data.map((f) => (
+      {shown.map((f) => (
         <FileRow
           key={f.name}
           file={f}

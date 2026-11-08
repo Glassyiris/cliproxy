@@ -1,78 +1,41 @@
-import { useEffect, useMemo, useRef, useState, type Ref } from "react";
+// Usage, the Activity route's first tab, from the Astryx template dashboard-comparison on the shared
+// PageFrame with the nbcards admin's sizes (DESIGN.md "Roles"). Deviations from the template, one
+// per line with its reason:
+// - The header is PageFrame's (route title, tabs, one line), padded by the page roles, so the h1
+//   sits where every page has it; the template's contentWidth 1440 is dropped (content is full).
+// - No date-range, segment or device selectors and no Export: the server keeps 200 minutes of
+//   ten-minute buckets and nothing to export; the chart card's line names that window instead.
+// - The only header control is the live view switch (plan 五: opened from the header, confirmed
+//   first). Reading the usage queue removes records for other readers (REQUIREMENTS Exceptions).
+// - No "Key metrics" grid over the 200 minutes: the totals are Overview's tiles and this chart's
+//   conclusion, so tiles here would repeat them. MetricCards appear for the live view only.
+// - The source filter sits on the chart card, not in the header: it changes that chart only.
+// - One chart, a bar chart (TrafficChart) instead of the area trend: requests per ten minutes
+//   with failures on top, the shared chart module's form; no sparklines or period deltas, which
+//   the API cannot supply.
+// - No demographics breakdown cards; the acquisition table becomes the sources table (requests,
+//   share with the template's ProgressBar, failed, failed share), flat with row dividers rather
+//   than in a Card (COMMON-R "lists and tables are flat"), plus a row toggle that shows that
+//   source in the chart.
+// - Section headings are SectionHeading (no icon tile): roles "Heading levels".
+import { useEffect, useMemo, useRef, useState } from "react";
 import { focusManager } from "@tanstack/react-query";
-import { Play, Square } from "lucide-react";
+import { Radio } from "lucide-react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
-import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
-import { Divider } from "@astryxdesign/core/Divider";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
-import { VStack } from "@astryxdesign/core/Layout";
+import { Text } from "@astryxdesign/core/Text";
+import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { PageFrame } from "../../app/PageFrame.tsx";
-import { useApiKeyUsage, useCredentials } from "../../app/serverQueries.ts";
-import { MissingActions, useAvailable } from "../../components/MissingActions.tsx";
-import { ReadError } from "../../components/ReadError.tsx";
-import { StatusLamp } from "../../components/StatusLamp.tsx";
+import { useHashParams } from "../../app/useHashRoute.ts";
+import { useAvailable } from "../../components/MissingActions.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { t } from "../../lib/i18n.ts";
 import { usageStats, type UsageEvent } from "../../lib/usage.ts";
-import { layout } from "../../themes/site/layout.ts";
-import { LatestRail } from "./LatestRail.tsx";
-import { LiveTiles, ModelTable } from "./LiveTiles.tsx";
+import { roles } from "../../themes/site/roles.ts";
+import { LiveSection } from "./Live.tsx";
 import { useUsageDrain } from "./queries.ts";
-import { SourcesCard } from "./Sources.tsx";
-import { addBatch, recent, sources } from "./summary.ts";
-
-/** The template's header status line: a pulsing lamp while the live view drains the queue. */
-function LiveLamp({ live }: { live: boolean }) {
-  const word = live ? t("usage.page.live") : t("usage.page.off");
-  return <StatusLamp status={live ? "ready" : "disabled"} label={word} isPulsing={live} />;
-}
-
-/**
- * Start live view or Stop. A primary button is never greyed out, so without the queue route the
- * page shows no Start and MissingActions names it.
- */
-function LiveToggle({
-  ref,
-  live,
-  onPress,
-}: {
-  ref: Ref<HTMLButtonElement>;
-  live: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Button
-      ref={ref}
-      label={live ? t("usage.page.stop") : t("usage.page.start")}
-      variant="primary"
-      icon={<Icon icon={live ? Square : Play} />}
-      onClick={onPress}
-    />
-  );
-}
-
-/** Both traffic reads; a failed poll keeps the cached answer, so a failure drops its rows. */
-function useSources() {
-  const credentials = useCredentials({ poll: true });
-  const keyUsage = useApiKeyUsage({ poll: true });
-  const files = credentials.isError ? null : credentials.data?.files;
-  const usage = keyUsage.isError ? null : keyUsage.data;
-  const summary = useMemo(
-    () => (files === undefined || usage === undefined ? undefined : sources(files, usage)),
-    [files, usage],
-  );
-  return {
-    summary,
-    accountRead: credentials.isError
-      ? { error: credentials.error, retry: () => void credentials.refetch() }
-      : null,
-    keyRead: keyUsage.isError
-      ? { error: keyUsage.error, retry: () => void keyUsage.refetch() }
-      : null,
-  };
-}
+import { addBatch, recent } from "./summary.ts";
+import { TrafficSection, useSources } from "./Traffic.tsx";
 
 const CLOCK_MS = 10_000;
 
@@ -119,67 +82,61 @@ function useLiveView() {
 }
 
 export default function Usage() {
-  const { summary, accountRead, keyRead } = useSources();
+  const traffic = useSources();
+  const [params, setParams] = useHashParams();
   const view = useLiveView();
   const stats = useMemo(() => usageStats(view.events), [view.events]);
   const [isAsking, setAsking] = useState(false);
   const isAvailable = useAvailable();
-  const isNarrow = useMediaQuery(layout.railFolds);
+  const canStart = isAvailable(routes.drainUsageQueue);
   const toggle = useRef<HTMLButtonElement>(null);
-  // Retry removes the banner that holds it, so focus goes to the header button.
-  const retry = () => {
+  // Retry and the empty state's Start go with their region; focus goes to the header switch.
+  const start = () => {
     view.start();
     toggle.current?.focus();
   };
-  const rail = (hasStickyHeader: boolean) => (
-    <LatestRail events={view.events} live={view.live} hasStickyHeader={hasStickyHeader} />
-  );
-
+  const settled = traffic.rows !== undefined || !!traffic.accountRead || !!traffic.keyRead;
+  const word = view.live ? t("usage.page.live") : t("usage.page.off");
   return (
     <PageFrame
       title={t("usage.page.title")}
       width="full"
-      meta={<LiveLamp live={view.live} />}
-      actions={
-        (view.live || isAvailable(routes.drainUsageQueue)) && (
-          <LiveToggle
-            ref={toggle}
-            live={view.live}
-            onPress={() => (view.live ? view.stop() : setAsking(true))}
-          />
-        )
+      meta={
+        <Text type={roles.textType.supporting} color="secondary">
+          {t("usage.route.line")}
+        </Text>
       }
-      panel={
-        isNarrow
-          ? undefined
-          : {
-              label: t("usage.rail.heading"),
-              content: rail(true),
-            }
+      actions={
+        // Disabled, not hidden, while the queue route is probed or missing, so the header does
+        // not move when it is known (REQUIREMENTS Exceptions: probed write actions).
+        <ToggleButton
+          ref={toggle}
+          label={word}
+          isPressed={view.live}
+          isDisabled={!view.live && !canStart}
+          icon={<Icon icon={Radio} size="sm" />}
+          onPressedChange={() => (view.live ? view.stop() : setAsking(true))}
+        />
       }
     >
-      <VStack gap={10}>
-        {view.failure !== null && (
-          <ReadError error={view.failure} what={t("usage.page.liveRead")} retry={retry} />
-        )}
-        <MissingActions
-          actions={[{ route: routes.drainUsageQueue, label: t("usage.page.liveAction") }]}
+      <TrafficSection
+        traffic={traffic}
+        chosen={params.source ?? ""}
+        onChoose={(source) => setParams({ source }, "replace")}
+      />
+      {/* Under the sources table, whose row count is unknown until it loads: shown once the
+          traffic reads answer, so the table's growth moves nothing already on screen. */}
+      {settled && (
+        <LiveSection
+          live={view.live}
+          events={view.events}
+          stats={stats}
+          failure={view.failure}
+          onStart={() => setAsking(true)}
+          onRetry={start}
+          canStart={canStart}
         />
-        <SourcesCard
-          rows={summary?.rows}
-          max={summary?.max ?? 1}
-          accountRead={accountRead}
-          keyRead={keyRead}
-        />
-        {stats.count > 0 && (
-          <>
-            <Divider />
-            <LiveTiles stats={stats} />
-            <ModelTable models={stats.models} />
-          </>
-        )}
-        {isNarrow && <Card padding={0}>{rail(false)}</Card>}
-      </VStack>
+      )}
       <AlertDialog
         isOpen={isAsking}
         onOpenChange={setAsking}
@@ -189,7 +146,7 @@ export default function Usage() {
         cancelLabel={t("usage.start.cancel")}
         onAction={() => {
           setAsking(false);
-          view.start();
+          start();
         }}
       />
     </PageFrame>

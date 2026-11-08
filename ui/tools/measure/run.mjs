@@ -58,7 +58,10 @@ const ROUTES = {
     measures: ["primaryButton", "rowAction"],
     pending: "R3",
   },
-  activity: { answer: "[role=main] h1", measures: ["primaryButton"], pending: "R4" },
+  activity: {
+    answer: "#activity-traffic",
+    measures: ["headerControl", "cardPadding", "skeletonShift", "tableRow", "rowAction"],
+  },
   settings: {
     answer: "[role=main] h1",
     measures: ["primaryButton", "headerControl"],
@@ -234,6 +237,8 @@ async function measure(browser, base, route, viewport, answer) {
     await page.fill("input[type=password]", KEY);
     const from = await page.evaluate(() => performance.now());
     await page.click('form button:has-text("Connect")');
+    // Park the pointer, so no chart tooltip under it is measured as a card.
+    await page.mouse.move(0, 0);
     await page.waitForFunction(isReady, null, { timeout: 30_000, polling: "raf" });
     await sleep(1000);
     const result = await page.evaluate(readPage, { from, answer });

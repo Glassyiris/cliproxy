@@ -90,8 +90,6 @@ const CARD_PADDING_EXCEPTIONS = {
   // Pages R1 to R5 rewrite next; each leaves this list when it is rewritten.
   "src/features/connect/SignInPanel.tsx": "not yet rewritten",
   "src/features/system/System.tsx": "not yet rewritten",
-  "src/features/usage/LiveTiles.tsx": "not yet rewritten",
-  "src/features/usage/Sources.tsx": "not yet rewritten",
 };
 const DEFAULT_EXPORT = /export\s*\{\s*default\s*\}\s*from\s*["'](\.\/[^"']+)["']/;
 
