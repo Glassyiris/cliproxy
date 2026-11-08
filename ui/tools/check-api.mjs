@@ -10,8 +10,9 @@
 // method chains on MethodRouter and Router. Anything else exits 2 instead of being guessed.
 //
 // Exit codes: 0 in step, 1 mismatch, 2 cannot read or parse an input.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const ui = fileURLToPath(new URL("..", import.meta.url));
 const rustFile = fileURLToPath(new URL("../../crates/cpa-server/src/management.rs", import.meta.url));
@@ -417,8 +418,29 @@ function loadAllowlist() {
   return list;
 }
 
+function callerProblems() {
+  const problems = [];
+  const root = `${ui}src/`;
+  for (const file of readdirSync(root, { recursive: true })) {
+    if (!/\.tsx?$/.test(file) || file === "lib/api/routes.ts") continue;
+    const source = ts.createSourceFile(file, readFileSync(root + file, "utf8"), ts.ScriptTarget.Latest, true);
+    const visit = (node) => {
+      if (ts.isSpreadAssignment(node)) {
+        const expression = node.expression;
+        if ((ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
+            ts.isIdentifier(expression.expression) &&
+            ["routes", "publicRoutes"].includes(expression.expression.text))
+          problems.push(`${file}: do not spread a registered route; pass it unchanged`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  return problems;
+}
+
 async function main() {
-  let server, registry, allow, publicServer, publicRegistry;
+  let server, registry, allow, publicServer, publicRegistry, problems;
   try {
     server = serverRoutes();
     publicServer = publicServerRoutes();
@@ -426,11 +448,11 @@ async function main() {
     const table = await import(`${ui}src/lib/api/routes.ts`);
     registry = Object.entries(table.routes).map(([name, r]) => ({ name, ...r }));
     publicRegistry = Object.entries(table.publicRoutes).map(([name, r]) => ({ name, ...r }));
+    problems = callerProblems();
   } catch (e) {
     console.error(`check-api: cannot parse: ${e.message}`);
     return 2;
   }
-  const problems = [];
   const have = new Set(server.map(key));
   const seen = new Map();
   for (const r of registry) {

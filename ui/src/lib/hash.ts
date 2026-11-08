@@ -57,7 +57,15 @@ export function redirect(hash: string, from = ""): string | null {
   }
   for (const [key, value] of Object.entries(target.params ?? {})) query.set(key, value);
   if (target.argParam) {
-    if (arg) query.set(target.argParam, decodeURIComponent(arg));
+    if (arg) {
+      let value = arg;
+      try {
+        value = decodeURIComponent(arg);
+      } catch {
+        // A malformed escape is read as written.
+      }
+      query.set(target.argParam, value);
+    }
     return join(target.route, query);
   }
   return join(arg ? `${target.route}/${arg}` : target.route, query);

@@ -34,3 +34,11 @@ test("connect and about open over the page shown before", () => {
   assert.equal(redirect("#connect"), "#overview?open=connect");
   assert.equal(redirect("#connect", "#connect"), "#overview?open=connect");
 });
+
+test("a malformed plugin escape is read as written", () => {
+  for (const arg of ["%", "%E0%A4%A", "a%2Fb%"])
+    assert.equal(
+      redirect(`#plugins/${arg}`),
+      `#settings?open=plugins&plugin=${encodeURIComponent(arg)}`,
+    );
+});

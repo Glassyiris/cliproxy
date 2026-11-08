@@ -184,9 +184,9 @@ export async function request<T>(route: Route, call: Call = {}): Promise<T> {
   if (response.ok) return value as T;
   if (response.status === 401) hooks.unauthorized();
   const error = new ApiError(
-    String(value.message || value.error || `HTTP ${response.status}`),
+    String(value?.message || value?.error || `HTTP ${response.status}`),
     response.status,
-    String(value.code || value.error || ""),
+    String(value?.code || value?.error || ""),
     route,
   );
   if (error.notImplemented && !missing.has(routeId(route))) {

@@ -34,7 +34,10 @@ export default {
   pages: [
     { id: "overview", title: "Overview" },
     { id: "accounts", title: "Accounts" },
-    { id: "system", title: "System" },
+    { id: "clients", title: "Client keys" },
+    { id: "models", title: "Models" },
+    { id: "activity", title: "Usage" },
+    { id: "settings", title: "Settings" },
   ],
   pageReady,
 

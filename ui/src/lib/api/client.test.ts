@@ -152,3 +152,19 @@ test("a 2xx body that cannot be read fails like an unreachable server", async ()
     (e) => e instanceof ConnectionError && e.reason === "unreachable",
   );
 });
+
+test("a null error body keeps the HTTP status in ApiError", async () => {
+  for (const status of [400, 404, 500]) {
+    signIn();
+    server.answer = () => Response.json(null, { status });
+    await assert.rejects(
+      request(routes.readConfig),
+      (e) =>
+        e instanceof ApiError &&
+        e.status === status &&
+        e.message === `HTTP ${status}` &&
+        e.code === "" &&
+        e.path === routes.readConfig.path,
+    );
+  }
+});
