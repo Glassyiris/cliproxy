@@ -100,6 +100,7 @@ export default {
     "app.list.allFamilies": "全部提供商",
     "app.list.status": "状态",
     "app.list.anyStatus": "任意状态",
+    "app.list.chosen": "{field}：{value}",
     "app.list.clear": "清除筛选",
     "app.list.moreActions": "更多操作",
     "app.unsaved.title": "放弃未保存的更改？",

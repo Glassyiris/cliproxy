@@ -104,6 +104,7 @@ export default {
     "app.list.allFamilies": "All providers",
     "app.list.status": "Status",
     "app.list.anyStatus": "Any status",
+    "app.list.chosen": "{field}: {value}",
     "app.list.clear": "Clear filters",
     "app.list.moreActions": "More actions",
     "app.unsaved.title": "Discard unsaved changes?",

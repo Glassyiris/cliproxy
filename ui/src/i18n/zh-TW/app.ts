@@ -100,6 +100,7 @@ export default {
     "app.list.allFamilies": "全部供應商",
     "app.list.status": "狀態",
     "app.list.anyStatus": "任意狀態",
+    "app.list.chosen": "{field}：{value}",
     "app.list.clear": "清除篩選",
     "app.list.moreActions": "更多操作",
     "app.unsaved.title": "捨棄未儲存的變更？",
