@@ -35,14 +35,52 @@ const iconColor: Record<Tone, IconProps["color"]> = {
 };
 
 /** Each reason in words, its glyph and its tone by the accounts' status. */
-const look: Record<Reason, { title: () => string; icon: IconProps["icon"]; tone: Tone }> = {
-  signIn: { title: () => t("overview.attention.signIn"), icon: LogIn, tone: "error" },
-  unavailable: { title: () => t("overview.attention.unavailable"), icon: CloudOff, tone: "error" },
-  error: { title: () => t("overview.attention.error"), icon: "error", tone: "error" },
-  limited: { title: () => t("overview.attention.limited"), icon: Gauge, tone: "warning" },
-  cooling: { title: () => t("overview.attention.cooling"), icon: "clock", tone: "warning" },
-  disabled: { title: () => t("overview.attention.disabled"), icon: PowerOff, tone: "neutral" },
-  other: { title: () => t("overview.attention.other"), icon: CircleQuestionMark, tone: "neutral" },
+const look: Record<
+  Reason,
+  { title: () => string; hint: () => string; icon: IconProps["icon"]; tone: Tone }
+> = {
+  signIn: {
+    title: () => t("overview.attention.signIn"),
+    hint: () => t("overview.attention.signInHint"),
+    icon: LogIn,
+    tone: "error",
+  },
+  unavailable: {
+    title: () => t("overview.attention.unavailable"),
+    hint: () => t("overview.attention.unavailableHint"),
+    icon: CloudOff,
+    tone: "error",
+  },
+  error: {
+    title: () => t("overview.attention.error"),
+    hint: () => t("overview.attention.errorHint"),
+    icon: "error",
+    tone: "error",
+  },
+  limited: {
+    title: () => t("overview.attention.limited"),
+    hint: () => t("overview.attention.limitedHint"),
+    icon: Gauge,
+    tone: "warning",
+  },
+  cooling: {
+    title: () => t("overview.attention.cooling"),
+    hint: () => t("overview.attention.coolingHint"),
+    icon: "clock",
+    tone: "warning",
+  },
+  disabled: {
+    title: () => t("overview.attention.disabled"),
+    hint: () => t("overview.attention.disabledHint"),
+    icon: PowerOff,
+    tone: "neutral",
+  },
+  other: {
+    title: () => t("overview.attention.other"),
+    hint: () => t("overview.attention.otherHint"),
+    icon: CircleQuestionMark,
+    tone: "neutral",
+  },
 };
 
 const count = (n: number) => (
@@ -83,10 +121,12 @@ function AlertCard({ alert, now }: { alert: Alert; now: number }) {
       iconColor={iconColor[tone]}
       value={count(alert.count)}
       badge={<Badge variant={tone} label={badgeWord[tone]()} />}
-      detail={
-        soonest !== null &&
-        basis(t("overview.tiles.soonestBack", { time: span(Math.max(0, soonest - now)) }))
-      }
+      // Every card carries one line, so the cards of a row read alike and none ends half empty.
+      detail={basis(
+        soonest === null
+          ? look[reason].hint()
+          : t("overview.tiles.soonestBack", { time: span(Math.max(0, soonest - now)) }),
+      )}
       href={reason === "signIn" ? "#connect" : `#accounts?show=${reason}`}
     />
   );
@@ -104,7 +144,7 @@ function Clear({ hasAccounts }: { hasAccounts: boolean }) {
   );
 }
 
-const cards = { minWidth: layout.summaryTileMin, max: 4, repeat: "fit" } as const;
+const cards = { minWidth: layout.summaryTileMin, repeat: "fit" } as const;
 
 /**
  * "Needs attention": one card per reason that has accounts, most urgent first (the nbcards admin's

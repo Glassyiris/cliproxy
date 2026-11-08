@@ -254,7 +254,7 @@ added to `roles.ts` with a named use and its source, so text stays one scale acr
 | Page frame | `Layout` / `LayoutHeader` / `LayoutContent` / `LayoutPanel`, padding set once on `Layout` | card-v2 `PageFrame.tsx`; `dashboard-alert-rail:1446-1567`, `table-filter:4333-4480` |
 | Header | Every route has a `LayoutHeader` with a divider holding the h1 (26/600) and one 13 px `Text type="supporting"` line; the h1 is at the same place on every route. `table-page` and `settings-sidebar` have no header (`:856-869`, `:301`); their pages add one, a recorded deviation | card-v2 `PageFrame.tsx`; REPORT.md "h1" |
 | Page padding | 6 (24 px), 4 (16 px) below Astryx `md`; the body ends with 10 (40 px) | card-v2 `PageFrame.tsx` |
-| Content width | The content line stops at 1440 px. Settings pages cap their content at 1200, single-column forms at 800; lists and dashboards take the full line | card-v2 `PageFrame.tsx` `CONTENT_WIDTH`; `settings-sidebar:303`, `form-wizard-inline:610` |
+| Content width | The content line takes the full width (no 1440 cap, unlike card-v2: it left empty bands on wide screens). Settings pages cap their content at 1200, single-column forms at 800; lists and dashboards take the full line | card-v2 `PageFrame.tsx` `CONTENT_WIDTH`; `settings-sidebar:303`, `form-wizard-inline:610` |
 | Section gap | 6 (24 px) between a page's sections | card-v2 `layout.ts` `SECTION_GAP` |
 | Card gap | 4 (16 px) between cards and between blocks inside one card | card-v2 `layout.ts` `CARD_GAP` |
 | Card | One style: `Card` with radius 16, hairline border, padding 5 (20 px). Only for a few related facts or a chart | card-v2 `layout.ts` `CARD_PADDING`, `UI-RULES.md` |

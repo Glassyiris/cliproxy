@@ -135,7 +135,6 @@ export function PageFrame(props: FrameProps) {
       <Layout
         height="fill"
         padding={isPhone ? roles.page.phonePadding : roles.page.padding}
-        contentWidth={roles.page.contentWidth}
         defaultHasDividers
         end={panel && !isMobile ? <EndPanel panel={panel} /> : undefined}
         header={<FrameHeader {...props} host={host} />}

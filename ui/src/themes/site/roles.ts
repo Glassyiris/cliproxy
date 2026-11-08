@@ -9,8 +9,9 @@ import { layout } from "./layout.ts";
 export const roles = {
   // card-v2 PageFrame.tsx: padding 6 on Layout (24 px; 4 on a phone), set once so the header and
   // the content share one line and the h1 sits at the same place on every page; the body ends with
-  // paddingBlockEnd 10 (40 px) and the content line stops at 1440 px.
-  page: { padding: 6, phonePadding: 4, bottomPadding: 10, contentWidth: layout.contentWidth },
+  // paddingBlockEnd 10 (40 px). Unlike card-v2 the content line is not capped at 1440: on a wide
+  // screen the cap left empty bands on both sides (owner, 2026-11-08: 「留空太多了？」).
+  page: { padding: 6, phonePadding: 4, bottomPadding: 10 },
   // card-v2 layout.ts: SECTION_GAP between a page's sections, CARD_GAP between cards and between
   // blocks inside one card, CARD_PADDING the one Card padding.
   gap: { section: 6, card: 4 },

@@ -1,8 +1,6 @@
 // Fixed sizes of the app frame, in the units the Astryx props take: numbers are pixels.
 export const layout = {
   signInWidth: 400,
-  // card-v2 PageFrame.tsx CONTENT_WIDTH: the widest the page's content line grows, centred beyond.
-  contentWidth: 1440,
   // card-v2 layout.ts SIDE_WIDTH: a side column of cards beside the main column.
   sideColumn: 340,
   // The phone breakpoint at which the page padding drops to 16 px: Astryx `md` (AppShell's phone
