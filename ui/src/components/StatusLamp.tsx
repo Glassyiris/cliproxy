@@ -1,6 +1,8 @@
+import * as stylex from "@stylexjs/stylex";
 import { HStack } from "@astryxdesign/core/Layout";
 import { StatusDot, type StatusDotVariant } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
+import { typeScaleVars } from "@astryxdesign/core/theme/tokens.stylex";
 import type { CredState, Lamp } from "../lib/credentials.ts";
 import { t } from "../lib/i18n.ts";
 import { span } from "../lib/time.ts";
@@ -47,28 +49,40 @@ export const lampVariant = {
   disabled: "neutral",
 } as const satisfies Record<Status, StatusDotVariant>;
 
+const styles = stylex.create({
+  // The supporting word's line is shorter than a body line, so beside body text in the same row
+  // its first line sat 2.5 px high; centred in a body-height line it lines up.
+  // The leading token is a multiplier, so the height is size x leading.
+  bodyLine: {
+    minHeight: `calc(${typeScaleVars["--text-body-size"]} * ${typeScaleVars["--text-body-leading"]})`,
+  },
+});
+
 /**
  * A status lamp with its word beside it, so the state never rests on colour alone. The word is
  * secondary text, as in the owner's BoothDex console (admin/live-status.tsx): Astryx's Text has
  * no status colours, and the theme adds none. `isPulsing` marks a live thing (log tail, sign-in
  * waiting, live usage). `isLabelHidden` drops the word where the control around the lamp already
- * says it (a toggle button's label); the lamp keeps it as its accessible label.
+ * says it (a toggle button's label); the lamp keeps it as its accessible label. `isBodyLine` sets
+ * the lamp's line to a body line's height, for a cell whose neighbours' first line is body text.
  */
 export function StatusLamp({
   status,
   label,
   isPulsing = false,
   isLabelHidden = false,
+  isBodyLine = false,
 }: {
   status: Status;
   label: string;
   isPulsing?: boolean;
   isLabelHidden?: boolean;
+  isBodyLine?: boolean;
 }) {
   const lamp = <StatusDot variant={lampVariant[status]} label={label} isPulsing={isPulsing} />;
   if (isLabelHidden) return lamp;
   return (
-    <HStack gap={1.5} vAlign="center">
+    <HStack gap={1.5} vAlign="center" xstyle={isBodyLine ? styles.bodyLine : undefined}>
       {lamp}
       <Text type="supporting" color="secondary">
         {label}

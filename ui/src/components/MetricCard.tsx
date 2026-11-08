@@ -10,6 +10,7 @@ import { Icon, type IconProps } from "@astryxdesign/core/Icon";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Heading } from "@astryxdesign/core/Text";
 import { roles } from "../themes/site/roles.ts";
+import { Words } from "./Words.tsx";
 
 export function MetricCard({
   label,
@@ -39,7 +40,7 @@ export function MetricCard({
         <Icon icon={icon} size="sm" color={iconColor} label={iconLabel} />
         <StackItem size="fill">
           <Heading level={roles.heading.inCard} accessibilityLevel={roles.heading.card}>
-            {label}
+            <Words>{label}</Words>
           </Heading>
         </StackItem>
         {href && <Icon icon={ChevronRight} size="sm" color="secondary" />}

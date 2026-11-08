@@ -29,7 +29,11 @@ export const layout = {
   // Icon size="sm" (Astryx 0.7.11): the empty slot that keeps a menu's counts in line with a check.
   smallIcon: 16,
   valueSkeleton: { width: "8rem", height: "1em" },
-  summaryTileMin: 150,
+  // The three summary tiles stay in one column until two of them fit side by side with the value
+  // "169 / 200" at the metric size on one line: at 150 a 390px phone made two columns, wrapped the
+  // value and left the third tile alone. 200 makes a phone one column (two columns from 416px of
+  // content) and still gives three columns from 632px, so tablets and desktop keep one row.
+  summaryTileMin: 200,
   // The settings template's two columns, a Region's heading and its controls, are each at least
   // this wide; where both do not fit they stack.
   settingsColumnMin: 320,

@@ -114,7 +114,9 @@ function Name({ row }: { row: Row }) {
 function Status({ row }: { row: Row }) {
   return (
     <TwoLines
-      first={<StatusLamp status={lampStatus[row.view.lamp]} label={statusOf(row.view)} />}
+      first={
+        <StatusLamp status={lampStatus[row.view.lamp]} label={statusOf(row.view)} isBodyLine />
+      }
       second={reasonOf(row.view, row.account)}
     />
   );

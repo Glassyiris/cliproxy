@@ -62,7 +62,7 @@ function Tile({
       iconLabel={data ? word(judgement) : t("overview.tiles.loading")}
       value={
         data ? (
-          <Text type={roles.textType.metric} hasTabularNumbers>
+          <Text type={roles.textType.metric} hasTabularNumbers textWrap="nowrap">
             {data.value}
           </Text>
         ) : (
