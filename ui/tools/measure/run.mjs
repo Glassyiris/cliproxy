@@ -60,9 +60,10 @@ const ROUTES = {
     answer: "[role=main] tbody tr",
     measures: ["primaryButton", "headerControl", "rowAction", "skeletonShift"],
   },
+  // The header's one control is the live view Switch, not a button.
   activity: {
     answer: "#activity-traffic",
-    measures: ["headerControl", "cardPadding", "skeletonShift", "tableRow", "rowAction"],
+    measures: ["cardPadding", "skeletonShift", "tableRow", "rowAction"],
   },
   // The group list needs no data, so the phone's first view has no skeleton to measure.
   settings: { answer: "#settings-nav", measures: ["primaryButton", "headerControl"] },

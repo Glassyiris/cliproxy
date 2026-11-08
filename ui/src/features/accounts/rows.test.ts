@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Credential } from "../../lib/api/credentials.ts";
 import {
+  countBy,
   fieldPatch,
+  hasShow,
   hiddenSelection,
   inScope,
   inView,
   matches,
   reach,
+  shows,
   toRows,
   toSwitch,
   type Row,
@@ -88,4 +91,32 @@ test("the default view keeps accounts that cannot serve; a status narrows to tha
   assert.equal(inView(scope, "all").length, 3);
   assert.deepEqual(keys(inScope(list, { provider: "", show: "signIn", search: "" })), ["3"]);
   assert.deepEqual(keys(inScope(list, { provider: "", show: "ready", search: "" })), ["1"]);
+});
+
+test("the status options partition the accounts: a Low account is not also Ready", () => {
+  const used = { "1": 90, "2": 40 } as Record<string, number>;
+  const limits = (a: Credential) =>
+    a.auth_index in used
+      ? {
+          windows: [{ label: { name: "session" as const }, used: used[a.auth_index], reset: "" }],
+          at: 1,
+        }
+      : null;
+  const files: Partial<Credential>[] = [
+    { name: "low.json", auth_index: "1" },
+    { name: "ok.json", auth_index: "2" },
+    { name: "off.json", auth_index: "3", disabled: true },
+    { name: "bad.json", auth_index: "4", status: "error", status_message: "HTTP 401" },
+  ];
+  const list = toRows(files.map(account), { ...quota, limits }, 0);
+  const counts = countBy(list, shows, hasShow);
+  assert.equal(
+    [...counts.values()].reduce((a, b) => a + b, 0),
+    list.length,
+  );
+  assert.deepEqual([counts.get("ready"), counts.get("low")], [1, 1]);
+  const low = list.find((r) => r.account.auth_index === "1")!;
+  // Low still serves: it is not in the needs view, and its row reads the filter's word.
+  assert.deepEqual([low.view.ready, low.view.lamp, low.view.word], [true, "warn", { kind: "low" }]);
+  assert.deepEqual(keys(inView(list, "needs")).sort(), ["3", "4"]);
 });

@@ -66,13 +66,20 @@ const reasons = [
   "other",
 ] as const;
 
-/** The status filter (`show=`): it can serve, it serves with a window near its limit, or a reason. */
+/**
+ * The status filter (`show=`): it can serve, it serves with a window near its limit, or a reason.
+ * The options partition the accounts: Ready leaves out the Low ones, which also serve.
+ */
 export const shows = ["ready", "low", ...reasons] as const;
 export type Show = (typeof shows)[number];
 export const isShow = (value: string | undefined): value is Show => shows.includes(value as Show);
 
 export const hasShow = (row: Row, show: Show) =>
-  show === "ready" ? row.view.ready : show === "low" ? row.view.low : row.view.state.state === show;
+  show === "ready"
+    ? row.view.ready && !row.view.low
+    : show === "low"
+      ? row.view.low
+      : row.view.state.state === show;
 
 /** The filters in the hash: family ("" is every family), view, status ("" is any) and search. */
 export type Filters = { provider: string; view: View; show: Show | ""; search: string };

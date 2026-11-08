@@ -2,8 +2,7 @@ export default {
   en: {
     "usage.page.title": "Usage",
     "usage.page.window": "Last 200 minutes",
-    "usage.page.live": "Live view on",
-    "usage.page.off": "Live view off",
+    "usage.page.liveSwitch": "Live view",
     "usage.page.start": "Start live view",
     "usage.page.liveRead": "live usage",
     "usage.page.liveAction": "the live request view",

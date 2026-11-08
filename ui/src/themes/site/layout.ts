@@ -47,9 +47,13 @@ export const layout = {
   // tabular digits, then the 20 ten-minute bars at one width, so every row's count and timeline
   // start at the same x. The column holds both plus the cell's inline padding.
   requests: { count: "5ch", strip: 120, column: 200 },
-  // A page hosted in a dialog (PageDialog): one height for every step of a wizard, so the frame
-  // does not jump between steps; tall enough that Connect's longest step, the list of ways, does not
-  // scroll at 1440x900, and the viewport less 2rem on a phone so the footer stays on screen.
+  // A page hosted in a dialog (PageDialog) and the Use with a tool wizard: one height for every
+  // step of a wizard, so the frame does not jump between steps; tall enough that Connect's longest
+  // step, the list of ways, does not scroll at 1440x900, and the viewport less 2rem on a phone so
+  // the footer stays on screen.
+  // A header control that is not a button (the Usage live view Switch) sits in a button's height,
+  // so it lines up with the h1 as the other pages' buttons do.
+  headerControl: "var(--size-element-md)",
   pageDialog: { height: "min(40rem, calc(100dvh - 2rem))" },
   // The settings-dialog template's frame: 1120 x min(800, viewport less 2rem), one size for every
   // panel so the frame does not jump as panels change; below 40rem the side rail becomes a tab

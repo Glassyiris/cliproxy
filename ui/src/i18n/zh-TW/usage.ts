@@ -2,8 +2,7 @@ export default {
   "zh-TW": {
     "usage.page.title": "用量",
     "usage.page.window": "最近 200 分鐘",
-    "usage.page.live": "即時檢視已開啟",
-    "usage.page.off": "即時檢視已關閉",
+    "usage.page.liveSwitch": "即時檢視",
     "usage.page.start": "開始即時檢視",
     "usage.page.liveRead": "即時用量",
     "usage.page.liveAction": "即時請求檢視",

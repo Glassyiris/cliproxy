@@ -296,8 +296,10 @@ function SourceTable({
   const isPhone = useAppShellMobile().isMobile;
   const all = rows?.reduce((n, r) => n + r.total, 0) ?? 0;
   const data: Row[] = rows ? rows.map((s) => ({ id: s.key, item: s })) : placeholderRows;
+  // A fragment: the Table bleeds into its container's top padding when it is its parent's first
+  // child, which pulled it up against the chart card.
   return (
-    <VStack gap={3}>
+    <>
       <Table<Row>
         data={data}
         columns={sourceColumns(all, chosen, onChoose, isPhone)}
@@ -310,7 +312,7 @@ function SourceTable({
           {sourcesSummary(rows)}
         </Text>
       )}
-    </VStack>
+    </>
   );
 }
 
@@ -348,10 +350,11 @@ export function TrafficSection({
   // With no rows, a failed account read's banner says why; nothing read at all is the empty state.
   const body =
     rows?.length !== 0 ? (
-      <>
+      // The chart and the table under it are spaced as sections, not packed as one card's blocks.
+      <VStack gap={roles.gap.section}>
         <TrafficCard rows={rows} times={times} choice={choice} onChoose={onChoose} />
         <SourceTable rows={rows} chosen={choice?.key ?? ""} onChoose={onChoose} />
-      </>
+      </VStack>
     ) : (
       !accountRead &&
       keysAnswered && <EmptyState title={t("usage.sources.empty")} headingLevel={3} isCompact />

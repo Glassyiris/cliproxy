@@ -103,6 +103,9 @@ test("account rows: status words, honest unknowns, low, last used and weekly ord
   assert.equal(row({}, checked([w(session, 84.9), w({ name: "weeklyLimit" }, 10)])).low, false);
   assert.deepEqual(row({}, checked([w(session, 8), w({ name: "weeklyLimit" }, 86)])).sub, { kind: "low", window: "weekly", used: 86 });
   assert.deepEqual(row({}, checked([w(session, 8)])).sub, { kind: "canServe" });
+  // A Low row reads Low with the warning lamp and keeps its line while serving.
+  const busyLow = row({ recent_requests: traffic(19) }, checked([w(session, 92)]));
+  assert.deepEqual([busyLow.word, busyLow.lamp, busyLow.ready, busyLow.serving, busyLow.sub], [{ kind: "low" }, "warn", true, true, { kind: "low", window: "session", used: 92 }]);
   const cooling = row({ cooldowns: [{ scope: "credential", retry_at: at(20 * 60_000) }] }, checked([w(session, 100)]));
   assert.deepEqual(cooling.word, { kind: "coolingUntil", until: now + 20 * 60_000 });
   assert.deepEqual(cooling.sub, { kind: "coolingDown" });

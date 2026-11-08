@@ -6,7 +6,8 @@
 // - No date-range, segment or device selectors and no Export: the server keeps 200 minutes of
 //   ten-minute buckets and nothing to export; the chart card's line names that window instead.
 // - The only header control is the live view switch (plan 五: opened from the header, confirmed
-//   first). Reading the usage queue removes records for other readers (REQUIREMENTS Exceptions).
+//   first), a labelled Switch: an on/off state, and a ghost toggle read as plain text. Reading the
+//   usage queue removes records for other readers (REQUIREMENTS Exceptions).
 // - No "Key metrics" grid over the 200 minutes: the totals are Overview's tiles and this chart's
 //   conclusion, so tiles here would repeat them. MetricCards appear for the live view only.
 // - The source filter sits on the chart card, not in the header: it changes that chart only.
@@ -20,16 +21,16 @@
 // - Section headings are SectionHeading (no icon tile): roles "Heading levels".
 import { useEffect, useMemo, useRef, useState } from "react";
 import { focusManager } from "@tanstack/react-query";
-import { Radio } from "lucide-react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
-import { Icon } from "@astryxdesign/core/Icon";
-import { ToggleButton } from "@astryxdesign/core/ToggleButton";
+import { HStack } from "@astryxdesign/core/Layout";
+import { Switch } from "@astryxdesign/core/Switch";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { useAvailable } from "../../components/MissingActions.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { t } from "../../lib/i18n.ts";
 import { usageStats, type UsageEvent } from "../../lib/usage.ts";
+import { layout } from "../../themes/site/layout.ts";
 import { LiveSection } from "./Live.tsx";
 import { useUsageDrain } from "./queries.ts";
 import { addBatch, recent } from "./summary.ts";
@@ -87,14 +88,13 @@ export default function Usage() {
   const [isAsking, setAsking] = useState(false);
   const isAvailable = useAvailable();
   const canStart = isAvailable(routes.drainUsageQueue);
-  const toggle = useRef<HTMLButtonElement>(null);
+  const toggle = useRef<HTMLInputElement>(null);
   // Retry and the empty state's Start go with their region; focus goes to the header switch.
   const start = () => {
     view.start();
     toggle.current?.focus();
   };
   const settled = traffic.rows !== undefined || !!traffic.accountRead || !!traffic.keyRead;
-  const word = view.live ? t("usage.page.live") : t("usage.page.off");
   return (
     <PageFrame
       title={t("usage.page.title")}
@@ -102,14 +102,16 @@ export default function Usage() {
       actions={
         // Disabled, not hidden, while the queue route is probed or missing, so the header does
         // not move when it is known (REQUIREMENTS Exceptions: probed write actions).
-        <ToggleButton
-          ref={toggle}
-          label={word}
-          isPressed={view.live}
-          isDisabled={!view.live && !canStart}
-          icon={<Icon icon={Radio} size="sm" />}
-          onPressedChange={() => (view.live ? view.stop() : setAsking(true))}
-        />
+        <HStack height={layout.headerControl} vAlign="center">
+          <Switch
+            ref={toggle}
+            label={t("usage.page.liveSwitch")}
+            labelPosition="start"
+            value={view.live}
+            isDisabled={!view.live && !canStart}
+            onChange={(on) => (on ? setAsking(true) : view.stop())}
+          />
+        </HStack>
       }
     >
       <TrafficSection

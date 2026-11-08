@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CircleQuestionMark, CloudOff, Gauge, KeyRound, LogIn, PowerOff } from "lucide-react";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Grid } from "@astryxdesign/core/Grid";
@@ -7,6 +8,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { MetricCard } from "../../components/MetricCard.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { SectionHeading } from "../../components/SectionHeading.tsx";
+import { Words } from "../../components/Words.tsx";
 import { currentLocale, t } from "../../lib/i18n.ts";
 import { span } from "../../lib/time.ts";
 import { layout } from "../../themes/site/layout.ts";
@@ -83,7 +85,7 @@ const count = (n: number) => (
   </Text>
 );
 
-const basis = (text: string) => (
+const basis = (text: ReactNode) => (
   <Text type={roles.textType.supporting} color="secondary">
     {text}
   </Text>
@@ -109,9 +111,11 @@ function AlertCard({ alert, now }: { alert: Alert; now: number }) {
   const { reason, soonest } = alert;
   const { title, hint, icon, tone } = look[reason];
   const detail =
-    soonest === null
-      ? hint?.()
-      : t("overview.tiles.soonestBack", { time: span(Math.max(0, soonest - now)) });
+    soonest === null ? (
+      hint?.()
+    ) : (
+      <Words>{t("overview.tiles.soonestBack", { time: span(Math.max(0, soonest - now)) })}</Words>
+    );
   return (
     <MetricCard
       label={title()}

@@ -4,6 +4,8 @@
 // Continue, and the draft reset when the dialog opens. Deviations, one per line:
 // - 800 wide (roles.content.formWidth), not 620: every hosted dialog is 800 (PageDialog), and the
 //   setup snippets are code lines that wrap or scroll sooner at 620.
+// - One height for every step, PageDialog's (layout.pageDialog), as the template's fixed-height
+//   rule asks: the header and footer stay put and only the step's body scrolls.
 // - The tool and the key live in the hash (`tool`, `key`), so a key row opens the dialog with its
 //   key and old `#use?tool=` links land on their tool; the step stays component state.
 // - The last step's primary action is Done, which closes: the result is the test banner, and there
@@ -23,6 +25,7 @@ import {
   LayoutFooter,
   LayoutHeader,
   StackItem,
+  VStack,
 } from "@astryxdesign/core/Layout";
 import { Step, Stepper } from "@astryxdesign/core/Stepper";
 import { Plus } from "lucide-react";
@@ -34,6 +37,7 @@ import { base } from "../../lib/api/client.ts";
 import { newKey } from "../../lib/client-keys.ts";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
+import { layout } from "../../themes/site/layout.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { isLocalHost, toolTarget } from "./address.ts";
 import { ChooseTool } from "./ChooseTool.tsx";
@@ -210,27 +214,30 @@ export function UseWithTools({ isOpen, onClose }: { isOpen: boolean; onClose: ()
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       width={roles.content.formWidth}
+      maxHeight={layout.pageDialog.height}
       purpose="form"
     >
-      <Layout
-        height="fill"
-        padding={4}
-        defaultHasDividers
-        header={<ProgressHeader step={step} onOpenChange={onOpenChange} />}
-        content={
-          <LayoutContent>
-            <StepBody step={step} isOpen={isOpen} onCreated={() => setBlocked(false)} />
-          </LayoutContent>
-        }
-        footer={
-          <StepFooter
-            step={step}
-            blocked={blocked && !hasKey}
-            onBack={() => setStep(Math.max(0, step - 1))}
-            onNext={next}
-          />
-        }
-      />
+      <VStack height={layout.pageDialog.height}>
+        <Layout
+          height="fill"
+          padding={4}
+          defaultHasDividers
+          header={<ProgressHeader step={step} onOpenChange={onOpenChange} />}
+          content={
+            <LayoutContent>
+              <StepBody step={step} isOpen={isOpen} onCreated={() => setBlocked(false)} />
+            </LayoutContent>
+          }
+          footer={
+            <StepFooter
+              step={step}
+              blocked={blocked && !hasKey}
+              onBack={() => setStep(Math.max(0, step - 1))}
+              onNext={next}
+            />
+          }
+        />
+      </VStack>
     </Dialog>
   );
 }

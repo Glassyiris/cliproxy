@@ -21,6 +21,7 @@ import { useAvailable } from "../../components/MissingActions.tsx";
 import { QuotaWindow, quotaErrorText } from "../../components/QuotaWindow.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
+import { Words } from "../../components/Words.tsx";
 import { setCredentialFields } from "../../lib/api/credentials.ts";
 import { routes } from "../../lib/api/routes.ts";
 import { equal } from "../../lib/compare.ts";
@@ -54,7 +55,9 @@ function State({ row, now }: Pick<PanelProps, "row"> & { now: number }) {
       {reason && <MetadataListItem label={t("accounts.panel.reason")}>{reason}</MetadataListItem>}
       {!row.view.ready && (
         <MetadataListItem label={t("accounts.columns.recovery")}>
-          {r.second ? t("accounts.panel.recoveryAt", { when: r.first, at: r.second }) : r.first}
+          <Words>
+            {r.second ? t("accounts.panel.recoveryAt", { when: r.first, at: r.second }) : r.first}
+          </Words>
         </MetadataListItem>
       )}
       <MetadataListItem label={t("accounts.panel.lastUsed")}>{lastOf(row.view)}</MetadataListItem>

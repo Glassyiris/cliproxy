@@ -58,9 +58,11 @@ function useSections() {
 function AddMenu({
   configured,
   onPick,
+  isDisabled,
 }: {
   configured: ReadonlySet<Family>;
   onPick: (family: Family) => void;
+  isDisabled: boolean;
 }) {
   const item = (f: Family) => ({ label: familyName(f), onClick: () => onPick(f) });
   const unused = families.filter((f) => !configured.has(f));
@@ -71,6 +73,7 @@ function AddMenu({
         label: t("providers.page.add"),
         variant: roles.primaryAction.variant,
         icon: <Icon icon={Plus} size="sm" />,
+        isDisabled,
       }}
       alignment="end"
       items={[
@@ -226,7 +229,9 @@ export default function ProviderKeys() {
     listRef.current?.querySelector<HTMLElement>("tbody tr[tabindex]")?.focus(),
   );
   const { config, usage, entries, open, go, writes, isMobile } = page;
-  const addMenu = entries && <AddMenu configured={page.configured} onPick={page.setAdding} />;
+  const addMenu = (
+    <AddMenu configured={page.configured} onPick={page.setAdding} isDisabled={!entries} />
+  );
   const panel = open && {
     label: t("providers.panel.label", { name: open.name }),
     content: (
@@ -250,8 +255,9 @@ export default function ProviderKeys() {
       actions={
         <>
           <SettingsLink />
-          {/* The empty state carries Add itself, so the page keeps one primary action. */}
-          {!!entries?.length && addMenu}
+          {/* The empty state carries Add itself, so the page keeps one primary action. Drawn,
+              disabled, while the config loads, so the header does not grow when it arrives. */}
+          {(config.isPending || !!entries?.length) && addMenu}
         </>
       }
       panel={panel}

@@ -1,6 +1,7 @@
 // The table-filter template's row activation (`table-filter:2728-2767`): each row is one tab stop,
-// a click or Enter or Space opens its detail, and the open row is one step past hover.
-import { useMemo, type KeyboardEvent, type MouseEvent } from "react";
+// a click or Enter or Space opens its detail, and the open row is one step past hover. When the
+// detail closes and takes focus with it, focus goes back to the row, as rowKeys does for Accounts.
+import { useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent } from "react";
 import * as stylex from "@stylexjs/stylex";
 import type { TablePlugin } from "@astryxdesign/core/Table";
 import { colorVars } from "@astryxdesign/core/theme/tokens.stylex";
@@ -17,6 +18,17 @@ export function useRowActivation<T extends { key: string }>(
   openKey: string | undefined,
   onOpen: (row: T) => void,
 ) {
+  const opened = useRef(openKey);
+  useEffect(() => {
+    const was = opened.current;
+    opened.current = openKey;
+    if (!was || openKey) return;
+    requestAnimationFrame(() => {
+      // Only focus that the closing panel dropped; a move made on purpose stays.
+      if (document.activeElement && document.activeElement !== document.body) return;
+      document.querySelector<HTMLElement>(`tr[data-row-key="${CSS.escape(was)}"]`)?.focus();
+    });
+  }, [openKey]);
   return useMemo<TablePlugin<T>>(
     () => ({
       transformBodyRow: (props, item) => {
@@ -26,6 +38,7 @@ export function useRowActivation<T extends { key: string }>(
           htmlProps: {
             ...props.htmlProps,
             tabIndex: 0,
+            "data-row-key": item.key,
             "aria-current": isOpen ? true : undefined,
             onClick: (event: MouseEvent<HTMLTableRowElement>) => {
               // Buttons and menus in a cell own their own clicks.

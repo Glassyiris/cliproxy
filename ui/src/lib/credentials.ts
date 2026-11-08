@@ -131,16 +131,24 @@ export type QuotaWhy = "notChecked" | "notReported" | "readFailed" | "noWindows"
 /** A quota cell: the window, and how old its numbers are when kept past a refused sign-in. */
 export type Bar = { window: Window; staleFor: number | null } | { why: QuotaWhy };
 export type AccountRow = {
+  /** The state's lamp; a Low row's is "warn", though it still serves. */
   lamp: Lamp;
   /** Ready with a request in the latest bucket: the lamp is live and the word is "In use". */
   serving: boolean;
   state: CredState;
-  /** "In use", "Cooling until <until>" (24-hour clock, weekday when not today), or the state's word. */
-  word: { kind: "inUse" } | { kind: "coolingUntil"; until: number } | { kind: "state" };
   /**
-   * The line under the word: "serving now", "<Session | Weekly | window> <used>% used", "can serve
-   * now", "token refused", "not in rotation", the server's message, "<n> models cooling", "cooling
-   * down", or nothing.
+   * "Low quota" (the status filter's word, ahead of "In use"), "In use", "Cooling until <until>"
+   * (24-hour clock, weekday when not today), or the state's word.
+   */
+  word:
+    | { kind: "low" }
+    | { kind: "inUse" }
+    | { kind: "coolingUntil"; until: number }
+    | { kind: "state" };
+  /**
+   * The line under the word: "<Session | Weekly | window> <used>% used" (a Low row, serving or
+   * not), "serving now", "can serve now", "token refused", "not in rotation", the server's
+   * message, "<n> models cooling", "cooling down", or nothing.
    */
   sub:
     | { kind: "serving" | "canServe" | "tokenRefused" | "notInRotation" | "coolingDown" }
@@ -157,8 +165,9 @@ export type AccountRow = {
   last: { kind: "notIn"; minutes: number } | { kind: "now" } | { kind: "ago"; ms: number } | null;
   /** Weekly reset time for sorting; Infinity when unknown. */
   next: number;
-  /** Can serve now: Ready or In use. */
+  /** Can serve now: Ready, In use or Low. */
   ready: boolean;
+  /** Ready with a reported window at 85% or more; the status filter lists it apart from Ready. */
   low: boolean;
   attention: boolean;
 };
@@ -190,8 +199,8 @@ function why(a: Data, q: Limits, windows: Window[], source: boolean): QuotaWhy {
 }
 
 function sub(s: CredState, ready: boolean, serving: boolean, disabled: boolean, low: AccountRow["sub"]): AccountRow["sub"] {
-  if (serving) return { kind: "serving" };
   if (low) return low;
+  if (serving) return { kind: "serving" };
   if (ready) return { kind: "canServe" };
   if (s.state === "signIn") return { kind: "tokenRefused" };
   if (disabled) return { kind: "notInRotation" };
@@ -227,10 +236,10 @@ export function accountRow(a: Data, q: Limits, live: boolean, source: boolean, n
       ? { kind: "low", window: high === session ? "session" : high === weekly ? "weekly" : high.label, used: high.used! }
       : null;
   return {
-    lamp: s.lamp,
+    lamp: low ? "warn" : s.lamp,
     serving,
     state: s,
-    word: serving ? { kind: "inUse" } : s.lamp === "warn" && s.until ? { kind: "coolingUntil", until: s.until } : { kind: "state" },
+    word: low ? { kind: "low" } : serving ? { kind: "inUse" } : s.lamp === "warn" && s.until ? { kind: "coolingUntil", until: s.until } : { kind: "state" },
     sub: sub(s, ready, serving, !!a.disabled, lowSub),
     session: bar(session),
     weekly: bar(weekly),

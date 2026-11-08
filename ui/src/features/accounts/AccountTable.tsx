@@ -36,6 +36,7 @@ import { ListSkeleton } from "../../components/loadingRows.tsx";
 import { isRowItself, onRowKey, rowAt, useReturnFocus } from "../../components/rowKeys.ts";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
 import { TwoLines } from "../../components/TwoLines.tsx";
+import { Words } from "../../components/Words.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
@@ -153,9 +154,11 @@ function Summary({ row, now }: { row: Row; now: number }) {
       </HStack>
       {!row.view.ready && (
         <Text type={roles.textType.supporting} color="secondary" hasTabularNumbers>
-          {r.second
-            ? t("accounts.row.recoveryAt", { when: r.first, at: r.second })
-            : t("accounts.row.recovery", { when: r.first })}
+          <Words>
+            {r.second
+              ? t("accounts.row.recoveryAt", { when: r.first, at: r.second })
+              : t("accounts.row.recovery", { when: r.first })}
+          </Words>
         </Text>
       )}
     </VStack>

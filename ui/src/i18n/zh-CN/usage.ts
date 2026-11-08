@@ -2,8 +2,7 @@ export default {
   "zh-CN": {
     "usage.page.title": "用量",
     "usage.page.window": "最近 200 分钟",
-    "usage.page.live": "实时查看已开启",
-    "usage.page.off": "实时查看已关闭",
+    "usage.page.liveSwitch": "实时查看",
     "usage.page.start": "开始实时查看",
     "usage.page.liveRead": "实时用量",
     "usage.page.liveAction": "实时请求视图",

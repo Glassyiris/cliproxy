@@ -6,6 +6,7 @@ import { money, t } from "../lib/i18n.ts";
 import type { QuotaError } from "../lib/quota.ts";
 import type { Window, WindowLabel } from "../lib/quota-windows.ts";
 import { span } from "../lib/time.ts";
+import { Words } from "./Words.tsx";
 
 /** A window's title in the current language; plugin and Kimi titles are the server's own text. */
 export function windowLabel(label: WindowLabel): string {
@@ -109,7 +110,7 @@ export function QuotaWindow({
       <HStack gap={2} vAlign="center" wrap="wrap">
         <Text type="body">{label}</Text>
         <Text type="supporting" color="secondary">
-          {line}
+          <Words>{line}</Words>
         </Text>
       </HStack>
     );
@@ -125,7 +126,7 @@ export function QuotaWindow({
       />
       {line && (
         <Text type="supporting" color="secondary">
-          {line}
+          <Words>{line}</Words>
         </Text>
       )}
     </VStack>

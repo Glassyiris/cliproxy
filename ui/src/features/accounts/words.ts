@@ -19,6 +19,7 @@ const stateWords: Record<AccountRow["state"]["state"], () => string> = {
 
 /** The word beside the lamp; when an account comes back is its own column. */
 export function statusOf(v: AccountRow) {
+  if (v.word.kind === "low") return t("accounts.filters.low");
   if (v.word.kind === "inUse") return t("accounts.row.inUse");
   return v.state.state === "other" ? (v.state.status ?? "") : stateWords[v.state.state]();
 }

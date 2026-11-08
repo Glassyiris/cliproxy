@@ -161,6 +161,7 @@ export default function PayloadRules() {
       label={t("payload.page.add")}
       variant={roles.primaryAction.variant}
       icon={<Icon icon={Plus} />}
+      isDisabled={page.config.isPending}
       onClick={() => page.setAdding(true)}
     />
   );
@@ -179,7 +180,9 @@ export default function PayloadRules() {
       actions={
         <>
           <SettingsLink />
-          {hasRules && addButton}
+          {/* Drawn, disabled, while the config loads, so the header does not grow when it arrives;
+              with no rules the empty state carries Add. */}
+          {(page.config.isPending || hasRules) && addButton}
         </>
       }
       toolbar={
