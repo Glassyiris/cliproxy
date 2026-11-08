@@ -91,16 +91,23 @@ def pr_number(file: str, root: Path, runner) -> int:
     return number
 
 
+NUMBERED = re.compile(r"\(#\d+\)$")
+
+
 def render(root: Path, runner=run, warn=warn_stderr) -> tuple[str, list[str]]:
     found = fragments(root)
     groups: dict[str, list[str]] = {kind: [] for kind in TYPES}
     for file, kind, bullets in found:
+        bullets = [b.rstrip() for b in bullets]
         suffix = ""
-        try:
-            suffix = f" (#{pr_number(file, root, runner)})"
-        except Exception as error:  # git or gh missing, offline, no PR yet
-            warn(f"changelog: {file}: omitting PR number: {error}")
-        groups[kind].extend(f"{b.rstrip()}{suffix}" for b in bullets)
+        # A bullet that already ends with "(#N)" keeps it: fragments written after their PR
+        # merged (a backfill) name the PR the change came from, not the one that added them.
+        if not all(NUMBERED.search(b) for b in bullets):
+            try:
+                suffix = f" (#{pr_number(file, root, runner)})"
+            except Exception as error:  # git or gh missing, offline, no PR yet
+                warn(f"changelog: {file}: omitting PR number: {error}")
+        groups[kind].extend(b if NUMBERED.search(b) else f"{b}{suffix}" for b in bullets)
     sections = [f"### {kind}\n\n" + "\n".join(groups[kind]) for kind in TYPES if groups[kind]]
     return "\n\n".join(["## [Unreleased]", *sections]) + "\n", [f for f, _, _ in found]
 

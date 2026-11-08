@@ -119,6 +119,25 @@ class Render(Repo):
         self.assertNotIn("(#", render(self.root, runner, warnings.append)[0])
         self.assertRegex(warnings[0], "no associated PR found")
 
+    def test_backfilled_numbers_are_kept(self):
+        backfill = self.add("old.md", "Changed\n\n- Earlier change. (#3)\n- Another one. (#3)\n")
+        mixed = self.add("mixed.md", "Fixed\n\n- Named fix. (#4)\n- New fix.\n")
+        asked = []
+        runner = self.git_runner({backfill: 20, mixed: 21})
+
+        def counting(program, args, cwd=None):
+            if program == "gh":
+                asked.append(args[1])
+            return runner(program, args, cwd)
+
+        self.assertEqual(
+            render(self.root, counting)[0],
+            "## [Unreleased]\n\n### Changed\n\n- Earlier change. (#3)\n- Another one. (#3)\n\n"
+            "### Fixed\n\n- Named fix. (#4)\n- New fix. (#21)\n",
+        )
+        # A fragment whose bullets all carry a number needs no lookup.
+        self.assertEqual(asked, [f"repos/{{owner}}/{{repo}}/commits/{mixed}/pulls"])
+
     def test_empty_directory_and_uncommitted_fragment(self):
         self.assertEqual(render(self.root, offline, lambda _: None)[0], "## [Unreleased]\n")
         (self.root / "changes/new.md").write_text("Added\n\n- Uncommitted change.\n")
