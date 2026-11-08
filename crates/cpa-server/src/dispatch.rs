@@ -561,14 +561,16 @@ where
                 response.headers_mut().insert("x-cpa-trace-id", value);
             }
             // The model a model router chose, and the provider that served (cliproxy-rs only).
-            if let Some(value) = trace
-                .routed_model()
-                .and_then(|m| axum::http::HeaderValue::from_str(&m).ok())
-            {
+            // Both are sent only when a router or `routing.providers` is in play, so a config
+            // without them answers exactly as Go does.
+            let routed_model = trace.routed_model();
+            let routed = routed_model.is_some() || rt.policy().providers.is_set();
+            if let Some(value) = routed_model.and_then(|m| axum::http::HeaderValue::from_str(&m).ok()) {
                 response.headers_mut().insert("x-cpa-routed-model", value);
             }
             if let Some(value) = trace
                 .routed_provider(&rt)
+                .filter(|_| routed)
                 .and_then(|p| axum::http::HeaderValue::from_str(&p).ok())
             {
                 response.headers_mut().insert("x-cpa-routed-provider", value);

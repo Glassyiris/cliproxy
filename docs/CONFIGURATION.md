@@ -136,7 +136,7 @@ routing:
 - **Order.** Tiers are tried top down, `strategy` balances inside a tier, and unlisted credentials follow by `priority`. Order only places new conversations: with `session-affinity` a conversation keeps its usable account even when a higher tier recovers, so its cache stays warm.
 - **Failover** to the next credential follows the entry's `request-scoped-errors` actions, else the usual handling.
 
-`X-CPA-Routed-Provider` names the serving credential's selector.
+`X-CPA-Routed-Provider` names the serving credential's selector. It is sent only when `routing.providers` sets `exclude` or `order`, or a model router served the request.
 
 ### Optional preset: fail over only on 429
 

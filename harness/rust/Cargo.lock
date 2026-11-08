@@ -536,6 +536,7 @@ dependencies = [
  "cpa-exec",
  "cpa-plugin",
  "cpa-translate",
+ "flate2",
  "futures-util",
  "getrandom 0.3.4",
  "gjson",

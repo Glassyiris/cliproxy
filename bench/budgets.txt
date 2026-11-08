@@ -74,10 +74,15 @@
 # afc8474, +14 KB .text (+16 KB binary, +6 KB archive) over master's build at 80ce87c
 # in this job (30_131_831 to 30_146_167); the lines below are that job's measurements.
 # The rest of the rise came with master's changes since #148's line.
-size.x86_64-unknown-linux-gnu.binary_bytes   44_725_616  2
-size.x86_64-unknown-linux-gnu.text_bytes     30_146_167  2
-size.x86_64-unknown-linux-gnu.rodata_bytes    8_492_512  2
-size.x86_64-unknown-linux-gnu.archive_bytes  19_024_966  2
+# 2026-11-09: the React dashboard (#1), embedded gzip-compressed (1.06 MB; 3.3 MB as
+# built), and model routers with provider scope and order (#2). At f6f6530, +0.88 MB
+# .rodata, +223 KB .text (+1.13 MB binary, +1.10 MB archive) over the previous budget
+# values, in this job; the lines below are that job's measurements. The archive barely
+# shrinks from the gzip step because the archive is compressed anyway.
+size.x86_64-unknown-linux-gnu.binary_bytes   45_858_704  2
+size.x86_64-unknown-linux-gnu.text_bytes     30_368_887  2
+size.x86_64-unknown-linux-gnu.rodata_bytes    9_369_056  2
+size.x86_64-unknown-linux-gnu.archive_bytes  20_120_276  2
 # Crates linked into the binary in two or more versions; a new one fails until it is
 # justified here. 2026-10-05: base64, block-buffer, cpufeatures, crypto-common, digest,
 # getrandom, hashbrown (3), rand, rand_core, sha2, thiserror.

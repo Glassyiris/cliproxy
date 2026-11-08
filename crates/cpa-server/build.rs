@@ -1,5 +1,8 @@
 use std::fmt::Write;
+use std::io::Write as _;
 use std::path::Path;
+
+use flate2::{Compression, GzBuilder};
 
 fn collect(path: &Path, files: &mut Vec<std::path::PathBuf>) {
     for entry in std::fs::read_dir(path)
@@ -28,8 +31,9 @@ fn main() {
     let mut files = Vec::new();
     collect(&root, &mut files);
     files.sort();
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let mut output =
-        String::from("fn dashboard_asset(path: &str) -> Option<(&'static [u8], &'static str)> { match path {\n");
+        String::from("fn dashboard_asset(path: &str) -> Option<(&'static [u8], &'static str, bool)> { match path {\n");
     for path in files {
         // The match key is a URL path, so it is joined with `/` on every host;
         // `display()` would give `\` on Windows. include_bytes! keeps the native path.
@@ -39,7 +43,19 @@ fn main() {
             .components()
             .map(|part| format!("/{}", part.as_os_str().to_str().unwrap()))
             .collect();
-        let mime = match path.extension().and_then(|s| s.to_str()).unwrap_or_default() {
+        let extension = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
+        let gzip = matches!(extension, "html" | "js" | "css" | "svg" | "json");
+        let stored = if gzip {
+            let target = out_dir.join(format!("{}.gz", name.trim_start_matches('/')));
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            let mut encoder = GzBuilder::new().mtime(0).write(Vec::new(), Compression::best());
+            encoder.write_all(&std::fs::read(&path).unwrap()).unwrap();
+            std::fs::write(&target, encoder.finish().unwrap()).unwrap();
+            target
+        } else {
+            path.clone()
+        };
+        let mime = match extension {
             "html" => "text/html; charset=utf-8",
             "js" => "text/javascript; charset=utf-8",
             "css" => "text/css; charset=utf-8",
@@ -50,8 +66,8 @@ fn main() {
         };
         writeln!(
             output,
-            "{name:?} => Some((include_bytes!({:?}), {mime:?})),",
-            path.to_str().unwrap()
+            "{name:?} => Some((include_bytes!({:?}), {mime:?}, {gzip})),",
+            stored.to_str().unwrap()
         )
         .unwrap();
         // The page is served at /management.html (the URL the Go dashboard used) and the build
@@ -59,16 +75,12 @@ fn main() {
         if name == "/index.html" {
             writeln!(
                 output,
-                "\"/management.html\" => Some((include_bytes!({:?}), {mime:?})),",
-                path.to_str().unwrap()
+                "\"/management.html\" => Some((include_bytes!({:?}), {mime:?}, {gzip})),",
+                stored.to_str().unwrap()
             )
             .unwrap();
         }
     }
     output.push_str("_ => None, } }\n");
-    std::fs::write(
-        Path::new(&std::env::var("OUT_DIR").unwrap()).join("dashboard.rs"),
-        output,
-    )
-    .unwrap();
+    std::fs::write(out_dir.join("dashboard.rs"), output).unwrap();
 }

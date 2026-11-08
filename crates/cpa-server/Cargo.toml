@@ -72,6 +72,9 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 media-relay = ["dep:webrtc", "dep:rtc", "dep:async-trait"]
 pprof = ["dep:pprof", "dep:backtrace"]
 
+[build-dependencies]
+flate2 = "1.1.10"
+
 [dev-dependencies]
 cpa-core = { workspace = true, features = ["test-support"] }
 cpa-plugin = { workspace = true, features = ["test-support"] }
