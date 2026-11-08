@@ -14,4 +14,4 @@ For behaviour of the original Go server, ask in [router-for-me/CLIProxyAPI](http
 - Reproduction steps, expected behaviour and actual behaviour.
 - The server log lines around the problem and, for dashboard problems, the browser name, version and console errors.
 
-Remove API keys, tokens, OAuth credentials, auth files and private data before posting logs, configuration or screenshots. Report suspected vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
+Remove API keys, tokens, OAuth credentials, auth files and private data before posting logs, configuration or screenshots. Report suspected vulnerabilities privately as described in [SECURITY.md](../SECURITY.md), not in a public issue.
