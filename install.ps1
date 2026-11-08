@@ -116,10 +116,10 @@ function Install-CliproxyRs([bool]$Service, [bool]$BinaryOnly) {
   $displaced = $null
   if (Test-Path -LiteralPath $exe) {
     $displaced = Join-Path $dir ("cliproxy.prev-" + [guid]::NewGuid() + '.exe')
-    [IO.File]::Move($exe, $displaced)
+    Invoke-Retry { [IO.File]::Move($exe, $displaced) }
     if (-not $runningPrevious) { $previous = $displaced }
   }
-  try { [IO.File]::Move($staged, $exe) } catch {
+  try { Invoke-Retry { [IO.File]::Move($staged, $exe) } } catch {
     $why = $_.Exception.Message
     if ($displaced) { [IO.File]::Move($displaced, $exe) }
     throw "install.ps1: could not put the new cliproxy.exe in place ($why); the previous one is unchanged"
@@ -216,7 +216,9 @@ function Install-CliproxyRs([bool]$Service, [bool]$BinaryOnly) {
   Write-Host 'If cliproxy-rs helps, a star helps others find it: https://github.com/vayungodara/cliproxy-rs'
 }
 
-# Runs a download up to three times, for a brief network or server error.
+# Runs an action up to three times: a download, for a brief network or server error, or
+# a rename of an image another process holds for a moment (an antivirus scan of a file
+# this run has just executed).
 function Invoke-Retry([scriptblock]$Action) {
   for ($i = 1; ; $i++) {
     try { return & $Action } catch { if ($i -ge 3) { throw } }
