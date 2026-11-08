@@ -1,61 +1,57 @@
-import { useEffect, useRef, useState } from "react";
+// The table-grouped body: one group per model name, its header a full-width row that folds the
+// group, then one row per rule (model pattern, action, number of fields, remove).
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { Trash2 } from "lucide-react";
+import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Badge } from "@astryxdesign/core/Badge";
-import { Button } from "@astryxdesign/core/Button";
-import { Code } from "@astryxdesign/core/Code";
-import { CodeBlock } from "@astryxdesign/core/CodeBlock";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Icon } from "@astryxdesign/core/Icon";
-import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
-import { Link } from "@astryxdesign/core/Link";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
-import { Table, TableBody, TableCell, TableRow } from "@astryxdesign/core/Table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
+import { Token } from "@astryxdesign/core/Token";
+import { colorVars } from "@astryxdesign/core/theme/tokens.stylex";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
-import { isRule, modelLabels, type Kind, type Rule } from "./rules.ts";
-import { kindMeaning } from "./words.ts";
+import { roles } from "../../themes/site/roles.ts";
+import { fieldCount, NO_MODEL, UNREADABLE, type RuleRow } from "./rules.ts";
 
-/** `notList`: the server holds something other than a list for this kind. */
-export type Group = { kind: Kind; entries: unknown[]; notList: boolean };
+export type RuleGroup = { name: string; rows: RuleRow[] };
 
-// Past this many lines a rule's parameters start folded.
-const FOLD_LINES = 6;
+const styles = stylex.create({
+  // table-grouped:66-70: the group header fills the row with the muted background.
+  groupHeader: { cursor: "pointer", backgroundColor: colorVars["--color-background-muted"] },
+  clickableRow: { cursor: "pointer" },
+  activeRow: {
+    backgroundColor: colorVars["--color-overlay-pressed"],
+    "--table-row-overlay": colorVars["--color-overlay-pressed"],
+  },
+});
 
-// One column: a rule is its models and Remove button over its parameters, so the parameters take
-// the table's whole width at every viewport.
-const COLUMNS = 1;
+export const groupName = (name: string) => {
+  if (name === NO_MODEL) return t("payload.group.noModels");
+  if (name === UNREADABLE) return t("payload.row.unreadable");
+  return name;
+};
 
-function Models({ rule }: { rule: Rule }) {
-  return (
-    <HStack gap={2} wrap="wrap">
-      {modelLabels(rule).map((label, i) => (
-        <Code key={i}>{label}</Code>
-      ))}
-    </HStack>
-  );
-}
+export const fieldsOf = (row: RuleRow) => fieldCount(row.rule ? row.rule.params : row.entry);
 
-function Params({ params }: { params: unknown }) {
-  const code = JSON.stringify(params, null, 2) ?? "null";
-  const lines = code.split("\n").length;
-  const block = (
-    <CodeBlock code={code} language="json" hasLanguageLabel={false} isWrapped width="100%" />
-  );
-  if (lines <= FOLD_LINES) return block;
-  return (
-    <Collapsible
-      defaultIsOpen={false}
-      chevronPosition="start"
-      trigger={
-        <Text type="supporting" color="secondary">
-          {t("payload.row.showParams", { count: lines })}
-        </Text>
-      }
-    >
-      {block}
-    </Collapsible>
-  );
-}
+/** Activates on Enter or Space when the row itself has focus (table-filter:2754-2762). */
+const onActivate = (run: () => void) => (event: KeyboardEvent<HTMLTableRowElement>) => {
+  if (event.target !== event.currentTarget) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  run();
+};
 
 /** Takes focus when `focused` turns true: the row that moved up into a removed rule's place. */
 function RemoveButton({ focused, onRemove }: { focused: boolean; onRemove: () => void }) {
@@ -64,168 +60,204 @@ function RemoveButton({ focused, onRemove }: { focused: boolean; onRemove: () =>
     if (focused) ref.current?.focus();
   }, [focused]);
   return (
-    <Button
+    <IconButton
       ref={ref}
       label={t("payload.row.remove")}
-      variant="secondary"
-      size="sm"
+      tooltip={t("payload.row.remove")}
+      variant={roles.rowAction.variant}
+      size={roles.rowAction.size}
+      icon={<Icon icon={Trash2} size="sm" />}
       onClick={onRemove}
     />
   );
 }
 
-function RuleRow({
-  entry,
-  focused,
-  onRemove,
-}: {
-  entry: unknown;
-  focused: boolean;
-  onRemove: () => void;
-}) {
-  const rule = isRule(entry) ? entry : null;
+function Pattern({ row, isMobile }: { row: RuleRow; isMobile: boolean }) {
   return (
-    <TableRow>
+    <VStack gap={1}>
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        <Text type={roles.textType.identifier}>
+          {row.model ? row.model.name : groupName(row.rule ? NO_MODEL : UNREADABLE)}
+        </Text>
+        {row.model?.protocol && <Token label={row.model.protocol} size="sm" />}
+      </HStack>
+      {isMobile && (
+        <Text type={roles.textType.supporting} color="secondary">
+          {t("payload.row.summary", { kind: row.kind, count: fieldsOf(row) })}
+        </Text>
+      )}
+    </VStack>
+  );
+}
+
+type RowProps = {
+  row: RuleRow;
+  isMobile: boolean;
+  isOpen: boolean;
+  focused: boolean;
+  onOpen: () => void;
+  onRemove: () => void;
+};
+
+function RuleRowView({ row, isMobile, isOpen, focused, onOpen, onRemove }: RowProps) {
+  return (
+    <TableRow
+      tabIndex={0}
+      aria-current={isOpen ? true : undefined}
+      xstyle={[styles.clickableRow, isOpen && styles.activeRow]}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("button, a")) return;
+        onOpen();
+      }}
+      onKeyDown={onActivate(onOpen)}
+    >
       <TableCell>
-        <VStack gap={2}>
-          <HStack gap={2} vAlign="center">
-            <StackItem size="fill">
-              {rule ? (
-                <Models rule={rule} />
-              ) : (
-                <Text type="supporting" color="secondary">
-                  {t("payload.row.unreadable")}
-                </Text>
-              )}
-            </StackItem>
-            <RemoveButton focused={focused} onRemove={onRemove} />
+        <Pattern row={row} isMobile={isMobile} />
+      </TableCell>
+      {!isMobile && (
+        <TableCell>
+          <Text type={roles.textType.identifier}>{row.kind}</Text>
+        </TableCell>
+      )}
+      {!isMobile && (
+        <TableCell>
+          <HStack hAlign="end">
+            <Text hasTabularNumbers>{fieldsOf(row)}</Text>
           </HStack>
-          <Params params={rule ? rule.params : entry} />
-        </VStack>
+        </TableCell>
+      )}
+      <TableCell>
+        <HStack hAlign="end">
+          <RemoveButton focused={focused} onRemove={onRemove} />
+        </HStack>
       </TableCell>
     </TableRow>
   );
 }
 
-function GroupRows({
+function GroupHeader({
   group,
   open,
-  focus,
+  span,
   onToggle,
-  onRemove,
 }: {
-  group: Group;
+  group: RuleGroup;
   open: boolean;
-  focus: string | null;
+  span: number;
   onToggle: () => void;
-  onRemove: (index: number) => void;
 }) {
-  const label = open
-    ? t("payload.row.fold", { kind: group.kind })
-    : t("payload.row.unfold", { kind: group.kind });
   return (
-    <>
-      <TableRow>
-        <TableCell colSpan={COLUMNS}>
-          <HStack gap={2} vAlign="center" wrap="wrap">
-            <Button
-              label={label}
-              tooltip={label}
-              variant="ghost"
-              size="sm"
-              isIconOnly
-              aria-expanded={open}
-              icon={<Icon icon={open ? "chevronDown" : "chevronRight"} size="sm" />}
-              onClick={onToggle}
-            />
-            <Code>{group.kind}</Code>
-            <Badge variant="neutral" label={group.entries.length} />
-            <Text type="supporting" color="secondary">
-              {kindMeaning(group.kind)}
-            </Text>
-          </HStack>
-        </TableCell>
-      </TableRow>
-      {open && group.notList && (
-        <TableRow>
-          <TableCell colSpan={COLUMNS}>
-            <Text type="supporting" color="secondary">
-              {t("payload.group.storedNotList")}{" "}
-              <Link href="#config">{t("payload.page.editLink")}</Link>
-            </Text>
-          </TableCell>
-        </TableRow>
-      )}
-      {open && !group.notList && group.entries.length === 0 && (
-        <TableRow>
-          <TableCell colSpan={COLUMNS}>
-            <Text type="supporting" color="secondary">
-              {t("payload.group.empty", { kind: group.kind })}
-            </Text>
-          </TableCell>
-        </TableRow>
-      )}
-      {open &&
-        group.entries.map((entry, index) => (
-          <RuleRow
-            key={index}
-            entry={entry}
-            focused={focus === `${group.kind}:${index}`}
-            onRemove={() => onRemove(index)}
-          />
+    <TableRow
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      onClick={onToggle}
+      onKeyDown={onActivate(onToggle)}
+    >
+      <TableCell colSpan={span} xstyle={styles.groupHeader}>
+        <HStack gap={2} vAlign="center">
+          <Icon icon={open ? "chevronDown" : "chevronRight"} size="sm" color="secondary" />
+          <Text type={roles.textType.identifier} weight={roles.textWeight.strong}>
+            {groupName(group.name)}
+          </Text>
+          <Badge variant="neutral" label={String(group.rows.length)} />
+        </HStack>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+type Column = { key: string; header: string; isEnd?: boolean };
+
+const columnsFor = (isMobile: boolean): Column[] => [
+  { key: "pattern", header: t("payload.col.pattern") },
+  ...(isMobile
+    ? []
+    : [
+        { key: "kind", header: t("payload.col.kind") },
+        { key: "fields", header: t("payload.col.fields"), isEnd: true },
+      ]),
+  { key: "actions", header: t("payload.col.actions"), isEnd: true },
+];
+
+/** The column headings; the grouped body is hand-built rows, so the Table draws none itself. */
+function Header({ columns }: { columns: Column[] }) {
+  return (
+    <TableHeader>
+      <TableRow isHeaderRow>
+        {columns.map((column) => (
+          <TableHeaderCell key={column.key} scope="col">
+            {column.isEnd ? <HStack hAlign="end">{column.header}</HStack> : column.header}
+          </TableHeaderCell>
         ))}
-    </>
+      </TableRow>
+    </TableHeader>
   );
 }
 
-function SkeletonRows() {
-  return (
-    <>
-      {["a", "b", "c"].map((id) => (
-        <TableRow key={id}>
-          <TableCell colSpan={COLUMNS}>
-            <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
-          </TableCell>
-        </TableRow>
-      ))}
-    </>
-  );
+function SkeletonRows({ span }: { span: number }) {
+  return ["a", "b", "c", "d"].map((id) => (
+    <TableRow key={id} aria-hidden>
+      <TableCell colSpan={span}>
+        <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
+      </TableCell>
+    </TableRow>
+  ));
 }
 
-/** The five kinds as groups. `groups` is undefined while the config loads. */
 export function RuleTable({
   groups,
+  openKey,
   focus,
+  onOpen,
   onRemove,
 }: {
-  groups: Group[] | undefined;
+  /** Undefined while the config loads. */
+  groups: RuleGroup[] | undefined;
+  openKey: string | undefined;
   /** `<kind>:<index>` of the Remove button that should hold focus, if any. */
   focus: string | null;
-  onRemove: (kind: Kind, index: number) => void;
+  onOpen: (row: RuleRow) => void;
+  onRemove: (row: RuleRow) => void;
 }) {
-  const [folded, setFolded] = useState<ReadonlySet<Kind>>(new Set());
-  const toggle = (kind: Kind) =>
+  const isMobile = useAppShellMobile().isMobile;
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  const columns = columnsFor(isMobile);
+  const toggle = (name: string) =>
     setFolded((prev) => {
       const next = new Set(prev);
-      if (!next.delete(kind)) next.add(kind);
+      if (!next.delete(name)) next.add(name);
       return next;
     });
   return (
-    <Table hasHover={!!groups}>
+    <Table density={roles.table.density} dividers="rows" hasHover={!!groups}>
+      <Header columns={columns} />
       <TableBody>
         {groups ? (
           groups.map((group) => (
-            <GroupRows
-              key={group.kind}
-              group={group}
-              open={!folded.has(group.kind)}
-              focus={focus}
-              onToggle={() => toggle(group.kind)}
-              onRemove={(index) => onRemove(group.kind, index)}
-            />
+            <Fragment key={group.name}>
+              <GroupHeader
+                group={group}
+                open={!folded.has(group.name)}
+                span={columns.length}
+                onToggle={() => toggle(group.name)}
+              />
+              {!folded.has(group.name) &&
+                group.rows.map((row) => (
+                  <RuleRowView
+                    key={row.key}
+                    row={row}
+                    isMobile={isMobile}
+                    isOpen={row.key === openKey}
+                    focused={row.key === focus}
+                    onOpen={() => onOpen(row)}
+                    onRemove={() => onRemove(row)}
+                  />
+                ))}
+            </Fragment>
           ))
         ) : (
-          <SkeletonRows />
+          <SkeletonRows span={columns.length} />
         )}
       </TableBody>
     </Table>

@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  catalogRow,
   aliasProblems,
+  isExcluded,
   kilo,
   matchesQuery,
+  modelRows,
   newAlias,
+  pageOf,
   readList,
-  isExcluded,
+  ruleRows,
+  wildcard,
 } from "./modelConfig.ts";
 
 test("readList reads a stored null and a missing key as the empty list", () => {
@@ -43,35 +46,70 @@ test("isExcluded matches a listed pattern exactly", () => {
   assert.equal(isExcluded([], "a"), false);
 });
 
-test("catalogRow reads either limit spelling, and kilo words the limits", () => {
-  const base = { id: "m", object: "model", created: 0, owned_by: "x", type: "x" };
-  assert.deepEqual(
-    catalogRow({ ...base, context_length: 200_000, max_completion_tokens: 64_000 }),
-    {
-      id: "m",
-      name: "",
-      context: 200_000,
-      output: 64_000,
-    },
+test("modelRows reads either limit spelling, its aliases and the pattern that hides it", () => {
+  const base = { object: "model", created: 0, owned_by: "x", type: "x" };
+  const [opus, gemini] = modelRows(
+    "claude",
+    [
+      { ...base, id: "Claude-3-Opus", context_length: 200_000, max_completion_tokens: 64_000 },
+      { ...base, id: "g", display_name: "G", inputTokenLimit: 1_048_576 },
+    ],
+    [newAlias(" claude-3-opus ", "opus", false), newAlias("g", "gee", true)],
+    ["*-preview", "CLAUDE-3-*"],
   );
-  const gemini = catalogRow({ ...base, display_name: "G", inputTokenLimit: 1_048_576 });
+  assert.deepEqual(opus, {
+    key: "claude/Claude-3-Opus",
+    channel: "claude",
+    id: "Claude-3-Opus",
+    name: "",
+    context: 200_000,
+    output: 64_000,
+    aliases: ["opus"],
+    excludedBy: "CLAUDE-3-*",
+  });
   assert.equal(gemini.name, "G");
+  assert.equal(gemini.excludedBy, undefined);
   assert.equal(kilo(gemini.context), "1049k");
   assert.equal(kilo(gemini.output), null);
   assert.equal(kilo(512), "512");
 });
 
-test("matchesQuery looks at the id and the display name, ignoring case and outer spaces", () => {
-  const row = catalogRow({
-    id: "claude-opus",
-    object: "model",
-    created: 0,
-    owned_by: "x",
-    type: "x",
-    display_name: "Opus Four",
-  });
-  assert.equal(matchesQuery(row, "  OPUS "), true);
-  assert.equal(matchesQuery(row, "four"), true);
-  assert.equal(matchesQuery(row, "sonnet"), false);
-  assert.equal(matchesQuery(row, "  "), true);
+test("wildcard matches as the server does", () => {
+  for (const [p, v, ok] of [
+    ["a*c", "abc", true],
+    ["a*c", "ab", false],
+    ["*", "x", true],
+    ["a**b", "ab", true],
+    ["x", "x", true],
+    ["*mid*", "a-mid-b", true],
+    ["a*b*c", "acb", false],
+    ["", "", false],
+  ] as const)
+    assert.equal(wildcard(p, v), ok, `${p} ${v}`);
+});
+
+test("ruleRows keeps each entry's stored index", () => {
+  const rows = ruleRows("codex", [newAlias("m", "a", true)], ["x", "y"]);
+  assert.deepEqual(
+    rows.map((r) => [r.kind, r.index, r.pattern, r.alias, r.fork]),
+    [
+      ["alias", 0, "m", "a", true],
+      ["excluded", 0, "x", undefined, undefined],
+      ["excluded", 1, "y", undefined, undefined],
+    ],
+  );
+});
+
+test("matchesQuery looks at every text, ignoring case and outer spaces", () => {
+  assert.equal(matchesQuery(["claude-opus", "Opus Four"], "  OPUS "), true);
+  assert.equal(matchesQuery(["claude-opus", undefined], "four"), false);
+  assert.equal(matchesQuery([], "  "), true);
+});
+
+test("pageOf clamps the page and slices 20 rows", () => {
+  const rows = Array.from({ length: 45 }, (_, i) => i);
+  assert.deepEqual(pageOf(rows, 3), { page: 3, rows: [40, 41, 42, 43, 44] });
+  assert.equal(pageOf(rows, 9).page, 3);
+  assert.equal(pageOf(rows, Number.NaN).page, 1);
+  assert.deepEqual(pageOf([], 2), { page: 1, rows: [] });
 });

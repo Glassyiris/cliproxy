@@ -1,7 +1,6 @@
 import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
-import type { Group } from "./RuleTable.tsx";
-import { isList, kinds, rulesOf, storedRules, type Kind } from "./rules.ts";
+import { isList, kinds, rulesOf, storedRules, type Group, type Kind } from "./rules.ts";
 
 const rulesPath = (kind: Kind) => `requests/payload/${kind}`;
 

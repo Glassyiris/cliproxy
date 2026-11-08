@@ -55,8 +55,7 @@ const ROUTES = {
   },
   models: {
     answer: "[role=main] tbody tr",
-    measures: ["primaryButton", "rowAction"],
-    pending: "R3",
+    measures: ["primaryButton", "headerControl", "rowAction", "skeletonShift"],
   },
   activity: {
     answer: "#activity-traffic",

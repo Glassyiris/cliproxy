@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { RemoveTarget } from "./RemoveRuleDialog.tsx";
-import type { Group } from "./RuleTable.tsx";
-import type { Kind } from "./rules.ts";
+import type { Group, Kind } from "./rules.ts";
 import { entryLabel } from "./words.ts";
 
 /**

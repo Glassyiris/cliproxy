@@ -1,18 +1,14 @@
 import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Table, type TableColumn } from "@astryxdesign/core/Table";
 import { layout } from "../../themes/site/layout.ts";
+import { roles } from "../../themes/site/roles.ts";
 
 type Row = { id: string };
-const rows: Row[] = [{ id: "a" }, { id: "b" }, { id: "c" }];
+const rows: Row[] = ["a", "b", "c", "d", "e"].map((id) => ({ id }));
 
-/** Placeholder rows in the shape of a table that is still loading. */
-export function SkeletonTable({
-  headers,
-  density,
-}: {
-  headers: string[];
-  density?: "compact" | "balanced";
-}) {
+/** Placeholder rows under the real headers while the table loads (table-filter:1882-1945). */
+export function SkeletonTable({ headers }: { headers: string[] }) {
   const columns: TableColumn<Row>[] = headers.map((header) => ({
     key: header,
     header,
@@ -20,5 +16,16 @@ export function SkeletonTable({
       <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
     ),
   }));
-  return <Table<Row> data={rows} columns={columns} idKey="id" density={density} />;
+  // In the same stack as the loaded table and its pager, so the table keeps its inset.
+  return (
+    <VStack gap={roles.gap.card}>
+      <Table<Row>
+        data={rows}
+        columns={columns}
+        idKey="id"
+        density={roles.table.density}
+        aria-busy
+      />
+    </VStack>
+  );
 }

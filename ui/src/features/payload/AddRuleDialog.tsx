@@ -35,10 +35,14 @@ function KindField({
         label={t("payload.add.kind")}
         value={kind}
         options={kindOptions()}
-        status={blocked ? { type: "error", message: t("payload.group.storedNotList") } : undefined}
+        status={
+          blocked
+            ? { type: "error", message: t("payload.group.storedNotList", { kind }) }
+            : undefined
+        }
         onChange={(value) => onChange(value as Kind)}
       />
-      {blocked && <Link href="#config">{t("payload.page.editLink")}</Link>}
+      {blocked && <Link href="#settings">{t("payload.page.editLink")}</Link>}
     </VStack>
   );
 }

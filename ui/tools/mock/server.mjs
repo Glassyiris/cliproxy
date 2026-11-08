@@ -78,6 +78,8 @@ const MODELS = {
   xai: ["grok-4", "grok-code-fast-1"],
   devin: ["devin-swe-1"],
   vertex: ["gemini-2.5-pro"],
+  meta: ["muse-spark"],
+  aistudio: ["gemini-2.5-pro", "gemini-2.5-flash"],
 };
 
 /** Server-relative bucket clock: bucket 0 starts at the 10-minute boundary before server start. */

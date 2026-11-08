@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isList, isRule, modelLabels, parseParams, rulesOf, storedRules } from "./rules.ts";
+import {
+  fieldCount,
+  groupByModel,
+  isList,
+  isRule,
+  modelsOf,
+  NO_MODEL,
+  parseParams,
+  rulesOf,
+  storedRules,
+  UNREADABLE,
+} from "./rules.ts";
 
 test("a filter takes a list and every other kind takes an object", () => {
   assert.deepEqual(parseParams("filter", '["a.b"]'), { value: ["a.b"] });
@@ -33,13 +44,43 @@ test("entries that are not objects keep their place in the list", () => {
 });
 
 test("a model entry that is not an object shows as its JSON and nothing throws", () => {
+  assert.deepEqual(modelsOf({ models: [{ name: "gpt-5*", protocol: "codex" }, { name: "a" }] }), [
+    { name: "gpt-5*", protocol: "codex" },
+    { name: "a" },
+  ]);
   assert.deepEqual(
-    modelLabels({ models: [{ name: "gpt-5*", protocol: "codex" }, { name: "a" }] }),
-    ["gpt-5* · codex", "a"],
+    modelsOf({ models: [null, "x", {}] }).map((m) => m.name),
+    ["null", '"x"', ""],
   );
-  assert.deepEqual(modelLabels({ models: [null, "x", {}] }), ["null", '"x"', ""]);
-  assert.deepEqual(modelLabels({ models: "gpt" }), []);
-  assert.deepEqual(modelLabels({}), []);
+  assert.deepEqual(modelsOf({ models: "gpt" }), []);
+  assert.deepEqual(modelsOf({}), []);
+});
+
+test("rules group by model name, a two-model rule under both, keeping each entry's place", () => {
+  const groups = groupByModel([
+    { kind: "default", entries: [{ models: [{ name: "a" }, { name: "b" }], params: { x: 1 } }] },
+    {
+      kind: "filter",
+      entries: [{ models: [{ name: "a", protocol: "gemini" }] }, 7, { params: [] }],
+    },
+  ]);
+  assert.deepEqual(
+    groups.map((g) => [g.name, g.rows.map((r) => r.key)]),
+    [
+      ["a", ["default:0", "filter:0"]],
+      ["b", ["default:0"]],
+      [UNREADABLE, ["filter:1"]],
+      [NO_MODEL, ["filter:2"]],
+    ],
+  );
+  assert.deepEqual(groups[0].rows[1].model, { name: "a", protocol: "gemini" });
+});
+
+test("fieldCount counts an object's paths and a filter's entries", () => {
+  assert.equal(fieldCount({ a: 1, b: 2 }), 2);
+  assert.equal(fieldCount(["a"]), 1);
+  assert.equal(fieldCount(null), 0);
+  assert.equal(fieldCount("x"), 0);
 });
 
 test("only an object, string or number stored for a kind counts as not a list", () => {
