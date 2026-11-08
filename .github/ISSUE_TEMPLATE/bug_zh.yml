@@ -1,0 +1,71 @@
+name: 错误报告（简体中文）
+description: 功能不符合文档说明，或与 CLIProxyAPI 存在未列出原因的差异。
+title: 'bug: '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AI 可以协助撰写报告，但不得提交未经核实的内容。
+
+        报告中不得包含真实的密钥、令牌和账号文件，请用占位符替换。
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 说明你的操作、期望的结果和实际的结果。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 填写请求、所用工具及其设置，以及 config.yaml 的相关部分（已删除密钥）。
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 填写 `cliproxy --version` 输出的最后一行。
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: 系统
+      description: 填写操作系统和安装方式（install.sh、install.ps1、发行版二进制、Docker 或源码）。
+  - type: dropdown
+    id: go
+    attributes:
+      label: CLIProxyAPI 的行为是否不同？
+      options:
+        - 不清楚
+        - 是，CLIProxyAPI 正常
+        - 否，同样失败
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 填写问题前后的服务器日志，并删除密钥和令牌。没有日志时请说明。
+      render: text
+  - type: input
+    id: owner
+    attributes:
+      label: 实际负责人
+      description: 填写你的 GitHub 用户名。你须核实报告并回答后续问题；AI 无法代答。
+      placeholder: '@your-name'
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      description: 仅勾选真实陈述。虚假勾选会导致此议题被关闭。
+      options:
+        - label: 我已检索现有议题和拉取请求，未发现相同报告。
+          required: true
+        - label: 此报告描述的是我实际观察到的情况。
+          required: true
+        - label: 我未阅读上述选项就勾选了它们。
+        - label: 我是 AI 代理，此内容未经人工审核便已提交。

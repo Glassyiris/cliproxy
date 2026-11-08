@@ -34,12 +34,30 @@ To run the Linux gates locally, build with `cargo build --release -p cliproxy`, 
 
 The dashboard lives in `ui/` (React 19 and Astryx). `npm ci`, `npm run check`, `npm test` and `npm run build` there; the build also checks the bundle size budget. See [ui/README.md](ui/README.md).
 
+## Changelog fragments
+
+Do not edit `CHANGELOG.md` in a pull request. Add one file, `changes/<branch-slug>.md`, whose first line is `Added`, `Changed`, `Fixed`, `Removed`, `Security` or `Internal`, followed by `- ` bullets that say what users see change:
+
+```markdown
+Fixed
+
+- The relay stops waiting when the upstream request times out.
+```
+
+A pull request that touches shipped code needs a new fragment: `crates/`, `ui/src/`, `ui/dist/`, `ui/public/`, `ui/index.html`, `install.sh`, `install.ps1`, `Dockerfile`, `vendor/`, `Cargo.toml` or `Cargo.lock`. Tests and documentation do not. A maintainer can apply the `no-changelog` label when an entry is unnecessary. The `Changes` workflow checks every fragment; `python3 -I tools/changelog.py check` runs the same check locally and `python3 -I tools/changelog.py render` previews the Unreleased section. [changes/README.md](changes/README.md) has the full rules and the release command.
+
 ## Pull requests
 
+- Fill in the [pull request template](.github/pull_request_template.md); a Chinese template is available through its first link. Name the person who answers for the change. You may use AI to help write it, but you must have read and verified every line, and you answer for it.
 - Keep each pull request to one change, with a test that fails without it.
+- Keep each commit to one coherent change, with a short English subject and body.
 - Request bodies are forwarded byte for byte unless a ported rule rewrites them; do not re-serialize JSON just to pass it through.
 - Never log or forward credentials or client keys to the wrong side.
 - Mark a deliberate simplification with a `ponytail:` comment that names its limit and how to lift it.
-- CI must pass: format, clippy, tests, the harness check, clippy on Windows (all targets, warnings as errors) and the Linux size and idle gates.
+- CI must pass: format, clippy, tests, the harness check, clippy on Windows (all targets, warnings as errors), the Linux size and idle gates and the changelog fragment check.
+
+## Issues
+
+Search existing issues first, then pick a form: bug report or feature request, each in English and in Simplified Chinese. State your version (`cliproxy --version`), how you installed it, and whether CLIProxyAPI behaves the same. Remove keys, tokens and account files from logs and configuration before posting. Usage questions go through [SUPPORT.md](.github/SUPPORT.md), and vulnerabilities through [SECURITY.md](SECURITY.md), never a public issue. Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
 
 By contributing you agree that your work is released under the [GNU Affero General Public License, version 3 or later](LICENSE).
