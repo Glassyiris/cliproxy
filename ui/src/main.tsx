@@ -10,6 +10,22 @@ import { t } from "./lib/i18n.ts";
 import { notify } from "./lib/notify.ts";
 import { defaultPalette, loadPalette, siteTheme } from "./themes/site/index.ts";
 
+// A new build replaces the old one's chunks, and a tab opened before it gets the HTML page for
+// them: the next lazy page or dialog fails to load. Reload once to pick up the new build; the
+// stored time stops a loop when the chunk is missing for another reason.
+window.addEventListener("vite:preloadError", (event) => {
+  const key = "cliproxy.reloadedForBuild";
+  try {
+    const last = Number(sessionStorage.getItem(key) ?? 0);
+    if (Date.now() - last < 10_000) return;
+    sessionStorage.setItem(key, String(Date.now()));
+  } catch {
+    return;
+  }
+  event.preventDefault();
+  location.reload();
+});
+
 // A Chinese page starts with Astryx's Chinese strings, and a stored palette is in before the
 // first render, so nothing is drawn first in English or in the default palette.
 const wanted = initialPalette();
