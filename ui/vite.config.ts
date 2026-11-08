@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import stylex from "@stylexjs/unplugin/vite";
+import { noticesPlugin } from "./tools/notices-plugin.ts";
 
 // Development only: point the proxy at another backend with CPA_BACKEND=http://127.0.0.1:8318.
 const backend = process.env.CPA_BACKEND || "http://127.0.0.1:8317";
@@ -25,6 +26,8 @@ export default defineConfig({
       useCSSLayers: { before: ["reset", "astryx-base"], prefix: "app", after: ["astryx-theme"] },
     }),
     react(),
+    // Inert unless CLIPROXY_NOTICES_OUT is set (tools/third-party-notices.py).
+    noticesPlugin(),
   ],
   // cors: false lets OPTIONS capability probes reach the backend instead of Vite.
   server: {
