@@ -121,9 +121,12 @@ function extensions(
         borderRadius: "var(--radius-element)",
         fontSize: "var(--text-code-size)",
       },
+      // Focus marks the box's own edge, inset: an offset outline was cut off by the dialog body's
+      // scroll edge and read as a selection (owner, 2026-11-08: 「被選中。」).
       "&.cm-focused": {
-        outline: "var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color)",
-        outlineOffset: "var(--focus-outline-offset)",
+        outline: "none",
+        borderColor: "var(--focus-outline-color)",
+        boxShadow: "inset 0 0 0 var(--border-width) var(--focus-outline-color)",
       },
       ".cm-scroller": {
         fontFamily: "var(--font-family-code)",
