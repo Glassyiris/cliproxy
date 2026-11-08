@@ -44,7 +44,7 @@ On a new server, the Overview shows a short Get started card with three steps: c
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/connect-dark.png">
-  <img src="img/connect-light.png" alt="The Connect account page: sign in to Claude, ChatGPT, Kimi, Meta, xAI or Devin, or add a provider API key" width="880">
+  <img src="img/connect-light.png" alt="The Connect an account dialog: sign in to Claude, Codex, Antigravity, Kimi, xAI, Devin or Meta, or add Vertex AI or a provider API key" width="880">
 </picture>
 
 In the dashboard, choose Connect account and pick a provider. Claude and ChatGPT (Codex) open the provider's own sign-in page; Kimi, Meta, xAI and Devin show a device code to enter on their site. The proxy stores the sign-in token in `auth-dir`. It never sees your password.
@@ -63,10 +63,10 @@ Read [Accounts and provider terms](../README.md#accounts-and-provider-terms) bef
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/use-dark.png">
-  <img src="img/use-light.png" alt="The Use with tools page: the proxy address, the client key test and a ready-to-copy Claude Code setup" width="880">
+  <img src="img/use-light.png" alt="The Use with tools dialog at its Test step: the proxy address, the client key and a passing connection test" width="880">
 </picture>
 
-The dashboard's Use with tools page shows this server's address and your client key with copy buttons, and tests the key. For Claude Code, for example:
+The dashboard's Use with tools dialog, on the Client keys page, shows this server's address and your client key with copy buttons, and tests the key. For Claude Code, for example:
 
 ```sh
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8317
