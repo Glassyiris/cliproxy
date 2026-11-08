@@ -69,6 +69,24 @@ const { height } = layout.codeEditor;
 // The content's block padding, as CodeMirror draws it below.
 const padding = "var(--spacing-2)";
 
+/**
+ * Focus is a ring laid over the box's own edge: an offset outline was cut off by the dialog body's
+ * scroll edge and read as a selection (owner, 2026-11-08: 「被選中。」), and an inset shadow or
+ * outline sat under the gutter's background, so the left edge came out broken.
+ */
+const focusRing = {
+  "&.cm-focused": { outline: "none" },
+  "&.cm-focused::after": {
+    content: '""',
+    position: "absolute",
+    inset: "calc(-1 * var(--border-width))",
+    border: "var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color)",
+    borderRadius: "var(--radius-element)",
+    pointerEvents: "none",
+    zIndex: 500,
+  },
+};
+
 const color = (token: string) => ({ color: `var(--color-syntax-${token})` });
 
 function extensions(
@@ -121,13 +139,7 @@ function extensions(
         borderRadius: "var(--radius-element)",
         fontSize: "var(--text-code-size)",
       },
-      // Focus marks the box's own edge, inset: an offset outline was cut off by the dialog body's
-      // scroll edge and read as a selection (owner, 2026-11-08: 「被選中。」).
-      "&.cm-focused": {
-        outline: "none",
-        borderColor: "var(--focus-outline-color)",
-        boxShadow: "inset 0 0 0 var(--border-width) var(--focus-outline-color)",
-      },
+      ...focusRing,
       ".cm-scroller": {
         fontFamily: "var(--font-family-code)",
         lineHeight: "var(--text-code-leading)",
