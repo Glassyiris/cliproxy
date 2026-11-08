@@ -76,14 +76,14 @@ export function useConfigWrite(action: Action) {
   const queryClient = useQueryClient();
   const config = useConfig().data;
   // Before the first read there is nothing shown to write over; pages offer no write then.
-  return (path: string, next: unknown | (() => unknown), success?: string) =>
+  return (path: string, next: unknown, success?: string) =>
     config
       ? action.run(async () => {
           try {
             await replaceConfigValue(
               path,
               storedValue(config, path),
-              typeof next === "function" ? next() : next,
+              typeof next === "function" ? (next as () => unknown)() : next,
               absent,
             );
           } finally {

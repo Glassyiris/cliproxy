@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { t } from "../lib/i18n.ts";
@@ -79,6 +80,21 @@ function useRestore(open: Open, failed: () => void) {
 }
 
 /**
+ * A sign-out in another tab cleared the stores; this tab follows, and a sign-in it is still checking
+ * is cancelled. The signing-out tab hears its own message too, after it has already signed out.
+ */
+function useFollowSignOut(signedIn: RefObject<boolean>, endSession: () => void) {
+  useEffect(
+    () =>
+      onForgotten(() => {
+        cancelSignIns();
+        if (signedIn.current) endSession();
+      }),
+    [signedIn, endSession],
+  );
+}
+
+/**
  * The one session of this tab. Requests read the key from lib/api/client.ts memory; the stored
  * copy is lib/keyStore.ts's, written on a typed sign-in and read back once when the page loads.
  */
@@ -97,16 +113,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setState(signedOut);
   }, [queryClient]);
 
-  // A sign-out in another tab cleared the stores; this tab follows. The signing-out tab hears its
-  // own message too, after it has already signed out, and ignores it here.
-  useEffect(
-    () =>
-      onForgotten(() => {
-        cancelSignIns();
-        if (signedIn.current) endSession();
-      }),
-    [endSession],
-  );
+  useFollowSignOut(signedIn, endSession);
 
   // Only an explicit sign-out clears both stores and signs out the other tabs.
   const signOut = useCallback(() => {
