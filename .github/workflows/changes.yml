@@ -1,0 +1,30 @@
+# Validates the changelog fragments a pull request adds and requires one when it touches
+# shipped code (rules: changes/README.md). It reruns when a label changes, so adding
+# `no-changelog` clears a failure without a new push. Kept apart from ci.yml so a label
+# change does not restart the build and test jobs.
+name: Changes
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  fragments:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # The check needs the merge base of the pull request, so fetch full history.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run the parser tests
+        run: python3 -I -m unittest discover -s tools
+      - name: Validate fragments and require one for shipped paths
+        run: python3 -I tools/changelog.py check
