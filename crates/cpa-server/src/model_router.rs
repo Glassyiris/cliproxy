@@ -855,10 +855,16 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<Routed> {
     };
     // A conversation keeps its model while the router still offers it (a config change can
     // take it away); only a new user message is graded again.
-    let bound = key
-        .as_ref()
-        .and_then(|k| rt.model_router.bound(k, now))
-        .filter(|b| candidates.iter().any(|(s, _)| s.id == b.model));
+    let bound = key.as_ref().and_then(|k| rt.model_router.bound(k, now)).filter(|b| {
+        candidates.iter().any(|(s, entry)| {
+            s.id == b.model
+                && entry.and_then(|e| split_suffix(&e.model).1).is_none_or(|pin| {
+                    split_suffix(&b.pattern)
+                        .1
+                        .is_some_and(|effort| effort.trim().eq_ignore_ascii_case(pin.trim()))
+                })
+        })
+    });
     if let Some(b) = &bound
         && (counting || !fresh_turn(&call.body))
     {
@@ -874,8 +880,8 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<Routed> {
         let (pattern, model) = match candidates.first() {
             Some((spec, entry @ Some(_))) => (unrated(spec, *entry), spec.id.clone()),
             _ => {
-                let model = registry.resolve_auto(|c, m| usable(rt, router, c, m))?;
-                (model.clone(), model)
+                let (spec, entry) = candidates.iter().rev().max_by_key(|(s, _)| s.created)?;
+                (unrated(spec, *entry), spec.id.clone())
             }
         };
         tracing::debug!(router = %router.name, model = %pattern, "model router: no rated candidate");
@@ -1417,6 +1423,99 @@ mod tests {
             list.contains(r#""id":"smart""#) && list.contains(r#""id":"judged""#),
             "{list}"
         );
+    }
+
+    fn routing_call(body: serde_json::Value) -> Call {
+        Call {
+            entry: Format::OpenAI,
+            response: Format::OpenAI,
+            operation: Operation::Generate,
+            model: "smart".into(),
+            body: serde_json::to_vec(&body).unwrap().into(),
+            stream: false,
+            alt: None,
+            headers: Default::default(),
+            caller: cpa_core::exec::Caller {
+                principal: String::new(),
+                source: "",
+                provider: String::new(),
+            },
+            forced_provider: None,
+            selection_model: None,
+            execution_session: Some("router-regression".into()),
+            request_path: "/v1/chat/completions".into(),
+            peer: None,
+            turn: None,
+            media: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn unrated_fallback_stays_within_filtered_candidates() {
+        let auth = std::env::temp_dir().join(format!("router-regression-{}", std::process::id()));
+        let cfg = Config::parse(&format!(
+            "auth-dir: {}\napi-keys:\n  openai-compatibility:\n    - name: local\n      base-url: http://127.0.0.1:1/v1\n      models:\n        - {{name: small, max-context-length: 8000}}\n        - {{name: large, max-context-length: 128000}}\n      keys:\n        - api-key: test\nmodel-routers:\n  - name: smart\n    judge: smart\n", auth.display()
+        )).unwrap();
+        let credentials = cpa_core::config::credentials::load(&cfg);
+        let rt = Arc::new(crate::testing::runtime(
+            cfg.clone(),
+            credentials,
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+        ));
+        let call = routing_call(serde_json::json!({"messages": [{"role": "user", "content": "word ".repeat(8000)}]}));
+        assert!(estimate_tokens(&call.body) > 8000);
+        assert_eq!(route(&rt, &call).await.unwrap().model, "large");
+        let oversized =
+            routing_call(serde_json::json!({"messages": [{"role": "user", "content": "word ".repeat(104000)}]}));
+        assert!(route(&rt, &oversized).await.is_none());
+        let mut cfg = cfg;
+        cfg.document["model-routers"][0]["models"] = serde_yaml_ng::from_str("[missing]").unwrap();
+        rt.publish_config(cfg);
+        assert!(route(&rt, &call).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn bound_effort_follows_reloaded_candidates() {
+        let auth = std::env::temp_dir().join(format!("router-regression-{}", std::process::id()));
+        let mut cfg = config(
+            "http://127.0.0.1:1",
+            "model-routers:\n  - name: smart\n    judge: smart\n    models: [top(high)]\n",
+        );
+        cfg.document["auth-dir"] = Value::String(auth.to_string_lossy().into_owned());
+        let credentials = cpa_core::config::credentials::load(&cfg);
+        let rt = Arc::new(crate::testing::runtime(
+            cfg.clone(),
+            credentials,
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+        ));
+        rt.model_router.publish(rated());
+        let user = routing_call(serde_json::json!({"messages": [{"role": "user", "content": "hi"}]}));
+        let tool =
+            routing_call(serde_json::json!({"messages": [{"role": "tool", "tool_call_id": "c", "content": "done"}]}));
+        let mut routed = Vec::new();
+        for call in [&tool, &user] {
+            cfg.document["model-routers"][0]["models"] = serde_yaml_ng::from_str("[top(high)]").unwrap();
+            rt.publish_config(cfg.clone());
+            let first = route(&rt, &user).await.unwrap();
+            assert_eq!(first.model, "top(high)");
+            first.commit(&rt);
+            cfg.document["model-routers"][0]["models"] = serde_yaml_ng::from_str("[top(low)]").unwrap();
+            rt.publish_config(cfg.clone());
+            routed.push(route(&rt, call).await.unwrap().model);
+        }
+        assert_eq!(routed, ["top(low)", "top(low)"]);
     }
 
     #[tokio::test]
