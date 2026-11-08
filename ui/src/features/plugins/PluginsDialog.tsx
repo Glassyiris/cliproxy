@@ -5,7 +5,7 @@
 // - Two panels instead of the template's six, and no account card in the rail: plugins have
 //   nothing else to set.
 // - The open panel is `?store=1` in the hash, so Back and links reach the store.
-import { useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import * as stylex from "@stylexjs/stylex";
 import { Package, Store } from "lucide-react";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -124,6 +124,13 @@ function InstalledPanel({ onBrowse }: { onBrowse: () => void }) {
   const [, setParams] = useHashParams();
   // The open plugin is `?plugin=`: SettingsPage scopes the route argument to it.
   const editing = useHashRoute().arg;
+  // A link that opens the dialog with `&plugin=` mounts both in one commit, and the inner editor's
+  // showModal would run before the outer dialog's and end up under it; the editor waits a frame.
+  const [isShown, setShown] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const panelRef = useRef<HTMLElement>(null);
   const plugins = list.data?.plugins;
   const edited = plugins?.find((p) => p.id === editing);
@@ -162,7 +169,7 @@ function InstalledPanel({ onBrowse }: { onBrowse: () => void }) {
         onClose={confirmation.close}
       />
       <ConfigEditor
-        source={editing ? { path: `plugins/configs/${editing}` } : null}
+        source={editing && isShown ? { path: `plugins/configs/${editing}` } : null}
         title={t("plugins.row.configureTitle", { name: edited ? pluginName(edited) : editing })}
         hashKey="plugin"
         action={action}
