@@ -37,7 +37,7 @@ test("a duration must be one Go accepts", () => {
 test("every group, setting and unit has its names in the catalog", () => {
   const listed = new Set(dynamicKeys);
   const wanted = [
-    ...groups.flatMap((g) => [`config.group.${g}`, `config.groupHint.${g}`]),
+    ...groups.flatMap((g) => [`config.group.${g}`]),
     ...settings.flatMap((s) => [`config.label.${settingId(s)}`, `config.hint.${settingId(s)}`]),
     ...settings.flatMap((s) => (s.kind === "number" && s.units ? [`config.unit.${s.units}`] : [])),
   ];

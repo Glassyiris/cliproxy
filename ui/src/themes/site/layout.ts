@@ -4,6 +4,8 @@ export const layout = {
   // One label column for every MetadataList on a surface, so stacked lists line up their values
   // (About: facts and links). Fits "Remote management" and 程式碼儲存庫 at 15 px.
   metadataLabelWidth: 160,
+  // Settings that take a number or a duration: wide enough for "300 seconds", not the whole column.
+  shortControlWidth: 200,
   // card-v2 layout.ts SIDE_WIDTH: a side column of cards beside the main column.
   sideColumn: 340,
   // The phone breakpoint at which the page padding drops to 16 px: Astryx `md` (AppShell's phone

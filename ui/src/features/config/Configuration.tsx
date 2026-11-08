@@ -141,7 +141,7 @@ function useSaveChanges(onSaved: () => void) {
   return { action, save };
 }
 
-/** The open group: its heading (with the way back on a phone), what it covers, its rows. */
+/** The open group: its heading (with the way back on a phone) and its rows. */
 function GroupPanel({
   group,
   isNarrow,
@@ -177,9 +177,6 @@ function GroupPanel({
       ) : (
         heading
       )}
-      <Text type="supporting" color="secondary">
-        {t(`config.groupHint.${group}`)}
-      </Text>
       {children}
     </VStack>
   );

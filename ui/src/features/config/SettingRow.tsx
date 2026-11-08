@@ -71,6 +71,7 @@ function TextControl({
       isLabelHidden
       value={text}
       hasSpellCheck={false}
+      width={setting.kind === "text" && setting.pattern ? layout.shortControlWidth : undefined}
       status={invalid ? { type: "error", message: t("config.row.duration") } : undefined}
       onChange={(next) => {
         setTyped(next);
@@ -119,7 +120,12 @@ export function Control({
         ))}
       </RadioList>
     );
-  if (isLoading) return <Skeleton width="100%" height="var(--size-element-md)" />;
+  if (isLoading) {
+    const short = setting.kind === "number" || (setting.kind === "text" && setting.pattern);
+    return (
+      <Skeleton width={short ? layout.shortControlWidth : "100%"} height="var(--size-element-md)" />
+    );
+  }
   if (setting.kind === "switch")
     return (
       <Switch
@@ -139,6 +145,7 @@ export function Control({
         max={setting.max}
         isIntegerOnly
         isWheelEnabled={false}
+        width={layout.shortControlWidth}
         units={setting.units ? t(`config.unit.${setting.units}`) : undefined}
         onChange={onChange}
       />
