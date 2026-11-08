@@ -21,12 +21,13 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import {
   Table,
   TableCell,
+  pixel,
   proportional,
   type TableColumn,
   type TablePlugin,
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import { Token } from "@astryxdesign/core/Token";
+import { Token, type TokenProps } from "@astryxdesign/core/Token";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
 import type { LogLine } from "./lines.ts";
@@ -35,11 +36,12 @@ const styles = stylex.create({
   spacer: (height: number) => ({ height, paddingBlock: 0 }),
 });
 
-// A first guess for a line's height, one row of text or, on a phone, three; each is measured.
-const ROW_ESTIMATE = { wide: 38, compact: 82 };
+// A first guess for a line's height, one row of text or, stacked, three; each is measured.
+const ROW_ESTIMATE = { wide: 38, stacked: 82 };
 const OVERSCAN = 12;
-// The message column's share beside three short columns of one share each.
-const MESSAGE_SHARE = 4;
+// The three short columns are as wide as their value on one line; the message takes the rest.
+const SHORT = pixel(layout.shortValueColumn);
+const MESSAGE = proportional(1, { minWidth: layout.tableColumnFloor });
 // How close to the end still counts as being at the end.
 const END_SLACK = 48;
 
@@ -127,22 +129,32 @@ function RequestLink({ line, query }: { line: LogLine; query: string }) {
   );
 }
 
+// The server's logrus levels; the theme maps red and yellow to the error and warning colours.
+const LEVEL_COLOR: Record<string, TokenProps["color"]> = {
+  panic: "red",
+  fatal: "red",
+  error: "red",
+  warn: "yellow",
+  warning: "yellow",
+};
+
 const Level = ({ line }: { line: LogLine }) =>
-  line.parsed && <Token label={line.parsed.level} size="sm" />;
+  line.parsed && (
+    <Token label={line.parsed.level} size="sm" color={LEVEL_COLOR[line.parsed.level]} />
+  );
 
 const Message = ({ line }: { line: LogLine }) => (
   <Text type="code">{line.parsed?.message ?? line.text}</Text>
 );
 
 /**
- * Four columns; on a phone one, with the time, request and level over the message. The three
- * short columns keep only the compact floor, so beside the request panel the table still fits
- * and a long message wraps instead of running past the panel's edge.
+ * Four columns; stacked (on a phone, or beside the open request panel) one, with the time, request
+ * and level over the message, so the message keeps the list's whole width.
  */
-function columnsOf(query: string, isCompact: boolean): TableColumn<Item>[] {
+function columnsOf(query: string, isStacked: boolean): TableColumn<Item>[] {
   const cell = (render: (line: LogLine) => ReactNode) => (item: Item) =>
     isSpacer(item) ? null : render(item);
-  if (isCompact)
+  if (isStacked)
     return [
       {
         key: "line",
@@ -165,22 +177,25 @@ function columnsOf(query: string, isCompact: boolean): TableColumn<Item>[] {
     {
       key: "time",
       header: t("logs.columns.time"),
+      width: SHORT,
       renderCell: cell((l) => <Time line={l} />),
     },
     {
       key: "request",
       header: t("logs.columns.request"),
+      width: SHORT,
       renderCell: cell((l) => <RequestLink line={l} query={query} />),
     },
     {
       key: "level",
       header: t("logs.columns.level"),
+      width: SHORT,
       renderCell: cell((l) => <Level line={l} />),
     },
     {
       key: "message",
       header: t("logs.columns.message"),
-      width: proportional(MESSAGE_SHARE),
+      width: MESSAGE,
       renderCell: cell((l) => <Message line={l} />),
     },
   ];
@@ -281,9 +296,15 @@ function useRowPlugin(
   );
 }
 
-export function LogRows({ lines, query }: { lines: LogLine[]; query: string }) {
-  const { isMobile } = useAppShellMobile();
-  const columns = useMemo(() => columnsOf(query, isMobile), [query, isMobile]);
+/** One column on a phone, and beside the open request panel at any width. */
+function useIsStacked(isPanelOpen: boolean) {
+  return useAppShellMobile().isMobile || isPanelOpen;
+}
+
+export function LogRows(props: { lines: LogLine[]; query: string; isPanelOpen: boolean }) {
+  const { lines, query } = props;
+  const isStacked = useIsStacked(props.isPanelOpen);
+  const columns = useMemo(() => columnsOf(query, isStacked), [query, isStacked]);
   const indexOf = useMemo(() => new Map(lines.map((l, i) => [l, i])), [lines]);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [body, setBody] = useState<HTMLElement | null>(null);
@@ -299,7 +320,7 @@ export function LogRows({ lines, query }: { lines: LogLine[]; query: string }) {
   const virtualizer = useVirtualizer({
     count: lines.length,
     getScrollElement: () => scroller,
-    estimateSize: () => (isMobile ? ROW_ESTIMATE.compact : ROW_ESTIMATE.wide),
+    estimateSize: () => (isStacked ? ROW_ESTIMATE.stacked : ROW_ESTIMATE.wide),
     overscan: OVERSCAN,
     scrollMargin: margin,
     getItemKey: (i) => lines[i].key,
@@ -358,23 +379,23 @@ export function LogRows({ lines, query }: { lines: LogLine[]; query: string }) {
 const placeholders = Array.from({ length: 8 }, (_, i) => ({ key: String(i) }));
 
 /** The log's shape while the first read is pending: its columns over skeleton lines. */
-export function LoadingRows() {
-  const { isMobile } = useAppShellMobile();
+export function LoadingRows({ isPanelOpen }: { isPanelOpen: boolean }) {
+  const isStacked = useIsStacked(isPanelOpen);
   const cell = (r: { key: string }) => (
     <Skeleton width="100%" height={layout.valueSkeleton.height} index={Number(r.key)} />
   );
-  const shape: [string, string, number?][] = isMobile
+  const shape: [string, string][] = isStacked
     ? [["line", t("logs.columns.message")]]
     : [
         ["time", t("logs.columns.time")],
         ["request", t("logs.columns.request")],
         ["level", t("logs.columns.level")],
-        ["message", t("logs.columns.message"), MESSAGE_SHARE],
+        ["message", t("logs.columns.message")],
       ];
-  const columns: TableColumn<{ key: string }>[] = shape.map(([key, header, share]) => ({
+  const columns: TableColumn<{ key: string }>[] = shape.map(([key, header]) => ({
     key,
     header,
-    width: share === undefined ? undefined : proportional(share),
+    width: key === "message" ? MESSAGE : SHORT,
     renderCell: cell,
   }));
   return (

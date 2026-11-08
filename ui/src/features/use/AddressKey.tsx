@@ -1,6 +1,5 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Code } from "@astryxdesign/core/Code";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
@@ -10,6 +9,7 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Heading } from "@astryxdesign/core/Text";
 import type { KeyTest } from "../../app/useKeyTest.ts";
+import { Identifier } from "../../components/Identifier.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
 import { mask } from "../../lib/client-keys.ts";
@@ -22,7 +22,7 @@ function CopyableAddress({ value }: { value: string }) {
   const { copy, isCopied } = useClipboard({ announce: t("use.address.copied") });
   return (
     <HStack gap={1} vAlign="center">
-      <Code>{value}</Code>
+      <Identifier>{value}</Identifier>
       <IconButton
         label={t("use.address.copy")}
         tooltip={t("use.address.copy")}

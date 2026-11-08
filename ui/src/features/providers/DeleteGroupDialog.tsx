@@ -26,7 +26,7 @@ export function DeleteGroupDialog({
       title={t("providers.delete.title", { name: named })}
       description={t("providers.delete.description")}
       actionLabel={t("providers.delete.action")}
-      cancelLabel={t("providers.dialog.cancel")}
+      cancelLabel={t("app.dialog.cancel")}
       isActionLoading={busy}
       onAction={onConfirm}
     />

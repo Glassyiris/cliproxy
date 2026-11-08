@@ -1,5 +1,6 @@
-// Accounts, from the table-filter template: the filter row above the table, the table grouped by
-// provider, the selection toolbar while rows are selected, and the open row in the end panel.
+// Accounts, from the table-filter template: the filter row in the header above the table, the
+// table grouped by provider, the selection toolbar while rows are selected, and the open row in
+// the end panel.
 // The template's own LayoutHeader is PageFrame's; its saved views, power search and column and
 // grouping options are dropped (PAGE-MAP "Accounts").
 import {
@@ -8,6 +9,7 @@ import {
   useMemo,
   useState,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import { Plus } from "lucide-react";
@@ -185,9 +187,8 @@ type CollectionProps = {
   writes: Writes;
 };
 
-/** The filter row, the selection toolbar and the table, or why the filters leave no rows. */
-function Collection(props: CollectionProps) {
-  const { rows, filters, setFilters, quota, writes } = props;
+/** The rows the filters leave, their counts per quick filter, and the quota check of every row. */
+function useCollection(rows: Row[], filters: Filters, quota: ReturnType<typeof useQuota>) {
   const [checking, setChecking] = useState(false);
   const { provider, search, show } = filters;
   const tab = useMemo(() => inTab(rows, { provider, search }), [rows, provider, search]);
@@ -203,19 +204,48 @@ function Collection(props: CollectionProps) {
     await quota.checkAll(rows.map((r) => r.account));
     setChecking(false);
   };
+  return { shown, ready, quick: quick as Record<Show, number>, checking, checkAll };
+}
+
+type Collected = ReturnType<typeof useCollection>;
+
+/** The filter row, kept in the page header while the table scrolls. */
+function CollectionToolbar({
+  rows,
+  filters,
+  setFilters,
+  collected,
+  quota,
+  writes,
+}: Pick<CollectionProps, "rows" | "filters" | "setFilters" | "quota" | "writes"> & {
+  collected: Collected;
+}) {
+  return (
+    <Toolbar
+      filters={filters}
+      setFilters={setFilters}
+      tabs={providerCounts(rows)}
+      total={rows.length}
+      quick={collected.quick}
+      writes={writes}
+      checking={collected.checking}
+      canCheck={rows.some((r) => quota.canCheck(r.account))}
+      onCheck={() => void collected.checkAll()}
+    />
+  );
+}
+
+/**
+ * The selection toolbar and the table, or why the filters leave no rows. On a phone the filter row
+ * (`toolbar`) leads it, as the header there would take most of the screen.
+ */
+function Collection(props: CollectionProps & { collected: Collected; toolbar: ReactNode }) {
+  const { rows, setFilters, writes, collected } = props;
+  const { shown, ready } = collected;
+  const { provider } = props.filters;
   return (
     <>
-      <Toolbar
-        filters={filters}
-        setFilters={setFilters}
-        tabs={providerCounts(rows)}
-        total={rows.length}
-        quick={quick as Record<Show, number>}
-        writes={writes}
-        checking={checking}
-        canCheck={rows.some((r) => quota.canCheck(r.account))}
-        onCheck={() => void checkAll()}
-      />
+      {props.toolbar}
       <PluginsError />
       <SortNote />
       <BatchBar
@@ -260,10 +290,14 @@ export default function Accounts() {
   const now = useNow(!!openId);
   const { credentials, quota, rows } = useRows(now);
   const writes = useWrites();
+  const collected = useCollection(rows, filters, quota);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const open = rows.find((r) => r.id === openId);
   const { isMobile } = useAppShellMobile();
   const isPanelBeside = !!open && !isMobile;
+  const toolbar = rows.length > 0 && (
+    <CollectionToolbar {...{ rows, filters, setFilters, collected, quota, writes }} />
+  );
   const onToggle = useCallback((r: Row) => go(r.id === openId ? "" : r.id), [go, openId]);
   const onDeleted = (keys: string[]) => {
     setSelected((s) => new Set([...s].filter((k) => !keys.includes(k))));
@@ -302,6 +336,7 @@ export default function Accounts() {
         )
       }
       panel={panel}
+      toolbar={!isMobile && toolbar}
     >
       <MissingActions actions={missing()} />
       {credentials.isError && (
@@ -318,6 +353,8 @@ export default function Accounts() {
           {...{ rows, filters, setFilters, selected, setSelected, openId, onToggle, now, quota }}
           isPanelBeside={isPanelBeside}
           writes={writes}
+          collected={collected}
+          toolbar={isMobile && toolbar}
         />
       )}
       {writes.dialog}

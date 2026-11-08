@@ -27,7 +27,7 @@ export function RemoveKeyDialog({
       title={t("keys.remove.title", { key: mask(named) })}
       description={t("keys.remove.description")}
       actionLabel={t("keys.remove.action")}
-      cancelLabel={t("keys.dialog.cancel")}
+      cancelLabel={t("app.dialog.cancel")}
       isActionLoading={busy}
       onAction={onConfirm}
     />

@@ -1,41 +1,11 @@
 import { useMemo, useState } from "react";
-import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
-import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
-import { HStack, Layout, LayoutContent, LayoutFooter, VStack } from "@astryxdesign/core/Layout";
+import { VStack } from "@astryxdesign/core/Layout";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Typeahead, createStaticSource, type SearchableItem } from "@astryxdesign/core/Typeahead";
+import { FormDialog } from "../../components/FormDialog.tsx";
 import { t } from "../../lib/i18n.ts";
 import { aliasProblems, newAlias, type Alias, type AliasProblems } from "./modelConfig.ts";
-
-function AliasFooter({
-  busy,
-  cancel,
-  submit,
-}: {
-  busy: boolean;
-  cancel: () => void;
-  submit: () => void;
-}) {
-  return (
-    <LayoutFooter>
-      <HStack gap={2} hAlign="end">
-        <Button
-          label={t("models.add.cancel")}
-          variant="secondary"
-          isLoading={busy}
-          onClick={cancel}
-        />
-        <Button
-          label={t("models.add.submit")}
-          variant="primary"
-          isLoading={busy}
-          onClick={submit}
-        />
-      </HStack>
-    </LayoutFooter>
-  );
-}
 
 const aliasMessage = (code: AliasProblems["alias"]) => {
   if (code === "required") return t("models.add.aliasRequired");
@@ -71,8 +41,6 @@ export function AddAliasDialog({
     () => createStaticSource(models.map((id) => ({ id, label: id }))),
     [models],
   );
-  // A write cannot be called back once sent, so the dialog stays open until it ends.
-  const close = () => !busy && onClose();
 
   const submit = async () => {
     // A model the catalog does not list can still be aliased, as the legacy datalist allowed.
@@ -84,46 +52,44 @@ export function AddAliasDialog({
   };
 
   return (
-    <Dialog isOpen onOpenChange={(open) => !open && close()} purpose="form">
-      <Layout
-        header={<DialogHeader title={t("models.add.title")} onOpenChange={() => close()} />}
-        content={
-          <LayoutContent>
-            <VStack gap={3}>
-              <Typeahead
-                label={t("models.add.upstream")}
-                searchSource={source}
-                value={picked}
-                onChange={(item) => {
-                  setPicked(item);
-                  setProblems((p) => ({ ...p, name: undefined }));
-                }}
-                onChangeQuery={setTyped}
-                hasEntriesOnFocus
-                debounceMs={0}
-                status={problem(problems.name && t("models.add.upstreamRequired"))}
-              />
-              <TextInput
-                label={t("models.add.alias")}
-                value={alias}
-                onChange={(value) => {
-                  setAlias(value);
-                  setProblems((p) => ({ ...p, alias: undefined }));
-                }}
-                onEnter={() => void submit()}
-                status={problem(aliasMessage(problems.alias))}
-              />
-              <CheckboxInput
-                label={t("models.add.keep")}
-                description={t("models.add.keepDescription")}
-                value={keep}
-                onChange={setKeep}
-              />
-            </VStack>
-          </LayoutContent>
-        }
-        footer={<AliasFooter busy={busy} cancel={close} submit={() => void submit()} />}
-      />
-    </Dialog>
+    <FormDialog
+      title={t("models.add.title")}
+      submitLabel={t("models.add.submit")}
+      busy={busy}
+      onSubmit={() => void submit()}
+      onClose={onClose}
+    >
+      <VStack gap={3}>
+        <Typeahead
+          label={t("models.add.upstream")}
+          searchSource={source}
+          value={picked}
+          onChange={(item) => {
+            setPicked(item);
+            setProblems((p) => ({ ...p, name: undefined }));
+          }}
+          onChangeQuery={setTyped}
+          hasEntriesOnFocus
+          debounceMs={0}
+          status={problem(problems.name && t("models.add.upstreamRequired"))}
+        />
+        <TextInput
+          label={t("models.add.alias")}
+          value={alias}
+          onChange={(value) => {
+            setAlias(value);
+            setProblems((p) => ({ ...p, alias: undefined }));
+          }}
+          onEnter={() => void submit()}
+          status={problem(aliasMessage(problems.alias))}
+        />
+        <CheckboxInput
+          label={t("models.add.keep")}
+          description={t("models.add.keepDescription")}
+          value={keep}
+          onChange={setKeep}
+        />
+      </VStack>
+    </FormDialog>
   );
 }

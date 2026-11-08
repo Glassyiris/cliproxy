@@ -89,7 +89,7 @@ to both palettes.
 | Moon dark | text on highlight med | 7.41 | 10:1 | browser | Selected nav row, neutral badge, Kbd, "Go to page" button | 「原色優先」 2026-11-08 |
 | Moon dark | text on overlay under the hover layer | 7.65 | 10:1 | browser | Hovered or open menu row | 「原色優先」 2026-11-08 |
 | Moon dark | pine on surface | 3.94 | 5:1 | browser | Sign-in status line | 「原色優先」 2026-11-08 |
-| Moon dark | love on overlay | 4.00 | 5:1 | browser | Error banner, field error, destructive button label | 「原色優先」 2026-11-08 |
+| Moon dark | love on overlay | 4.00 | 5:1 | browser | Error banner, field error, destructive button label, error level on Logs | 「原色優先」 2026-11-08 |
 | Moon dark | subtle on surface | 4.46 | 5:1 | browser | Secondary text on cards, side nav, content area | 「原色優先」 2026-11-08 |
 | Moon dark | subtle on base | 4.86 | 5:1 | browser | Secondary text on the page and side nav | 「原色優先」 2026-11-08 |
 | Main dark | pine on surface | 3.16 | 5:1 | browser | Sign-in status line | 「原色優先」 2026-11-08 |
@@ -101,7 +101,8 @@ to both palettes.
 | Dawn light | text on overlay under the hover layer | 7.31 | 10:1 | browser | Hovered or open menu row | 「原色優先」 2026-11-08 |
 | Dawn light | base on text | 8.69 | 10:1 | browser | Primary button label | 「原色優先」 2026-11-08 |
 | Dawn light | foam on overlay | 2.86 | 5:1 | browser | Info banner | 「原色優先」 2026-11-08 |
-| Dawn light | love on overlay | 3.50 | 5:1 | browser | Error banner, field error, destructive button label | 「原色優先」 2026-11-08 |
+| Dawn light | love on overlay | 3.50 | 5:1 | browser | Error banner, field error, destructive button label, error level on Logs | 「原色優先」 2026-11-08 |
+| Dawn light | gold on overlay | 1.87 | 5:1 | browser | Warning level on Logs | 「原色優先」 2026-11-08 |
 | Dawn light | iris on surface | 3.65 | 5:1 | browser | Skip link | 「原色優先」 2026-11-08 |
 | Dawn light | subtle on base | 4.02 | 5:1 | browser | Secondary text on the page and side nav | 「原色優先」 2026-11-08 |
 | Dawn light | subtle on surface | 4.23 | 5:1 | browser | Secondary text on cards and the content area | 「原色優先」 2026-11-08 |

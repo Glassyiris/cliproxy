@@ -53,9 +53,6 @@ export default {
     "providers.delete.description": "Requests stop using its keys. This cannot be undone.",
     "providers.delete.action": "Delete",
     "providers.delete.deleted": "Group deleted.",
-
-    "providers.dialog.cancel": "Cancel",
-    "providers.dialog.closeWhileSaving": "Saving. This can be closed once it finishes.",
   },
   "zh-CN": {
     "providers.page.title": "提供商密钥",
@@ -110,9 +107,6 @@ export default {
     "providers.delete.description": "请求将不再使用其中的密钥。此操作无法撤销。",
     "providers.delete.action": "删除",
     "providers.delete.deleted": "已删除分组",
-
-    "providers.dialog.cancel": "取消",
-    "providers.dialog.closeWhileSaving": "正在保存，保存结束后才能关闭。",
   },
   "zh-TW": {
     "providers.page.title": "供應商金鑰",
@@ -167,8 +161,5 @@ export default {
     "providers.delete.description": "請求將不再使用其中的金鑰。此操作無法復原。",
     "providers.delete.action": "刪除",
     "providers.delete.deleted": "已刪除分組",
-
-    "providers.dialog.cancel": "取消",
-    "providers.dialog.closeWhileSaving": "正在儲存，儲存結束後才能關閉。",
   },
 };

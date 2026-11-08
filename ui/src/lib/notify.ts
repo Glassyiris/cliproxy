@@ -7,11 +7,19 @@ export type NoticeLevel = "success" | "info" | "warning" | "error";
 export type Notice = { id: number; level: NoticeLevel; message: string };
 
 const listeners = new Set<(notice: Notice) => void>();
+const dismissers = new Set<(id: number) => void>();
 let next = 0;
 
+/** Shows `message` at its level's place; the returned id can take a toast down again. */
 export function notify(level: NoticeLevel, message: string) {
   const notice = { id: ++next, level, message };
   for (const listener of listeners) listener(notice);
+  return notice.id;
+}
+
+/** Takes down the toast `notify` returned `id` for, if it is still shown. */
+export function dismissNotice(id: number) {
+  for (const dismisser of dismissers) dismisser(id);
 }
 
 /**
@@ -28,4 +36,10 @@ export function placement(level: NoticeLevel) {
 export function onNotice(listener: (notice: Notice) => void) {
   listeners.add(listener);
   return () => void listeners.delete(listener);
+}
+
+/** The toast viewport subscribes here to take a toast down by its notice id. */
+export function onDismissNotice(dismisser: (id: number) => void) {
+  dismissers.add(dismisser);
+  return () => void dismissers.delete(dismisser);
 }

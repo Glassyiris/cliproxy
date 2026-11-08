@@ -1,13 +1,13 @@
 // Logs, from the table-filter template: the filter row above the log lines and the open request's
 // log in the end panel. The template's own LayoutHeader is PageFrame's; its saved views, power
 // search and column options are dropped (PAGE-MAP "Logs").
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { VStack } from "@astryxdesign/core/Layout";
-import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Text } from "@astryxdesign/core/Text";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
@@ -16,6 +16,7 @@ import { useAction, type Action } from "../../app/useAction.ts";
 import { useHashParams, useHashRoute } from "../../app/useHashRoute.ts";
 import { MissingActions, useAvailable } from "../../components/MissingActions.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
+import { StatusLamp } from "../../components/StatusLamp.tsx";
 import { clearLogs } from "../../lib/api/logs.ts";
 import { routes } from "../../lib/api/routes.ts";
 import { t } from "../../lib/i18n.ts";
@@ -84,40 +85,33 @@ function FollowButton({
     : isOn
       ? t("logs.follow.on")
       : t("logs.follow.off");
-  const variant = isFailing ? "error" : isOn ? "success" : "neutral";
+  const status = isFailing ? "failing" : isOn ? "ready" : "disabled";
   return (
     <ToggleButton
       label={label}
       isPressed={isOn}
       isDisabled={!canFollow}
-      icon={<StatusDot variant={variant} isPulsing={isOn && !isFailing} label={label} />}
+      icon={
+        <StatusLamp status={status} label={label} isPulsing={isOn && !isFailing} isLabelHidden />
+      }
       onPressedChange={onChange}
     />
   );
 }
 
-/** The Application log tab: the filter row, then the lines or why there are none. */
-function ApplicationLog({
-  tail,
-  shown,
+/** The Application log tab's filter row, kept in the page header while the lines scroll. */
+function AppToolbar({
   hash,
   action,
   toolbar,
 }: {
-  tail: Tail;
-  shown: LogLine[] | undefined;
   hash: ReturnType<typeof useLogsView>;
   action: Action;
   toolbar: RefObject<HTMLDivElement | null>;
 }) {
   const client = useQueryClient();
   const isAvailable = useAvailable();
-  const { filters, setFilters } = hash;
-  const kept = tail.data?.lines.length;
   const canClear = isAvailable(routes.clearLogs) && isAvailable(routes.readLogs);
-  const readError = (
-    <ReadError error={tail.error} what={t("logs.lines.what")} retry={() => void tail.refetch()} />
-  );
   const onClear = async () => {
     await clearLogs();
     void client.resetQueries({ queryKey: logKeys.tail });
@@ -128,26 +122,49 @@ function ApplicationLog({
     if (id === hash.openId) void client.invalidateQueries({ queryKey: logKeys.request(id) });
     else hash.go(id);
   };
+  return (
+    <Toolbar
+      ref={toolbar}
+      filters={hash.filters}
+      setFilters={hash.setFilters}
+      action={action}
+      canClear={canClear}
+      onClear={onClear}
+      openId={hash.openId}
+      onOpen={onOpen}
+    />
+  );
+}
+
+/** The Application log tab: the lines or why there are none, after the filter row on a phone. */
+function ApplicationLog({
+  tail,
+  shown,
+  hash,
+  toolbar,
+  filterRow,
+}: {
+  tail: Tail;
+  shown: LogLine[] | undefined;
+  hash: ReturnType<typeof useLogsView>;
+  toolbar: RefObject<HTMLDivElement | null>;
+  filterRow: ReactNode;
+}) {
+  const kept = tail.data?.lines.length;
+  const readError = (
+    <ReadError error={tail.error} what={t("logs.lines.what")} retry={() => void tail.refetch()} />
+  );
   const showAll = () => {
-    setFilters({ filter: "", withManagement: true });
+    hash.setFilters({ filter: "", withManagement: true });
     // The button goes with the empty state; the filter it cleared takes focus.
     toolbar.current?.querySelector("input")?.focus();
   };
   return (
     <>
       <MissingActions actions={[{ route: routes.clearLogs, label: t("logs.clear.button") }]} />
-      <Toolbar
-        ref={toolbar}
-        filters={filters}
-        setFilters={setFilters}
-        action={action}
-        canClear={canClear}
-        onClear={onClear}
-        openId={hash.openId}
-        onOpen={onOpen}
-      />
+      {filterRow}
       {tail.isError && kept === undefined && readError}
-      {tail.isPending && !tail.isError && <LoadingRows />}
+      {tail.isPending && !tail.isError && <LoadingRows isPanelOpen={!!hash.openId} />}
       {kept === 0 && (
         <EmptyState
           title={t("logs.empty.title")}
@@ -165,11 +182,26 @@ function ApplicationLog({
           actions={<Button label={t("logs.empty.showAll")} onClick={showAll} />}
         />
       )}
-      {!!shown?.length && <LogRows lines={shown} query={hash.suffix} />}
+      {!!shown?.length && <LogRows lines={shown} query={hash.suffix} isPanelOpen={!!hash.openId} />}
       {/* A failed poll keeps the lines it had; its banner sits after them, where following
           keeps the view. */}
       {tail.isError && kept !== undefined && readError}
     </>
+  );
+}
+
+function LogTabs({
+  hash,
+  tabs,
+}: {
+  hash: ReturnType<typeof useLogsView>;
+  tabs: RefObject<HTMLElement | null>;
+}) {
+  return (
+    <TabList ref={tabs} value={hash.tab} onChange={hash.setTab} role="tablist" hasDivider>
+      <Tab value="app" label={t("logs.tabs.app")} panelId={PANEL_ID} />
+      <Tab value="errors" label={t("logs.tabs.errors")} panelId={PANEL_ID} />
+    </TabList>
   );
 }
 
@@ -186,6 +218,7 @@ export default function Logs() {
   );
   const toolbar = useRef<HTMLDivElement>(null);
   const tabs = useRef<HTMLElement>(null);
+  const { isMobile } = useAppShellMobile();
   const { openId } = hash;
   const close = () => {
     hash.go("");
@@ -196,6 +229,10 @@ export default function Logs() {
       tabs.current?.querySelector<HTMLElement>("[role=tab][aria-selected=true]");
     next?.focus();
   };
+  const tabList = <LogTabs hash={hash} tabs={tabs} />;
+  const filterRow = hash.tab === "app" && (
+    <AppToolbar hash={hash} action={action} toolbar={toolbar} />
+  );
   const panel = openId
     ? {
         label: t("logs.request.panel", { id: openId }),
@@ -227,16 +264,22 @@ export default function Logs() {
         />
       }
       panel={panel}
+      // On a phone the header would take most of the screen, so the rows stay in the content.
+      toolbar={
+        !isMobile && (
+          <VStack gap={4}>
+            {tabList}
+            {filterRow}
+          </VStack>
+        )
+      }
     >
-      <TabList ref={tabs} value={hash.tab} onChange={hash.setTab} role="tablist" hasDivider>
-        <Tab value="app" label={t("logs.tabs.app")} panelId={PANEL_ID} />
-        <Tab value="errors" label={t("logs.tabs.errors")} panelId={PANEL_ID} />
-      </TabList>
+      {isMobile && tabList}
       <VStack gap={4} id={PANEL_ID} role="tabpanel">
         {hash.tab === "errors" ? (
           <ErrorLogs />
         ) : (
-          <ApplicationLog tail={tail} shown={shown} hash={hash} action={action} toolbar={toolbar} />
+          <ApplicationLog {...{ tail, shown, hash, toolbar }} filterRow={isMobile && filterRow} />
         )}
       </VStack>
     </PageFrame>

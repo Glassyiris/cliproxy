@@ -32,9 +32,6 @@ export default {
     "keys.remove.description": "Clients using it lose access immediately.",
     "keys.remove.action": "Remove",
     "keys.remove.removed": "Key removed.",
-
-    "keys.dialog.cancel": "Cancel",
-    "keys.dialog.closeWhileSaving": "Saving. This can be closed once it finishes.",
   },
   "zh-CN": {
     "keys.page.title": "客户端密钥",
@@ -69,9 +66,6 @@ export default {
     "keys.remove.description": "使用此密钥的客户端会立即失去访问权限。",
     "keys.remove.action": "移除",
     "keys.remove.removed": "已移除密钥",
-
-    "keys.dialog.cancel": "取消",
-    "keys.dialog.closeWhileSaving": "正在保存，保存结束后才能关闭。",
   },
   "zh-TW": {
     "keys.page.title": "用戶端金鑰",
@@ -106,8 +100,5 @@ export default {
     "keys.remove.description": "使用此金鑰的用戶端會立即失去存取權。",
     "keys.remove.action": "移除",
     "keys.remove.removed": "已移除金鑰",
-
-    "keys.dialog.cancel": "取消",
-    "keys.dialog.closeWhileSaving": "正在儲存，儲存結束後才能關閉。",
   },
 };

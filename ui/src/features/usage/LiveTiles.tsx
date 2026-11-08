@@ -4,7 +4,7 @@ import { Code } from "@astryxdesign/core/Code";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Icon, type IconProps } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Table, type TableColumn } from "@astryxdesign/core/Table";
+import { proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { currentLocale, t } from "../../lib/i18n.ts";
 import type { usageStats } from "../../lib/usage.ts";
@@ -82,6 +82,8 @@ const modelColumns = (): TableColumn<ModelRow>[] => [
   {
     key: "model",
     header: t("usage.models.model"),
+    // Twice a count's share, and free to narrow to the counts' floor on a phone.
+    width: proportional(2, { minWidth: layout.tableColumnFloor }),
     renderCell: (row) => <Code>{row.model}</Code>,
   },
   {

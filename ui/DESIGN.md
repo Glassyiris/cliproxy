@@ -65,8 +65,8 @@ from `palette.json`, the highlight roles from `dist/css/rose-pine.css`; they liv
   | Links, focus ring | iris |
   | Ready / success | pine |
   | Info | foam |
-  | Warning (cooling) | gold |
-  | Error (failing) | love |
+  | Warning (cooling), yellow Token (warning log level) | gold |
+  | Error (failing), red Token (error log level) | love |
   | rose | unused |
 
 - Status vocabulary, closed set: `ready`, `cooling`, `failing`, `info`, `disabled` (muted). A lamp
@@ -78,8 +78,8 @@ from `palette.json`, the highlight roles from `dist/css/rose-pine.css`; they liv
   some of them, see `REQUIREMENTS.md`.
 - The dialog scrim, the shadow and the hover and pressed overlays drawn over a fill keep Astryx's
   translucent defaults: they are not palette colours, and Rosé Pine defines none.
-- Text tokens are not fill tokens. Traffic strips use the neutral roles for volume; love only for
-  failed buckets.
+- Text tokens are not fill tokens. Traffic strips use the neutral roles for volume; gold for a
+  bucket where 5 % to 50 % of the requests failed, love from 50 % (fewer failures stay neutral).
 
 ## Type
 
@@ -166,7 +166,7 @@ built from the same template.
 | Detail | Astryx `LayoutPanel` + `MetadataList`; `BottomSheet` on phones |
 | Edits | Astryx `Dialog purpose="form"`; config edits show a diff and reread before write |
 | Quota windows | Astryx `ProgressBar` with label and reset time |
-| Traffic (20 × 10 min) | One local `TrafficStrip`, drawn like the `dashboard-alert-rail` template's `UptimeStrip`: one cell per bucket, neutral volume, red failures, accessible summary |
+| Traffic (20 × 10 min) | One local `TrafficStrip`, drawn like the `dashboard-alert-rail` template's `UptimeStrip`: one cell per bucket, neutral volume, gold or love by failure share, accessible summary |
 | Notices | See below |
 
 ## Notifications

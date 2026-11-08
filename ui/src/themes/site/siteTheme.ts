@@ -94,6 +94,17 @@ const statusTokens = ({ mode, status }: Roles) => ({
   "--color-icon-gray": mode("subtle"),
   "--color-border-gray": mode("highlightMed"),
   "--color-background-gray": mode("overlay"),
+
+  // Red and yellow are the failing and cooling hues, so a red or yellow Token (log levels) is
+  // the error or warning colour, drawn like a badge: the hue on overlay.
+  "--color-text-red": status.failing,
+  "--color-icon-red": status.failing,
+  "--color-border-red": status.failing,
+  "--color-background-red": mode("overlay"),
+  "--color-text-yellow": status.cooling,
+  "--color-icon-yellow": status.cooling,
+  "--color-border-yellow": status.cooling,
+  "--color-background-yellow": mode("overlay"),
 });
 
 type ThemeConfig = Parameters<typeof defineTheme>[0];

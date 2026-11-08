@@ -1,21 +1,35 @@
 import { useEffect, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
-import { useToast } from "@astryxdesign/core/Toast";
+import { useToast, type ToastDismissFn } from "@astryxdesign/core/Toast";
 import { t } from "../lib/i18n.ts";
-import { onNotice, placement, type Notice } from "../lib/notify.ts";
+import { onDismissNotice, onNotice, placement, type Notice } from "../lib/notify.ts";
 
-/** Shows success, info and error notices as toasts; PageWarning shows warnings. */
+/**
+ * Shows success, info and error notices as toasts and takes one down on request; PageWarning
+ * shows warnings.
+ */
 export function ToastBridge() {
   const show = useToast();
-  useEffect(
-    () =>
-      onNotice(({ level, message }) => {
-        const where = placement(level);
-        if (where.surface === "toast")
-          show({ body: message, type: where.type, isAutoHide: where.autoHide });
-      }),
-    [show],
-  );
+  useEffect(() => {
+    const shown = new Map<number, ToastDismissFn>();
+    const stopShowing = onNotice(({ id, level, message }) => {
+      const where = placement(level);
+      if (where.surface !== "toast") return;
+      const hide = () => void shown.delete(id);
+      shown.set(
+        id,
+        show({ body: message, type: where.type, isAutoHide: where.autoHide, onHide: hide }),
+      );
+    });
+    const stopDismissing = onDismissNotice((id) => {
+      shown.get(id)?.();
+      shown.delete(id);
+    });
+    return () => {
+      stopShowing();
+      stopDismissing();
+    };
+  }, [show]);
   return null;
 }
 

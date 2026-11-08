@@ -1,71 +1,14 @@
-import type { ReactNode } from "react";
 import { History } from "lucide-react";
-import * as stylex from "@stylexjs/stylex";
-import { Divider } from "@astryxdesign/core/Divider";
-import { Icon, type IconProps } from "@astryxdesign/core/Icon";
-import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Heading, Text } from "@astryxdesign/core/Text";
+import { Text } from "@astryxdesign/core/Text";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
+import { RailSection } from "../../components/RailSection.tsx";
+import { StatusLamp } from "../../components/StatusLamp.tsx";
 import { t } from "../../lib/i18n.ts";
 import type { UsageEvent } from "../../lib/usage.ts";
-
-const railStyles = stylex.create({
-  // Translucent, so the band reads the same on a card and on the panel.
-  header: {
-    backgroundColor: "var(--color-background-muted)",
-  },
-  // The opaque layer the translucent band needs; without it the rows read
-  // through the header as they scroll past.
-  stickyHeader: {
-    position: "sticky",
-    insetBlockStart: 0,
-    zIndex: 1,
-    backgroundColor: "var(--color-background-surface)",
-  },
-});
-
-/**
- * One labelled region of the triage rail. `hasStickyHeader` is the rail form: the header pins to
- * the top of the panel while the list scrolls. Folded inline, the section sits in its own card.
- */
-function RailSection({
-  icon,
-  title,
-  subtitle,
-  hasStickyHeader,
-  children,
-}: {
-  icon: IconProps["icon"];
-  title: string;
-  subtitle: string;
-  hasStickyHeader: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <>
-      <VStack gap={0} xstyle={hasStickyHeader ? railStyles.stickyHeader : undefined}>
-        <VStack gap={1} padding={4} xstyle={railStyles.header}>
-          <HStack gap={2} vAlign="center">
-            <Icon icon={icon} size="sm" color="secondary" />
-            <StackItem size="fill">
-              <Heading level={3} accessibilityLevel={2}>
-                {title}
-              </Heading>
-            </StackItem>
-          </HStack>
-          <Text type="supporting" color="secondary">
-            {subtitle}
-          </Text>
-        </VStack>
-        <Divider />
-      </VStack>
-      {children}
-    </>
-  );
-}
 
 const SHOWN = 30;
 
@@ -125,12 +68,9 @@ export function LatestRail({
           ))}
         </List>
       ) : live ? (
-        <HStack gap={2} vAlign="center" padding={4}>
-          <StatusDot variant="success" label={t("usage.rail.listening")} isPulsing />
-          <Text type="supporting" color="secondary">
-            {t("usage.rail.listening")}
-          </Text>
-        </HStack>
+        <VStack padding={4}>
+          <StatusLamp status="ready" label={t("usage.rail.listening")} isPulsing />
+        </VStack>
       ) : (
         <VStack padding={4}>
           <Text type="supporting" color="secondary">

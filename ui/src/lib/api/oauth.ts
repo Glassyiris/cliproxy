@@ -48,8 +48,8 @@ export function importVertex(file: File, location: string) {
 
 /**
  * Start binding Sign in with ChatGPT to a file-backed Codex credential.
- * @public ponytail: no caller until Connect handles Accounts' `#connect/siwc/<name>` link
- * (OPEN-QUESTIONS 7); drop the tag when it does, or this function and that link if it is dropped.
+ * @public ponytail: no caller until Connect gets a way to bind a ChatGPT sign-in
+ * (OPEN-QUESTIONS 7); drop the tag when it does, or this function if that is dropped.
  */
 export const bindSiwc = (name: string) =>
   request<{ status: "ok"; url: string; state: string; flow: "siwc_bind"; expires_in: number }>(

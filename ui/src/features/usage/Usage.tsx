@@ -7,39 +7,26 @@ import { Card } from "@astryxdesign/core/Card";
 import { Divider } from "@astryxdesign/core/Divider";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Text } from "@astryxdesign/core/Text";
+import { VStack } from "@astryxdesign/core/Layout";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useApiKeyUsage, useCredentials } from "../../app/serverQueries.ts";
 import { MissingActions, useAvailable } from "../../components/MissingActions.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
+import { StatusLamp } from "../../components/StatusLamp.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { t } from "../../lib/i18n.ts";
 import { usageStats, type UsageEvent } from "../../lib/usage.ts";
+import { layout } from "../../themes/site/layout.ts";
 import { LatestRail } from "./LatestRail.tsx";
 import { LiveTiles, ModelTable } from "./LiveTiles.tsx";
 import { useUsageDrain } from "./queries.ts";
 import { SourcesCard } from "./Sources.tsx";
 import { addBatch, recent, sources } from "./summary.ts";
 
-// 1024px at the default root size, where the template folds its rail into the content.
-const RAIL_FOLDS = "(max-width: 64rem)";
-
-/**
- * The template's header status line: a pulsing lamp while the live view drains the queue.
- * ponytail: StatusLamp has no pulse; this draws the same lamp and word with StatusDot until it does.
- */
+/** The template's header status line: a pulsing lamp while the live view drains the queue. */
 function LiveLamp({ live }: { live: boolean }) {
   const word = live ? t("usage.page.live") : t("usage.page.off");
-  return (
-    <HStack gap={1.5} vAlign="center">
-      <StatusDot variant={live ? "success" : "neutral"} label={word} isPulsing={live} />
-      <Text type="supporting" color="secondary">
-        {word}
-      </Text>
-    </HStack>
-  );
+  return <StatusLamp status={live ? "ready" : "disabled"} label={word} isPulsing={live} />;
 }
 
 /**
@@ -137,7 +124,7 @@ export default function Usage() {
   const stats = useMemo(() => usageStats(view.events), [view.events]);
   const [isAsking, setAsking] = useState(false);
   const isAvailable = useAvailable();
-  const isNarrow = useMediaQuery(RAIL_FOLDS);
+  const isNarrow = useMediaQuery(layout.railFolds);
   const toggle = useRef<HTMLButtonElement>(null);
   // Retry removes the banner that holds it, so focus goes to the header button.
   const retry = () => {
@@ -168,7 +155,6 @@ export default function Usage() {
           : {
               label: t("usage.rail.heading"),
               content: rail(true),
-              onClose: () => {},
             }
       }
     >

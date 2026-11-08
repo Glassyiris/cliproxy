@@ -8,8 +8,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Center } from "@astryxdesign/core/Center";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
-import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
-import { Icon } from "@astryxdesign/core/Icon";
+import { Dialog } from "@astryxdesign/core/Dialog";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Text } from "@astryxdesign/core/Text";
@@ -28,6 +27,7 @@ import { lineDiff } from "../lib/compare.ts";
 import { t } from "../lib/i18n.ts";
 import { notify } from "../lib/notify.ts";
 import { layout } from "../themes/site/layout.ts";
+import { FormDialogHeader } from "./FormDialog.tsx";
 import { ReadError } from "./ReadError.tsx";
 
 /** A config key path such as "routing/strategy" (edited as JSON), or the whole file as YAML. */
@@ -123,7 +123,13 @@ function Editor({
 
   return (
     <Dialog isOpen onOpenChange={(open) => !open && close()} variant="fullscreen" purpose="form">
-      <EditorHeader title={title} source={source} isSaving={isSaving} onClose={close} />
+      <FormDialogHeader
+        title={title}
+        subtitle={<Text type="code">{sourceName(source)}</Text>}
+        busy={isSaving}
+        busyLabel={t("app.editor.closeWhileSaving")}
+        onClose={close}
+      />
       {read.isPending ? (
         <Center axis="both" padding={10}>
           <Spinner aria-label={t("app.read.loading", { what: title })} />
@@ -151,42 +157,6 @@ function Editor({
         onAction={onClose}
       />
     </Dialog>
-  );
-}
-
-/** The dialog's title row; while a save is on its way, its close control is busy instead. */
-function EditorHeader({
-  title,
-  source,
-  isSaving,
-  onClose,
-}: {
-  title: string;
-  source: ConfigSource;
-  isSaving: boolean;
-  onClose: () => void;
-}) {
-  const subtitle = <Text type="code">{sourceName(source)}</Text>;
-  if (!isSaving)
-    return (
-      <DialogHeader title={title} subtitle={subtitle} onOpenChange={(open) => !open && onClose()} />
-    );
-  return (
-    <DialogHeader
-      title={title}
-      subtitle={subtitle}
-      endContentEdgeCompensation="all"
-      endContent={
-        <Button
-          variant="ghost"
-          isIconOnly
-          isLoading
-          label={t("app.editor.closeWhileSaving")}
-          tooltip={t("app.editor.closeWhileSaving")}
-          icon={<Icon icon="close" color="inherit" />}
-        />
-      }
-    />
   );
 }
 

@@ -1,6 +1,6 @@
 // What can be done to the open account. Unsupported actions render disabled and are named in
 // the page's one MissingActions line.
-import { Download, LogIn, RefreshCw } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { HStack } from "@astryxdesign/core/Layout";
@@ -139,14 +139,6 @@ export function PanelActions(props: PanelProps & { now: number }) {
         )}
       />
       <Resets row={row} writes={writes} />
-      {a.siwc_bind_supported && (
-        <Button
-          label={t("accounts.actions.bindSiwc")}
-          size="sm"
-          icon={<Icon icon={LogIn} size="sm" />}
-          href={`#connect/siwc/${encodeURIComponent(a.name)}`}
-        />
-      )}
       <Button
         label={t("accounts.actions.download")}
         size="sm"

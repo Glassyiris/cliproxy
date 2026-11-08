@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { Button } from "@astryxdesign/core/Button";
-import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
-import { Layout, LayoutContent, LayoutFooter, HStack, VStack } from "@astryxdesign/core/Layout";
+import { VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { Selector } from "@astryxdesign/core/Selector";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { FormDialog } from "../../components/FormDialog.tsx";
 import { t } from "../../lib/i18n.ts";
 import { kindMeaning, paramsMessage } from "./words.ts";
 import { kinds, parseParams, protocols, type Kind, type Rule } from "./rules.ts";
@@ -67,35 +66,6 @@ function ValuesField({
   );
 }
 
-function Footer({
-  busy,
-  onCancel,
-  onSubmit,
-}: {
-  busy: boolean;
-  onCancel: () => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <LayoutFooter>
-      <HStack gap={2} hAlign="end">
-        <Button
-          label={t("payload.add.cancel")}
-          variant="secondary"
-          isLoading={busy}
-          onClick={onCancel}
-        />
-        <Button
-          label={t("payload.add.submit")}
-          variant="primary"
-          isLoading={busy}
-          onClick={onSubmit}
-        />
-      </HStack>
-    </LayoutFooter>
-  );
-}
-
 /** The add-rule form. Mounted only while open, so every opening starts from the defaults. */
 export function AddRuleDialog({
   busy,
@@ -116,8 +86,6 @@ export function AddRuleDialog({
   const [values, setValues] = useState("");
   const [modelError, setModelError] = useState("");
   const [valuesError, setValuesError] = useState("");
-  // A write cannot be called back once sent, so the dialog stays open until it ends.
-  const close = () => !busy && onClose();
 
   const submit = async () => {
     const name = model.trim();
@@ -131,49 +99,47 @@ export function AddRuleDialog({
   };
 
   return (
-    <Dialog isOpen onOpenChange={(open) => !open && close()} purpose="form">
-      <Layout
-        header={<DialogHeader title={t("payload.add.title")} onOpenChange={() => close()} />}
-        content={
-          <LayoutContent>
-            <VStack gap={3}>
-              <KindField
-                kind={kind}
-                blocked={notList.includes(kind)}
-                onChange={(value) => {
-                  setKind(value);
-                  setValuesError("");
-                }}
-              />
-              <TextInput
-                label={t("payload.add.model")}
-                value={model}
-                status={modelError ? { type: "error", message: modelError } : undefined}
-                onChange={(value) => {
-                  setModel(value);
-                  setModelError("");
-                }}
-              />
-              <Selector
-                label={t("payload.add.protocol")}
-                value={protocol}
-                options={protocolOptions()}
-                onChange={setProtocol}
-              />
-              <ValuesField
-                kind={kind}
-                value={values}
-                error={valuesError}
-                onChange={(value) => {
-                  setValues(value);
-                  setValuesError("");
-                }}
-              />
-            </VStack>
-          </LayoutContent>
-        }
-        footer={<Footer busy={busy} onCancel={close} onSubmit={() => void submit()} />}
-      />
-    </Dialog>
+    <FormDialog
+      title={t("payload.add.title")}
+      submitLabel={t("payload.add.submit")}
+      busy={busy}
+      onSubmit={() => void submit()}
+      onClose={onClose}
+    >
+      <VStack gap={3}>
+        <KindField
+          kind={kind}
+          blocked={notList.includes(kind)}
+          onChange={(value) => {
+            setKind(value);
+            setValuesError("");
+          }}
+        />
+        <TextInput
+          label={t("payload.add.model")}
+          value={model}
+          status={modelError ? { type: "error", message: modelError } : undefined}
+          onChange={(value) => {
+            setModel(value);
+            setModelError("");
+          }}
+        />
+        <Selector
+          label={t("payload.add.protocol")}
+          value={protocol}
+          options={protocolOptions()}
+          onChange={setProtocol}
+        />
+        <ValuesField
+          kind={kind}
+          value={values}
+          error={valuesError}
+          onChange={(value) => {
+            setValues(value);
+            setValuesError("");
+          }}
+        />
+      </VStack>
+    </FormDialog>
   );
 }

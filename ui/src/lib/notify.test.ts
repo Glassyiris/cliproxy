@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { notify, onNotice, placement } from "./notify.ts";
+import { dismissNotice, notify, onDismissNotice, onNotice, placement } from "./notify.ts";
 
 test("each level goes where DESIGN.md Notifications puts it", () => {
   assert.deepEqual(placement("success"), { surface: "toast", type: "info", autoHide: true });
@@ -17,4 +17,20 @@ test("notify reaches every subscriber until it unsubscribes", () => {
   stop();
   notify("error", "after");
   assert.deepEqual(seen, ["warning:cooling"]);
+});
+
+test("notify returns the notice's id, and dismissNotice passes that id on", () => {
+  const shown: number[] = [];
+  const dismissed: number[] = [];
+  const stopShowing = onNotice((n) => shown.push(n.id));
+  const stopDismissing = onDismissNotice((id) => dismissed.push(id));
+  const first = notify("info", "callback sent");
+  const second = notify("info", "ended");
+  dismissNotice(first);
+  stopShowing();
+  stopDismissing();
+  dismissNotice(second);
+  assert.deepEqual(shown, [first, second]);
+  assert.notEqual(first, second);
+  assert.deepEqual(dismissed, [first]);
 });

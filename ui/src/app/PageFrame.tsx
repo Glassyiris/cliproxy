@@ -4,7 +4,10 @@
 // the content on the same padding, so it starts on the header's left edge. On a phone the meta
 // takes its own line under the title and the action drops below both (detail-page, mobile).
 // A detail panel sits at the end behind a resize handle on desktop and is a bottom sheet on phones,
-// as the table-filter template docks its job details, so the list beside it does not reflow.
+// as the table-filter template docks its job details, so the list beside it does not reflow. A
+// panel with no `onClose` is a permanent rail (the dashboard-alert-rail template's): its sections
+// bring their own padding, so the panel adds none. A long list's filter row goes in `toolbar`,
+// which stays in the header while the content scrolls, as the table-filter template keeps it.
 
 import type { ReactNode } from "react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
@@ -23,8 +26,11 @@ import { Heading } from "@astryxdesign/core/Text";
 import { t } from "../lib/i18n.ts";
 import { layout } from "../themes/site/layout.ts";
 
-/** The open detail of a row; the page closes it by no longer passing it. */
-export type DetailPanel = { label: string; content: ReactNode; onClose: () => void };
+/**
+ * The open detail of a row; the page closes it by no longer passing it. Without `onClose` it is a
+ * permanent rail the page always shows beside its content.
+ */
+export type DetailPanel = { label: string; content: ReactNode; onClose?: () => void };
 
 function EndPanel({ panel }: { panel: DetailPanel }) {
   const width = useResizable(layout.detailPanel);
@@ -36,7 +42,12 @@ function EndPanel({ panel }: { panel: DetailPanel }) {
         isAlwaysVisible={false}
         label={t("app.panel.resize", { panel: panel.label })}
       />
-      <LayoutPanel resizable={width.props} hasDivider padding={4} label={panel.label}>
+      <LayoutPanel
+        resizable={width.props}
+        hasDivider
+        padding={panel.onClose ? 4 : 0}
+        label={panel.label}
+      >
         {panel.content}
       </LayoutPanel>
     </>
@@ -49,6 +60,7 @@ export function PageFrame({
   actions,
   width = "reading",
   panel,
+  toolbar,
   children,
 }: {
   title: string;
@@ -58,6 +70,8 @@ export function PageFrame({
   /** DESIGN.md "Content width": 960 for forms, settings and System; full for list + panel screens. */
   width?: "reading" | "full";
   panel?: DetailPanel;
+  /** The filter row of a long list; it stays in view while the list scrolls. */
+  toolbar?: ReactNode;
   children: ReactNode;
 }) {
   const isMobile = useAppShellMobile().isMobile;
@@ -70,25 +84,28 @@ export function PageFrame({
         end={panel && !isMobile ? <EndPanel panel={panel} /> : undefined}
         header={
           <LayoutHeader hasDivider padding={4}>
-            {isMobile ? (
-              <VStack gap={3}>
-                <VStack gap={1}>
-                  {heading}
-                  {meta}
-                </VStack>
-                {actions}
-              </VStack>
-            ) : (
-              <HStack gap={4} vAlign="center">
-                <StackItem size="fill">
-                  <HStack gap={3} vAlign="center" wrap="wrap">
+            <VStack gap={4}>
+              {isMobile ? (
+                <VStack gap={3}>
+                  <VStack gap={1}>
                     {heading}
                     {meta}
-                  </HStack>
-                </StackItem>
-                {actions}
-              </HStack>
-            )}
+                  </VStack>
+                  {actions}
+                </VStack>
+              ) : (
+                <HStack gap={4} vAlign="center">
+                  <StackItem size="fill">
+                    <HStack gap={3} vAlign="center" wrap="wrap">
+                      {heading}
+                      {meta}
+                    </HStack>
+                  </StackItem>
+                  {actions}
+                </HStack>
+              )}
+              {toolbar}
+            </VStack>
           </LayoutHeader>
         }
         content={
@@ -100,7 +117,7 @@ export function PageFrame({
       {isMobile && (
         <BottomSheet
           isOpen={!!panel}
-          onOpenChange={(open) => !open && panel?.onClose()}
+          onOpenChange={(open) => !open && panel?.onClose?.()}
           label={panel?.label ?? ""}
           height="tall"
         >

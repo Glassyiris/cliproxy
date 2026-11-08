@@ -18,6 +18,7 @@ import type { Credential } from "../../lib/api/credentials.ts";
 import { readPath } from "../../lib/config-path.ts";
 import { buckets, sum } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
+import { layout } from "../../themes/site/layout.ts";
 import { AttentionFeed } from "./Attention.tsx";
 import { GetStarted, useFirstRun } from "./GetStarted.tsx";
 import { LimitsSection } from "./Limits.tsx";
@@ -54,9 +55,6 @@ function Meta({ online, observedAt }: { online: boolean; observedAt?: string }) 
     </HStack>
   );
 }
-
-// 1024px at the default root size.
-const RAIL_FOLDS = "(max-width: 64rem)";
 
 /** Every read the page shows, and what the tiles, strips and rail derive from them. */
 function useOverviewData() {
@@ -104,7 +102,7 @@ export default function Overview() {
   const errorLogs = useErrorLogs();
   const { online } = useSession();
   const action = useAction();
-  const isNarrow = useMediaQuery(RAIL_FOLDS);
+  const isNarrow = useMediaQuery(layout.railFolds);
   const firstRun = useFirstRun(files?.length);
 
   const rail = (hasStickyHeader: boolean) => (
@@ -127,8 +125,6 @@ export default function Overview() {
           : {
               label: t("overview.attention.heading"),
               content: rail(true),
-              // The rail is part of the page, never closed.
-              onClose: () => {},
             }
       }
     >

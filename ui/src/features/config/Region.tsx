@@ -15,7 +15,7 @@ export function Region({
   children: ReactNode;
 }) {
   return (
-    <Grid columns={{ minWidth: layout.detailPanel.minSize }} gap={10}>
+    <Grid columns={{ minWidth: layout.settingsColumnMin }} gap={10}>
       <VStack gap={1}>
         <Heading level={3} accessibilityLevel={2}>
           {heading}

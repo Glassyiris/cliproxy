@@ -62,7 +62,11 @@ export function SignInPanel({ signIn }: { signIn: SignIn }) {
           </StackItem>
           <Expiry flow={flow} polledAt={signIn.polledAt} />
           <HStack aria-live="polite">
-            <StatusLamp status={phaseStatus[flow.phase]} label={phaseWord(flow.phase)} />
+            <StatusLamp
+              status={phaseStatus[flow.phase]}
+              label={phaseWord(flow.phase)}
+              isPulsing={waiting}
+            />
           </HStack>
         </HStack>
         <VStack>

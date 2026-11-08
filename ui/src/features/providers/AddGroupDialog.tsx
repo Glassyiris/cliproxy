@@ -1,63 +1,10 @@
 import { useState } from "react";
-import { Button } from "@astryxdesign/core/Button";
-import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
-import { Icon } from "@astryxdesign/core/Icon";
-import { HStack, Layout, LayoutContent, LayoutFooter, VStack } from "@astryxdesign/core/Layout";
+import { VStack } from "@astryxdesign/core/Layout";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { FormDialog } from "../../components/FormDialog.tsx";
 import { KeyField } from "../../components/KeyField.tsx";
 import { t } from "../../lib/i18n.ts";
 import { formErrors, newGroup, type FormErrors, type Group } from "./groups.ts";
-
-/** The title row; while the write is on its way the close control is busy instead. */
-function Header({ busy, onClose }: { busy: boolean; onClose: () => void }) {
-  if (!busy)
-    return <DialogHeader title={t("providers.add.title")} onOpenChange={() => onClose()} />;
-  return (
-    <DialogHeader
-      title={t("providers.add.title")}
-      endContentEdgeCompensation="all"
-      endContent={
-        <Button
-          variant="ghost"
-          isIconOnly
-          isLoading
-          label={t("providers.dialog.closeWhileSaving")}
-          tooltip={t("providers.dialog.closeWhileSaving")}
-          icon={<Icon icon="close" color="inherit" />}
-        />
-      }
-    />
-  );
-}
-
-function Footer({
-  busy,
-  onCancel,
-  onSubmit,
-}: {
-  busy: boolean;
-  onCancel: () => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <LayoutFooter>
-      <HStack gap={2} hAlign="end">
-        <Button
-          label={t("providers.dialog.cancel")}
-          variant="secondary"
-          isLoading={busy}
-          onClick={onCancel}
-        />
-        <Button
-          label={t("providers.add.submit")}
-          variant="primary"
-          isLoading={busy}
-          onClick={onSubmit}
-        />
-      </HStack>
-    </LayoutFooter>
-  );
-}
 
 const urlMessage = {
   required: () => t("providers.add.urlRequired"),
@@ -87,6 +34,7 @@ function Fields({
         label={t("providers.add.name")}
         size="lg"
         isRequired
+        hasAutoFocus
         value={values.name}
         onChange={change("name")}
         onEnter={submit}
@@ -109,6 +57,7 @@ function Fields({
       <KeyField
         label={t("providers.add.key")}
         kind="new"
+        hasAutoFocus={false}
         secret={values.key}
         failure={errors.key ? t("providers.add.keyRequired") : ""}
         onChange={change("key")}
@@ -134,8 +83,6 @@ export function AddGroupDialog({
 }) {
   const [values, setValues] = useState<Values>({ name: "", baseUrl: "", key: "" });
   const [errors, setErrors] = useState<FormErrors>({});
-  // A write cannot be called back once sent, so the dialog stays open until it ends.
-  const close = () => !busy && onClose();
   const change = (field: keyof Values) => (value: string) => {
     setValues((v) => ({ ...v, [field]: value }));
     setErrors((e) => ({ ...e, [field]: undefined }));
@@ -155,22 +102,20 @@ export function AddGroupDialog({
   };
 
   return (
-    <Dialog isOpen onOpenChange={(open) => !open && close()} purpose="form">
-      <Layout
-        header={<Header busy={busy} onClose={close} />}
-        content={
-          <LayoutContent>
-            <Fields
-              compat={compat}
-              values={values}
-              errors={errors}
-              change={change}
-              submit={() => void submit()}
-            />
-          </LayoutContent>
-        }
-        footer={<Footer busy={busy} onCancel={close} onSubmit={() => void submit()} />}
+    <FormDialog
+      title={t("providers.add.title")}
+      submitLabel={t("providers.add.submit")}
+      busy={busy}
+      onSubmit={() => void submit()}
+      onClose={onClose}
+    >
+      <Fields
+        compat={compat}
+        values={values}
+        errors={errors}
+        change={change}
+        submit={() => void submit()}
       />
-    </Dialog>
+    </FormDialog>
   );
 }

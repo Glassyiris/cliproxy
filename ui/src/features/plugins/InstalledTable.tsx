@@ -1,17 +1,15 @@
-import type { ReactNode } from "react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Code } from "@astryxdesign/core/Code";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Switch } from "@astryxdesign/core/Switch";
 import { proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
+import { loadingCell, placeholderRows, type LoadingRow } from "../../components/loadingRows.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
 import type { Plugin } from "../../lib/api/plugins.ts";
 import { t } from "../../lib/i18n.ts";
 import type { Status } from "../../themes/site/index.ts";
-import { layout } from "../../themes/site/layout.ts";
 import { capabilities, plainText, pluginName, pluginState, type PluginState } from "./rows.ts";
 
 const lamp = {
@@ -83,13 +81,7 @@ function RowMenu({
   );
 }
 
-type Row = { id: string; plugin: Plugin | null };
-
-const skeletonRows: Row[] = [
-  { id: "a", plugin: null },
-  { id: "b", plugin: null },
-  { id: "c", plugin: null },
-];
+type Row = LoadingRow<Plugin>;
 
 type Handlers = {
   canSwitch: boolean;
@@ -99,14 +91,7 @@ type Handlers = {
   onDelete: (plugin: Plugin) => void;
 };
 
-const cell =
-  (render: (plugin: Plugin) => ReactNode) =>
-  ({ plugin }: Row) =>
-    plugin ? (
-      render(plugin)
-    ) : (
-      <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
-    );
+const cell = loadingCell<Plugin>;
 
 const Lamp = ({ plugin }: { plugin: Plugin }) => {
   const state = pluginState(plugin);
@@ -190,6 +175,7 @@ export function InstalledTable({
 }: { plugins: Plugin[] | undefined } & Handlers) {
   const isMobile = useAppShellMobile().isMobile;
   const columns = isMobile ? narrowColumns(handlers) : wideColumns(handlers);
-  const data: Row[] = plugins?.map((plugin) => ({ id: plugin.id, plugin })) ?? skeletonRows;
+  const data: Row[] =
+    plugins?.map((plugin) => ({ id: plugin.id, item: plugin })) ?? placeholderRows;
   return <Table<Row> data={data} columns={columns} idKey="id" hasHover={!!plugins} />;
 }

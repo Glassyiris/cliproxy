@@ -32,7 +32,7 @@ export function RemoveRuleDialog({
       title={t("payload.remove.title", { kind: named?.kind ?? "" })}
       description={t("payload.remove.description", { models: named?.label ?? "" })}
       actionLabel={t("payload.remove.action")}
-      cancelLabel={t("payload.add.cancel")}
+      cancelLabel={t("app.dialog.cancel")}
       isActionLoading={busy}
       onAction={onConfirm}
     />

@@ -1,17 +1,16 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef } from "react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Code } from "@astryxdesign/core/Code";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { loadingCell, placeholderRows, type LoadingRow } from "../../components/loadingRows.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import type { PluginStore, StorePlugin } from "../../lib/api/plugins.ts";
 import { t } from "../../lib/i18n.ts";
-import { layout } from "../../themes/site/layout.ts";
 import { plainText, pluginName } from "./rows.ts";
 
 const verb = (p: StorePlugin) =>
@@ -21,24 +20,11 @@ const verb = (p: StorePlugin) =>
       : t("plugins.store.reinstall")
     : t("plugins.store.install");
 
-type Row = { id: string; plugin: StorePlugin | null };
-
-const skeletonRows: Row[] = [
-  { id: "a", plugin: null },
-  { id: "b", plugin: null },
-  { id: "c", plugin: null },
-];
+type Row = LoadingRow<StorePlugin>;
 
 type Install = (plugin: StorePlugin, verb: string) => void;
 
-const cell =
-  (render: (plugin: StorePlugin) => ReactNode) =>
-  ({ plugin }: Row) =>
-    plugin ? (
-      render(plugin)
-    ) : (
-      <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
-    );
+const cell = loadingCell<StorePlugin>;
 
 const Name = ({ plugin }: { plugin: StorePlugin }) => (
   <Text type="body" weight="semibold">
@@ -113,7 +99,8 @@ function StoreTable({
 }) {
   const isMobile = useAppShellMobile().isMobile;
   const columns = isMobile ? narrowColumns(onInstall) : wideColumns(onInstall);
-  const data: Row[] = plugins?.map((plugin) => ({ id: plugin.store_id, plugin })) ?? skeletonRows;
+  const data: Row[] =
+    plugins?.map((plugin) => ({ id: plugin.store_id, item: plugin })) ?? placeholderRows;
   return <Table<Row> data={data} columns={columns} idKey="id" hasHover={!!plugins} />;
 }
 

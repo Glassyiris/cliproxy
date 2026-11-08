@@ -36,7 +36,6 @@ export default {
     "payload.add.invalid": "Enter valid JSON.",
     "payload.add.notList": "A filter takes a JSON list of paths.",
     "payload.add.notObject": "This kind takes a JSON object of path → value.",
-    "payload.add.cancel": "Cancel",
     "payload.add.submit": "Add rule",
     "payload.add.added": "Rule added.",
 
@@ -82,7 +81,6 @@ export default {
     "payload.add.invalid": "请输入有效的 JSON。",
     "payload.add.notList": "filter 只接受由路径组成的 JSON 列表。",
     "payload.add.notObject": "此类型只接受 JSON 对象，格式为 路径 → 值。",
-    "payload.add.cancel": "取消",
     "payload.add.submit": "添加规则",
     "payload.add.added": "已添加规则",
 
@@ -127,7 +125,6 @@ export default {
     "payload.add.invalid": "請輸入有效的 JSON。",
     "payload.add.notList": "filter 只接受由路徑組成的 JSON 清單。",
     "payload.add.notObject": "此類型只接受 JSON 物件，格式為 路徑 → 值。",
-    "payload.add.cancel": "取消",
     "payload.add.submit": "新增規則",
     "payload.add.added": "已新增規則",
 

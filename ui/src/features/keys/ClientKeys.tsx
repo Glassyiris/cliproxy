@@ -3,7 +3,6 @@ import { Eye, Plus } from "lucide-react";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Code } from "@astryxdesign/core/Code";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
@@ -12,6 +11,7 @@ import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
+import { Identifier } from "../../components/Identifier.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
@@ -109,7 +109,7 @@ export default function ClientKeys() {
     >
       <Text type="supporting" color="secondary">
         {t("keys.page.introBefore")}
-        <Code>{apiKeyHeader}</Code>
+        <Identifier>{apiKeyHeader}</Identifier>
         {t("keys.page.introAfter")}
       </Text>
       {config.isError && (

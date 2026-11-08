@@ -11,7 +11,7 @@ import type { Credential } from "../../lib/api/credentials.ts";
 import { cancelOAuth, startOAuth, submitOAuthCallback } from "../../lib/api/oauth.ts";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
-import { notify } from "../../lib/notify.ts";
+import { dismissNotice, notify } from "../../lib/notify.ts";
 import type { QuotaReading } from "../../lib/quota.ts";
 import { span } from "../../lib/time.ts";
 import { isForwarded, signedInAccount, signInUrl, type Phase, type Seen } from "./flow.ts";
@@ -43,7 +43,8 @@ export type Flow = {
   read: QuotaReading | null;
   /** When the phase last changed. */
   at: number;
-  callbackSent: boolean;
+  /** The "Callback sent…" toast; null until a callback is sent. */
+  callbackNotice: number | null;
   /** Why the account list could not be reread after the server confirmed; null when it was. */
   reread: unknown;
 };
@@ -78,14 +79,21 @@ function update(ctx: Ctx, id: number, patch: Partial<Flow>) {
   return next;
 }
 
-// notify cannot dismiss "Callback sent…", so the ending follows it as a second toast that says
-// how the sign-in ended.
+/** Takes down "Callback sent…" once the sign-in has ended, success included. */
+function dropCallbackNotice(flow: Flow) {
+  if (flow.callbackNotice !== null) dismissNotice(flow.callbackNotice);
+}
+
+// After a callback, an ending other than success (refused, error, unknown, cancelled) replaces
+// "Callback sent…" with a toast that says how the sign-in ended; a success replaces it with its
+// own "connected" toast in `verify`.
 function announceEnd(flow: Flow) {
-  if (flow.callbackSent)
-    notify(
-      flow.phase === "error" || flow.phase === "refused" ? "error" : "info",
-      t("connect.panel.ended", { provider: label(flow.provider), status: phaseWord(flow.phase) }),
-    );
+  if (flow.callbackNotice === null) return;
+  dropCallbackNotice(flow);
+  notify(
+    flow.phase === "error" || flow.phase === "refused" ? "error" : "info",
+    t("connect.panel.ended", { provider: label(flow.provider), status: phaseWord(flow.phase) }),
+  );
 }
 
 function end(ctx: Ctx, id: number, phase: Phase, problem = "") {
@@ -117,8 +125,9 @@ async function verify(ctx: Ctx, id: number, account: Credential | null) {
     at: Date.now(),
   });
   if (!flow) return;
-  if (refused) announceEnd(flow);
-  else notify("success", t("connect.result.connected", { provider: label(flow.provider) }));
+  if (refused) return announceEnd(flow);
+  dropCallbackNotice(flow);
+  notify("success", t("connect.result.connected", { provider: label(flow.provider) }));
 }
 
 /**
@@ -133,7 +142,14 @@ async function confirm(ctx: Ctx, id: number, known: Credential | null, found: bo
   try {
     list = (await reloadCredentials(ctx.queryClient)).files;
   } catch (e) {
-    update(ctx, id, { phase: "ok", account: known, read: null, reread: e, at: Date.now() });
+    const ended = update(ctx, id, {
+      phase: "ok",
+      account: known,
+      read: null,
+      reread: e,
+      at: Date.now(),
+    });
+    if (ended) dropCallbackNotice(ended);
     return;
   }
   await verify(ctx, id, known ?? signedInAccount(flow.provider, flow.seen, list));
@@ -195,7 +211,7 @@ async function begin(ctx: Ctx, provider: string, notOnServer: () => void) {
     account: null,
     read: null,
     at: now,
-    callbackSent: false,
+    callbackNotice: null,
     reread: null,
   });
 }
@@ -204,8 +220,9 @@ async function sendCallback(ctx: Ctx, address: string) {
   const flow = ctx.latest.get();
   if (flow?.phase !== "wait") return;
   await submitOAuthCallback(flow.provider, address);
-  if (ctx.latest.get()?.phase === "wait" && update(ctx, flow.id, { callbackSent: true }))
-    notify("info", t("connect.callback.sent"));
+  const now = ctx.latest.get();
+  if (now?.id === flow.id && now.phase === "wait")
+    update(ctx, flow.id, { callbackNotice: notify("info", t("connect.callback.sent")) });
 }
 
 /**

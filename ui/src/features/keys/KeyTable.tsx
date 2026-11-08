@@ -1,4 +1,3 @@
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Code } from "@astryxdesign/core/Code";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -6,12 +5,12 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack } from "@astryxdesign/core/Layout";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Table, type TableColumn } from "@astryxdesign/core/Table";
+import { loadingCell, placeholderRows, type LoadingRow } from "../../components/loadingRows.tsx";
 import { mask } from "../../lib/client-keys.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
-import { layout } from "../../themes/site/layout.ts";
 
-type Row = { id: string; value: string };
+type Row = LoadingRow<string>;
 
 function RowActions({ value, onRemove }: { value: string; onRemove: (key: string) => void }) {
   const { copy, isCopied } = useClipboard();
@@ -46,12 +45,6 @@ function RowActions({ value, onRemove }: { value: string; onRemove: (key: string
   );
 }
 
-const skeletonRows: Row[] = [
-  { id: "a", value: "" },
-  { id: "b", value: "" },
-  { id: "c", value: "" },
-];
-
 export function KeyTable({
   keys,
   revealed,
@@ -67,20 +60,16 @@ export function KeyTable({
     {
       key: "value",
       header: t("keys.table.key"),
-      renderCell: (row) =>
-        loading ? (
-          <Skeleton width={layout.valueSkeleton.width} height={layout.valueSkeleton.height} />
-        ) : (
-          <Code>{revealed ? row.value : mask(row.value)}</Code>
-        ),
+      renderCell: loadingCell((value: string) => <Code>{revealed ? value : mask(value)}</Code>),
     },
     {
       key: "actions",
       header: t("keys.table.actions"),
       align: "end",
-      renderCell: (row) => (loading ? null : <RowActions value={row.value} onRemove={onRemove} />),
+      renderCell: ({ item }) =>
+        item === null ? null : <RowActions value={item} onRemove={onRemove} />,
     },
   ];
-  const data = keys?.map((value, index) => ({ id: String(index), value })) ?? skeletonRows;
+  const data = keys?.map((item, index) => ({ id: String(index), item })) ?? placeholderRows;
   return <Table<Row> data={data} columns={columns} idKey="id" hasHover={!loading} />;
 }

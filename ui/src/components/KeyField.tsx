@@ -2,11 +2,11 @@ import { useState, type RefObject } from "react";
 import { Eye } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
-import { InputGroup } from "@astryxdesign/core/InputGroup";
+import { InputGroup, type InputGroupProps } from "@astryxdesign/core/InputGroup";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { t } from "../lib/i18n.ts";
 
-/** A secret field with a show/hide button and its error; the sign-in card and Add key use it. */
+/** A secret field with a show/hide button and its error; the sign-in card and the add dialogs use it. */
 export function KeyField({
   label,
   secret,
@@ -15,6 +15,8 @@ export function KeyField({
   submit,
   inputRef,
   kind,
+  hasAutoFocus = true,
+  size = "lg",
 }: {
   label: string;
   secret: string;
@@ -24,13 +26,16 @@ export function KeyField({
   inputRef?: RefObject<HTMLInputElement | null>;
   /** The management key being typed to sign in, or a new key being made up. */
   kind: "sign-in" | "new";
+  /** Off when the field is not the dialog's first, so focus lands on the first one. */
+  hasAutoFocus?: boolean;
+  size?: InputGroupProps["size"];
 }) {
   const [shown, setShown] = useState(false);
   const toggle = shown ? t("app.signIn.hideKey") : t("app.signIn.showKey");
   return (
     <InputGroup
       label={label}
-      size="lg"
+      size={size}
       status={failure ? { type: "error", message: failure } : undefined}
     >
       <TextInput
@@ -41,7 +46,7 @@ export function KeyField({
         value={secret}
         onChange={onChange}
         onEnter={submit}
-        hasAutoFocus
+        hasAutoFocus={hasAutoFocus}
         autoComplete={kind === "sign-in" ? "current-password" : "off"}
         autoCapitalize="off"
         hasAutoCorrect={false}

@@ -94,7 +94,7 @@ export default {
     "app.unsaved.keep": "Keep editing",
     "app.missing.actions": "Not available on this server: {actions}.",
     "app.traffic.summary":
-      "{total, plural, one {# request} other {# requests}} in the last {minutes} minutes{failed, plural, =0 {} other {, # failed}}",
+      "{total, plural, one {# request} other {# requests}} in the last {minutes} minutes{failed, plural, =0 {} other {, # failed}}{degraded, plural, =0 {} one {; some requests failed in # ten-minute period} other {; some requests failed in # ten-minute periods}}{failing, plural, =0 {} one {; at least half failed in # ten-minute period} other {; at least half failed in # ten-minute periods}}",
     "app.credState.disabled": "Disabled",
     "app.credState.limited": "Limited until {until, date, ::EEEjjmm} · next check in {next}",
     "app.credState.limitedOnRequest":
@@ -152,6 +152,8 @@ export default {
     "app.editor.yamlNote": "The server validates YAML and may normalise it.",
     "app.editor.discardDescription": "Closing the editor drops the changes you made.",
     "app.editor.closeWhileSaving": "Saving. The editor can be closed once it finishes.",
+    "app.dialog.cancel": "Cancel",
+    "app.dialog.closeWhileSaving": "Saving. This can be closed once it finishes.",
     "app.notice.dismiss": "Dismiss",
   },
   "zh-CN": {
@@ -245,7 +247,7 @@ export default {
     "app.unsaved.keep": "继续编辑",
     "app.missing.actions": "此服务器不支持：{actions}。",
     "app.traffic.summary":
-      "最近 {minutes} 分钟 {total} 个请求{failed, plural, =0 {} other {，# 个失败}}",
+      "最近 {minutes} 分钟 {total} 个请求{failed, plural, =0 {} other {，# 个失败}}{degraded, plural, =0 {} other {；# 个 10 分钟时段部分失败}}{failing, plural, =0 {} other {；# 个 10 分钟时段半数以上失败}}",
     "app.credState.disabled": "已停用",
     "app.credState.limited": "受限至 {until, date, ::EEEjjmm} · {next}后再次检查",
     "app.credState.limitedOnRequest": "受限至 {until, date, ::EEEjjmm} · 下次请求时再次检查",
@@ -300,6 +302,8 @@ export default {
     "app.editor.yamlNote": "服务器会校验 YAML，并可能调整其格式。",
     "app.editor.discardDescription": "关闭编辑器会丢失所做的更改。",
     "app.editor.closeWhileSaving": "正在保存，保存结束后才能关闭编辑器。",
+    "app.dialog.cancel": "取消",
+    "app.dialog.closeWhileSaving": "正在保存，保存结束后才能关闭。",
     "app.notice.dismiss": "关闭",
   },
   "zh-TW": {
@@ -393,7 +397,7 @@ export default {
     "app.unsaved.keep": "繼續編輯",
     "app.missing.actions": "此伺服器不支援：{actions}。",
     "app.traffic.summary":
-      "最近 {minutes} 分鐘 {total} 個請求{failed, plural, =0 {} other {，# 個失敗}}",
+      "最近 {minutes} 分鐘 {total} 個請求{failed, plural, =0 {} other {，# 個失敗}}{degraded, plural, =0 {} other {；# 個 10 分鐘時段部分失敗}}{failing, plural, =0 {} other {；# 個 10 分鐘時段半數以上失敗}}",
     "app.credState.disabled": "已停用",
     "app.credState.limited": "受限至 {until, date, ::EEEjjmm} · {next}後再次檢查",
     "app.credState.limitedOnRequest": "受限至 {until, date, ::EEEjjmm} · 下次請求時再次檢查",
@@ -448,6 +452,8 @@ export default {
     "app.editor.yamlNote": "伺服器會驗證 YAML，並可能調整其格式。",
     "app.editor.discardDescription": "關閉編輯器會遺失所做的變更。",
     "app.editor.closeWhileSaving": "正在儲存，儲存結束後才能關閉編輯器。",
+    "app.dialog.cancel": "取消",
+    "app.dialog.closeWhileSaving": "正在儲存，儲存結束後才能關閉。",
     "app.notice.dismiss": "關閉",
   },
 };
