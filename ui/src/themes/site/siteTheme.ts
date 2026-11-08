@@ -107,6 +107,26 @@ const statusTokens = ({ mode, status }: Roles) => ({
   "--color-background-yellow": mode("overlay"),
 });
 
+/**
+ * Astryx's data tokens (`dataVars`) as Rosé Pine colours. Rosé Pine has six accents for ten
+ * categorical names, so each name takes its nearest hue and pairs share one; a chart picks
+ * distinct Rosé Pine hues, not distinct names. The sequential ramps are not set: Rosé Pine has no
+ * ramps and no chart here uses one.
+ */
+const dataTokens = ({ mode }: Roles) => ({
+  "--color-data-neutral": mode("subtle"),
+  "--color-data-categorical-blue": mode("pine"),
+  "--color-data-categorical-green": mode("pine"),
+  "--color-data-categorical-cyan": mode("foam"),
+  "--color-data-categorical-teal": mode("foam"),
+  "--color-data-categorical-purple": mode("iris"),
+  "--color-data-categorical-indigo": mode("iris"),
+  "--color-data-categorical-red": mode("love"),
+  "--color-data-categorical-pink": mode("rose"),
+  "--color-data-categorical-orange": mode("gold"),
+  "--color-data-categorical-brown": mode("gold"),
+});
+
 type ThemeConfig = Parameters<typeof defineTheme>[0];
 
 export const siteAdaptations: ThemeConfig["adaptations"] = {
@@ -141,6 +161,7 @@ export const roseTokens = (dark: RosePineVariant) => {
     "--text-supporting-size": "0.8125rem",
     ...chromeTokens(r, dark),
     ...statusTokens(r),
+    ...dataTokens(r),
   };
 };
 

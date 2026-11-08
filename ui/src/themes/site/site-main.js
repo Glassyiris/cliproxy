@@ -226,7 +226,18 @@ export const siteMainTheme = {
     "--color-border-warning": "light-dark(#ea9d34, #f6c177)",
     "--color-border-error": "light-dark(#b4637a, #eb6f92)",
     "--color-border-info": "light-dark(#56949f, #9ccfd8)",
-    "--color-background-error-inverted": "light-dark(#b4637a, #eb6f92)"
+    "--color-background-error-inverted": "light-dark(#b4637a, #eb6f92)",
+    "--color-data-neutral": "light-dark(#797593, #908caa)",
+    "--color-data-categorical-blue": "light-dark(#286983, #31748f)",
+    "--color-data-categorical-green": "light-dark(#286983, #31748f)",
+    "--color-data-categorical-cyan": "light-dark(#56949f, #9ccfd8)",
+    "--color-data-categorical-teal": "light-dark(#56949f, #9ccfd8)",
+    "--color-data-categorical-purple": "light-dark(#907aa9, #c4a7e7)",
+    "--color-data-categorical-indigo": "light-dark(#907aa9, #c4a7e7)",
+    "--color-data-categorical-red": "light-dark(#b4637a, #eb6f92)",
+    "--color-data-categorical-pink": "light-dark(#d7827e, #ebbcba)",
+    "--color-data-categorical-orange": "light-dark(#ea9d34, #f6c177)",
+    "--color-data-categorical-brown": "light-dark(#ea9d34, #f6c177)"
   },
   localTokens: {
     "--astryx-theme-neutral-color-status-fill-accent": "light-dark(#0074e2, #6d9cfe)"

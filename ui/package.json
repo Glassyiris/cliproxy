@@ -29,7 +29,8 @@
     "intl-messageformat": "12.1.4",
     "lucide-react": "1.70.0",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "recharts": "3.10.1"
   },
   "devDependencies": {
     "@astryxdesign/cli": "0.7.11",
