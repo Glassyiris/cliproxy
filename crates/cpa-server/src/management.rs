@@ -1367,16 +1367,68 @@ async fn legacy_yaml(State(state): State<Arc<Management>>) -> Response {
 
 include!(concat!(env!("OUT_DIR"), "/dashboard.rs"));
 
-async fn panel(State(state): State<Arc<Management>>, OriginalUri(uri): OriginalUri) -> Response {
+fn accepts_gzip(headers: &HeaderMap) -> bool {
+    let mut gzip = None;
+    let mut wildcard = false;
+    for value in headers.get_all(header::ACCEPT_ENCODING) {
+        let Ok(value) = value.to_str() else { continue };
+        for coding in value.split(',') {
+            let mut parts = coding.split(';');
+            let name = parts.next().unwrap_or_default().trim();
+            if !name.eq_ignore_ascii_case("gzip") && name != "*" {
+                continue;
+            }
+            let quality = parts
+                .filter_map(|part| part.split_once('='))
+                .find(|(name, _)| name.trim().eq_ignore_ascii_case("q"))
+                .map_or(1.0, |(_, value)| value.trim().parse::<f32>().unwrap_or(0.0));
+            let accepted = quality > 0.0 && quality <= 1.0;
+            if name == "*" {
+                wildcard = accepted;
+            } else {
+                gzip = Some(accepted);
+            }
+        }
+    }
+    gzip.unwrap_or(wildcard)
+}
+
+async fn panel(State(state): State<Arc<Management>>, OriginalUri(uri): OriginalUri, headers: HeaderMap) -> Response {
     if state.rt.config().management.disable_control_panel {
         return error(404, "not_found");
     }
-    let Some((bytes, mime)) = dashboard_asset(uri.path()) else {
+    let Some((bytes, mime, gzip)) = dashboard_asset(uri.path()) else {
         return error(404, "not_found");
     };
-    (
+    let encoded = gzip && accepts_gzip(&headers);
+    let body = if gzip && !encoded {
+        use tokio::io::AsyncReadExt;
+        let mut decoded = Vec::new();
+        if async_compression::tokio::bufread::GzipDecoder::new(bytes)
+            .read_to_end(&mut decoded)
+            .await
+            .is_err()
+        {
+            return error(500, "dashboard_decode_failed");
+        }
+        Bytes::from(decoded)
+    } else {
+        Bytes::from_static(bytes)
+    };
+    let mut response = (
         [(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "no-cache")],
-        bytes,
+        body,
     )
-        .into_response()
+        .into_response();
+    if gzip {
+        response
+            .headers_mut()
+            .insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
+    }
+    if encoded {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    }
+    response
 }

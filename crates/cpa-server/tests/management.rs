@@ -293,6 +293,96 @@ async fn real_http_config_rejections_comments_publication_and_panel_assets() {
 }
 
 #[tokio::test]
+async fn dashboard_negotiates_embedded_gzip_and_preserves_identity_bytes() {
+    use tokio::io::AsyncReadExt;
+
+    let f = Fixture::new("panel-encoding");
+    let (base, server) = f.server().await;
+    let client = wreq::Client::builder()
+        .no_proxy()
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
+        .no_zstd()
+        .build()
+        .unwrap();
+    let dist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ui/dist");
+    let html = std::fs::read_to_string(dist.join("index.html")).unwrap();
+    let mut paths = vec!["/management.html".to_owned()];
+    paths.extend(
+        html.split('"')
+            .filter(|p| p.starts_with("./assets/"))
+            .map(|p| p.trim_start_matches('.').to_owned()),
+    );
+    let font = std::fs::read_dir(dist.join("assets"))
+        .unwrap()
+        .flatten()
+        .find(|entry| entry.path().extension().is_some_and(|ext| ext == "woff2"))
+        .unwrap();
+    paths.push(format!("/assets/{}", font.file_name().to_str().unwrap()));
+    for path in paths {
+        let original = std::fs::read(dist.join(if path == "/management.html" {
+            "index.html"
+        } else {
+            path.trim_start_matches('/')
+        }))
+        .unwrap();
+        let compressible = !path.ends_with(".woff2");
+        for (accept, gzip) in [
+            (None, false),
+            (Some("gzip"), true),
+            (Some("br, GZip ; q=0.5"), true),
+            (Some("gzip;q=0"), false),
+            (Some("*"), true),
+            (Some("*;q=0"), false),
+            (Some("gzip;q=0, *;q=1"), false),
+            (Some("*;q=1, gzip;q=0.000"), false),
+            (Some("gzip;q=1, *;q=0"), true),
+            (Some("br"), false),
+        ] {
+            let mut request = client.get(format!("{base}{path}"));
+            if let Some(accept) = accept {
+                request = request.header("accept-encoding", accept);
+            }
+            let response = request.send().await.unwrap();
+            assert_eq!(response.status(), 200, "{path}: {accept:?}");
+            assert_eq!(response.headers()["cache-control"], "no-cache");
+            let mime = if path.ends_with(".html") {
+                "text/html; charset=utf-8"
+            } else if path.ends_with(".js") {
+                "text/javascript; charset=utf-8"
+            } else if path.ends_with(".css") {
+                "text/css; charset=utf-8"
+            } else {
+                "font/woff2"
+            };
+            assert_eq!(response.headers()["content-type"], mime);
+            if compressible {
+                assert_eq!(response.headers()["vary"], "Accept-Encoding");
+            }
+            let encoded = gzip && compressible;
+            assert_eq!(
+                response.headers().get("content-encoding").map(|v| v.to_str().unwrap()),
+                encoded.then_some("gzip"),
+                "{path}: {accept:?}"
+            );
+            let body = response.bytes().await.unwrap();
+            if encoded {
+                let mut decoded = Vec::new();
+                async_compression::tokio::bufread::GzipDecoder::new(body.as_ref())
+                    .read_to_end(&mut decoded)
+                    .await
+                    .unwrap();
+                assert_eq!(decoded, original, "{path}: {accept:?}");
+            } else {
+                assert_eq!(body.as_ref(), original, "{path}: {accept:?}");
+            }
+        }
+    }
+    server.abort();
+}
+
+#[tokio::test]
 async fn watcher_keeps_last_good_config_and_reconciles_disabled_deleted_and_self_writes() {
     let f = Fixture::new("reload");
     let auth = f.dir.join("auth/fake.json");

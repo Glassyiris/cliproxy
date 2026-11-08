@@ -11,6 +11,16 @@ export default defineConfig({
   // (src/themes/layers.css). The header names the Astryx layers too, so the order holds when
   // this stylesheet loads first, as it does in dev.
   plugins: [
+    // Every browser the dashboard supports reads woff2, and the server embeds every emitted
+    // file, so Fontsource's .woff fallbacks would only add bytes to the binary.
+    {
+      name: "figtree-woff2-only",
+      enforce: "pre",
+      transform(code, id) {
+        if (id.includes("/@fontsource/figtree/") && id.endsWith(".css"))
+          return code.replace(/,\s*url\([^)]*\.woff\)\s*format\(['"]woff['"]\)/g, "");
+      },
+    },
     stylex({
       useCSSLayers: { before: ["reset", "astryx-base"], prefix: "app", after: ["astryx-theme"] },
     }),
