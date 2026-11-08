@@ -1,1 +1,1 @@
-export { default } from "./Plugins.tsx";
+export { PluginsDialog } from "./PluginsDialog.tsx";

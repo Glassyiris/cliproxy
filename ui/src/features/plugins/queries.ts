@@ -12,31 +12,23 @@ import {
   type StorePlugin,
 } from "../../lib/api/plugins.ts";
 import { t } from "../../lib/i18n.ts";
+import { notify } from "../../lib/notify.ts";
 
 const storeKey = ["plugins", "store"] as const;
 
-/**
- * The store is open while the hash says `?store=1` and is read then, not before. Each Browse press
- * counts in `reveal`, so the section comes into view; a reload with `?store=1` does not.
- */
-export function useBrowse() {
+/** The dialog's open panel is the store while the hash says `?store=1`; it is read then, not before. */
+export function useStore() {
   const [params, setParams] = useHashParams();
-  const browsing = params.store === "1";
-  const [reveal, setReveal] = useState(0);
+  const isOpen = params.store === "1";
   const store = useQuery({
     queryKey: storeKey,
     queryFn: ({ signal }) => listPluginStore(signal),
-    enabled: browsing,
+    enabled: isOpen,
   });
   return {
-    browsing,
-    reveal,
+    isOpen,
     store,
-    press: () => {
-      if (browsing) void store.refetch();
-      else setParams({ store: "1" }, "push");
-      setReveal((n) => n + 1);
-    },
+    show: (open: boolean) => setParams({ store: open ? "1" : undefined }, "push"),
   };
 }
 
@@ -89,13 +81,22 @@ export function usePluginWrites(action: Action, config: Config | undefined) {
           await reload(serverKeys.plugins, serverKeys.config, storeKey);
         }
       }, t("plugins.delete.deleted")),
-    install: (p: StorePlugin) =>
-      action.run(async () => {
+    install: async (p: StorePlugin) => {
+      let restart = false;
+      const ok = await action.run(async () => {
         try {
-          await installPlugin(p.id, p.source_id);
+          const answer = await installPlugin(p.id, p.source_id);
+          restart = answer.restart_required;
         } finally {
           await reload(serverKeys.plugins, serverKeys.config, storeKey);
         }
-      }, t("plugins.store.installed")),
+      });
+      if (ok)
+        notify(
+          "success",
+          restart ? t("plugins.store.installedRestart") : t("plugins.store.installed"),
+        );
+      return ok;
+    },
   };
 }

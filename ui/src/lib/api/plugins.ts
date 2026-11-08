@@ -78,14 +78,18 @@ export const listPluginStore = (signal?: AbortSignal) =>
   request<PluginStore>(routes.listPluginStore, { signal });
 
 export const installPlugin = (id: string, source?: string) =>
-  request<{ status: "installed"; id: string; version: string; path: string; source_id: string }>(
-    routes.installPlugin,
-    {
-      params: { id },
-      query: { source },
-      body: {},
-    },
-  );
+  request<{
+    status: "installed";
+    id: string;
+    version: string;
+    path: string;
+    source_id: string;
+    restart_required: boolean;
+  }>(routes.installPlugin, {
+    params: { id },
+    query: { source },
+    body: {},
+  });
 
 /** A quota plugin's reading; plugins may use snake_case, which the readers also accept. */
 export type PluginQuota = {

@@ -62,11 +62,8 @@ const ROUTES = {
     answer: "#activity-traffic",
     measures: ["headerControl", "cardPadding", "skeletonShift", "tableRow", "rowAction"],
   },
-  settings: {
-    answer: "[role=main] h1",
-    measures: ["primaryButton", "headerControl"],
-    pending: "R5",
-  },
+  // The group list needs no data, so the phone's first view has no skeleton to measure.
+  settings: { answer: "#settings-nav", measures: ["primaryButton", "headerControl"] },
 };
 
 // The nbcards admin's values (p3/r/ref/nbcards/REPORT.md) each role must have, per viewport; the

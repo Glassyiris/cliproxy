@@ -2,15 +2,15 @@ import { Puzzle } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import Configuration from "../../features/config";
-import Plugins from "../../features/plugins";
+import { PluginsDialog } from "../../features/plugins";
 import { t } from "../../lib/i18n.ts";
 import { PageHostContext } from "../pageHost.ts";
 import { ArgFromQuery } from "../useHashRoute.ts";
-import { PageDialog, useDialogParam } from "./PageDialog.tsx";
+import { useDialogParam } from "./PageDialog.tsx";
 
 /**
- * The server configuration; Plugins opens over it from the header. Configuration's open section is
- * the path argument, so the open plugin is `?plugin=` (src/lib/hash.ts).
+ * The server configuration; Plugins opens over it from the header. Its store and its open plugin
+ * are query keys (src/lib/hash.ts), and the open plugin is the dialog's route argument.
  */
 export default function SettingsPage() {
   const plugins = useDialogParam("plugins", ["plugin", "store"]);
@@ -33,11 +33,9 @@ export default function SettingsPage() {
       >
         <Configuration />
       </PageHostContext>
-      <PageDialog isOpen={plugins.isOpen} title={t("app.nav.plugins")} onClose={plugins.close}>
-        <ArgFromQuery value="plugin">
-          <Plugins />
-        </ArgFromQuery>
-      </PageDialog>
+      <ArgFromQuery value="plugin">
+        <PluginsDialog isOpen={plugins.isOpen} onClose={plugins.close} />
+      </ArgFromQuery>
     </>
   );
 }

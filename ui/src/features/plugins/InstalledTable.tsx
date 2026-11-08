@@ -1,5 +1,4 @@
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
-import { Code } from "@astryxdesign/core/Code";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Switch } from "@astryxdesign/core/Switch";
@@ -10,6 +9,7 @@ import { StatusLamp } from "../../components/StatusLamp.tsx";
 import type { Plugin } from "../../lib/api/plugins.ts";
 import { t } from "../../lib/i18n.ts";
 import type { Status } from "../../themes/site/index.ts";
+import { roles } from "../../themes/site/roles.ts";
 import { capabilities, plainText, pluginName, pluginState, type PluginState } from "./rows.ts";
 
 const lamp = {
@@ -38,6 +38,7 @@ function Capabilities({ plugin }: { plugin: Plugin }) {
   );
 }
 
+/** The name, then the id when it differs and what the plugin adds. */
 function Name({ plugin }: { plugin: Plugin }) {
   const name = pluginName(plugin);
   return (
@@ -45,11 +46,14 @@ function Name({ plugin }: { plugin: Plugin }) {
       <Text type="body" weight="semibold">
         {name}
       </Text>
-      {name !== plugin.id && (
-        <HStack>
-          <Code>{plugin.id}</Code>
-        </HStack>
-      )}
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        {name !== plugin.id && (
+          <Text type={roles.textType.identifier} color="secondary">
+            {plugin.id}
+          </Text>
+        )}
+        <Capabilities plugin={plugin} />
+      </HStack>
     </VStack>
   );
 }
@@ -64,20 +68,18 @@ function RowMenu({
   onDelete: (plugin: Plugin) => void;
 }) {
   return (
-    <HStack hAlign="end">
-      <MoreMenu
-        label={t("plugins.row.menu", { name: pluginName(plugin) })}
-        size="sm"
-        items={[
-          { label: t("plugins.row.configure"), onClick: () => onConfigure(plugin) },
-          {
-            label: t("plugins.row.delete"),
-            variant: "destructive",
-            onClick: () => onDelete(plugin),
-          },
-        ]}
-      />
-    </HStack>
+    <MoreMenu
+      label={t("plugins.row.menu", { name: pluginName(plugin) })}
+      size="sm"
+      items={[
+        { label: t("plugins.row.configure"), onClick: () => onConfigure(plugin) },
+        {
+          label: t("plugins.row.delete"),
+          variant: "destructive",
+          onClick: () => onDelete(plugin),
+        },
+      ]}
+    />
   );
 }
 
@@ -99,14 +101,19 @@ const Lamp = ({ plugin }: { plugin: Plugin }) => {
 };
 
 const Version = ({ plugin }: { plugin: Plugin }) =>
-  plugin.metadata ? <Code>{plainText(plugin.metadata.version)}</Code> : null;
+  plugin.metadata ? (
+    <Text type={roles.textType.body} hasTabularNumbers>
+      {plainText(plugin.metadata.version)}
+    </Text>
+  ) : null;
 
-/** The last two columns, the same in both layouts. */
-const controlColumns = (h: Handlers): TableColumn<Row>[] => [
-  {
-    key: "enabled",
-    header: t("plugins.table.enabled"),
-    renderCell: cell((p) => (
+/** The switch and the menu, the same in both layouts. */
+const actionsColumn = (h: Handlers): TableColumn<Row> => ({
+  key: "actions",
+  header: t("plugins.table.actions"),
+  align: "end",
+  renderCell: cell((p) => (
+    <HStack gap={2} vAlign="center" hAlign="end">
       <Switch
         label={t("plugins.row.enabled", { name: pluginName(p) })}
         isLabelHidden
@@ -116,24 +123,12 @@ const controlColumns = (h: Handlers): TableColumn<Row>[] => [
         isDisabled={!h.canSwitch}
         onChange={() => h.onSwitch(p)}
       />
-    )),
-  },
-  {
-    key: "actions",
-    header: t("plugins.table.actions"),
-    align: "end",
-    renderCell: cell((p) => (
       <RowMenu plugin={p} onConfigure={h.onConfigure} onDelete={h.onDelete} />
-    )),
-  },
-];
+    </HStack>
+  )),
+});
 
 const wideColumns = (h: Handlers): TableColumn<Row>[] => [
-  {
-    key: "status",
-    header: t("plugins.table.status"),
-    renderCell: cell((p) => <Lamp plugin={p} />),
-  },
   { key: "name", header: t("plugins.table.name"), renderCell: cell((p) => <Name plugin={p} />) },
   {
     key: "version",
@@ -141,14 +136,14 @@ const wideColumns = (h: Handlers): TableColumn<Row>[] => [
     renderCell: cell((p) => <Version plugin={p} />),
   },
   {
-    key: "capabilities",
-    header: t("plugins.table.capabilities"),
-    renderCell: cell((p) => <Capabilities plugin={p} />),
+    key: "status",
+    header: t("plugins.table.status"),
+    renderCell: cell((p) => <Lamp plugin={p} />),
   },
-  ...controlColumns(h),
+  actionsColumn(h),
 ];
 
-// On a phone the facts about a plugin stack in one column, so the switch and the menu keep theirs.
+// On a phone the facts about a plugin stack in one column, so the actions keep theirs.
 const narrowColumns = (h: Handlers): TableColumn<Row>[] => [
   {
     key: "name",
@@ -157,15 +152,14 @@ const narrowColumns = (h: Handlers): TableColumn<Row>[] => [
     renderCell: cell((p) => (
       <VStack gap={1}>
         <Name plugin={p} />
-        <Lamp plugin={p} />
         <HStack gap={2} vAlign="center" wrap="wrap">
+          <Lamp plugin={p} />
           <Version plugin={p} />
-          <Capabilities plugin={p} />
         </HStack>
       </VStack>
     )),
   },
-  ...controlColumns(h),
+  actionsColumn(h),
 ];
 
 /** `plugins` is undefined while the list loads: placeholder rows in the table's shape. */

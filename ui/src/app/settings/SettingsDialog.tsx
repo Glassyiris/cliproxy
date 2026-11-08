@@ -1,7 +1,7 @@
 // The Astryx page template settings-dialog: a side rail of panels beside the panel, one frame
 // height for every panel, and below the narrow breakpoint a title row, a tab strip and the panel.
 // Every setting here applies to this browser only, which the Appearance panel says once. About
-// (the earlier System page, hosted unchanged) reports the server and this build.
+// reports the server and this build.
 
 import { lazy, Suspense, useId, useState, type ReactNode } from "react";
 import * as stylex from "@stylexjs/stylex";
@@ -17,7 +17,6 @@ import { Spinner } from "@astryxdesign/core/Spinner";
 import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { t } from "../../lib/i18n.ts";
-import { PageHostContext } from "../pageHost.ts";
 import { useDialogParam } from "../pages/PageDialog.tsx";
 import { AppearancePanel } from "./AppearancePanel.tsx";
 import { row } from "./SettingsRows.tsx";
@@ -46,7 +45,9 @@ const styles = stylex.create({
 
 type PanelId = "appearance" | "shortcuts" | "about";
 
-const System = lazy(() => import("../../features/system/index.ts"));
+const About = lazy(() =>
+  import("../../features/system/index.ts").then((m) => ({ default: m.About })),
+);
 
 /** The one list both shells read. */
 const PANELS: {
@@ -76,11 +77,9 @@ const PANELS: {
     description: () => t("app.settings.aboutHint"),
     icon: Info,
     body: () => (
-      <PageHostContext value={{ kind: "dialog" }}>
-        <Suspense fallback={<Spinner aria-label={t("app.settings.about")} />}>
-          <System />
-        </Suspense>
-      </PageHostContext>
+      <Suspense fallback={<Spinner aria-label={t("app.settings.about")} />}>
+        <About />
+      </Suspense>
     ),
   },
 ];
