@@ -9,8 +9,8 @@
 // rail: its sections bring their own padding, so the panel adds none.
 //
 // A page hosted by a route (app/pages/) renders through the host: as a tab, its frame takes the
-// route's title, tabs and controls; inside a dialog, it draws its controls and body only, under
-// the dialog's title.
+// route's title, tabs and controls; inside a dialog, the dialog's frame draws the title, pins the
+// filter row under it and the footer at its foot, and scrolls the controls and body between.
 
 import { useContext, type ReactNode } from "react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
@@ -69,13 +69,15 @@ type FrameProps = {
   /** DESIGN.md "Roles", content width: a reading page caps its content, a list or dashboard is full. */
   width?: "reading" | "full";
   panel?: DetailPanel;
-  /** The filter row of a long list; it stays in view while the list scrolls. */
+  /** A long list's filter row or a wizard's stepper; it stays in view while the body scrolls. */
   toolbar?: ReactNode;
+  /** The buttons that close the body (a wizard's Back and next); pinned at a dialog's foot. */
+  footer?: ReactNode;
   children: ReactNode;
 };
 
 /** A hosted page inside a dialog: the dialog has the title, so only the controls and the body. */
-function DialogBody({ meta, actions, toolbar, children }: FrameProps) {
+function DialogBody({ meta, actions, children }: FrameProps) {
   return (
     <VStack gap={roles.gap.section}>
       {(meta || actions) && (
@@ -84,7 +86,6 @@ function DialogBody({ meta, actions, toolbar, children }: FrameProps) {
           {actions}
         </HStack>
       )}
-      {toolbar}
       {children}
     </VStack>
   );
@@ -125,11 +126,12 @@ function FrameHeader({
 }
 
 export function PageFrame(props: FrameProps) {
-  const { width = "reading", panel, children } = props;
+  const { width = "reading", panel, footer, children } = props;
   const host = useContext(PageHostContext);
   const isMobile = useAppShellMobile().isMobile;
   const isPhone = useMediaQuery(layout.phone);
-  if (host?.kind === "dialog") return <DialogBody {...props} />;
+  if (host?.kind === "dialog")
+    return host.frame({ header: props.toolbar, content: <DialogBody {...props} />, footer });
   return (
     <>
       <Layout
@@ -146,6 +148,7 @@ export function PageFrame(props: FrameProps) {
               maxWidth={width === "reading" ? roles.content.settingsWidth : undefined}
             >
               {children}
+              {footer}
             </VStack>
           </LayoutContent>
         }

@@ -25,6 +25,7 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import {
   Table,
   TableCell,
+  pixel,
   proportional,
   useTableSelectionState,
   type TableColumn,
@@ -183,6 +184,20 @@ function Summary({ row, now }: { row: Row; now: number }) {
 
 const share = (n: number) => proportional(n, { minWidth: layout.tableColumnFloor });
 
+/**
+ * Each column's width, the same for the list and its skeleton. The name gets the largest share,
+ * so a 28-character email fits at 1440 without the panel; the status's reason ("transient error,
+ * HTTP 502") fits in a smaller one; the requests column is as wide as its fixed-width content.
+ */
+const widths = {
+  account: share(2.5),
+  status: share(1.5),
+  session: share(1.25),
+  weekly: share(1.25),
+  recovery: share(1.25),
+  requests: pixel(layout.requests.column),
+};
+
 type Cell = (render: (r: Row) => ReactNode) => (r: Row) => ReactNode;
 
 /** The account's second line: provider and plan, then its note, else its file. */
@@ -197,11 +212,10 @@ function accountColumn(
   allSelected: boolean,
   cell: Cell,
   content: (r: Row) => ReactNode,
-  width: number,
 ): TableColumn<Row> {
   return {
     key: "account",
-    width: share(width),
+    width: widths.account,
     header: (
       <HStack gap={2} vAlign="center">
         <CheckboxInput
@@ -235,24 +249,25 @@ function columnsOf(
 ): TableColumn<Row>[] {
   const cell: Cell = (render) => (r) => (spacerOf(r) === undefined ? render(r) : null);
   if (shape === "stacked")
-    return [accountColumn(selection, allSelected, cell, (r) => <Summary row={r} now={now} />, 1)];
+    return [
+      {
+        ...accountColumn(selection, allSelected, cell, (r) => <Summary row={r} now={now} />),
+        width: share(1),
+      },
+    ];
   const columns: TableColumn<Row>[] = [
-    accountColumn(
-      selection,
-      allSelected,
-      cell,
-      (r) => <TwoLines first={<Name row={r} />} second={accountLine(r)} />,
-      2,
-    ),
+    accountColumn(selection, allSelected, cell, (r) => (
+      <TwoLines first={<Name row={r} />} second={accountLine(r)} />
+    )),
     {
       key: "status",
-      width: share(2),
+      width: widths.status,
       header: t("accounts.columns.status"),
       renderCell: cell((r) => <Status row={r} />),
     },
     ...(["session", "weekly"] as const).map((k) => ({
       key: k,
-      width: share(1.25),
+      width: widths[k],
       header: k === "session" ? t("accounts.columns.session") : t("accounts.columns.weekly"),
       renderCell: cell((r) => <QuotaWindow bar={r.view[k]} now={now} isCompact />),
     })),
@@ -262,13 +277,13 @@ function columnsOf(
     ...columns,
     {
       key: "recovery",
-      width: share(1.25),
+      width: widths.recovery,
       header: t("accounts.columns.recovery"),
       renderCell: cell((r) => <Recovery row={r} now={now} />),
     },
     {
       key: "requests",
-      width: share(1.5),
+      width: widths.requests,
       header: t("accounts.columns.requests"),
       renderCell: cell((r) =>
         r.buckets ? (
@@ -477,7 +492,7 @@ export function LoadingTable({ shape }: { shape: ListShape }) {
       second={" "}
     />
   );
-  const keys =
+  const keys: (keyof typeof widths)[] =
     shape === "stacked"
       ? ["account"]
       : shape === "tight"
@@ -486,7 +501,7 @@ export function LoadingTable({ shape }: { shape: ListShape }) {
   const columns: TableColumn<{ key: string }>[] = keys.map((key) => ({
     key,
     header: headers[key](),
-    width: share(key === "account" || key === "status" ? 2 : 1.25),
+    width: shape === "stacked" ? share(1) : widths[key],
     renderCell: cell,
   }));
   return (

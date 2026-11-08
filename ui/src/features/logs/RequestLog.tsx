@@ -1,13 +1,13 @@
 // The open request's log in the end panel (a bottom sheet on phones).
 import { Download } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
-import { Code } from "@astryxdesign/core/Code";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Heading } from "@astryxdesign/core/Text";
+import { Identifier } from "../../components/Identifier.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { saveBlob } from "../../lib/download.ts";
 import { t } from "../../lib/i18n.ts";
@@ -51,7 +51,7 @@ export function RequestLog({ id, onClose }: { id: string; onClose: () => void })
         <StackItem size="fill">
           <VStack gap={1}>
             <Heading level={2}>{t("logs.request.title")}</Heading>
-            <Code>{id}</Code>
+            <Identifier breakAt="name">{id}</Identifier>
           </VStack>
         </StackItem>
         <IconButton

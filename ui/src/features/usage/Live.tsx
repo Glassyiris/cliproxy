@@ -2,7 +2,6 @@
 // the live view ran, kept for one hour. Off and empty, it is one empty state with the start action.
 import { Activity, Coins, Radio, Timer } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
-import { Code } from "@astryxdesign/core/Code";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -13,6 +12,7 @@ import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { proportional, Table, type TableColumn } from "@astryxdesign/core/Table";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
+import { Identifier } from "../../components/Identifier.tsx";
 import { MetricCard } from "../../components/MetricCard.tsx";
 import { MissingActions } from "../../components/MissingActions.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
@@ -138,7 +138,7 @@ const modelColumns = (): TableColumn<ModelRow>[] => [
     header: t("usage.models.model"),
     // Twice a count's share, and free to narrow to the counts' floor on a phone.
     width: proportional(2, { minWidth: layout.tableColumnFloor }),
-    renderCell: (row) => <Code>{row.model}</Code>,
+    renderCell: (row) => <Identifier breakAt="name">{row.model}</Identifier>,
   },
   {
     key: "count",

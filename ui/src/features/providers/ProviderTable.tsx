@@ -74,13 +74,10 @@ function GroupName({ entry }: { entry: Entry }) {
       <Text type={roles.textType.body} maxLines={1}>
         {entry.name}
       </Text>
-      {entry.group["base-url"] ? (
+      {/* Only a custom endpoint earns the line; the default would read the same on every row. */}
+      {entry.group["base-url"] && (
         <Text type={roles.textType.identifier} color="secondary" maxLines={1}>
           {entry.group["base-url"]}
-        </Text>
-      ) : (
-        <Text type={roles.textType.supporting} color="secondary">
-          {t("providers.group.defaultEndpoint")}
         </Text>
       )}
     </VStack>
@@ -99,9 +96,12 @@ function KeyCount({ entry }: { entry: Entry }) {
       <Text type={roles.textType.body} hasTabularNumbers>
         {t("providers.table.keys", { count: entry.keys.length })}
       </Text>
-      <Text type={roles.textType.supporting} color="secondary">
-        {models ? t("providers.table.models", { count: models }) : t("providers.table.allModels")}
-      </Text>
+      {/* Only a model restriction earns the line, as the endpoint does in the name cell. */}
+      {models > 0 && (
+        <Text type={roles.textType.supporting} color="secondary">
+          {t("providers.table.models", { count: models })}
+        </Text>
+      )}
     </VStack>
   );
 }
@@ -232,7 +232,7 @@ function columnsOf(props: TableProps): TableColumn<Item>[] {
     columns.push({
       key: "requests",
       header: t("providers.table.requests"),
-      width: share(1.5),
+      width: pixel(layout.requests.column),
       renderCell: cell((e) => <Requests entry={e} pending={props.trafficPending} />),
     });
   return [...columns, menu];

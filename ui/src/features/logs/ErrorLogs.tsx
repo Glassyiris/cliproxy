@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
-import { Code } from "@astryxdesign/core/Code";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
@@ -11,6 +10,7 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { useAction } from "../../app/useAction.ts";
+import { Identifier } from "../../components/Identifier.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { downloadErrorLog, type ErrorLogFile } from "../../lib/api/logs.ts";
 import { saveBlob } from "../../lib/download.ts";
@@ -43,7 +43,7 @@ function FileRow({
 }) {
   return (
     <ListItem
-      label={<Code>{file.name}</Code>}
+      label={<Identifier breakAt="name">{file.name}</Identifier>}
       description={
         <HStack gap={2} vAlign="center" wrap="wrap">
           {file.modified > 0 && (

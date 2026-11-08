@@ -89,9 +89,11 @@ export function ageOf(v: AccountRow, now: number) {
   const age = v.age;
   if (!("at" in age))
     return age.kind === "disabled" ? t("accounts.row.ageDisabled") : t("accounts.row.neverChecked");
+  // The label says the quota was read; a check from this dashboard says so, a stored read is
+  // only its age.
   return age.kind === "checked"
     ? t("accounts.row.checked", { time: ago(age.at, now) })
-    : t("accounts.row.seen", { time: ago(age.at, now) });
+    : ago(age.at, now);
 }
 
 const reasons: Record<Cooldown["reason"], () => string> = {

@@ -4,7 +4,7 @@
 import { useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
-import { Code } from "@astryxdesign/core/Code";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
@@ -15,8 +15,8 @@ import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { Token } from "@astryxdesign/core/Token";
 import { useUnsavedChanges } from "../../app/useHashRoute.ts";
+import { Identifier } from "../../components/Identifier.tsx";
 import { useAvailable } from "../../components/MissingActions.tsx";
 import { QuotaWindow, quotaErrorText } from "../../components/QuotaWindow.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
@@ -85,7 +85,13 @@ function Upstream({ row, now }: Pick<PanelProps, "row"> & { now: number }) {
           {cooldowns.map((c, i) => (
             <ListItem
               key={i}
-              label={c.model_key ? <Code>{c.model_key}</Code> : t("accounts.cooldown.wholeAccount")}
+              label={
+                c.model_key ? (
+                  <Identifier breakAt="name">{c.model_key}</Identifier>
+                ) : (
+                  t("accounts.cooldown.wholeAccount")
+                )
+              }
               description={cooldownOf(c, now)}
             />
           ))}
@@ -114,12 +120,30 @@ function Limits({ row, quota, now }: Pick<PanelProps, "row" | "quota"> & { now: 
             label={t("accounts.panel.usageFailed", { error: quotaErrorText(limits.error) })}
           />
         )}
+        {/* The raw headers the windows were read from: rarely needed, so they start collapsed. */}
         {signals.length > 0 && (
-          <HStack gap={1} wrap="wrap">
-            {signals.map(([k, v]) => (
-              <Token key={k} size="sm" label={t("accounts.panel.signal", { name: k, value: v })} />
-            ))}
-          </HStack>
+          <Collapsible
+            trigger={
+              <Text type={roles.textType.body}>
+                {t("accounts.panel.signals", { count: signals.length })}
+              </Text>
+            }
+            defaultIsOpen={false}
+          >
+            <List density="compact" hasDividers>
+              {signals.map(([k, v]) => (
+                <ListItem
+                  key={k}
+                  label={
+                    <Text type={roles.textType.identifier} textWrap="wrap" wordBreak="break-word">
+                      {k}
+                    </Text>
+                  }
+                  description={v}
+                />
+              ))}
+            </List>
+          </Collapsible>
         )}
       </VStack>
     </Block>
@@ -167,9 +191,11 @@ function FieldsForm({ row, writes }: Pick<PanelProps, "row" | "writes">) {
           {number("weight", t("accounts.fields.weight"), t("accounts.fields.weightHint"))}
           {number("request_retry", t("accounts.fields.retries"), t("accounts.fields.retriesHint"))}
         </HStack>
-        <HStack gap={2}>
+        {/* Buttons end on the right, at the panel's one button size. */}
+        <HStack gap={2} hAlign="end">
           <Button
             label={t("accounts.fields.save")}
+            size="sm"
             isLoading={writes.isBusy("fields")}
             isDisabled={!isAvailable(routes.setCredentialFields)}
             onClick={() => void save()}
@@ -195,7 +221,11 @@ function Models({ row }: Pick<PanelProps, "row">) {
       ) : models.data.length ? (
         <List density="compact" hasDividers>
           {models.data.map((m) => (
-            <ListItem key={m.id} label={<Code>{m.id}</Code>} description={m.display_name} />
+            <ListItem
+              key={m.id}
+              label={<Identifier breakAt="name">{m.id}</Identifier>}
+              description={m.display_name}
+            />
           ))}
         </List>
       ) : (
@@ -214,10 +244,10 @@ function File({ row }: Pick<PanelProps, "row">) {
     <Block title={t("accounts.panel.file")}>
       <MetadataList>
         <MetadataListItem label={t("accounts.panel.fileName")}>
-          <Code>{a.name}</Code>
+          <Identifier breakAt="name">{a.name}</Identifier>
         </MetadataListItem>
         <MetadataListItem label={t("accounts.panel.authIndex")}>
-          {a.auth_index ? <Code>{a.auth_index}</Code> : t("accounts.panel.none")}
+          {a.auth_index ? <Identifier>{a.auth_index}</Identifier> : t("accounts.panel.none")}
         </MetadataListItem>
         <MetadataListItem label={t("accounts.panel.source")}>
           {a.source === "memory"
