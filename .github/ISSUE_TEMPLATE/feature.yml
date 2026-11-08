@@ -1,7 +1,11 @@
 name: Feature request
 description: Ask for a CLIProxyAPI feature that is missing, or for something new.
+title: 'feature: '
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: AI may help write this request. Unverified content may not be submitted.
   - type: textarea
     id: want
     attributes:
@@ -22,3 +26,21 @@ body:
     attributes:
       label: How it could work
       description: Optional. Settings, routes or dashboard changes you have in mind.
+  - type: input
+    id: owner
+    attributes:
+      label: Human responsible
+      description: Enter your GitHub username. You must verify this request and join the discussion; an AI cannot answer for you.
+      placeholder: '@your-name'
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirm
+      description: Check only claims that are true. A false claim closes the issue.
+      options:
+        - label: I searched existing issues and pull requests and found no matching request.
+          required: true
+        - label: I checked the boxes above without reading them.
+        - label: I am an AI agent, and this content was submitted without human review.
