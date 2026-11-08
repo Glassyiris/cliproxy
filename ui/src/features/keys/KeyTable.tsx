@@ -15,38 +15,37 @@ import { roles } from "../../themes/site/roles.ts";
 type Key = { value: string; index: number };
 type Row = LoadingRow<Key>;
 
-/** The key masked, with its own reveal and copy beside it. */
-function KeyCell({ value }: { value: string }) {
-  const { copy, isCopied } = useClipboard();
-  const [revealed, setRevealed] = useState(false);
-  const reveal = revealed ? t("keys.row.hide") : t("keys.row.show");
+function RevealKey({ isShown, onToggle }: { isShown: boolean; onToggle: () => void }) {
+  const label = isShown ? t("keys.row.hide") : t("keys.row.show");
   return (
-    <HStack gap={1} vAlign="center">
-      <Code>{revealed ? value : mask(value)}</Code>
-      <IconButton
-        label={reveal}
-        tooltip={reveal}
-        size={roles.rowAction.size}
-        variant={roles.rowAction.variant}
-        icon={<Icon icon={revealed ? "eyeSlash" : Eye} size="sm" />}
-        aria-pressed={revealed}
-        onClick={() => setRevealed(!revealed)}
-      />
-      <IconButton
-        label={t("keys.row.copy")}
-        tooltip={t("keys.row.copy")}
-        size={roles.rowAction.size}
-        variant={roles.rowAction.variant}
-        icon={<Icon icon={isCopied ? "check" : "copy"} size="sm" />}
-        onClick={() =>
-          void copy(value).then((ok) =>
-            ok
-              ? notify("success", t("keys.row.copied"))
-              : notify("error", t("keys.row.copyFailed")),
-          )
-        }
-      />
-    </HStack>
+    <IconButton
+      label={label}
+      tooltip={label}
+      size={roles.rowAction.size}
+      variant={roles.rowAction.variant}
+      icon={<Icon icon={isShown ? "eyeSlash" : Eye} size="sm" />}
+      aria-pressed={isShown}
+      onClick={onToggle}
+    />
+  );
+}
+
+/** Copies one full key; its own clipboard state, so only this row shows the check. */
+function CopyKey({ value }: { value: string }) {
+  const { copy, isCopied } = useClipboard();
+  return (
+    <IconButton
+      label={t("keys.row.copy")}
+      tooltip={t("keys.row.copy")}
+      size={roles.rowAction.size}
+      variant={roles.rowAction.variant}
+      icon={<Icon icon={isCopied ? "check" : "copy"} size="sm" />}
+      onClick={() =>
+        void copy(value).then((ok) =>
+          ok ? notify("success", t("keys.row.copied")) : notify("error", t("keys.row.copyFailed")),
+        )
+      }
+    />
   );
 }
 
@@ -61,11 +60,22 @@ export function KeyTable({
   onRevoke: (key: string) => void;
 }) {
   const loading = keys === undefined;
+  // Row actions sit together at the end (owner, 2026-11-08: 「為什麼按鈕不放右邊」), so the
+  // reveal state lives here and the key cell only draws the key.
+  const [shown, setShown] = useState<ReadonlySet<number>>(() => new Set());
+  const toggle = (index: number) =>
+    setShown((was) => {
+      const next = new Set(was);
+      if (!next.delete(index)) next.add(index);
+      return next;
+    });
   const columns: TableColumn<Row>[] = [
     {
       key: "value",
       header: t("keys.table.key"),
-      renderCell: loadingCell(({ value }: Key) => <KeyCell value={value} />),
+      renderCell: loadingCell(({ value, index }: Key) => (
+        <Code>{shown.has(index) ? value : mask(value)}</Code>
+      )),
     },
     {
       key: "actions",
@@ -74,6 +84,8 @@ export function KeyTable({
       renderCell: ({ item }) =>
         item === null ? null : (
           <HStack gap={1} vAlign="center" hAlign="end">
+            <RevealKey isShown={shown.has(item.index)} onToggle={() => toggle(item.index)} />
+            <CopyKey value={item.value} />
             <IconButton
               label={t("app.nav.use")}
               tooltip={t("app.nav.use")}
