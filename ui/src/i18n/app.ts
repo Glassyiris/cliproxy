@@ -156,6 +156,7 @@ export default {
     "app.strategyHelp.soonestReset":
       "Uses the account whose weekly limit resets soonest until it cools down or uses up a window, then moves to the next. Conversations bound to an account stay on it. This is the default.",
     "app.editor.text": "{format} text",
+    "app.editor.absent": "Server default",
     "app.editor.review": "Review changes",
     "app.editor.save": "Save",
     "app.editor.saved": "Saved.",
@@ -318,6 +319,7 @@ export default {
     "app.strategyHelp.soonestReset":
       "优先使用每周额度最早重置的账号，直到它进入冷却或用尽一个额度窗口，再换下一个。已绑定账号的会话保持在该账号上。这是默认策略。",
     "app.editor.text": "{format} 内容",
+    "app.editor.absent": "服务器默认值",
     "app.editor.review": "检查更改",
     "app.editor.save": "保存",
     "app.editor.saved": "已保存。",
@@ -480,6 +482,7 @@ export default {
     "app.strategyHelp.soonestReset":
       "優先使用每週額度最早重設的帳號，直到它進入冷卻或用盡一個額度視窗，再換下一個。已綁定帳號的對話會留在該帳號。這是預設策略。",
     "app.editor.text": "{format} 內容",
+    "app.editor.absent": "伺服器預設值",
     "app.editor.review": "檢查變更",
     "app.editor.save": "儲存",
     "app.editor.saved": "已儲存。",

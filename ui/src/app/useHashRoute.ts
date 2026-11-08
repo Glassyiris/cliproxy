@@ -1,7 +1,15 @@
 // The hash is the app's location: the page, its argument (the open row) and its query (tab,
 // filter, search), so reload and Back keep them. One listener for the whole app, so the unsaved
 // guard decides once per change, whoever reads the route.
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import { redirect } from "../lib/hash.ts";
 import { parseHash } from "./routes.ts";
 
@@ -26,7 +34,8 @@ let params: Params = parsed.params;
 let query = new URLSearchParams(params).toString();
 /** What a held-back change would do, while the discard question is open. */
 let blocked: (() => void) | null = null;
-const dirty = new Set<symbol>();
+/** The dirty forms, each with the query key that holds it open, if any. */
+const dirty = new Map<symbol, string | undefined>();
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
 
@@ -45,7 +54,11 @@ function sync() {
   land(hash);
   if (location.hash === hash) return;
   const next = parseHash(location.hash);
-  const leaves = next.route !== place.route || next.arg !== place.arg;
+  const moves = next.route !== place.route || next.arg !== place.arg;
+  // A form held open by a query key (an editor at `?key=`) is left when that key changes too.
+  const leaves =
+    moves ||
+    [...dirty.values()].some((key) => key && (next.params[key] ?? "") !== (params[key] ?? ""));
   const landed = indexOf(history.state);
   if (leaves && dirty.size) {
     if (landed === null) {
@@ -72,7 +85,7 @@ function sync() {
   index = indexOf(history.state) ?? index;
   hash = location.hash;
   parsed = next;
-  if (leaves) place = { route: next.route, arg: next.arg };
+  if (moves) place = { route: next.route, arg: next.arg };
   const nextQuery = new URLSearchParams(next.params).toString();
   if (nextQuery !== query) [params, query] = [next.params, nextQuery];
   emit();
@@ -141,20 +154,28 @@ export function useHashParams() {
 /**
  * While `isDirty`, leaving the page or the open row asks first, and so do signing out
  * (`leaveOrAsk`) and closing the tab. A change of the query alone keeps the form mounted and is
- * not asked about.
+ * not asked about, except of `hashKey`, the query key that holds the form open (Back from an
+ * editor at `?key=`). The returned `release` stops asking at once, for the form's own close,
+ * which runs before its clean state renders.
  */
-export function useUnsavedChanges(isDirty: boolean) {
+export function useUnsavedChanges(isDirty: boolean, hashKey?: string) {
+  const held = useRef<symbol | null>(null);
   useEffect(() => {
     if (!isDirty) return;
     const id = Symbol("unsaved");
     const ask = (event: BeforeUnloadEvent) => event.preventDefault();
-    dirty.add(id);
+    held.current = id;
+    dirty.set(id, hashKey);
     addEventListener("beforeunload", ask);
     return () => {
+      held.current = null;
       dirty.delete(id);
       removeEventListener("beforeunload", ask);
     };
-  }, [isDirty]);
+  }, [isDirty, hashKey]);
+  return useCallback(() => {
+    if (held.current) dirty.delete(held.current);
+  }, []);
 }
 
 /**

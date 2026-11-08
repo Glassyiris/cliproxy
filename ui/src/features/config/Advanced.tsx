@@ -2,7 +2,7 @@
 // secondary line at the start, the action at the end, a divider under each row. Deviations:
 // - Rows sit on SettingRow's two-column Grid, so the value and Edit line up with the controls above.
 // - Edit is a Button: it opens an editor, an action (DESIGN.md "Links"); the template's is a Link.
-// - The editor is the shared fullscreen ConfigEditor, not the template's expand-in-place row: a
+// - The editor is the shared ConfigEditor dialog, not the template's expand-in-place row: a
 //   section is JSON of any size, and the editor shows the diff before it writes.
 // - The open editor is `?key=` in the hash, so links from other pages land on it and Back closes it.
 import { Button } from "@astryxdesign/core/Button";
@@ -121,6 +121,7 @@ export function Advanced({ action, config }: { action: Action; config: Config | 
       <ConfigEditor
         source={!key ? null : key === YAML_KEY ? { yaml: true } : { path: key }}
         title={key === YAML_KEY ? t("config.yaml.label") : (key ?? "")}
+        hashKey="key"
         action={action}
         onClose={() => open(undefined)}
       />

@@ -176,6 +176,7 @@ function InstalledPanel({ onBrowse }: { onBrowse: () => void }) {
       <ConfigEditor
         source={editing ? { path: `plugins/configs/${editing}` } : null}
         title={t("plugins.row.configureTitle", { name: edited ? pluginName(edited) : editing })}
+        hashKey="plugin"
         action={action}
         onClose={() => open(undefined)}
       />

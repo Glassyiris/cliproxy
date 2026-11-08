@@ -1,8 +1,13 @@
-// The one editor for a config value as JSON or the whole file as YAML, in a fullscreen form
-// dialog (a plugin's settings; a section or the file under Settings, Advanced). Review shows the
-// change as a diff and Save rereads the server copy first, refusing when it changed since the
-// editor opened (REQUIREMENTS intentional design).
-import { useEffect, useRef, useState } from "react";
+// The one editor for a config value as JSON or the whole file as YAML, in a form dialog (a
+// plugin's settings; a section or the file under Settings, Advanced). Review shows the change as a
+// diff and Save rereads the server copy first, refusing when it changed since the editor opened
+// (REQUIREMENTS intentional design).
+// Template: the DialogFormDialog block: Dialog `purpose="form"`, a Layout with the DialogHeader,
+// the content, and Cancel beside the primary action at the end of a LayoutFooter; only the content
+// scrolls. Deviations: 800 wide for a value (roles.content.formWidth, as PageDialog) and the
+// settings-dialog template's 1120 for the whole file, not the block's 480, since code lines are
+// long; the height follows the editor's lines (CodeEditor) up to the viewport.
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -10,7 +15,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Center } from "@astryxdesign/core/Center";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Dialog } from "@astryxdesign/core/Dialog";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { HStack, Layout, LayoutContent, LayoutFooter, VStack } from "@astryxdesign/core/Layout";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Text } from "@astryxdesign/core/Text";
 import { serverKeys } from "../app/serverQueries.ts";
@@ -26,6 +31,8 @@ import {
 import { lineDiff } from "../lib/compare.ts";
 import { t } from "../lib/i18n.ts";
 import { notify } from "../lib/notify.ts";
+import { layout } from "../themes/site/layout.ts";
+import { roles } from "../themes/site/roles.ts";
 import { CodeColors, CodeEditor } from "./CodeEditor.tsx";
 import { FormDialogHeader } from "./FormDialog.tsx";
 import { ReadError } from "./ReadError.tsx";
@@ -36,9 +43,12 @@ export type ConfigSource = { path: string } | { yaml: true };
 const sourceName = (source: ConfigSource) => ("path" in source ? source.path : "config.yaml");
 const format = (source: ConfigSource) => ("path" in source ? "JSON" : "YAML");
 
+/** What the editor opens for a key the file lacks: an empty object, told apart by identity. */
+const absent = {};
+
 const readSource = (source: ConfigSource, signal: AbortSignal): Promise<unknown> =>
   "path" in source
-    ? readConfigValue(source.path, { signal, fallback: {} })
+    ? readConfigValue(source.path, { signal, fallback: absent })
     : readConfigYaml(signal);
 
 const asText = (source: ConfigSource, value: unknown) =>
@@ -67,11 +77,14 @@ const touchesPlugins = (source: ConfigSource) =>
 export function ConfigEditor({
   source,
   title,
+  hashKey,
   action,
   onClose,
 }: {
   source: ConfigSource | null;
   title: string;
+  /** The query key that holds the editor open, so Back asks before it drops unsaved text. */
+  hashKey: string;
   action: Action;
   onClose: () => void;
 }) {
@@ -81,6 +94,7 @@ export function ConfigEditor({
       key={sourceName(source)}
       source={source}
       title={title}
+      hashKey={hashKey}
       action={action}
       onClose={onClose}
     />
@@ -88,7 +102,7 @@ export function ConfigEditor({
 }
 
 /** The copy the editor opened, the draft over it, and saving it. */
-function useEditor(source: ConfigSource, action: Action, onSaved: () => void) {
+function useEditor(source: ConfigSource, action: Action, hashKey: string, onSaved: () => void) {
   // Read when the editor opens, and again after a save or when one is refused: this copy is what
   // Save compares the server against.
   const read = useQuery({
@@ -102,18 +116,20 @@ function useEditor(source: ConfigSource, action: Action, onSaved: () => void) {
   const [draft, setDraft] = useState<string | null>(null);
   const text = draft ?? before;
   const isDirty = text !== before;
-  useUnsavedChanges(isDirty);
+  const release = useUnsavedChanges(isDirty, hashKey);
   const saving = useSave(source, read.data, action, {
     // The saved text is the new server copy, and the next edit starts from it.
     onSaved: () => {
       setDraft(null);
       void read.refetch();
+      release();
       onSaved();
     },
     // The draft stays, so Review shows it against the new server copy.
     onRefused: () => void read.refetch(),
   });
-  return { read, before, text, isDirty, setDraft, ...saving };
+  const isAbsent = read.data === absent;
+  return { read, before, text, isDirty, isAbsent, setDraft, release, ...saving };
 }
 
 type EditorState = ReturnType<typeof useEditor>;
@@ -121,29 +137,44 @@ type EditorState = ReturnType<typeof useEditor>;
 function EditorContent({
   source,
   title,
+  header,
   editor,
+  onCancel,
 }: {
   source: ConfigSource;
   title: string;
+  header: ReactNode;
   editor: EditorState;
+  onCancel: () => void;
 }) {
   const { read } = editor;
-  if (read.isPending)
+  if (read.isPending || read.isError)
     return (
-      <Center axis="both" padding={10}>
-        <Spinner aria-label={t("app.read.loading", { what: title })} />
-      </Center>
+      <Layout
+        header={header}
+        content={
+          <LayoutContent>
+            {read.isPending ? (
+              <Center axis="both" padding={10}>
+                <Spinner aria-label={t("app.read.loading", { what: title })} />
+              </Center>
+            ) : (
+              <ReadError error={read.error} what={title} retry={() => void read.refetch()} />
+            )}
+          </LayoutContent>
+        }
+      />
     );
-  if (read.isError)
-    return <ReadError error={read.error} what={title} retry={() => void read.refetch()} />;
   // Keyed on the server copy, so a save or a refusal returns to the text from review.
   return (
     <EditorBody
       key={editor.before}
       source={source}
+      header={header}
       before={editor.before}
       text={editor.text}
       onEdit={editor.setDraft}
+      onCancel={onCancel}
       save={editor.save}
       isSaving={editor.isSaving}
       error={editor.error}
@@ -154,32 +185,55 @@ function EditorContent({
 function Editor({
   source,
   title,
+  hashKey,
   action,
   onClose,
 }: {
   source: ConfigSource;
   title: string;
+  hashKey: string;
   action: Action;
   onClose: () => void;
 }) {
-  const editor = useEditor(source, action, onClose);
+  const editor = useEditor(source, action, hashKey, onClose);
   const [isAsking, setAsking] = useState(false);
   // A save cannot be called back once sent, so the editor stays open until it ends.
   const close = () => !editor.isSaving && (editor.isDirty ? setAsking(true) : onClose());
+  const discard = () => {
+    editor.release();
+    onClose();
+  };
+  // A plugin's title is its name, so the path follows; a section's title is its path already.
+  const subtitle =
+    title !== sourceName(source) ? (
+      <Text type="code">{sourceName(source)}</Text>
+    ) : editor.isAbsent ? (
+      t("app.editor.absent")
+    ) : undefined;
 
   return (
-    <Dialog isOpen onOpenChange={(open) => !open && close()} variant="fullscreen" purpose="form">
-      <FormDialogHeader
+    <Dialog
+      isOpen
+      onOpenChange={(open) => !open && close()}
+      width={"yaml" in source ? layout.settingsDialog.width : roles.content.formWidth}
+      maxHeight={layout.configEditor.maxHeight}
+      purpose="form"
+    >
+      <EditorContent
+        source={source}
         title={title}
-        // A section's title is its path already.
-        subtitle={
-          title === sourceName(source) ? undefined : <Text type="code">{sourceName(source)}</Text>
+        header={
+          <FormDialogHeader
+            title={title}
+            subtitle={subtitle}
+            busy={editor.isSaving}
+            busyLabel={t("app.editor.closeWhileSaving")}
+            onClose={close}
+          />
         }
-        busy={editor.isSaving}
-        busyLabel={t("app.editor.closeWhileSaving")}
-        onClose={close}
+        editor={editor}
+        onCancel={close}
       />
-      <EditorContent source={source} title={title} editor={editor} />
       <AlertDialog
         isOpen={isAsking}
         onOpenChange={setAsking}
@@ -187,7 +241,7 @@ function Editor({
         description={t("app.editor.discardDescription")}
         actionLabel={t("app.unsaved.discard")}
         cancelLabel={t("app.unsaved.keep")}
-        onAction={onClose}
+        onAction={discard}
       />
     </Dialog>
   );
@@ -243,17 +297,21 @@ function useSave(
 
 function EditorBody({
   source,
+  header,
   before,
   text,
   onEdit,
+  onCancel,
   save,
   isSaving,
   error,
 }: {
   source: ConfigSource;
+  header: ReactNode;
   before: string;
   text: string;
   onEdit: (text: string) => void;
+  onCancel: () => void;
   save: (text: string) => Promise<void>;
   isSaving: boolean;
   error: string;
@@ -274,50 +332,85 @@ function EditorBody({
   };
 
   return (
-    <VStack gap={4}>
-      {error && <Banner status="error" title={error} />}
-      {reviewed === null ? (
-        <>
-          <CodeEditor
-            label={t("app.editor.text", { format: format(source) })}
-            language={"path" in source ? "json" : "yaml"}
-            value={text}
-            onChange={(value) => {
-              onEdit(value);
-              setFieldError("");
-            }}
-            status={fieldError ? { type: "error", message: fieldError } : undefined}
-          />
-          <HStack gap={2}>
-            <Button label={t("app.editor.review")} variant="primary" onClick={review} />
-          </HStack>
-        </>
-      ) : (
-        <ReviewPane
-          source={source}
-          diff={diffText(before, reviewed)}
+    <Layout
+      header={header}
+      content={
+        <LayoutContent>
+          <VStack gap={4}>
+            {error && <Banner status="error" title={error} />}
+            {reviewed === null ? (
+              <CodeEditor
+                label={t("app.editor.text", { format: format(source) })}
+                isLabelHidden
+                language={"path" in source ? "json" : "yaml"}
+                value={text}
+                onChange={(value) => {
+                  onEdit(value);
+                  setFieldError("");
+                }}
+                status={fieldError ? { type: "error", message: fieldError } : undefined}
+              />
+            ) : (
+              <ReviewPane source={source} diff={diffText(before, reviewed)} />
+            )}
+          </VStack>
+        </LayoutContent>
+      }
+      footer={
+        <EditorFooter
+          isReviewing={reviewed !== null}
           isSaving={isSaving}
-          onSave={() => void save(reviewed)}
+          onCancel={onCancel}
+          onReview={review}
           onBack={() => setReviewed(null)}
+          onSave={() => reviewed !== null && void save(reviewed)}
         />
-      )}
-    </VStack>
+      }
+    />
   );
 }
 
-function ReviewPane({
-  source,
-  diff,
+/** Cancel and Review while editing, Keep editing and Save in review; the primary one last. */
+function EditorFooter({
+  isReviewing,
   isSaving,
-  onSave,
+  onCancel,
+  onReview,
   onBack,
+  onSave,
 }: {
-  source: ConfigSource;
-  diff: string;
+  isReviewing: boolean;
   isSaving: boolean;
-  onSave: () => void;
+  onCancel: () => void;
+  onReview: () => void;
   onBack: () => void;
+  onSave: () => void;
 }) {
+  return (
+    <LayoutFooter>
+      <HStack gap={2} hAlign="end">
+        {isReviewing ? (
+          <>
+            <Button label={t("app.unsaved.keep")} variant="secondary" onClick={onBack} />
+            <Button
+              label={t("app.editor.save")}
+              variant="primary"
+              isLoading={isSaving}
+              onClick={onSave}
+            />
+          </>
+        ) : (
+          <>
+            <Button label={t("app.dialog.cancel")} variant="secondary" onClick={onCancel} />
+            <Button label={t("app.editor.review")} variant="primary" onClick={onReview} />
+          </>
+        )}
+      </HStack>
+    </LayoutFooter>
+  );
+}
+
+function ReviewPane({ source, diff }: { source: ConfigSource; diff: string }) {
   return (
     <>
       <CodeColors>
@@ -329,20 +422,11 @@ function ReviewPane({
           width="100%"
         />
       </CodeColors>
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <Button
-          label={t("app.editor.save")}
-          variant="primary"
-          isLoading={isSaving}
-          onClick={onSave}
-        />
-        <Button label={t("app.unsaved.keep")} variant="secondary" onClick={onBack} />
-        {"yaml" in source && (
-          <Text type="supporting" color="secondary">
-            {t("app.editor.yamlNote")}
-          </Text>
-        )}
-      </HStack>
+      {"yaml" in source && (
+        <Text type="supporting" color="secondary">
+          {t("app.editor.yamlNote")}
+        </Text>
+      )}
     </>
   );
 }

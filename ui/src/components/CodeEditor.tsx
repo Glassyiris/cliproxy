@@ -1,6 +1,7 @@
 // The one code editor (CodeMirror 6) and the Rosé Pine syntax colours every code surface shares.
 // CodeMirror is imported when the first editor mounts, so it stays out of the first load and out
-// of every route chunk; until then the editor's box is a skeleton of the same size.
+// of every route chunk; until then the editor's box is a skeleton of the same size. The box grows
+// with its lines from layout.codeEditor.minRows up to its maxHeight, then scrolls inside.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { EditorView } from "@codemirror/view";
 import { Field } from "@astryxdesign/core/Field";
@@ -62,6 +63,16 @@ const loadCodeMirror = () =>
   ]);
 
 type Modules = Awaited<ReturnType<typeof loadCodeMirror>>;
+type Compartment = InstanceType<Modules[0]["Compartment"]>;
+
+const { minRows, maxHeight } = layout.codeEditor;
+// One line of code and the content's block padding, as CodeMirror draws them below.
+const codeLine = "var(--text-code-leading) * var(--text-code-size)";
+const padding = "var(--spacing-2)";
+
+/** The box's height for `text` before CodeMirror measures it: its lines, within the limits. */
+const boxHeight = (text: string) =>
+  `min(calc(${Math.max(text.split("\n").length, minRows)} * ${codeLine} + 2 * ${padding}), ${maxHeight})`;
 
 const color = (token: string) => ({ color: `var(--color-syntax-${token})` });
 
@@ -70,6 +81,7 @@ function extensions(
   language: CodeLanguage,
   ids: { input: string; label: string },
   onChange: Change,
+  described: Compartment,
 ) {
   const [, view, lang, commands, { tags }, yaml, json] = m;
   const highlight = lang.HighlightStyle.define([
@@ -100,12 +112,14 @@ function extensions(
       "aria-labelledby": ids.label,
       spellcheck: "false",
     }),
+    // The error under the box, while there is one (reconfigured by the component).
+    described.of(view.EditorView.contentAttributes.of({})),
     view.EditorView.updateListener.of((update) => {
       if (update.docChanged) onChange(update.state.doc.toString());
     }),
     view.EditorView.theme({
       "&": {
-        height: `${layout.editorRows}lh`,
+        maxHeight,
         color: "var(--color-text-primary)",
         backgroundColor: "var(--color-syntax-background)",
         border: "var(--border-width) solid var(--color-border-emphasized)",
@@ -120,8 +134,10 @@ function extensions(
         fontFamily: "var(--font-family-code)",
         lineHeight: "var(--text-code-leading)",
         borderRadius: "var(--radius-element)",
+        overflow: "auto",
       },
-      ".cm-content": { caretColor: "var(--color-text-primary)", paddingBlock: "var(--spacing-2)" },
+      ".cm-content": { caretColor: "var(--color-text-primary)", paddingBlock: padding },
+      ".cm-content, .cm-gutter": { minHeight: `calc(${minRows} * ${codeLine})` },
       ".cm-cursor": { borderInlineStartColor: "var(--color-text-primary)" },
       ".cm-gutters": {
         backgroundColor: "var(--color-syntax-background)",
@@ -139,55 +155,62 @@ function extensions(
 type Change = (text: string) => void;
 
 /**
- * A YAML or JSON editor of `value`, labelled like any field. The text it reports is what the
- * operator typed; a new `value` from outside replaces the document.
+ * CodeMirror mounted into `host` once its modules load, holding `value`; `describedBy` is the id
+ * of the error that describes the content, or null while there is none.
  */
-export function CodeEditor({
-  label,
-  language,
-  value,
-  onChange,
-  status,
-}: {
-  label: string;
-  language: CodeLanguage;
-  value: string;
-  onChange: Change;
-  status?: { type: "error"; message: string };
-}) {
-  const inputId = useId();
-  const labelId = useId();
+function useCodeMirror(
+  language: CodeLanguage,
+  value: string,
+  onChange: Change,
+  ids: { input: string; label: string },
+  describedBy: string | null,
+) {
   const host = useRef<HTMLElement>(null);
   const editor = useRef<EditorView | null>(null);
+  /** Points the content's aria-describedby at an id, or drops it. */
+  const describe = useRef<((id: string | null) => void) | null>(null);
   const changed = useRef(onChange);
   useEffect(() => {
     changed.current = onChange;
   });
   const [isReady, setReady] = useState(false);
   const initial = useRef(value);
+  const { input, label } = ids;
 
   useEffect(() => {
     let alive = true;
     void loadCodeMirror().then((modules) => {
       if (!alive || !host.current) return;
       const [state, view] = modules;
-      editor.current = new view.EditorView({
+      const described = new state.Compartment();
+      const onEdit = (text: string) => changed.current(text);
+      const created = new view.EditorView({
         parent: host.current,
         state: state.EditorState.create({
           doc: initial.current,
-          extensions: extensions(modules, language, { input: inputId, label: labelId }, (text) =>
-            changed.current(text),
-          ),
+          extensions: extensions(modules, language, { input, label }, onEdit, described),
         }),
       });
+      editor.current = created;
+      describe.current = (id) =>
+        created.dispatch({
+          effects: described.reconfigure(
+            view.EditorView.contentAttributes.of(
+              id ? { "aria-describedby": id, "aria-invalid": "true" } : {},
+            ),
+          ),
+        });
       setReady(true);
     });
     return () => {
       alive = false;
       editor.current?.destroy();
       editor.current = null;
+      describe.current = null;
     };
-  }, [language, inputId, labelId]);
+  }, [language, input, label]);
+
+  useEffect(() => describe.current?.(describedBy), [describedBy, isReady]);
 
   useEffect(() => {
     const view = editor.current;
@@ -195,16 +218,51 @@ export function CodeEditor({
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
   }, [value, isReady]);
 
+  return { host, isReady };
+}
+
+/**
+ * A YAML or JSON editor of `value`, labelled like any field (`isLabelHidden` keeps the label for
+ * assistive technology only). The text it reports is what the operator typed; a new `value` from
+ * outside replaces the document. An error `status` shows under the box and describes it.
+ */
+export function CodeEditor({
+  label,
+  language,
+  value,
+  onChange,
+  status,
+  isLabelHidden = false,
+}: {
+  label: string;
+  language: CodeLanguage;
+  value: string;
+  onChange: Change;
+  status?: { type: "error"; message: string };
+  isLabelHidden?: boolean;
+}) {
+  const inputId = useId();
+  const labelId = useId();
+  const statusId = useId();
+  const { host, isReady } = useCodeMirror(
+    language,
+    value,
+    onChange,
+    { input: inputId, label: labelId },
+    status?.message ? statusId : null,
+  );
+
   return (
     <Field
       label={label}
       inputID={inputId}
       labelID={labelId}
-      status={status}
+      isLabelHidden={isLabelHidden}
+      status={status && { ...status, messageID: statusId }}
       statusVariant="detached"
     >
       <CodeColors>
-        {!isReady && <Skeleton width="100%" height={`${layout.editorRows}lh`} />}
+        {!isReady && <Skeleton width="100%" height={boxHeight(value)} />}
         {/* Empty until CodeMirror mounts into it, so the skeleton holds the height alone. */}
         <VStack ref={host} />
       </CodeColors>
