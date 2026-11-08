@@ -1,6 +1,13 @@
 // Fixed sizes of the app frame, in the units the Astryx props take: numbers are pixels.
 export const layout = {
   signInWidth: 400,
+  // card-v2 PageFrame.tsx CONTENT_WIDTH: the widest the page's content line grows, centred beyond.
+  contentWidth: 1440,
+  // card-v2 layout.ts SIDE_WIDTH: a side column of cards beside the main column.
+  sideColumn: 340,
+  // The phone breakpoint at which the page padding drops to 16 px: Astryx `md` (AppShell's phone
+  // bar starts below it).
+  phone: "(max-width: 47.99rem)",
   // The detail panel beside a list, as the table-filter template sizes it: wide enough for a
   // MetadataList's label column, narrow enough to leave the table its columns.
   detailPanel: { defaultSize: 380, minSize: 320, maxSize: 560 },

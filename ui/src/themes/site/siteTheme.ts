@@ -29,13 +29,15 @@ const chromeTokens = ({ mode }: Roles, dark: RosePineVariant) => ({
   "--color-background-muted": mode("overlay"),
   "--color-background-inverted": mode("text"),
 
-  // The primary action is ink (text on base); links, focus ring and the current page are iris.
+  // The primary action is ink (text on base). Links are body text, as the nbcards admin draws
+  // them (card-v2 siteTheme.ts sets the text accent to its ink); a chevron, the hover and the
+  // button shape show what is clickable. Iris is the focus ring only.
   "--color-accent": mode("text"),
   "--color-accent-muted": mode("overlay"),
   "--color-on-accent": mode("base"),
-  "--color-text-accent": mode("iris"),
-  "--color-icon-accent": mode("iris"),
-  "--focus-outline-color": "var(--color-text-accent)",
+  "--color-text-accent": mode("text"),
+  "--color-icon-accent": mode("text"),
+  "--focus-outline-color": mode("iris"),
   // Hover and selected nav rows and neutral badges sit on base or surface, where highlight low
   // is invisible (1.01 to 1.12:1), so they take highlight med.
   "--color-neutral": mode("highlightMed"),
@@ -129,6 +131,24 @@ const dataTokens = ({ mode }: Roles) => ({
 
 type ThemeConfig = Parameters<typeof defineTheme>[0];
 
+const neutralSans =
+  '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+/**
+ * card-v2's `panelScale`: base 15, ratio 1.2, so body 15, card title 18, section 22, page title 26
+ * and metric value 31. `typography` replaces neutral's block whole, so its fonts are repeated as
+ * neutral writes them; headings 3 and 4 are semibold, not neutral's bold (weights 400/500/600).
+ */
+export const siteTypography: ThemeConfig["typography"] = {
+  scale: { base: 15, ratio: 1.2 },
+  body: { family: "Figtree", fallbacks: neutralSans },
+  heading: { family: "Figtree", fallbacks: neutralSans, weights: { 3: "semibold", 4: "semibold" } },
+  code: {
+    family: "ui-monospace",
+    fallbacks: '"SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  },
+};
+
 export const siteAdaptations: ThemeConfig["adaptations"] = {
   rules: [
     // Reduced motion turns motion off, not down: Astryx alone still fades for up to 200 ms.
@@ -151,14 +171,30 @@ export const siteAdaptations: ThemeConfig["adaptations"] = {
   ],
 };
 
-/** The colour and type tokens for one Rosé Pine dark variant; light is always Dawn. */
+/**
+ * Sizes from the nbcards admin (card-v2 `web/src/themes/shared/index.ts` `panelShared`, and the
+ * radii of `web/src/themes/site/siteTheme.ts`; MIT, the owner's project): controls one 4 px step up
+ * (sm 32 row actions and icon buttons, md 36 buttons and inputs, lg 40), supporting text 13 on a
+ * 20 px line, and radius 8 / 12 / 16 (inner, element, card). The metric value (display-3, 31 px)
+ * is semibold, as card-v2's MetricCard draws it.
+ */
+const sizeTokens = {
+  "--size-element-sm": "32px",
+  "--size-element-md": "36px",
+  "--size-element-lg": "40px",
+  "--text-supporting-size": "0.8125rem",
+  "--text-supporting-leading": "1.5385",
+  "--radius-inner": "0.5rem",
+  "--radius-element": "0.75rem",
+  "--radius-container": "1rem",
+  "--text-display-3-weight": "var(--font-weight-semibold)",
+};
+
+/** The colour and size tokens for one Rosé Pine dark variant; light is always Dawn. */
 export const roseTokens = (dark: RosePineVariant) => {
   const r = roles(dark);
   return {
-    // Type: page title 24/600, section 18/600, body 14, supporting 13.
-    "--text-heading-1-size": "1.5rem",
-    "--text-heading-2-size": "1.125rem",
-    "--text-supporting-size": "0.8125rem",
+    ...sizeTokens,
     ...chromeTokens(r, dark),
     ...statusTokens(r),
     ...dataTokens(r),
@@ -167,14 +203,15 @@ export const roseTokens = (dark: RosePineVariant) => {
 
 /**
  * The site theme, built twice: Moon (the default, this file) and Main (siteMainTheme.ts, loaded on
- * demand). Both extend Astryx's neutral theme and set tokens only: fonts, components, icons
- * (lucide), radius and motion come from neutral, so no Astryx component carries a style of this
+ * demand). Both extend Astryx's neutral theme and set tokens and the type scale only: fonts,
+ * components, icons (lucide) and motion come from neutral, so no Astryx component carries a style of this
  * app's own. Each file calls defineTheme itself: the build follows `extends` to carry neutral's
  * icon registry only through a direct defineTheme call.
  */
 export const siteTheme = defineTheme({
   name: "site",
   extends: neutralTheme,
+  typography: siteTypography,
   adaptations: siteAdaptations,
   tokens: roseTokens(moon),
 });

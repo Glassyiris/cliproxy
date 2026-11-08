@@ -35,6 +35,12 @@ function RowActions({ value, onRemove }: { value: string; onRemove: (key: string
         size="sm"
         items={[
           {
+            label: t("app.nav.use"),
+            onClick: () => {
+              location.hash = "#use";
+            },
+          },
+          {
             label: t("keys.row.remove"),
             variant: "destructive",
             onClick: () => onRemove(value),

@@ -26,17 +26,73 @@ import { parseArgs } from "node:util";
 import { chromium } from "playwright-core";
 import { installProbe, isReady, readPage } from "./page.mjs";
 
-// Every route has a LayoutHeader holding its h1 (DESIGN.md "Pages"), so these always apply.
-const ALWAYS = ["h1Size", "h1Top", "headerPadding", "contentInset", "cls"];
+// Every route renders PageFrame, whose LayoutHeader holds its h1 (DESIGN.md "Pages"), so these
+// always apply.
+const ALWAYS = ["h1Size", "h1Weight", "h1Left", "h1Top", "contentInset", "hScroll", "cls"];
 // What a page may have; a route lists the ones its page draws, and each then needs a sample.
-const OPTIONAL = ["tableRow", "primaryButton", "headerControl", "rowAction", "skeletonShift"];
-// Routes rebuilt on the roles table; a route joins when its page is rewritten, with the element
-// that answers its question (plan 五, checked to be in view) and its OPTIONAL measurements:
-//   overview: { answer: "<selector>", measures: ["primaryButton", "skeletonShift"] },
+const OPTIONAL = [
+  "tableRow",
+  "primaryButton",
+  "headerControl",
+  "rowAction",
+  "cardPadding",
+  "skeletonShift",
+];
+// The six routes (DESIGN.md "Routes"), each with the element that answers its question (plan 五,
+// checked to be in view) and its OPTIONAL measurements. `pending` names the rewrite that still owns
+// a route's content (R1 to R5): until then the frame's roles are measured and must hold, but the
+// load limits (CLS, skeleton shift) belong to the content and are reported without failing, and
+// Accounts, Activity and Server answer with their h1 until their rewrite gives them an answer.
 const ROUTES = {
   overview: {
-    answer: "#overview-attention li, #overview-attention .astryx-empty-state",
-    measures: ["primaryButton", "skeletonShift"],
+    answer: "#overview-attention a[href], #overview-attention-clear",
+    measures: ["primaryButton", "cardPadding", "skeletonShift"],
+  },
+  accounts: { answer: "[role=main] h1", measures: ["primaryButton"], pending: "R1" },
+  clients: {
+    answer: "[role=main] tbody tr",
+    measures: ["primaryButton", "headerControl", "rowAction"],
+    pending: "R2",
+  },
+  models: {
+    answer: "[role=main] tbody tr",
+    measures: ["primaryButton", "rowAction"],
+    pending: "R3",
+  },
+  activity: { answer: "[role=main] h1", measures: ["primaryButton"], pending: "R4" },
+  settings: {
+    answer: "[role=main] h1",
+    measures: ["primaryButton", "headerControl"],
+    pending: "R5",
+  },
+};
+
+// The nbcards admin's values (p3/r/ref/nbcards/REPORT.md) each role must have, per viewport; the
+// sidebar is 260 wide at 1440, so the h1 starts 24 inside the main area. A role not listed here is
+// only required to agree across routes.
+const EXPECTED = {
+  "1440x900": {
+    h1Size: "26px",
+    h1Weight: "600",
+    h1Left: 284,
+    h1Top: 24,
+    contentInset: "24px",
+    hScroll: 0,
+    primaryButton: 36,
+    headerControl: 36,
+    rowAction: 32,
+    cardPadding: "20px",
+  },
+  "390x844": {
+    h1Size: "26px",
+    h1Weight: "600",
+    h1Left: 16,
+    contentInset: "16px",
+    hScroll: 0,
+    primaryButton: 36,
+    headerControl: 36,
+    rowAction: 32,
+    cardPadding: "20px",
   },
 };
 // The measurements that must agree across routes; CLS and the skeleton shift are per-route limits.
@@ -92,7 +148,8 @@ function declarations() {
         if (!OPTIONAL.includes(name))
           throw new CannotRun(`${route}: unknown measurement "${name}" (${OPTIONAL.join(", ")})`);
       const required = listed && [...ALWAYS, ...listed];
-      return [route, { answer: answers[route] ?? ROUTES[route]?.answer, required }];
+      const answer = answers[route] ?? ROUTES[route]?.answer;
+      return [route, { answer, required, pending: ROUTES[route]?.pending }];
     }),
   );
 }
@@ -190,29 +247,46 @@ async function measure(browser, base, route, viewport, answer) {
   }
 }
 
-/** Failure lines for one viewport: samples and limits per route, then roles across routes. */
+/** The declared role values one route measured, and the roles that vary within it. */
+function roleValues(label, route, result, required) {
+  const failures = [];
+  const values = {};
+  // Only what the route declares: a page not yet rewritten may draw a legacy value elsewhere.
+  for (const name of ROLES.filter((role) => required.includes(role))) {
+    const value = result[name];
+    if (Array.isArray(value) && value.length > 1)
+      failures.push(`${label} ${route}: ${name} varies within the route: ${value.join(", ")}`);
+    else if (value !== null) values[name] = Array.isArray(value) ? value[0] : value;
+  }
+  return { failures, values };
+}
+
+/** One route's failures at one viewport, and the declared role values it measured. */
+function judgeRoute(label, route, result, { answer, required = ALWAYS, pending }) {
+  const { failures, values } = roleValues(label, route, result, required);
+  for (const name of required)
+    if (result[name] === null) failures.push(`${label} ${route}: no sample of ${name}`);
+  for (const [name, want] of Object.entries(EXPECTED[label] ?? {}))
+    if (name in values && values[name] !== want)
+      failures.push(`${label} ${route}: ${name} is ${values[name]}, not ${want}`);
+  const load = [];
+  if (result.cls > LIMITS.cls) load.push(`${label} ${route}: CLS ${result.cls} > ${LIMITS.cls}`);
+  if (result.skeletonShift > LIMITS.skeletonShift)
+    load.push(`${label} ${route}: first region moved ${result.skeletonShift} px from its skeleton`);
+  if (pending) for (const line of load) console.log(`NOTE (content, ${pending}) ${line}`);
+  else failures.push(...load);
+  if (result.answer === false) failures.push(`${label} ${route}: answer ${answer} is not in view`);
+  return { failures, values };
+}
+
+/** Failure lines for one viewport: samples, limits and nbcards values per route, then roles across routes. */
 function judge(label, results, declared) {
   const failures = [];
   const values = {};
   for (const [route, result] of Object.entries(results)) {
-    const { answer, required } = declared[route];
-    for (const name of required ?? ALWAYS)
-      if (result[name] === null) failures.push(`${label} ${route}: no sample of ${name}`);
-    values[route] = {};
-    for (const name of ROLES) {
-      const value = result[name];
-      if (Array.isArray(value) && value.length > 1)
-        failures.push(`${label} ${route}: ${name} varies within the route: ${value.join(", ")}`);
-      else if (value !== null) values[route][name] = Array.isArray(value) ? value[0] : value;
-    }
-    if (result.cls > LIMITS.cls)
-      failures.push(`${label} ${route}: CLS ${result.cls} > ${LIMITS.cls}`);
-    if (result.skeletonShift > LIMITS.skeletonShift)
-      failures.push(
-        `${label} ${route}: first region moved ${result.skeletonShift} px from its skeleton`,
-      );
-    if (result.answer === false)
-      failures.push(`${label} ${route}: answer ${answer} is not in view`);
+    const judged = judgeRoute(label, route, result, declared[route]);
+    failures.push(...judged.failures);
+    values[route] = judged.values;
   }
   for (const name of ROLES) {
     const sampled = Object.entries(values).filter(([, route]) => name in route);

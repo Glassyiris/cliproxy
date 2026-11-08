@@ -78,7 +78,6 @@ export function readPage({ from, answer }) {
     return values.size ? [...values].sort((a, b) => a - b) : null;
   };
   const h1 = main.querySelector("h1");
-  const header = style(".astryx-layout-header");
   const content = style(".astryx-layout-content");
 
   const region = state.firstRegion()?.getBoundingClientRect();
@@ -89,13 +88,24 @@ export function readPage({ from, answer }) {
       !!box && box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth
     );
   };
+  const cards = [...main.querySelectorAll(".astryx-card, .astryx-clickable-card")].filter(
+    (e) => e.getClientRects().length,
+  );
+  // The card's inset to its content: padding plus the hairline border (nbcards: 19 + 1).
+  const inset = (e) => {
+    const css = getComputedStyle(e);
+    return `${parseFloat(css.paddingTop) + parseFloat(css.borderTopWidth)}px`;
+  };
+  const cardPaddings = new Set(cards.map(inset));
   return {
     h1Size: h1 ? getComputedStyle(h1).fontSize : null,
+    h1Weight: h1 ? getComputedStyle(h1).fontWeight : null,
+    h1Left: h1 ? round(h1.getBoundingClientRect().left) : null,
     h1Top: h1 ? round(h1.getBoundingClientRect().top) : null,
-    headerPadding: header
-      ? `${header.paddingTop} ${header.paddingRight} ${header.paddingBottom} ${header.paddingLeft}`
-      : null,
-    contentInset: content ? `${content.paddingInlineStart} ${content.paddingInlineEnd}` : null,
+    hScroll: document.documentElement.scrollWidth - innerWidth,
+    cardPadding: cardPaddings.size ? [...cardPaddings].sort() : null,
+    // The start only: beside a panel Astryx narrows the content's end inset.
+    contentInset: content ? content.paddingInlineStart : null,
     // Virtualized lists put an aria-hidden spacer row above the rows in view.
     tableRow: height("tbody tr:not([aria-hidden=true])"),
     primaryButton: heights(".astryx-layout-header .astryx-button[data-variant=primary]"),

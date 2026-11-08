@@ -1,13 +1,12 @@
 import { Activity, UserCheck } from "lucide-react";
-import { Card } from "@astryxdesign/core/Card";
 import { Grid } from "@astryxdesign/core/Grid";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Icon, type IconProps } from "@astryxdesign/core/Icon";
+import type { IconProps } from "@astryxdesign/core/Icon";
 import { Text } from "@astryxdesign/core/Text";
+import { MetricCard } from "../../components/MetricCard.tsx";
 import type { Buckets } from "../../lib/credentials.ts";
 import { currentLocale, t } from "../../lib/i18n.ts";
-import { span } from "../../lib/time.ts";
 import { layout } from "../../themes/site/layout.ts";
+import { roles } from "../../themes/site/roles.ts";
 import { LineSkeleton } from "./LineSkeleton.tsx";
 import { failures, type Summary } from "./summary.ts";
 
@@ -39,9 +38,9 @@ const word = (j: Judgement) =>
 type TileData = { judgement: Judgement; value: string; basis: string };
 
 /**
- * One KPI tile as the template's KpiTile draws it: the tile's glyph in the judgement's colour
- * beside the label, the value, and one line of basis. `data` is undefined while loading; every
- * line keeps its height then.
+ * One KPI tile as the nbcards admin's MetricCard: the tile's glyph in the judgement's colour beside
+ * the label, the value at the metric size, and one line of basis. `data` is undefined while
+ * loading; every line keeps its height then.
  */
 function Tile({
   label,
@@ -55,32 +54,31 @@ function Tile({
   index: number;
 }) {
   const judgement = data?.judgement ?? "none";
-  const lamp = data ? word(judgement) : t("overview.tiles.loading");
   return (
-    <Card padding={4}>
-      <VStack gap={2}>
-        <HStack gap={2} vAlign="center" wrap="nowrap">
-          <Icon icon={icon} size="sm" color={colour[judgement]} label={lamp} />
-          <Text type="label" color="secondary" maxLines={1}>
-            {label}
-          </Text>
-        </HStack>
-        {data ? (
-          <Text type="large" hasTabularNumbers>
+    <MetricCard
+      label={label}
+      icon={icon}
+      iconColor={colour[judgement]}
+      iconLabel={data ? word(judgement) : t("overview.tiles.loading")}
+      value={
+        data ? (
+          <Text type={roles.textType.metric} hasTabularNumbers>
             {data.value}
           </Text>
         ) : (
           <LineSkeleton role="metric" index={index} />
-        )}
-        {data ? (
-          <Text type="supporting" color="secondary" maxLines={1}>
+        )
+      }
+      detail={
+        data ? (
+          <Text type={roles.textType.supporting} color="secondary" maxLines={1}>
             {data.basis}
           </Text>
         ) : (
           <LineSkeleton role="supporting" index={index} />
-        )}
-      </VStack>
-    </Card>
+        )
+      }
+    />
   );
 }
 
@@ -92,18 +90,6 @@ function canServe(s: Summary): TileData {
     basis: cannot
       ? t("overview.tiles.cannotServe", { count: cannot })
       : t("overview.tiles.allReady"),
-  };
-}
-
-function cooling(s: Summary, now: number): TileData {
-  const { count, soonest } = s.cooling;
-  return {
-    judgement: count ? "attention" : "good",
-    value: number(count),
-    basis:
-      soonest === null
-        ? t("overview.tiles.noneCooling")
-        : t("overview.tiles.soonestBack", { time: span(Math.max(0, soonest - now)) }),
   };
 }
 
@@ -137,18 +123,16 @@ function failureShare(traffic: Buckets | null): TileData {
 }
 
 /**
- * The four judgements: accounts that can serve, requests in the last 200 minutes, the failed
- * share, and accounts cooling down with the soonest back. `summary` is undefined while the
+ * The three judgements: accounts that can serve, requests in the last 200 minutes and the failed
+ * share (the attention cards below carry the accounts that wait). `summary` is undefined while the
  * accounts load; `traffic` is undefined until the provider-key usage answers too.
  */
 export function Tiles({
   summary,
   traffic,
-  now,
 }: {
   summary: Summary | undefined;
   traffic: Buckets | null | undefined;
-  now: number;
 }) {
   const tiles: { label: string; icon: IconProps["icon"]; data?: TileData }[] = [
     { label: t("overview.tiles.canServe"), icon: UserCheck, data: summary && canServe(summary) },
@@ -162,12 +146,11 @@ export function Tiles({
       icon: "error",
       data: traffic === undefined ? undefined : failureShare(traffic),
     },
-    { label: t("overview.tiles.cooling"), icon: "clock", data: summary && cooling(summary, now) },
   ];
   return (
     <Grid
-      columns={{ minWidth: layout.summaryTileMin, max: 4, repeat: "fit" }}
-      gap={3}
+      columns={{ minWidth: layout.summaryTileMin, max: 3, repeat: "fit" }}
+      gap={roles.gap.card}
       aria-label={t("overview.tiles.label")}
     >
       {tiles.map((tile, index) => (

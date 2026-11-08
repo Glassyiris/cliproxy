@@ -14,7 +14,7 @@ const cooling = (name: string, ms: number) =>
 const bucketsOf = (...pairs: [number, number][]) =>
   pairs.map(([success, failed], i) => ({ time: `t${i}`, success, failed }));
 
-test("alerts: one group per reason, failing first, then the no-key warning, cooling by soonest", () => {
+test("alerts: one card per reason, failing first, then the no-key warning; waits carry the soonest", () => {
   const files = [
     cooling("late", 3 * 3_600_000),
     account("ready"),
@@ -25,15 +25,16 @@ test("alerts: one group per reason, failing first, then the no-key warning, cool
     account("expired", { status: "error", status_message: "invalid refresh token" }),
   ];
   const s = summarize(files, 0, now);
+  assert.deepEqual(s.alerts, [
+    { kind: "group", reason: "signIn", count: 2, soonest: null },
+    { kind: "group", reason: "error", count: 1, soonest: null },
+    { kind: "noKeys" },
+    { kind: "group", reason: "cooling", count: 2, soonest: now + 60_000 },
+    { kind: "group", reason: "disabled", count: 1, soonest: null },
+  ]);
   assert.deepEqual(
-    s.alerts.map((a) =>
-      a.kind === "group" ? `${a.reason}:${a.rows.map((r) => r.account.name).join(",")}` : a.kind,
-    ),
-    ["signIn:revoked,expired", "error:broken", "noKeys", "cooling:soon,late", "disabled:off"],
-  );
-  assert.deepEqual(
-    { total: s.total, ready: s.ready, failing: s.failing, cooling: s.cooling },
-    { total: 7, ready: 1, failing: 3, cooling: { count: 2, soonest: now + 60_000 } },
+    { total: s.total, ready: s.ready, failing: s.failing },
+    { total: 7, ready: 1, failing: 3 },
   );
   // Keys configured, or not read yet: no warning.
   assert.ok(summarize(files, 2, now).alerts.every((a) => a.kind !== "noKeys"));

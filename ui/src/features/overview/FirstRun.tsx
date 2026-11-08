@@ -4,6 +4,7 @@ import { Card } from "@astryxdesign/core/Card";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { t } from "../../lib/i18n.ts";
+import { roles } from "../../themes/site/roles.ts";
 
 /**
  * A server with no accounts: the template's empty state in place of the tiles and the chart, with
@@ -11,7 +12,7 @@ import { t } from "../../lib/i18n.ts";
  */
 export function FirstRun({ connect }: { connect: () => void }) {
   return (
-    <Card padding={6}>
+    <Card padding={roles.card.padding}>
       <EmptyState
         title={t("overview.start.title")}
         description={t("overview.start.text")}
@@ -20,7 +21,7 @@ export function FirstRun({ connect }: { connect: () => void }) {
         actions={
           <>
             <Button label={t("overview.page.connect")} variant="secondary" onClick={connect} />
-            <Button label={t("overview.start.useTools")} variant="ghost" href="#use" />
+            <Button label={t("overview.start.useTools")} variant="ghost" href="#clients?open=use" />
           </>
         }
       />

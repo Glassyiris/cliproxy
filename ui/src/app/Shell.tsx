@@ -1,11 +1,11 @@
 // The app frame, as the owner's BoothDex console has it (admin/admin-shell.tsx) from the Astryx page
 // template shell-side-nav: AppShell with one collapsible, resizable SideNav: its heading on top, the
-// page sections from routes.ts, the session rows in the footer, and the colour-mode toggle and the
+// six pages from routes.ts as flat items, the session rows in the footer, and the colour-mode toggle and the
 // settings button in the footer icon row beside the collapse button. On phones AppShell turns the nav into its drawer
 // behind its own bar. There is no top bar.
 
-import { LogOut, Plug, Server } from "lucide-react";
-import { Suspense, useEffect, useMemo, useState, type AnchorHTMLAttributes } from "react";
+import { LogOut, Network, Plug } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState, type AnchorHTMLAttributes } from "react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { AppShell } from "@astryxdesign/core/AppShell";
 import { Center } from "@astryxdesign/core/Center";
@@ -25,12 +25,12 @@ import { lampVariant, StatusLamp } from "../components/StatusLamp.tsx";
 import { t } from "../lib/i18n.ts";
 import { repository } from "../lib/repository.ts";
 import { layout } from "../themes/site/layout.ts";
-import { useConnectAccount } from "./connect-entry.ts";
+import { PageDialog, useDialogParam } from "./pages/PageDialog.tsx";
 import { PageWarning } from "./Notices.tsx";
 import { FooterPreferences } from "./PreferenceMenus.tsx";
 import { usePreferences } from "./preferences.ts";
 import { QueryBoundary } from "./QueryBoundary.tsx";
-import { navGroups, routes, type NavGroup, type PageRoute } from "./routes.ts";
+import { destinations, routes, type PageRoute } from "./routes.ts";
 import { shortcuts } from "./settings/ShortcutsPanel.tsx";
 import { useSession } from "./Session.tsx";
 import { useDocumentTitle } from "./useDocumentTitle.ts";
@@ -91,19 +91,22 @@ function ConnectionItem() {
   );
 }
 
-/** "Go to page": a footer row (SideNav has no search slot) and Ctrl/Cmd+K, listing every page. */
+/** "Go to page": a footer row (SideNav has no search slot) and Ctrl/Cmd+K, listing every place. */
 function GoToPage() {
   const [isOpen, setOpen] = useState(false);
   const { locale } = usePreferences();
   // The titles come from the catalog, so the list is rebuilt when the language changes.
   const source = useMemo(() => {
-    const group = (r: PageRoute) => navGroups.find((g) => g.id === r.group)?.title() ?? "";
+    const page = (id: string) => routes.find((r) => r.id === id)?.title() ?? "";
     return createStaticSource(
-      routes.map((r) => ({ id: r.id, label: r.title(), auxiliaryData: { group: group(r) } })),
+      destinations.map((d) => ({
+        id: d.hash,
+        label: d.title(),
+        auxiliaryData: { group: page(d.route) },
+      })),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- locale changes what t() returns
   }, [locale]);
-  const connectAccount = useConnectAccount();
   useHotkeys([{ keys: shortcuts.goToPage, onPress: () => setOpen(true), allowInInputs: true }]);
   return (
     <>
@@ -119,53 +122,30 @@ function GoToPage() {
         searchSource={source}
         label={t("app.palette.label")}
         emptySearchText={t("app.palette.empty")}
-        onValueChange={(id) => {
+        onValueChange={(hash) => {
           setOpen(false);
-          if (id === "connect") connectAccount();
-          else location.hash = `#${id}`;
+          location.hash = hash;
         }}
       />
     </>
   );
 }
 
-/**
- * The nav categories that are open. The current page's opens whenever the page changes, so a page
- * reached by link or from the palette is never hidden; the others keep what the operator chose.
- * Adjusted while rendering when the page changes, as React's docs do for state derived from a prop.
- */
-function useOpenGroups(current: NavGroup) {
-  // Every category starts open; a closed one opens again when navigation lands in it.
-  const [open, setOpen] = useState<ReadonlySet<NavGroup>>(
-    () => new Set(navGroups.map((group) => group.id)),
-  );
-  const [shown, setShown] = useState(current);
-  if (shown !== current) {
-    setShown(current);
-    if (!open.has(current)) setOpen(new Set([...open, current]));
-  }
-  const toggle = (id: NavGroup, isOpen: boolean) =>
-    setOpen((was) => {
-      const next = new Set(was);
-      if (isOpen) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  return [open, toggle] as const;
-}
-
 function PageNav({ current }: { current: PageRoute }) {
   const { signOut } = useSession();
-  const [open, toggle] = useOpenGroups(current.group);
   return (
     <SideNav
       collapsible
-      resizable={layout.sidebar}
+      // Astryx keeps the width and the collapsed rail in localStorage under this key (read and
+      // written in try/catch), so someone who prefers the rail keeps it across reloads. Collapsed,
+      // each page is one icon with its name as SideNavItem's own tooltip; no item has children,
+      // so no flyout.
+      resizable={{ ...layout.sidebar, autoSaveId: "cliproxy-side-nav" }}
       header={
         <SideNavHeading
           heading={t("app.brand.name")}
           // The mark itself, as BoothDex's heading: NavIcon would paint an accent disc behind it.
-          icon={<Icon icon={Server} />}
+          icon={<Icon icon={Network} />}
           headingHref={`#${routes[0].id}`}
         />
       }
@@ -190,36 +170,49 @@ function PageNav({ current }: { current: PageRoute }) {
       }
     >
       <SideNavSection title={t("app.nav.pages")} isHeaderHidden>
-        {navGroups.map((group) => {
-          const pages = routes.filter((r) => r.group === group.id && !r.selects);
-          if (!pages.length) return null;
-          const items = pages.map((r) => (
-            <SideNavItem
-              key={r.id}
-              label={r.title()}
-              icon={r.icon}
-              href={`#${r.id}`}
-              isSelected={r === current || r.id === current.selects}
-            />
-          ));
-          if (group.id === navGroups[0].id) return items;
-          return (
-            <SideNavItem
-              key={group.id}
-              label={group.title()}
-              icon={group.icon}
-              collapsible={{
-                isCollapsed: !open.has(group.id),
-                onCollapsedChange: (isCollapsed) => toggle(group.id, !isCollapsed),
-              }}
-            >
-              {items}
-            </SideNavItem>
-          );
-        })}
+        {routes.map((r) => (
+          <SideNavItem
+            key={r.id}
+            label={r.title()}
+            icon={r.icon}
+            href={`#${r.id}`}
+            isSelected={r === current}
+          />
+        ))}
       </SideNavSection>
     </SideNav>
   );
+}
+
+const Connect = lazy(() => import("../features/connect/index.ts"));
+
+/** Connecting an account opens over whichever page asked for it (`?open=connect`). */
+function ConnectDialog() {
+  const connect = useDialogParam("connect");
+  return (
+    <PageDialog isOpen={connect.isOpen} title={t("app.nav.connect")} onClose={connect.close}>
+      <Connect />
+    </PageDialog>
+  );
+}
+
+/**
+ * Every page's chunk is fetched once the browser is idle after sign-in, so the first visit to a
+ * page does not wait for its chunks (a first visit to Accounts fetched 13 of them).
+ */
+function usePrefetchPages() {
+  useEffect(() => {
+    const prefetch = () => {
+      for (const r of routes) void r.preload();
+      void import("../features/connect/index.ts");
+    };
+    if (!("requestIdleCallback" in window)) {
+      const timer = setTimeout(prefetch, 1000);
+      return () => clearTimeout(timer);
+    }
+    const idle = requestIdleCallback(prefetch);
+    return () => cancelIdleCallback(idle);
+  }, []);
 }
 
 /** Asked when a page change or sign-out would drop unsaved edits (the guard in useHashRoute.ts). */
@@ -241,6 +234,7 @@ function DiscardChanges() {
 export function Shell() {
   const { route } = useHashRoute();
   useDocumentTitle(t("app.document.pageTitle", { title: route.title() }));
+  usePrefetchPages();
   const Page = route.page;
 
   return (
@@ -259,6 +253,7 @@ export function Shell() {
           <FocusHeading />
         </Suspense>
       </QueryBoundary>
+      <ConnectDialog />
       <DiscardChanges />
     </AppShell>
   );

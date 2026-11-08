@@ -19,7 +19,10 @@
 // - Type roles (src/themes/site/roles.ts): Heading levels 1 to 4; Text and Heading `size`,
 //   `weight` and `type` only as the roles table allows, written as literals or `roles.*`; it names
 //   no Heading `type`, since the level sets the scale. A route file (the page a feature's index.ts
-//   exports) has at most one level-1 Heading, and a rewritten one draws a LayoutHeader holding it.
+//   exports) has at most one level-1 Heading and renders PageFrame, whose LayoutHeader holds the
+//   page's h1, so the h1 sits at one place on every page.
+// - Card padding: a Card or ClickableCard takes roles.card.padding (the nbcards admin's one card
+//   padding) or 0 (a flush card around a list); the exceptions below say why.
 //
 // Tests and the i18n catalogs are skipped: tests hold fixtures and the catalogs hold prose.
 // Exit codes: 0 clean, 1 violation, 2 cannot read src/.
@@ -77,8 +80,20 @@ const TYPE_PROPS = {
   },
   Heading: { size: new Set(), weight: new Set(), type: new Set() },
 };
-// Route files rebuilt on the Layout frame (DESIGN.md "Roles"); a page joins when it is rewritten.
-const REWRITTEN_ROUTES = new Set(["src/features/overview/Overview.tsx"]);
+const FRAME = "src/app/PageFrame.tsx";
+const CARD_PADDINGS = new Set([roles.card.padding, 0]);
+const CARD_PADDING_EXCEPTIONS = {
+  // login-card's own card (padding 8); card-v2 UI-RULES.md exempts the auth card the same way.
+  "src/app/SignIn.tsx": "sign-in card",
+  // A chart tooltip is a popover drawn as a small card, as card-v2's TrendTip draws it.
+  "src/components/charts/plots.tsx": "chart tooltip",
+  // Pages R1 to R5 rewrite next; each leaves this list when it is rewritten.
+  "src/features/connect/SignInPanel.tsx": "not yet rewritten",
+  "src/features/system/System.tsx": "not yet rewritten",
+  "src/features/usage/LiveTiles.tsx": "not yet rewritten",
+  "src/features/usage/Sources.tsx": "not yet rewritten",
+  "src/features/use/SetUpTool.tsx": "not yet rewritten",
+};
 const DEFAULT_EXPORT = /export\s*\{\s*default\s*\}\s*from\s*["'](\.\/[^"']+)["']/;
 
 function listFiles(dir) {
@@ -267,6 +282,25 @@ function checkTypeRoles(node, fail) {
   }
 }
 
+function checkCardPadding(node, fail, relativePath) {
+  if (!ts.isJsxOpeningElement(node) && !ts.isJsxSelfClosingElement(node)) return;
+  if (!["Card", "ClickableCard"].includes(node.tagName.getText())) return;
+  if (relativePath in CARD_PADDING_EXCEPTIONS) return;
+  const attribute = attributeOf(node, "padding");
+  const values = attribute ? choicesOf(attribute.initializer) : [undefined];
+  if (!values || values.some((value) => !CARD_PADDINGS.has(value)))
+    fail("card", node, "a Card takes padding={roles.card.padding} or 0");
+}
+
+function rendersFrame(node) {
+  if (
+    (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+    node.tagName.getText() === "PageFrame"
+  )
+    return true;
+  return ts.forEachChild(node, rendersFrame) ?? false;
+}
+
 function headerHoldsTitle(node) {
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText() === "LayoutHeader") {
     let found = false;
@@ -280,7 +314,7 @@ function headerHoldsTitle(node) {
   return ts.forEachChild(node, headerHoldsTitle) ?? false;
 }
 
-function checkRouteFile(ast, relativePath, fail) {
+function checkRouteFile(ast, fail) {
   const titles = [];
   const collect = (node) => {
     if (isPageTitle(node)) titles.push(node);
@@ -288,8 +322,7 @@ function checkRouteFile(ast, relativePath, fail) {
   };
   collect(ast);
   if (titles.length > 1) fail("type", titles[1], "a route has one level-1 Heading");
-  if (REWRITTEN_ROUTES.has(relativePath) && !headerHoldsTitle(ast))
-    fail("type", null, "a rewritten route draws a LayoutHeader holding its level-1 Heading");
+  if (!rendersFrame(ast)) fail("type", null, "a route renders PageFrame");
 }
 
 // The page each feature's index.ts exports as its default: the file a route renders.
@@ -329,6 +362,7 @@ function checkFile(file, errors, routes) {
     checkGlyph(node, fail);
     checkRegistry(node, fail);
     checkTypeRoles(node, fail);
+    checkCardPadding(node, fail, relativePath);
     if (themeSource) checkThemeSource(node, fail);
     if (!inMotion) checkMotion(node, fail);
     if (!inThemes) {
@@ -339,7 +373,9 @@ function checkFile(file, errors, routes) {
     ts.forEachChild(node, visit);
   };
   visit(ast);
-  if (routes.has(relativePath)) checkRouteFile(ast, relativePath, fail);
+  if (routes.has(relativePath)) checkRouteFile(ast, fail);
+  if (relativePath === FRAME && !headerHoldsTitle(ast))
+    fail("type", null, "PageFrame draws a LayoutHeader holding the level-1 Heading");
 }
 
 if (!existsSync(srcDir)) {
@@ -356,5 +392,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-ui ok: ${files.length} source files (colours, px, tokens, sizes, style, layout, css, motion, names, icons, theme, type roles)`,
+  `check-ui ok: ${files.length} source files (colours, px, tokens, sizes, style, layout, css, motion, names, icons, theme, type roles, card padding)`,
 );

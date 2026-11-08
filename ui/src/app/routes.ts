@@ -1,172 +1,87 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import type { IconProps } from "@astryxdesign/core/Icon";
-import {
-  Activity,
-  Boxes,
-  Braces,
-  ChartColumn,
-  Key,
-  KeyRound,
-  LayoutDashboard,
-  MonitorSmartphone,
-  Network,
-  Plug,
-  PlugZap,
-  Puzzle,
-  Route,
-  ScrollText,
-  ServerCog,
-  Info,
-  Users,
-} from "lucide-react";
+import { Activity, Boxes, KeyRound, LayoutDashboard, Users } from "lucide-react";
 import { t } from "../lib/i18n.ts";
 
-export type NavGroup = "overview" | "upstream" | "clients" | "routing" | "monitor" | "server";
-
-/**
- * Side navigation categories, in order. The first holds the landing page and is drawn as plain
- * items; every other one is a collapsible parent row (owner, 2026-11-08: 「側邊欄搞個大分類不然太亂了」).
- */
-export const navGroups: readonly {
-  id: NavGroup;
-  title(): string;
-  icon: IconProps["icon"];
-}[] = [
-  { id: "overview", title: () => t("app.navGroup.overview"), icon: LayoutDashboard },
-  { id: "upstream", title: () => t("app.navGroup.upstream"), icon: Network },
-  { id: "clients", title: () => t("app.navGroup.clients"), icon: MonitorSmartphone },
-  { id: "routing", title: () => t("app.navGroup.routing"), icon: Route },
-  { id: "monitor", title: () => t("app.navGroup.monitor"), icon: Activity },
-  { id: "server", title: () => t("app.navGroup.server"), icon: ServerCog },
-];
-
 export type PageRoute = {
-  /** The hash segment: `#system`. */
+  /** The hash segment: `#accounts`. */
   id: string;
-  group: NavGroup;
   title(): string;
   /** A semantic icon name from the theme or an icon component. */
   icon: IconProps["icon"];
   page: LazyExoticComponent<ComponentType>;
-  /** Not a nav item: while this page is open, the item with this id is the selected one. */
-  selects?: string;
+  /** Fetches the page's chunk ahead of the first visit. */
+  preload(): Promise<unknown>;
 };
 
 /** A page chunk failed to load. React.lazy keeps the rejection, so only a reload fetches it again. */
 export class PageLoadError extends Error {}
 
 function page(load: () => Promise<{ default: ComponentType }>) {
-  return lazy(() =>
-    load().catch((cause: unknown) => {
-      throw new PageLoadError("Page chunk failed to load", { cause });
-    }),
-  );
+  return {
+    page: lazy(() =>
+      load().catch((cause: unknown) => {
+        throw new PageLoadError("Page chunk failed to load", { cause });
+      }),
+    ),
+    // A failed prefetch is retried by the visit itself, which reports it.
+    preload: () => load().catch(() => undefined),
+  };
 }
 
-// The navigation lists these in this order, grouped by `group`; the first one is the landing page.
+// Six pages, listed in this order in the side nav; the first one is the landing page. What used to
+// be a page of its own is a header tab (`?view=`) or a dialog (`?open=`) of one of them; old hashes
+// land there (src/lib/hash.ts).
 export const routes: readonly PageRoute[] = [
   {
     id: "overview",
-    group: "overview",
     title: () => t("app.nav.overview"),
     icon: LayoutDashboard,
-    page: page(() => import("../features/overview/index.ts")),
-  },
-  {
-    id: "use",
-    group: "clients",
-    title: () => t("app.nav.use"),
-    icon: Plug,
-    page: page(() => import("../features/use/index.ts")),
+    ...page(() => import("../features/overview/index.ts")),
   },
   {
     id: "accounts",
-    group: "upstream",
     title: () => t("app.nav.accounts"),
     icon: Users,
-    page: page(() => import("../features/accounts/index.ts")),
+    ...page(() => import("./pages/AccountsPage.tsx")),
   },
   {
-    id: "providers",
-    group: "upstream",
-    title: () => t("app.nav.providers"),
+    id: "clients",
+    title: () => t("app.nav.clients"),
     icon: KeyRound,
-    page: page(() => import("../features/providers/index.ts")),
-  },
-  {
-    id: "keys",
-    group: "clients",
-    title: () => t("app.nav.keys"),
-    icon: Key,
-    page: page(() => import("../features/keys/index.ts")),
+    ...page(() => import("./pages/ClientsPage.tsx")),
   },
   {
     id: "models",
-    group: "routing",
     title: () => t("app.nav.models"),
     icon: Boxes,
-    page: page(() => import("../features/models/index.ts")),
+    ...page(() => import("./pages/ModelsPage.tsx")),
   },
   {
-    id: "payload",
-    group: "routing",
-    title: () => t("app.nav.payload"),
-    icon: Braces,
-    page: page(() => import("../features/payload/index.ts")),
+    id: "activity",
+    title: () => t("app.nav.activity"),
+    icon: Activity,
+    ...page(() => import("./pages/ActivityPage.tsx")),
   },
   {
-    id: "usage",
-    group: "monitor",
-    title: () => t("app.nav.usage"),
-    icon: ChartColumn,
-    page: page(() => import("../features/usage/index.ts")),
-  },
-  {
-    id: "logs",
-    group: "monitor",
-    title: () => t("app.nav.logs"),
-    icon: ScrollText,
-    page: page(() => import("../features/logs/index.ts")),
-  },
-  {
-    id: "config",
-    group: "server",
-    title: () => t("app.nav.config"),
+    id: "settings",
+    title: () => t("app.nav.settings"),
     icon: "wrench",
-    page: page(() => import("../features/config/index.ts")),
-  },
-  {
-    id: "plugins",
-    group: "server",
-    title: () => t("app.nav.plugins"),
-    icon: Puzzle,
-    page: page(() => import("../features/plugins/index.ts")),
-  },
-  {
-    id: "system",
-    group: "server",
-    title: () => t("app.nav.system"),
-    icon: Info,
-    page: page(() => import("../features/system/index.ts")),
-  },
-  // Reached from Overview and Accounts, as in the legacy dashboard; the command palette lists it.
-  {
-    id: "connect",
-    group: "upstream",
-    title: () => t("app.nav.connect"),
-    icon: PlugZap,
-    page: page(() => import("../features/connect/index.ts")),
-    selects: "accounts",
+    ...page(() => import("./pages/SettingsPage.tsx")),
   },
 ];
 
-// Hashes of the legacy dashboard, so old links still land: Credentials and Quotas became Accounts.
-const aliases: Record<string, string> = {
-  oauth: "connect",
-  configuration: "config",
-  credentials: "accounts",
-  quotas: "accounts",
-};
+/** "Go to page" lists the pages and, under them, their tabs and dialogs. */
+export const destinations: readonly { hash: string; route: string; title(): string }[] = [
+  ...routes.map((r) => ({ hash: `#${r.id}`, route: r.id, title: () => r.title() })),
+  { hash: "#accounts?view=providers", route: "accounts", title: () => t("app.nav.providers") },
+  { hash: "#connect", route: "accounts", title: () => t("app.nav.connect") },
+  { hash: "#clients?open=use", route: "clients", title: () => t("app.nav.use") },
+  { hash: "#models?view=payload", route: "models", title: () => t("app.nav.payload") },
+  { hash: "#activity?view=logs", route: "activity", title: () => t("app.nav.logs") },
+  { hash: "#settings?open=plugins", route: "settings", title: () => t("app.nav.plugins") },
+  { hash: "#system", route: "settings", title: () => t("app.nav.system") },
+];
 
 /**
  * The page a hash names, the rest of its path and its query (`#accounts/<id>?provider=codex`); an
@@ -183,9 +98,8 @@ export function parseHash(hash: string) {
     // A malformed escape is read as written.
   }
   const [id = "", ...rest] = value.split("/");
-  const name = aliases[id] ?? id;
   return {
-    route: routes.find((r) => r.id === name) ?? routes[0],
+    route: routes.find((r) => r.id === id) ?? routes[0],
     arg: rest.join("/"),
     path,
     params: Object.fromEntries(new URLSearchParams(mark < 0 ? "" : raw.slice(mark + 1))),

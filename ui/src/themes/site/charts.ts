@@ -15,8 +15,8 @@ export const swatch = stylex.create({
   failed: { color: "var(--color-error)", fill: "var(--color-error)" },
 });
 
-// The dashboard-alert-rail template's chart geometry: a 280 px plot, the margin that keeps the
-// tallest y-label and the centred end ticks from clipping. Recharts takes numbers as px.
+// The chart geometry: the margin that keeps the tallest y-label and the centred end ticks from
+// clipping (dashboard-alert-rail). Recharts takes numbers as px.
 export const chartGeometry = {
   margin: { top: 12, right: 16, left: 0, bottom: 4 },
   tick: { fontSize: "var(--font-size-sm)", fill: "var(--color-text-secondary)" },
@@ -29,8 +29,15 @@ export const chartGeometry = {
 // focus outline around the SVG is cut off and only the Astryx ring around the box shows (recharts
 // sets the SVG's style itself, so the outline cannot be turned off on the SVG).
 export const chartPlot = stylex.create({
-  traffic: { height: "17.5rem", width: "100%", overflow: "hidden" },
-  // One band per source and room for the value axis under them.
+  // The nbcards admin's fixed plot height (card-v2 TrendChart.tsx): 14rem, 12rem on a phone (the
+  // media query is layout.phone; StyleX takes only a literal key).
+  traffic: {
+    height: { default: "14rem", "@media (max-width: 47.99rem)": "12rem" },
+    width: "100%",
+    overflow: "hidden",
+  },
+  // A bar list: one band per source and room for the value axis under them, so it grows with its
+  // rows rather than squeezing them into the fixed height.
   sources: (rows: number) => ({
     height: `calc(${rows} * 2.25rem + 2rem)`,
     width: "100%",

@@ -1,17 +1,19 @@
-import { useMemo, type ReactNode } from "react";
-import { ChartBarDecreasing, ChartColumn } from "lucide-react";
+import { useMemo } from "react";
+import { ChartBarDecreasing, ChartColumn, ChevronRight } from "lucide-react";
+import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
-import { Icon, type IconProps } from "@astryxdesign/core/Icon";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Link } from "@astryxdesign/core/Link";
-import { Heading, Text } from "@astryxdesign/core/Text";
+import { Icon } from "@astryxdesign/core/Icon";
+import { VStack } from "@astryxdesign/core/Layout";
+import { CardHeading } from "../../components/CardHeading.tsx";
 import { SourceChart, TrafficChart, type SourceRow } from "../../components/charts/index.ts";
 import { ReadError } from "../../components/ReadError.tsx";
+import { SectionHeading } from "../../components/SectionHeading.tsx";
 import { label, type Buckets } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
+import { roles } from "../../themes/site/roles.ts";
 import { failures, type Source } from "./summary.ts";
 
 const NO_BUCKETS: Buckets = { total: [], failed: [] };
@@ -44,36 +46,6 @@ function sourceConclusion(rows: SourceRow[]) {
 
 export type Read = { error: unknown; what: string; retry: () => void };
 
-/** A chart card's head as the template's MetricChart writes it, with the card's glyph. */
-function CardTitle({
-  icon,
-  title,
-  description,
-  end,
-}: {
-  icon: IconProps["icon"];
-  title: string;
-  description: string;
-  end?: ReactNode;
-}) {
-  return (
-    <HStack gap={3} vAlign="start" hAlign="between" wrap="wrap">
-      <VStack gap={1}>
-        <HStack gap={2} vAlign="center">
-          <Icon icon={icon} size="sm" color="secondary" />
-          <Heading level={3} accessibilityLevel={2}>
-            {title}
-          </Heading>
-        </HStack>
-        <Text type="supporting" color="secondary">
-          {description}
-        </Text>
-      </VStack>
-      {end}
-    </HStack>
-  );
-}
-
 function TrafficCard({
   traffic,
   times,
@@ -89,13 +61,9 @@ function TrafficCard({
   );
   const failedWithoutData = traffic === undefined && reads.length > 0;
   return (
-    <Card padding={6}>
-      <VStack gap={4}>
-        <CardTitle
-          icon={ChartColumn}
-          title={t("overview.chart.heading")}
-          description={t("overview.chart.description")}
-        />
+    <Card padding={roles.card.padding}>
+      <VStack gap={roles.gap.card}>
+        <CardHeading icon={ChartColumn} title={t("overview.chart.label")} />
         {reads.map((read) => (
           <ReadError key={read.what} error={read.error} what={read.what} retry={read.retry} />
         ))}
@@ -134,13 +102,20 @@ function SourcesCard({ sources, reads }: { sources: Source[] | null | undefined;
     [sources],
   );
   return (
-    <Card padding={6}>
-      <VStack gap={4}>
-        <CardTitle
+    <Card padding={roles.card.padding}>
+      <VStack gap={roles.gap.card}>
+        <CardHeading
           icon={ChartBarDecreasing}
           title={t("overview.sources.heading")}
-          description={t("overview.sources.description")}
-          end={<Link href="#usage">{t("overview.sources.usage")}</Link>}
+          actions={
+            <Button
+              label={t("overview.sources.usage")}
+              variant={roles.rowAction.variant}
+              size={roles.rowAction.size}
+              endContent={<Icon icon={ChevronRight} />}
+              href="#activity"
+            />
+          }
         />
         {sources === null ? (
           <EmptyState title={t("overview.chart.notReported")} headingLevel={3} isCompact />
@@ -165,8 +140,9 @@ function SourcesCard({ sources, reads }: { sources: Source[] | null | undefined;
 }
 
 /**
- * The template's two chart cards side by side, stacked where they do not fit: requests per
- * ten-minute bucket with failures on top, and requests per source. `traffic` and `sources` are
+ * The traffic section: its heading, then the template's two chart cards side by side, each at its
+ * own height and aligned at the top, stacked where they do not fit: requests per ten-minute bucket
+ * with failures on top, and requests per source. `traffic` and `sources` are
  * undefined while loading and null when the server reports no history; `reads` are the failed
  * reads both depend on, shown in the traffic card.
  */
@@ -182,9 +158,16 @@ export function Charts({
   reads: Read[];
 }) {
   return (
-    <Grid columns={{ minWidth: layout.settingsColumnMin, repeat: "fit" }} gap={3}>
-      <TrafficCard traffic={traffic} times={times} reads={reads} />
-      <SourcesCard sources={sources} reads={reads} />
-    </Grid>
+    <VStack gap={roles.gap.card}>
+      <SectionHeading title={t("overview.chart.heading")} hint={t("overview.chart.window")} />
+      <Grid
+        columns={{ minWidth: layout.settingsColumnMin, repeat: "fit" }}
+        gap={roles.gap.card}
+        align="start"
+      >
+        <TrafficCard traffic={traffic} times={times} reads={reads} />
+        <SourcesCard sources={sources} reads={reads} />
+      </Grid>
+    </VStack>
   );
 }

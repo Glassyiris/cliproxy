@@ -1,56 +1,42 @@
-// Overview, from the Astryx template dashboard-alert-rail: header | tiles and chart | alert rail.
-// Deviations from the template, one per line with its reason:
-// - Header padding 4, not 6: roles.header (DESIGN.md "Roles"), so the h1 and content share a line.
-// - Content padding 4, not 6: roles.content, for the same line.
-// - KPI values are Text type="large" hasTabularNumbers, not Heading level 2: roles "Numbers".
+// Overview, from the Astryx template dashboard-alert-rail, on the shared PageFrame with the nbcards
+// admin's sizes (DESIGN.md "Roles"). Deviations from the template, one per line with its reason:
+// - The header and content padding are the page roles (24, 16 on a phone), not the template's own,
+//   so the h1 sits where every other page has it.
+// - KPI values are Text at the metric size (display-3) with tabular figures, not Heading level 2:
+//   roles "Numbers".
 // - No time-window, environment or region controls: the server keeps 200 minutes for one proxy.
 // - Header line: the server host and whether it answers, not "Updated <time>"; the time would
 //   arrive with the data and push the header on a phone.
 // - The header lamp does not pulse: DESIGN.md "Motion" keeps pulses for live streams.
 // - The primary action is default size, not lg: roles.primaryAction.
-// - Tiles: four judgements with one basis line each, no delta and no sparkline (the chart below
-//   has the series); at least layout.summaryTileMin wide, not 240, so a phone shows two per row
-//   and the first alert stays in the first screen.
+// - Tiles: three judgements with one basis line each, no delta and no sparkline (the chart below
+//   has the series); at least layout.summaryTileMin wide, not 240, so a phone shows two per row.
+// - No alert rail: the reasons are a fixed, small set, so they are the nbcards admin's "Open work"
+//   cards under the tiles, one per reason with accounts, each linking to where it is fixed (owner,
+//   2026-11-08: 「這個既然固定了為什麼不換個佈局？」). The content takes the full width.
 // - Two chart cards as the template has, bar charts instead of line charts: requests per ten
-//   minutes with failures on top, and requests per source; the API reports no latency.
+//   minutes with failures on top, and requests per source; the API reports no latency. Each card
+//   keeps its own height, aligned at the top.
 // - The chart grid's columns are at least layout.settingsColumnMin wide (320, the template's
 //   value): check:ui keeps size literals in the theme and that is the theme's 320 two-column floor.
-// - No uptime roster and no service breakdown in the rail: per-source detail lives on Usage
-//   (#usage), linked from the source card.
-// - The rail is layout.detailPanel.defaultSize wide, not 400: check:ui keeps size literals in the
-//   theme, and that is the shared panel width.
-// - Below 1024 px the rail folds in under the tiles, not at the end, so on a phone the first alert
-//   is in the first screen (DESIGN.md "Routes").
-// - Alerts are one row per reason (icon, reason, one action) whose account count opens the
-//   affected accounts in place (Collapsible), without state Tokens or timestamps: the server
-//   reports account states, not alert events.
 // - Tile labels lead with a status-coloured icon instead of the StatusDot, which would repeat it.
 // - First run (no accounts): the template's EmptyState, in a card, replaces the tiles and chart.
 import { useMemo } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
-import {
-  HStack,
-  Layout,
-  LayoutContent,
-  LayoutHeader,
-  LayoutPanel,
-  VStack,
-} from "@astryxdesign/core/Layout";
+import { HStack } from "@astryxdesign/core/Layout";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Heading, Text } from "@astryxdesign/core/Text";
+import { Text } from "@astryxdesign/core/Text";
 import { useConnectAccount } from "../../app/connect-entry.ts";
+import { PageFrame } from "../../app/PageFrame.tsx";
 import { useApiKeyUsage, useConfig, useCredentials } from "../../app/serverQueries.ts";
 import { useSession } from "../../app/Session.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
-import { layout } from "../../themes/site/layout.ts";
 import { roles } from "../../themes/site/roles.ts";
-import { AttentionFeed } from "./Attention.tsx";
+import { Attention } from "./Attention.tsx";
 import { FirstRun } from "./FirstRun.tsx";
 import { bucketTimes, sources, summarize, totalTraffic } from "./summary.ts";
 import { Tiles } from "./Tiles.tsx";
@@ -108,24 +94,33 @@ function useOverviewData() {
   };
 }
 
-function Header({ connect }: { connect: () => void }) {
+/** The server host and whether it answers: the one line under the h1. */
+function Reachability() {
   const { online } = useSession();
   const reachability = t("overview.page.server", {
     host: location.host,
     state: online ? "up" : "down",
   });
   return (
-    <LayoutHeader padding={roles.header.padding} hasDivider>
-      <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
-        <VStack gap={0} vAlign="center">
-          <Heading level={roles.heading.page}>{t("overview.page.title")}</Heading>
-          <HStack gap={2} vAlign="center">
-            <StatusDot variant={online ? "success" : "error"} label={reachability} />
-            <Text type="supporting" color="secondary">
-              {reachability}
-            </Text>
-          </HStack>
-        </VStack>
+    <HStack gap={2} vAlign="center">
+      <StatusDot variant={online ? "success" : "error"} label={reachability} />
+      <Text type={roles.textType.supporting} color="secondary">
+        {reachability}
+      </Text>
+    </HStack>
+  );
+}
+
+export default function Overview() {
+  const data = useOverviewData();
+  const connect = useConnectAccount();
+  const isFirstRun = data.files?.length === 0;
+  return (
+    <PageFrame
+      title={t("overview.page.title")}
+      width="full"
+      meta={<Reachability />}
+      actions={
         <Button
           label={t("overview.page.connect")}
           variant={roles.primaryAction.variant}
@@ -133,66 +128,30 @@ function Header({ connect }: { connect: () => void }) {
           icon={<Icon icon={Plus} />}
           onClick={connect}
         />
-      </HStack>
-    </LayoutHeader>
-  );
-}
-
-export default function Overview() {
-  const data = useOverviewData();
-  const connect = useConnectAccount();
-  const isNarrow = useMediaQuery(layout.railFolds);
-  const isFirstRun = data.files?.length === 0;
-  const rail = (hasStickyHeader: boolean) => (
-    <AttentionFeed
-      summary={data.summary}
-      now={data.now}
-      reads={present([data.accounts, data.config])}
-      hasStickyHeader={hasStickyHeader}
-    />
-  );
-  return (
-    <Layout
-      height="fill"
-      header={<Header connect={connect} />}
-      content={
-        <LayoutContent padding={roles.content.padding}>
-          <VStack gap={6}>
-            {isFirstRun ? (
-              <FirstRun connect={connect} />
-            ) : data.unread ? (
-              <ReadError {...data.unread} />
-            ) : (
-              <Tiles summary={data.summary} traffic={data.traffic} now={data.now} />
-            )}
-            {isNarrow && <Card padding={0}>{rail(false)}</Card>}
-            {/* Folded, the rail grows from its skeleton to its rows, so on a phone the chart
-                waits for them rather than being pushed down. */}
-            {!isFirstRun && (!isNarrow || data.summary) && (
-              <Charts
-                traffic={data.traffic}
-                times={data.times}
-                sources={data.bySource}
-                reads={present([data.unread, data.keyUsage])}
-              />
-            )}
-          </VStack>
-        </LayoutContent>
       }
-      end={
-        isNarrow ? undefined : (
-          <LayoutPanel
-            width={layout.detailPanel.defaultSize}
-            padding={0}
-            hasDivider
-            role="complementary"
-            label={t("overview.attention.heading")}
-            isScrollable
-          >
-            {rail(true)}
-          </LayoutPanel>
-        )
-      }
-    />
+    >
+      {isFirstRun ? (
+        <FirstRun connect={connect} />
+      ) : data.unread ? (
+        <ReadError {...data.unread} />
+      ) : (
+        <Tiles summary={data.summary} traffic={data.traffic} />
+      )}
+      {!isFirstRun && (
+        <Attention
+          summary={data.summary}
+          now={data.now}
+          reads={present([data.accounts, data.config])}
+        />
+      )}
+      {!isFirstRun && (
+        <Charts
+          traffic={data.traffic}
+          times={data.times}
+          sources={data.bySource}
+          reads={present([data.unread, data.keyUsage])}
+        />
+      )}
+    </PageFrame>
   );
 }

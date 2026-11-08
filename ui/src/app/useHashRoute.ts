@@ -1,13 +1,23 @@
 // The hash is the app's location: the page, its argument (the open row) and its query (tab,
 // filter, search), so reload and Back keep them. One listener for the whole app, so the unsaved
 // guard decides once per change, whoever reads the route.
-import { useEffect, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
+import { redirect } from "../lib/hash.ts";
 import { parseHash } from "./routes.ts";
 
 type Parsed = ReturnType<typeof parseHash>;
 type Place = { route: Parsed["route"]; arg: string };
 type Params = Readonly<Record<string, string>>;
 
+const here = (to: string) => `${location.pathname}${location.search}${to}`;
+
+/** An old hash is replaced by its new place in the same history entry. */
+function land(before: string) {
+  const to = redirect(location.hash, before);
+  if (to) history.replaceState(history.state, "", here(to));
+}
+
+land("");
 let hash = location.hash;
 let parsed = parseHash(hash);
 // Replaced only when they change, so a reader of one is not rerendered by the other.
@@ -19,7 +29,6 @@ let blocked: (() => void) | null = null;
 const dirty = new Set<symbol>();
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
-const here = (to: string) => `${location.pathname}${location.search}${to}`;
 
 // Every history entry this app passes through carries its position, so a hashchange onto an
 // entry with one is Back or Forward and one without is a new navigation (a link, a typed hash).
@@ -32,6 +41,8 @@ const mark = (at: number) => history.replaceState({ ...history.state, index: at 
 mark(index);
 
 function sync() {
+  if (location.hash === hash) return;
+  land(hash);
   if (location.hash === hash) return;
   const next = parseHash(location.hash);
   const leaves = next.route !== place.route || next.arg !== place.arg;
@@ -80,9 +91,22 @@ function subscribe(listener: () => void) {
   };
 }
 
+/**
+ * Under this provider, `useHashRoute().arg` is the named query key instead of the path argument: a
+ * page hosted in a dialog over another page keeps its open item there, so the two do not share one
+ * argument (the plugins dialog over Configuration).
+ */
+export const ArgFromQuery = createContext<string | null>(null);
+
 /** The current page and its argument. An unknown hash opens the first page. */
 export function useHashRoute() {
-  return useSyncExternalStore(subscribe, () => place);
+  const current = useSyncExternalStore(subscribe, () => place);
+  const key = useContext(ArgFromQuery);
+  const scoped = useSyncExternalStore(subscribe, () => (key ? (params[key] ?? "") : null));
+  return useMemo(
+    () => (scoped === null ? current : { route: current.route, arg: scoped }),
+    [current, scoped],
+  );
 }
 
 /**

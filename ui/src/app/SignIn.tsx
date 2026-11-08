@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Server } from "lucide-react";
+import { Network } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
@@ -45,7 +45,7 @@ function ServerReachability() {
 function Brand() {
   return (
     <VStack gap={2} hAlign="center">
-      <Icon icon={Server} size="lg" />
+      <Icon icon={Network} size="lg" />
       <Text type="body" weight="bold" size="lg">
         {t("app.brand.name")}
       </Text>
