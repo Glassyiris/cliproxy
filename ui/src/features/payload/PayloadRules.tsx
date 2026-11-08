@@ -93,9 +93,6 @@ function Body({ page, addButton }: { page: Page; addButton: ReactNode }) {
   const { config, groups, shown, hasRules, open, removal } = page;
   return (
     <>
-      <Text type={roles.textType.supporting} color="secondary">
-        {t("payload.page.intro")}
-      </Text>
       {config.isError && (
         <ReadError
           error={config.error}
@@ -107,7 +104,6 @@ function Body({ page, addButton }: { page: Page; addButton: ReactNode }) {
       {groups && !hasRules && (
         <EmptyState
           title={t("payload.empty.title")}
-          description={t("payload.empty.description")}
           headingLevel={roles.heading.section}
           actions={addButton}
         />

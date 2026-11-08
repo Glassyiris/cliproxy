@@ -3,7 +3,6 @@ export default {
     "payload.page.title": "Payload rules",
     "payload.page.what": "payload rules",
     "payload.page.add": "Add rule",
-    "payload.page.intro": "Rules match on model name and, optionally, protocol.",
 
     "payload.group.storedNotList":
       "The stored {kind} value is not a list, so rules cannot be added to it.",
@@ -18,8 +17,6 @@ export default {
     "payload.kind.filter": "Remove paths from the request.",
 
     "payload.empty.title": "No payload rules",
-    "payload.empty.description":
-      "Add a rule to set, override or remove values in matching requests.",
 
     "payload.add.title": "Add payload rule",
     "payload.add.kind": "Kind",
@@ -61,7 +58,6 @@ export default {
     "payload.page.title": "请求体规则",
     "payload.page.what": "请求体规则",
     "payload.page.add": "添加规则",
-    "payload.page.intro": "规则按模型名匹配，也可以再按协议匹配。",
 
     "payload.group.storedNotList": "已存储的 {kind} 值不是列表，无法向其中添加规则。",
     "payload.row.remove": "移除",
@@ -75,7 +71,6 @@ export default {
     "payload.kind.filter": "从请求中移除路径。",
 
     "payload.empty.title": "没有请求体规则",
-    "payload.empty.description": "添加规则，可对匹配的请求设置、覆盖或移除值。",
 
     "payload.add.title": "添加请求体规则",
     "payload.add.kind": "类型",
@@ -115,7 +110,6 @@ export default {
     "payload.page.title": "請求內容規則",
     "payload.page.what": "請求內容規則",
     "payload.page.add": "新增規則",
-    "payload.page.intro": "規則依模型名稱比對，也可以再依協定比對。",
 
     "payload.group.storedNotList": "已儲存的 {kind} 值不是清單，無法在其中新增規則。",
     "payload.row.remove": "移除",
@@ -129,7 +123,6 @@ export default {
     "payload.kind.filter": "從請求中移除路徑。",
 
     "payload.empty.title": "沒有請求內容規則",
-    "payload.empty.description": "新增規則，可對符合的請求設定、覆寫或移除值。",
 
     "payload.add.title": "新增請求內容規則",
     "payload.add.kind": "類型",

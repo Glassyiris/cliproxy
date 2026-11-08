@@ -342,7 +342,6 @@ function EmptyView({
     return (
       <EmptyState
         title={t("accounts.empty.allServe")}
-        description={t("accounts.empty.allServeDetail")}
         headingLevel={roles.heading.section}
         actions={
           <Button label={t("accounts.empty.showAll")} onClick={() => setFilters({ view: "all" })} />
