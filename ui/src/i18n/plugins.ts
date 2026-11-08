@@ -1,9 +1,7 @@
 export default {
   en: {
     "plugins.panel.installed": "Installed",
-    "plugins.panel.installedHint": "Which plugins the server loaded, and which wait for a restart.",
     "plugins.panel.store": "Store",
-    "plugins.panel.storeHint": "Plugins offered by the configured sources.",
     "plugins.panel.sections": "Plugin panels",
     "plugins.facts.loaded": "Loaded",
     "plugins.facts.restart": "Waiting for a restart",
@@ -18,7 +16,6 @@ export default {
     "plugins.page.switchedOff": "Plugins off.",
 
     "plugins.empty.title": "No plugins installed",
-    "plugins.empty.description": "Plugins add providers, sign-in flows and quota sources.",
 
     "plugins.table.status": "Status",
     "plugins.table.name": "Name",
@@ -63,9 +60,7 @@ export default {
   },
   "zh-CN": {
     "plugins.panel.installed": "已安装",
-    "plugins.panel.installedHint": "服务器已加载哪些插件，哪些需要重启。",
     "plugins.panel.store": "商店",
-    "plugins.panel.storeHint": "已配置的来源提供的插件。",
     "plugins.panel.sections": "插件面板",
     "plugins.facts.loaded": "已加载",
     "plugins.facts.restart": "等待重启",
@@ -80,7 +75,6 @@ export default {
     "plugins.page.switchedOff": "已停用插件。",
 
     "plugins.empty.title": "尚未安装插件",
-    "plugins.empty.description": "插件可以添加提供商、登录流程和额度来源。",
 
     "plugins.table.status": "状态",
     "plugins.table.name": "名称",
@@ -124,9 +118,7 @@ export default {
   },
   "zh-TW": {
     "plugins.panel.installed": "已安裝",
-    "plugins.panel.installedHint": "伺服器已載入哪些外掛，哪些需要重新啟動。",
     "plugins.panel.store": "商店",
-    "plugins.panel.storeHint": "已設定的來源提供的外掛。",
     "plugins.panel.sections": "外掛面板",
     "plugins.facts.loaded": "已載入",
     "plugins.facts.restart": "等待重新啟動",
@@ -141,7 +133,6 @@ export default {
     "plugins.page.switchedOff": "已停用外掛。",
 
     "plugins.empty.title": "尚未安裝外掛",
-    "plugins.empty.description": "外掛可以新增供應商、登入流程和額度來源。",
 
     "plugins.table.status": "狀態",
     "plugins.table.name": "名稱",

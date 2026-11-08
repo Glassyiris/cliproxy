@@ -1,10 +1,11 @@
 // Logs, the Activity route's second tab (`?view=logs`), from the Astryx template table-filter on
 // the shared PageFrame. Deviations from the template, one per line with its reason:
-// - The header is PageFrame's: the view's title, the route's one line, the controls at the end,
+// - The header is PageFrame's: the view's title, the controls at the end,
 //   then the filter row; padded by the page roles, not the template's 0/16.
 // - The line count ends the filter row, not the header line (owner: counts belong to the list).
 // - The filter row stays in the header on a phone too (owner: h1, line, then the toolbar at every
-//   width), so the search is in view while following the end of the log.
+//   width; the line was cut as filler on 2026-11-08), so the search is in view while following the
+//   end of the log.
 // - No saved views, power search, bulk edit, view options or density switch: a log has no saved
 //   state or columns to choose, and roles "Table density" removes the switch.
 // - The filter chips are a log choice (SegmentedControl: application log or error logs, the
@@ -280,11 +281,6 @@ export default function Logs() {
     <PageFrame
       title={t("logs.page.title")}
       width="full"
-      meta={
-        <Text type={roles.textType.supporting} color="secondary">
-          {t("usage.route.line")}
-        </Text>
-      }
       actions={
         // One group, so on a phone the menu does not wrap away from Follow.
         <HStack gap={3} vAlign="center">

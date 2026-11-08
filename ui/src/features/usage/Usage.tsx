@@ -1,7 +1,7 @@
 // Usage, the Activity route's first tab, from the Astryx template dashboard-comparison on the shared
 // PageFrame with the nbcards admin's sizes (DESIGN.md "Roles"). Deviations from the template, one
 // per line with its reason:
-// - The header is PageFrame's (route title, tabs, one line), padded by the page roles, so the h1
+// - The header is PageFrame's (route title, then tabs), padded by the page roles, so the h1
 //   sits where every page has it; the template's contentWidth 1440 is dropped (content is full).
 // - No date-range, segment or device selectors and no Export: the server keeps 200 minutes of
 //   ten-minute buckets and nothing to export; the chart card's line names that window instead.
@@ -23,7 +23,6 @@ import { focusManager } from "@tanstack/react-query";
 import { Radio } from "lucide-react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Icon } from "@astryxdesign/core/Icon";
-import { Text } from "@astryxdesign/core/Text";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useHashParams } from "../../app/useHashRoute.ts";
@@ -31,7 +30,6 @@ import { useAvailable } from "../../components/MissingActions.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { t } from "../../lib/i18n.ts";
 import { usageStats, type UsageEvent } from "../../lib/usage.ts";
-import { roles } from "../../themes/site/roles.ts";
 import { LiveSection } from "./Live.tsx";
 import { useUsageDrain } from "./queries.ts";
 import { addBatch, recent } from "./summary.ts";
@@ -101,11 +99,6 @@ export default function Usage() {
     <PageFrame
       title={t("usage.page.title")}
       width="full"
-      meta={
-        <Text type={roles.textType.supporting} color="secondary">
-          {t("usage.route.line")}
-        </Text>
-      }
       actions={
         // Disabled, not hidden, while the queue route is probed or missing, so the header does
         // not move when it is known (REQUIREMENTS Exceptions: probed write actions).

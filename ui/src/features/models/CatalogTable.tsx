@@ -214,11 +214,7 @@ export function CatalogTable({
         actions={<Button label={t("models.empty.clear")} variant="secondary" onClick={onClear} />}
       />
     ) : (
-      <EmptyState
-        title={t("models.empty.catalog")}
-        description={t("models.empty.catalogHint")}
-        headingLevel={roles.heading.section}
-      />
+      <EmptyState title={t("models.empty.catalog")} headingLevel={roles.heading.section} />
     );
   const shown = pageOf(sortedData, page);
   return (

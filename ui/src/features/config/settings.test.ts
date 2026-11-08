@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { dynamicKeys } from "../../i18n/config.ts";
+import { dynamicKeys, hinted } from "../../i18n/config.ts";
 import { changes, diffText, groups, isValid, settingId, settings, shown } from "./settings.ts";
 
 const setting = (path: string) => settings.find((s) => s.path === path)!;
@@ -38,11 +38,20 @@ test("every group, setting and unit has its names in the catalog", () => {
   const listed = new Set(dynamicKeys);
   const wanted = [
     ...groups.flatMap((g) => [`config.group.${g}`]),
-    ...settings.flatMap((s) => [`config.label.${settingId(s)}`, `config.hint.${settingId(s)}`]),
+    ...settings.map((s) => `config.label.${settingId(s)}`),
+    ...hinted.map((id) => `config.hint.${id}`),
     ...settings.flatMap((s) => (s.kind === "number" && s.units ? [`config.unit.${s.units}`] : [])),
   ];
   assert.deepEqual(
     wanted.filter((key) => !listed.has(key)),
+    [],
+  );
+});
+
+test("every hint belongs to a setting", () => {
+  const ids = new Set<string>(settings.map(settingId));
+  assert.deepEqual(
+    hinted.filter((id) => !ids.has(id)),
     [],
   );
 });

@@ -37,11 +37,10 @@ const iconColor: Record<Tone, IconProps["color"]> = {
 /** Each reason in words, its glyph and its tone by the accounts' status. */
 const look: Record<
   Reason,
-  { title: () => string; hint: () => string; icon: IconProps["icon"]; tone: Tone }
+  { title: () => string; hint?: () => string; icon: IconProps["icon"]; tone: Tone }
 > = {
   signIn: {
     title: () => t("overview.attention.signIn"),
-    hint: () => t("overview.attention.signInHint"),
     icon: LogIn,
     tone: "error",
   },
@@ -53,31 +52,26 @@ const look: Record<
   },
   error: {
     title: () => t("overview.attention.error"),
-    hint: () => t("overview.attention.errorHint"),
     icon: "error",
     tone: "error",
   },
   limited: {
     title: () => t("overview.attention.limited"),
-    hint: () => t("overview.attention.limitedHint"),
     icon: Gauge,
     tone: "warning",
   },
   cooling: {
     title: () => t("overview.attention.cooling"),
-    hint: () => t("overview.attention.coolingHint"),
     icon: "clock",
     tone: "warning",
   },
   disabled: {
     title: () => t("overview.attention.disabled"),
-    hint: () => t("overview.attention.disabledHint"),
     icon: PowerOff,
     tone: "neutral",
   },
   other: {
     title: () => t("overview.attention.other"),
-    hint: () => t("overview.attention.otherHint"),
     icon: CircleQuestionMark,
     tone: "neutral",
   },
@@ -113,7 +107,11 @@ function AlertCard({ alert, now }: { alert: Alert; now: number }) {
       />
     );
   const { reason, soonest } = alert;
-  const { title, icon, tone } = look[reason];
+  const { title, hint, icon, tone } = look[reason];
+  const detail =
+    soonest === null
+      ? hint?.()
+      : t("overview.tiles.soonestBack", { time: span(Math.max(0, soonest - now)) });
   return (
     <MetricCard
       label={title()}
@@ -121,12 +119,8 @@ function AlertCard({ alert, now }: { alert: Alert; now: number }) {
       iconColor={iconColor[tone]}
       value={count(alert.count)}
       badge={<Badge variant={tone} label={badgeWord[tone]()} />}
-      // Every card carries one line, so the cards of a row read alike and none ends half empty.
-      detail={basis(
-        soonest === null
-          ? look[reason].hint()
-          : t("overview.tiles.soonestBack", { time: span(Math.max(0, soonest - now)) }),
-      )}
+      // A line only where the title does not say it all: when the accounts come back, or why.
+      detail={detail && basis(detail)}
       href={reason === "signIn" ? "#connect" : `#accounts?show=${reason}`}
     />
   );

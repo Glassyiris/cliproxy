@@ -6,7 +6,7 @@ export default {
 
     "app.signIn.managementKey": "Management key",
     "app.signIn.help":
-      "Use the plain text you set as {setting} (on first start the server replaces it in config.yaml with a hash), or the MANAGEMENT_PASSWORD the server was started with. It stays in this tab’s memory only; reloading signs you out.",
+      "The plain text you set as {setting}, or MANAGEMENT_PASSWORD. On first start the server replaces it in config.yaml with a hash.",
     "app.signIn.heading": "Connect to this server",
     "app.signIn.checking": "Checking {host}…",
     "app.signIn.restoring": "Connecting to {host}…",
@@ -21,12 +21,11 @@ export default {
     "app.signIn.connecting": "Connecting…",
     "app.signIn.remember": "Remember on this device",
     "app.signIn.apiOff":
-      "The management API is off on this server. Set management.secret-key in the server's config.yaml (or start it with MANAGEMENT_PASSWORD), then restart it.",
+      "The management API is off. Set management.secret-key in config.yaml and restart, or start the server with MANAGEMENT_PASSWORD.",
     "app.signIn.remoteDisabled":
       "This server accepts the dashboard only from its own machine. Open it there, or set management.allow-remote: true in config.yaml with a strong key.",
     "app.signIn.banned": "{message}. Too many wrong keys came from this address.",
-    "app.signIn.wrongKey":
-      "That key is not right. Use the plain text you set as management.secret-key: on first start the server replaces it in config.yaml with a hash, so the file no longer shows it.",
+    "app.signIn.wrongKey": "Wrong key. Use the plain text, not the hash now in config.yaml.",
     "app.connection.unreachable":
       "The server did not answer. Check that it is running and that this address reaches it.",
     "app.connection.timeout": "The server did not answer within 30 seconds. Try again.",
@@ -71,31 +70,26 @@ export default {
     "app.settings.sections": "Settings sections",
     "app.settings.close": "Close",
     "app.settings.appearance": "Appearance",
-    "app.settings.appearanceHint": "These settings apply to this browser only.",
-    "app.settings.paletteHint": "Applies in dark mode; light mode always uses Rosé Pine Dawn.",
+    "app.settings.paletteHint": "Dark mode only; light mode uses Rosé Pine Dawn.",
     "app.settings.mode": "Light and dark",
-    "app.settings.modeHint": "System follows this device’s setting.",
     "app.settings.modeSystem": "System",
     "app.settings.modeLight": "Light",
     "app.settings.modeDark": "Dark",
     "app.settings.shortcuts": "Keyboard shortcuts",
-    "app.settings.shortcutsHint": "Keys that work on every page.",
     "app.settings.about": "About",
-    "app.settings.aboutHint": "The server this dashboard is connected to.",
 
     "app.read.loading": "Loading {what}",
     "app.read.failed": "Could not load {what}",
     "app.read.unavailable": "Not available on this server",
     "app.read.unimplemented":
-      "{method} {path} answered {status}. It is part of the v8 API, but this server does not implement it yet.",
+      "{method} {path} answered {status}; this server does not implement it.",
     "app.read.retry": "Retry",
     "app.page.failedTitle": "This page could not be shown",
     "app.page.failedDescription": "Try again. If it keeps failing, reload the dashboard.",
-    "app.page.chunkFailedDescription":
-      "The code for this page could not be loaded. Reload the dashboard to fetch it again. Reloading signs you out, because the key is kept only in this tab’s memory.",
+    "app.page.chunkFailedDescription": "Reload the dashboard to fetch this page again.",
     "app.page.reload": "Reload",
     "app.action.configChanged":
-      "This setting changed on the server. Nothing was written; the page now shows the server copy.",
+      "Changed on the server; nothing was written. Showing the server value.",
     "app.keyTest.rejected":
       "The proxy rejected this key. Check that it is listed under Client keys.",
     "app.keyTest.status": "The proxy answered HTTP {status}. Check Logs for the reason.",
@@ -112,8 +106,7 @@ export default {
     "app.list.clear": "Clear filters",
     "app.list.moreActions": "More actions",
     "app.unsaved.title": "Discard unsaved changes?",
-    "app.unsaved.description":
-      "The changes on this page are not saved. Leaving the page drops them.",
+    "app.unsaved.description": "Leaving the page drops them.",
     "app.unsaved.discard": "Discard changes",
     "app.unsaved.keep": "Keep editing",
     "app.missing.actions": "Not available on this server: {actions}.",
@@ -149,7 +142,7 @@ export default {
     "app.quota.noWindows": "No usage windows reported",
     "app.quota.noSource": "No usage source",
     "app.quota.usageDenied":
-      "Claude denied access to usage (HTTP {status}). Setup tokens cannot read usage. Connect Claude through the dashboard's OAuth flow for usage checks.",
+      "Claude denied usage access (HTTP {status}). Setup tokens cannot read usage; connect with OAuth instead.",
     "app.quota.tokenRefused":
       "The provider rejected the account's token (HTTP {status}). Refresh the token, or connect the account again.",
     "app.quota.providerStatus": "The provider answered HTTP {status}. Try again later.",
@@ -158,13 +151,10 @@ export default {
     "app.strategy.fillFirst": "Fill first",
     "app.strategy.weightedRoundRobin": "Weighted round robin",
     "app.strategy.soonestReset": "Soonest reset first",
-    "app.strategyHelp.roundRobin": "Takes the accounts in turn, one request each.",
-    "app.strategyHelp.fillFirst":
-      "Uses one account until it cools down or reaches a limit, then moves to the next.",
-    "app.strategyHelp.weightedRoundRobin":
-      "Takes the accounts in turn in proportion to each account's weight, set on Accounts.",
+    "app.strategyHelp.fillFirst": "Stays on one account until it cools down or reaches a limit.",
+    "app.strategyHelp.weightedRoundRobin": "By each account's weight, set on Accounts.",
     "app.strategyHelp.soonestReset":
-      "Uses the account whose weekly limit resets soonest until it cools down or uses up a window, then moves to the next. Conversations bound to an account stay on it. This is the default.",
+      "Prefers the account whose weekly limit resets soonest. The default.",
     "app.editor.text": "{format} text",
     "app.editor.absent": "Server default",
     "app.editor.review": "Review changes",
@@ -172,11 +162,9 @@ export default {
     "app.editor.saved": "Saved.",
     "app.editor.noChanges": "Nothing changed yet.",
     "app.editor.invalidJson": "The JSON is not valid. Fix it before reviewing.",
-    "app.editor.yamlNote": "The server validates YAML and may normalise it.",
     "app.editor.discardDescription": "Closing the editor drops the changes you made.",
-    "app.editor.closeWhileSaving": "Saving. The editor can be closed once it finishes.",
     "app.dialog.cancel": "Cancel",
-    "app.dialog.closeWhileSaving": "Saving. This can be closed once it finishes.",
+    "app.dialog.closeWhileSaving": "Saving…",
     "app.notice.dismiss": "Dismiss",
   },
   "zh-CN": {
@@ -186,7 +174,7 @@ export default {
 
     "app.signIn.managementKey": "管理密钥",
     "app.signIn.help":
-      "输入为 {setting} 设置的明文（服务器首次启动时会把 config.yaml 中的值换成哈希），或启动服务器时设置的 MANAGEMENT_PASSWORD。密钥只保存在此标签页的内存中，刷新页面后需要重新登录。",
+      "为 {setting} 设置的明文，或 MANAGEMENT_PASSWORD。服务器首次启动时会把 config.yaml 中的明文换成哈希。",
     "app.signIn.heading": "连接到此服务器",
     "app.signIn.checking": "正在检查 {host}…",
     "app.signIn.restoring": "正在连接到 {host}…",
@@ -201,12 +189,11 @@ export default {
     "app.signIn.connecting": "正在连接…",
     "app.signIn.remember": "在这台设备上记住我",
     "app.signIn.apiOff":
-      "此服务器未开启管理 API。请在服务器的 config.yaml 中设置 management.secret-key（或以 MANAGEMENT_PASSWORD 启动），然后重启服务器。",
+      "管理 API 未开启。请在 config.yaml 中设置 management.secret-key，然后重启服务器。也可以用 MANAGEMENT_PASSWORD 启动。",
     "app.signIn.remoteDisabled":
       "此服务器只接受本机打开的面板。请在服务器所在的机器上打开，或在 config.yaml 中设置 management.allow-remote: true 并使用强密钥。",
     "app.signIn.banned": "{message}。此地址输错密钥的次数过多。",
-    "app.signIn.wrongKey":
-      "密钥不正确。请填写设置 management.secret-key 时使用的明文：服务器首次启动时会把 config.yaml 中的值替换为哈希，文件里已看不到原文。",
+    "app.signIn.wrongKey": "密钥不正确。请填写明文，而不是 config.yaml 中现在的哈希。",
     "app.connection.unreachable": "服务器没有响应。请确认服务器正在运行，并且此地址可以访问它。",
     "app.connection.timeout": "服务器在 30 秒内没有响应。请重试。",
     "app.signIn.rejected": "管理密钥已被拒绝。请重新登录。",
@@ -250,30 +237,24 @@ export default {
     "app.settings.sections": "偏好设置分类",
     "app.settings.close": "关闭",
     "app.settings.appearance": "外观",
-    "app.settings.appearanceHint": "这些设置只对当前浏览器生效。",
-    "app.settings.paletteHint": "用于深色模式；浅色模式始终使用 Rosé Pine Dawn。",
+    "app.settings.paletteHint": "仅用于深色模式；浅色模式使用 Rosé Pine Dawn。",
     "app.settings.mode": "浅色与深色",
-    "app.settings.modeHint": "跟随系统时，随本设备的设置切换。",
     "app.settings.modeSystem": "跟随系统",
     "app.settings.modeLight": "浅色",
     "app.settings.modeDark": "深色",
     "app.settings.shortcuts": "键盘快捷键",
-    "app.settings.shortcutsHint": "在任何页面都能使用的按键。",
     "app.settings.about": "关于",
-    "app.settings.aboutHint": "此面板连接的服务器。",
 
     "app.read.loading": "正在加载{what}",
     "app.read.failed": "无法加载{what}",
     "app.read.unavailable": "此服务器不支持",
-    "app.read.unimplemented": "{method} {path} 返回 {status}。它属于 v8 API，但此服务器尚未实现。",
+    "app.read.unimplemented": "{method} {path} 返回 {status}，此服务器尚未实现。",
     "app.read.retry": "重试",
     "app.page.failedTitle": "无法显示此页面",
     "app.page.failedDescription": "请重试。如果仍然失败，请刷新面板。",
-    "app.page.chunkFailedDescription":
-      "无法加载此页面的代码。请刷新面板重新获取。密钥只保存在此标签页的内存中，因此刷新后需要重新登录。",
+    "app.page.chunkFailedDescription": "请刷新面板，重新获取此页面。",
     "app.page.reload": "刷新",
-    "app.action.configChanged":
-      "服务器上的此设置已更改，未写入任何内容。页面现在显示服务器上的版本。",
+    "app.action.configChanged": "此设置已在服务器上更改，未写入任何内容。现显示服务器上的值。",
     "app.keyTest.rejected": "代理拒绝了此密钥。请确认客户端密钥页面中有此密钥。",
     "app.keyTest.status": "代理返回 HTTP {status}。请在日志中查看原因。",
     "app.keyTest.unreachable": "无法连接到代理。",
@@ -289,7 +270,7 @@ export default {
     "app.list.clear": "清除筛选",
     "app.list.moreActions": "更多操作",
     "app.unsaved.title": "放弃未保存的更改？",
-    "app.unsaved.description": "此页面的更改尚未保存，离开页面会丢失这些更改。",
+    "app.unsaved.description": "离开页面会丢失这些更改。",
     "app.unsaved.discard": "放弃更改",
     "app.unsaved.keep": "继续编辑",
     "app.missing.actions": "此服务器不支持：{actions}。",
@@ -324,7 +305,7 @@ export default {
     "app.quota.noWindows": "未报告任何额度",
     "app.quota.noSource": "无用量来源",
     "app.quota.usageDenied":
-      "Claude 拒绝读取用量（HTTP {status}）。用 setup-token 生成的令牌无法读取用量。如需检查用量，请通过面板的 OAuth 流程连接 Claude。",
+      "Claude 拒绝读取用量（HTTP {status}）。setup-token 无法读取用量，请改用 OAuth 连接。",
     "app.quota.tokenRefused":
       "提供商拒绝了此账号的令牌（HTTP {status}）。请刷新令牌，或重新连接此账号。",
     "app.quota.providerStatus": "提供商返回 HTTP {status}。请稍后重试。",
@@ -333,11 +314,9 @@ export default {
     "app.strategy.fillFirst": "先用满",
     "app.strategy.weightedRoundRobin": "加权轮询",
     "app.strategy.soonestReset": "最早重置优先",
-    "app.strategyHelp.roundRobin": "依次使用各账号，每个账号处理一个请求。",
-    "app.strategyHelp.fillFirst": "持续使用一个账号，直到它进入冷却或达到限额，再换下一个。",
-    "app.strategyHelp.weightedRoundRobin": "按各账号的权重依次使用账号，权重在账号页设置。",
-    "app.strategyHelp.soonestReset":
-      "优先使用每周额度最早重置的账号，直到它进入冷却或用尽一个额度窗口，再换下一个。已绑定账号的会话保持在该账号上。这是默认策略。",
+    "app.strategyHelp.fillFirst": "持续使用一个账号，直到它进入冷却或达到限额。",
+    "app.strategyHelp.weightedRoundRobin": "按账号权重分配，权重在账号页设置。",
+    "app.strategyHelp.soonestReset": "优先使用每周额度最早重置的账号。默认策略。",
     "app.editor.text": "{format} 内容",
     "app.editor.absent": "服务器默认值",
     "app.editor.review": "检查更改",
@@ -345,11 +324,9 @@ export default {
     "app.editor.saved": "已保存。",
     "app.editor.noChanges": "尚未做任何更改。",
     "app.editor.invalidJson": "JSON 无效。请先修正再检查。",
-    "app.editor.yamlNote": "服务器会校验 YAML，并可能调整其格式。",
     "app.editor.discardDescription": "关闭编辑器会丢失所做的更改。",
-    "app.editor.closeWhileSaving": "正在保存，保存结束后才能关闭编辑器。",
     "app.dialog.cancel": "取消",
-    "app.dialog.closeWhileSaving": "正在保存，保存结束后才能关闭。",
+    "app.dialog.closeWhileSaving": "正在保存…",
     "app.notice.dismiss": "关闭",
   },
   "zh-TW": {
@@ -359,7 +336,7 @@ export default {
 
     "app.signIn.managementKey": "管理金鑰",
     "app.signIn.help":
-      "輸入為 {setting} 設定的明文（伺服器首次啟動時會把 config.yaml 中的值換成雜湊），或啟動伺服器時設定的 MANAGEMENT_PASSWORD。金鑰只保存在此分頁的記憶體中，重新載入頁面後需要重新登入。",
+      "為 {setting} 設定的明文，或 MANAGEMENT_PASSWORD。伺服器首次啟動時會把 config.yaml 中的明文換成雜湊。",
     "app.signIn.heading": "連線到此伺服器",
     "app.signIn.checking": "正在檢查 {host}…",
     "app.signIn.restoring": "正在連線到 {host}…",
@@ -374,12 +351,11 @@ export default {
     "app.signIn.connecting": "正在連線…",
     "app.signIn.remember": "在這台裝置記住我",
     "app.signIn.apiOff":
-      "此伺服器未開啟管理 API。請在伺服器的 config.yaml 中設定 management.secret-key（或以 MANAGEMENT_PASSWORD 啟動），然後重新啟動伺服器。",
+      "管理 API 未開啟。請在 config.yaml 中設定 management.secret-key，然後重新啟動伺服器。也可以用 MANAGEMENT_PASSWORD 啟動。",
     "app.signIn.remoteDisabled":
       "此伺服器只接受本機開啟的面板。請在伺服器所在的機器上開啟，或在 config.yaml 中設定 management.allow-remote: true 並使用強金鑰。",
     "app.signIn.banned": "{message}。此位址輸錯金鑰的次數過多。",
-    "app.signIn.wrongKey":
-      "金鑰不正確。請填寫設定 management.secret-key 時使用的明文：伺服器首次啟動時會把 config.yaml 中的值換成雜湊，檔案裡已看不到原文。",
+    "app.signIn.wrongKey": "金鑰不正確。請填寫明文，而不是 config.yaml 中現在的雜湊。",
     "app.connection.unreachable": "伺服器沒有回應。請確認伺服器正在執行，且此位址可以連到它。",
     "app.connection.timeout": "伺服器在 30 秒內沒有回應。請重試。",
     "app.signIn.rejected": "管理金鑰已被拒絕。請重新登入。",
@@ -423,30 +399,24 @@ export default {
     "app.settings.sections": "偏好設定分類",
     "app.settings.close": "關閉",
     "app.settings.appearance": "外觀",
-    "app.settings.appearanceHint": "這些設定只對目前的瀏覽器生效。",
-    "app.settings.paletteHint": "用於深色模式；淺色模式一律使用 Rosé Pine Dawn。",
+    "app.settings.paletteHint": "僅用於深色模式；淺色模式使用 Rosé Pine Dawn。",
     "app.settings.mode": "淺色與深色",
-    "app.settings.modeHint": "跟隨系統時，依本裝置的設定切換。",
     "app.settings.modeSystem": "跟隨系統",
     "app.settings.modeLight": "淺色",
     "app.settings.modeDark": "深色",
     "app.settings.shortcuts": "鍵盤快速鍵",
-    "app.settings.shortcutsHint": "在任何頁面都能使用的按鍵。",
     "app.settings.about": "關於",
-    "app.settings.aboutHint": "此面板連線的伺服器。",
 
     "app.read.loading": "正在載入{what}",
     "app.read.failed": "無法載入{what}",
     "app.read.unavailable": "此伺服器不支援",
-    "app.read.unimplemented": "{method} {path} 回傳 {status}。它屬於 v8 API，但此伺服器尚未實作。",
+    "app.read.unimplemented": "{method} {path} 回傳 {status}，此伺服器尚未實作。",
     "app.read.retry": "重試",
     "app.page.failedTitle": "無法顯示此頁面",
     "app.page.failedDescription": "請重試。如果仍然失敗，請重新載入面板。",
-    "app.page.chunkFailedDescription":
-      "無法載入此頁面的程式碼。請重新載入面板以再次取得。金鑰只保存在此分頁的記憶體中，因此重新載入後需要重新登入。",
+    "app.page.chunkFailedDescription": "請重新載入面板，以再次取得此頁面。",
     "app.page.reload": "重新載入",
-    "app.action.configChanged":
-      "伺服器上的此設定已變更，未寫入任何內容。頁面現在顯示伺服器上的版本。",
+    "app.action.configChanged": "此設定已在伺服器上變更，未寫入任何內容。現顯示伺服器上的值。",
     "app.keyTest.rejected": "代理拒絕了此金鑰。請確認用戶端金鑰頁面中有此金鑰。",
     "app.keyTest.status": "代理回傳 HTTP {status}。請在日誌中查看原因。",
     "app.keyTest.unreachable": "無法連線到代理。",
@@ -462,7 +432,7 @@ export default {
     "app.list.clear": "清除篩選",
     "app.list.moreActions": "更多操作",
     "app.unsaved.title": "捨棄未儲存的變更？",
-    "app.unsaved.description": "此頁面的變更尚未儲存，離開頁面會遺失這些變更。",
+    "app.unsaved.description": "離開頁面會遺失這些變更。",
     "app.unsaved.discard": "捨棄變更",
     "app.unsaved.keep": "繼續編輯",
     "app.missing.actions": "此伺服器不支援：{actions}。",
@@ -497,7 +467,7 @@ export default {
     "app.quota.noWindows": "未回報任何額度",
     "app.quota.noSource": "無用量來源",
     "app.quota.usageDenied":
-      "Claude 拒絕讀取用量（HTTP {status}）。以 setup-token 產生的權杖無法讀取用量。如需檢查用量，請透過面板的 OAuth 流程連接 Claude。",
+      "Claude 拒絕讀取用量（HTTP {status}）。setup-token 無法讀取用量，請改用 OAuth 連接。",
     "app.quota.tokenRefused":
       "供應商拒絕了此帳號的權杖（HTTP {status}）。請重新整理權杖，或重新連接此帳號。",
     "app.quota.providerStatus": "供應商回應 HTTP {status}。請稍後重試。",
@@ -506,11 +476,9 @@ export default {
     "app.strategy.fillFirst": "先用滿",
     "app.strategy.weightedRoundRobin": "加權輪詢",
     "app.strategy.soonestReset": "最早重設優先",
-    "app.strategyHelp.roundRobin": "依序使用各帳號，每個帳號處理一個請求。",
-    "app.strategyHelp.fillFirst": "持續使用一個帳號，直到它進入冷卻或達到上限，再換下一個。",
-    "app.strategyHelp.weightedRoundRobin": "依各帳號的權重輪流使用帳號，權重在帳號頁設定。",
-    "app.strategyHelp.soonestReset":
-      "優先使用每週額度最早重設的帳號，直到它進入冷卻或用盡一個額度視窗，再換下一個。已綁定帳號的對話會留在該帳號。這是預設策略。",
+    "app.strategyHelp.fillFirst": "持續使用一個帳號，直到它進入冷卻或達到上限。",
+    "app.strategyHelp.weightedRoundRobin": "依帳號權重分配，權重在帳號頁設定。",
+    "app.strategyHelp.soonestReset": "優先使用每週額度最早重設的帳號。預設策略。",
     "app.editor.text": "{format} 內容",
     "app.editor.absent": "伺服器預設值",
     "app.editor.review": "檢查變更",
@@ -518,11 +486,9 @@ export default {
     "app.editor.saved": "已儲存。",
     "app.editor.noChanges": "尚未做任何變更。",
     "app.editor.invalidJson": "JSON 無效。請先修正再檢查。",
-    "app.editor.yamlNote": "伺服器會驗證 YAML，並可能調整其格式。",
     "app.editor.discardDescription": "關閉編輯器會遺失所做的變更。",
-    "app.editor.closeWhileSaving": "正在儲存，儲存結束後才能關閉編輯器。",
     "app.dialog.cancel": "取消",
-    "app.dialog.closeWhileSaving": "正在儲存，儲存結束後才能關閉。",
+    "app.dialog.closeWhileSaving": "正在儲存…",
     "app.notice.dismiss": "關閉",
   },
 };

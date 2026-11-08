@@ -111,7 +111,7 @@ export function Ways({
     {
       way: { kind: "apiKey" },
       name: t("connect.way.apiKey"),
-      line: t("connect.way.apiKeyLine"),
+      line: "",
       reason: null,
     },
   ];

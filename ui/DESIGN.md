@@ -340,7 +340,8 @@ waiting, live usage). No page transitions, no row entrance stagger: a list that 
   its rows instead. The legend is one text row. Two chart cards side by side align at the top and keep their own heights.
 - Charts draw only what the API has: total and failed requests over 200 minutes (Overview), source
   comparison and failure rate (Activity, Usage tab). The templates' 1h / 1d / 7d windows are dropped.
-  Each chart has a one-line written conclusion beside it.
+  Each chart has a one-line written conclusion as its screen-reader description, not shown: the
+  tiles carry the same numbers (owner, 2026-11-08: 「廢話太多了。」).
 - KPI tiles (`MetricCard`) appear where the page's template has them: Overview and Activity's Usage tab.
 
 ## Not doing

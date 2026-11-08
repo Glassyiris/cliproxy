@@ -29,7 +29,7 @@ export function Access({ config }: { config: Config | undefined }) {
   const clients: unknown = config && readPath(config, "access/api-keys", []);
   return (
     <VStack gap={0}>
-      <Row label={t("config.access.clients")} hint={t("config.access.clientsHint")}>
+      <Row label={t("config.access.clients")}>
         <VStack gap={1}>
           {config ? (
             <Text type="body" hasTabularNumbers>
@@ -42,7 +42,7 @@ export function Access({ config }: { config: Config | undefined }) {
         </VStack>
       </Row>
       <Divider />
-      <Row label={t("config.access.providers")} hint={t("config.access.providersHint")}>
+      <Row label={t("config.access.providers")}>
         <Manage href="#accounts?view=providers" what={t("config.access.providers")} />
       </Row>
       <Divider />

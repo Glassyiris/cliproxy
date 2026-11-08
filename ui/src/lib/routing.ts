@@ -9,10 +9,10 @@ export const strategies = [
 ] as const;
 export type Strategy = (typeof strategies)[number];
 
-const words: Record<Strategy, { name: () => string; help: () => string }> = {
+// Round robin needs no explanation beyond its name.
+const words: Record<Strategy, { name: () => string; help?: () => string }> = {
   "round-robin": {
     name: () => t("app.strategy.roundRobin"),
-    help: () => t("app.strategyHelp.roundRobin"),
   },
   "fill-first": {
     name: () => t("app.strategy.fillFirst"),
@@ -30,8 +30,8 @@ const words: Record<Strategy, { name: () => string; help: () => string }> = {
 
 /** A strategy's name in the current language. */
 export const strategyName = (s: Strategy) => words[s].name();
-/** A strategy's one-line explanation in the current language. */
-export const strategyHelp = (s: Strategy) => words[s].help();
+/** A strategy's one-line explanation in the current language, where its name is not enough. */
+export const strategyHelp = (s: Strategy) => words[s].help?.();
 
 /** The strategy a configured value selects, aliases included, as cliproxy-rs reads it: unset is soonest reset; anything else unknown is round robin. */
 export function strategy(value: unknown): Strategy {

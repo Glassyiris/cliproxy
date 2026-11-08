@@ -1,7 +1,5 @@
 export default {
   en: {
-    "system.updates.note": "Runs only when asked, sends no credentials and is cached for 12 h.",
-    "system.facts.noMetrics": "The Management API does not report uptime, CPU or memory.",
     "system.links.repository": "Repository",
     "system.links.licence": "Licence",
     "system.links.credits": "Credits",
@@ -13,19 +11,12 @@ export default {
     "system.facts.commitCopied": "Commit copied",
     "system.facts.copyFailed": "Could not copy the commit.",
     "system.facts.built": "Built",
-    "system.facts.configLayout": "Config layout",
-    "system.facts.configVersion": "v{version}",
-    "system.facts.legacyLayout": "Legacy (migrated on save)",
 
-    "system.config.routingStrategy": "Routing strategy",
-    "system.config.authDirectory": "Auth directory",
     "system.config.remoteManagement": "Remote management",
     "system.config.remoteAllowed": "Allowed",
     "system.config.remoteLocal": "Local only",
     "system.config.remoteLocalNote": "MANAGEMENT_PASSWORD also allows remote access.",
     "system.config.managementApi": "Management API",
-    "system.config.dashboard": "Dashboard source",
-    "system.config.builtIn": "Built into the server",
     "system.config.config": "the configuration",
 
     "system.updates.check": "Check for updates",
@@ -37,13 +28,10 @@ export default {
     "system.updates.releases": "View releases",
     "system.updates.cannotCompare": "Cannot compare versions",
     "system.updates.compareDetail":
-      "The latest release is {version}; this server reports {server}. One of them is not a plain version number.",
+      "Latest: {version}; this server: {server}. One is not a plain version number.",
     "system.updates.noRelease": "No release published yet",
-    "system.updates.noReleaseDetail": "{repository} has no published release to compare with.",
   },
   "zh-CN": {
-    "system.updates.note": "仅在手动检查时运行，不发送凭据，结果缓存 12 小时。",
-    "system.facts.noMetrics": "管理 API 不提供运行时间、CPU 和内存数据。",
     "system.links.repository": "代码仓库",
     "system.links.licence": "许可证",
     "system.links.credits": "致谢",
@@ -55,19 +43,12 @@ export default {
     "system.facts.commitCopied": "已复制提交",
     "system.facts.copyFailed": "无法复制提交。",
     "system.facts.built": "构建时间",
-    "system.facts.configLayout": "配置格式",
-    "system.facts.configVersion": "v{version}",
-    "system.facts.legacyLayout": "旧格式（保存时迁移）",
 
-    "system.config.routingStrategy": "路由策略",
-    "system.config.authDirectory": "凭据目录",
     "system.config.remoteManagement": "远程管理",
     "system.config.remoteAllowed": "允许",
     "system.config.remoteLocal": "仅限本机",
     "system.config.remoteLocalNote": "设置 MANAGEMENT_PASSWORD 后也允许远程访问。",
     "system.config.managementApi": "管理 API",
-    "system.config.dashboard": "面板来源",
-    "system.config.builtIn": "内置于服务器",
     "system.config.config": "配置",
 
     "system.updates.check": "检查更新",
@@ -79,13 +60,10 @@ export default {
     "system.updates.releases": "查看发布版本",
     "system.updates.cannotCompare": "无法比较版本",
     "system.updates.compareDetail":
-      "最新版本为 {version}，此服务器报告 {server}。其中一个不是纯数字版本号。",
+      "最新版本 {version}，此服务器 {server}。其中一个不是纯数字版本号。",
     "system.updates.noRelease": "尚未发布任何版本",
-    "system.updates.noReleaseDetail": "{repository} 没有可供比较的发布版本。",
   },
   "zh-TW": {
-    "system.updates.note": "僅在手動檢查時執行，不傳送憑證，結果快取 12 小時。",
-    "system.facts.noMetrics": "管理 API 不提供執行時間、CPU 與記憶體資料。",
     "system.links.repository": "程式碼儲存庫",
     "system.links.licence": "授權條款",
     "system.links.credits": "致謝",
@@ -97,19 +75,12 @@ export default {
     "system.facts.commitCopied": "已複製提交",
     "system.facts.copyFailed": "無法複製提交。",
     "system.facts.built": "建置時間",
-    "system.facts.configLayout": "設定格式",
-    "system.facts.configVersion": "v{version}",
-    "system.facts.legacyLayout": "舊格式（儲存時遷移）",
 
-    "system.config.routingStrategy": "路由策略",
-    "system.config.authDirectory": "憑證目錄",
     "system.config.remoteManagement": "遠端管理",
     "system.config.remoteAllowed": "允許",
     "system.config.remoteLocal": "僅限本機",
     "system.config.remoteLocalNote": "設定 MANAGEMENT_PASSWORD 後也允許遠端存取。",
     "system.config.managementApi": "管理 API",
-    "system.config.dashboard": "面板來源",
-    "system.config.builtIn": "內建於伺服器",
     "system.config.config": "設定",
 
     "system.updates.check": "檢查更新",
@@ -121,8 +92,7 @@ export default {
     "system.updates.releases": "檢視發行版本",
     "system.updates.cannotCompare": "無法比較版本",
     "system.updates.compareDetail":
-      "最新版本為 {version}，此伺服器回報 {server}。其中一個不是純數字版本號。",
+      "最新版本 {version}，此伺服器 {server}。其中一個不是純數字版本號。",
     "system.updates.noRelease": "尚未發行任何版本",
-    "system.updates.noReleaseDetail": "{repository} 沒有可供比較的發行版本。",
   },
 };

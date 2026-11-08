@@ -29,13 +29,16 @@ import { RevokeKeyDialog } from "./RevokeKeyDialog.tsx";
 
 const KEYS_PATH = "access/api-keys";
 
-/** Add key only once there is a key (the empty state has it); Use with a tool always: it can create one. */
+/**
+ * Add key unless the list is known to be empty (the empty state has it); Use with a tool always: it
+ * can create one. While loading it shows, as the table does, so a phone header does not wrap later.
+ */
 function HeaderActions({
-  hasKeys,
+  showAdd,
   onUse,
   add,
 }: {
-  hasKeys: boolean;
+  showAdd: boolean;
   onUse: () => void;
   add: ReactNode;
 }) {
@@ -47,7 +50,7 @@ function HeaderActions({
         icon={<Icon icon={Plug} />}
         onClick={onUse}
       />
-      {hasKeys && add}
+      {showAdd && add}
     </>
   );
 }
@@ -101,7 +104,13 @@ export default function ClientKeys() {
     <PageFrame
       title={t("keys.page.title")}
       width="full"
-      actions={<HeaderActions hasKeys={hasKeys} onUse={() => openUse()} add={addButton} />}
+      actions={
+        <HeaderActions
+          showAdd={config.isPending || hasKeys}
+          onUse={() => openUse()}
+          add={addButton}
+        />
+      }
     >
       {config.isError && (
         <ReadError
@@ -113,7 +122,6 @@ export default function ClientKeys() {
       {keys?.length === 0 && (
         <EmptyState
           title={t("keys.empty.title")}
-          description={t("keys.empty.description")}
           headingLevel={roles.heading.section}
           actions={addButton}
         />

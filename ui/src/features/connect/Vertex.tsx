@@ -73,7 +73,6 @@ export function VertexFields({ vertex }: { vertex: VertexImportState }) {
     <FormLayout defaultOptionality="optional">
       <TextInput
         label={t("connect.vertex.region")}
-        description={t("connect.vertex.regionHint")}
         value={vertex.region}
         onChange={vertex.setRegion}
         placeholder={t("connect.vertex.regionPlaceholder")}

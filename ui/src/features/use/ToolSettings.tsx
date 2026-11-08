@@ -18,12 +18,13 @@ import { roles } from "../../themes/site/roles.ts";
 import type { Tool } from "./tool.ts";
 import type { KeyChoice } from "./useKeyChoice.ts";
 
+/** What the setup text itself does not say; Codex CLI's comments say it all. */
 function note(tool: Tool) {
   switch (tool) {
     case "Claude Code":
       return t("use.note.claudeCode");
     case "Codex CLI":
-      return t("use.note.codexCli");
+      return undefined;
     case "Cursor":
       return t("use.note.cursor");
     case "OpenAI SDK":
@@ -53,7 +54,7 @@ function modelHint(choice: KeyChoice) {
   if (choice.checking) return t("use.settings.checking");
   if (choice.failed) return t("use.settings.modelsFailed");
   if (!choice.models.length) return t("use.settings.noModels");
-  return t("use.settings.modelCount", { count: choice.models.length });
+  return undefined;
 }
 
 /**
@@ -94,7 +95,6 @@ export function ToolSettings({
           options={(keys ?? []).map((key, i) => ({ value: String(i), label: mask(key) }))}
           value={keys ? String(choice.index) : undefined}
           isLoading={!keys}
-          description={t("use.settings.keyHint")}
           onChange={(value) => onKey(Number(value))}
         />
         <Selector
@@ -131,9 +131,11 @@ export function ToolSettings({
           {t("use.settings.copyNote")}
         </Text>
       </HStack>
-      <Text type={roles.textType.supporting} color="secondary">
-        {note(tool)}
-      </Text>
+      {note(tool) && (
+        <Text type={roles.textType.supporting} color="secondary">
+          {note(tool)}
+        </Text>
+      )}
     </FormLayout>
   );
 }

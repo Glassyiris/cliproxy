@@ -115,12 +115,7 @@ function Latest({ events }: { events: UsageEvent[] }) {
   const latest = events.slice(-SHOWN).reverse();
   return (
     <VStack gap={3}>
-      <VStack gap={1}>
-        <SubHeading title={t("usage.rail.heading")} />
-        <Text type={roles.textType.supporting} color="secondary">
-          {t("usage.rail.subtitle", { count: SHOWN })}
-        </Text>
-      </VStack>
+      <SubHeading title={t("usage.rail.heading")} />
       <List density="compact" hasDividers>
         {latest.map((e, i) => (
           <EventItem key={e.id || `${e.at}:${i}`} event={e} />
@@ -196,7 +191,6 @@ export function LiveSection({
     <VStack gap={roles.gap.card}>
       <SectionHeading
         title={t("usage.live.heading")}
-        hint={events.length ? t("usage.live.kept") : undefined}
         actions={live && <StatusLamp status="ready" label={t("usage.live.listening")} isPulsing />}
       />
       {failure !== null && (

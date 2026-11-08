@@ -134,18 +134,12 @@ export function AddAliasDialog({
         />
         <TextInput
           label={t("models.add.alias")}
-          description={t("models.add.aliasDescription")}
           value={f.alias}
           onChange={f.type}
           onEnter={() => void submit()}
           status={problem(aliasMessage(f.problems.alias))}
         />
-        <CheckboxInput
-          label={t("models.add.keep")}
-          description={t("models.add.keepDescription")}
-          value={f.keep}
-          onChange={f.setKeep}
-        />
+        <CheckboxInput label={t("models.add.keep")} value={f.keep} onChange={f.setKeep} />
       </VStack>
     </FormDialog>
   );

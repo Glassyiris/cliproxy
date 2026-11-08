@@ -26,7 +26,6 @@ import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
 import { repository } from "../../lib/repository.ts";
-import { strategy, strategyName } from "../../lib/routing.ts";
 import { layout } from "../../themes/site/layout.ts";
 import { useLatestVersion } from "./queries.ts";
 import { releaseStatus } from "./version.ts";
@@ -75,11 +74,6 @@ function RemoteManagement({ config }: { config: Config }) {
   );
 }
 
-const path = (config: Config, key: string) => {
-  const value: unknown = readPath(config, key);
-  return typeof value === "string" && value ? <Text type="body">{value}</Text> : null;
-};
-
 // No icon before the label: with one, MetadataList drops every value 3 px below its label
 // (owner, 2026-11-08: 「完全沒對齊」). Values are body text for the same reason: the code type sits
 // 5 px lower again.
@@ -87,7 +81,7 @@ function Item({ label, children }: { label: string; children: ReactNode }) {
   return <MetadataListItem label={label}>{children}</MetadataListItem>;
 }
 
-/** The eight facts: the build from the session, the rest from the config. */
+/** The build from the session, then how this server takes management. */
 function Facts({ config }: { config: UseQueryResult<Config> }) {
   const { version, commit, built } = useSession();
   // The server sends "none" and "unknown" when it was built without these values.
@@ -113,19 +107,6 @@ function Facts({ config }: { config: UseQueryResult<Config> }) {
           notReported()
         )}
       </Item>
-      <Item label={t("system.facts.configLayout")}>
-        {fromConfig((c) =>
-          c["config-version"]
-            ? t("system.facts.configVersion", { version: c["config-version"] })
-            : t("system.facts.legacyLayout"),
-        )}
-      </Item>
-      <Item label={t("system.config.routingStrategy")}>
-        {fromConfig((c) => strategyName(strategy(readPath(c, "routing/strategy"))))}
-      </Item>
-      <Item label={t("system.config.authDirectory")}>
-        {fromConfig((c) => path(c, "oauth/auth-dir"))}
-      </Item>
       <Item label={t("system.config.remoteManagement")}>
         {fromConfig((c) => (
           <RemoteManagement config={c} />
@@ -135,7 +116,6 @@ function Facts({ config }: { config: UseQueryResult<Config> }) {
       <Item label={t("system.config.managementApi")}>
         <Text type="body">{managementApi}</Text>
       </Item>
-      <Item label={t("system.config.dashboard")}>{t("system.config.builtIn")}</Item>
     </MetadataList>
   );
 }
@@ -153,15 +133,7 @@ function ReleaseResult({ latest }: { latest: UseQueryResult<string> }) {
     );
   // The server answers 502 invalid_response when the repository has no release to redirect to.
   if (error instanceof ApiError && error.code === "invalid_response")
-    return (
-      <Banner
-        status="info"
-        title={t("system.updates.noRelease")}
-        description={t("system.updates.noReleaseDetail", {
-          repository: repository.name,
-        })}
-      />
-    );
+    return <Banner status="info" title={t("system.updates.noRelease")} />;
   if (latest.isError)
     return (
       <ReadError
@@ -243,20 +215,14 @@ export function About() {
         />
       )}
       <Facts config={config} />
-      <Text type="supporting" color="secondary">
-        {t("system.facts.noMetrics")}
-      </Text>
       <Divider />
-      <HStack gap={3} vAlign="center" wrap="wrap">
+      <HStack>
         <Button
           label={t("system.updates.check")}
           variant="secondary"
           isLoading={latest.isFetching}
           onClick={() => void latest.refetch()}
         />
-        <Text type="supporting" color="secondary">
-          {t("system.updates.note")}
-        </Text>
       </HStack>
       <VStack role="status">
         <ReleaseResult latest={latest} />

@@ -4,7 +4,6 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Text } from "@astryxdesign/core/Text";
 import { CodeColors } from "../../components/CodeEditor.tsx";
 import { FormDialog } from "../../components/FormDialog.tsx";
 import { t } from "../../lib/i18n.ts";
@@ -52,10 +51,7 @@ export function ReviewDialog({
             width="100%"
           />
         </CodeColors>
-        <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
-          <Text type="supporting" color="secondary">
-            {t("config.review.reread")}
-          </Text>
+        <HStack hAlign="end">
           <Button
             label={t("config.review.discard")}
             variant="ghost"

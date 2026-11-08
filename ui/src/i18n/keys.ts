@@ -14,7 +14,6 @@ export default {
     "keys.row.revoke": "Revoke",
 
     "keys.empty.title": "Add a client key",
-    "keys.empty.description": "Tools use it to sign in to this proxy.",
 
     "keys.add.title": "Add client key",
     "keys.add.field": "Key",
@@ -44,7 +43,6 @@ export default {
     "keys.row.revoke": "撤销",
 
     "keys.empty.title": "添加客户端密钥",
-    "keys.empty.description": "工具用它连接此代理。",
 
     "keys.add.title": "添加客户端密钥",
     "keys.add.field": "密钥",
@@ -74,7 +72,6 @@ export default {
     "keys.row.revoke": "撤銷",
 
     "keys.empty.title": "新增用戶端金鑰",
-    "keys.empty.description": "工具用它連線到此代理。",
 
     "keys.add.title": "新增用戶端金鑰",
     "keys.add.field": "金鑰",

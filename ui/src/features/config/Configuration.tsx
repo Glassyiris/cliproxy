@@ -23,6 +23,7 @@ import { serverKeys, useConfig } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams, useHashRoute, useUnsavedChanges } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
+import { hinted } from "../../i18n/config.ts";
 import { replaceConfigValue, type Config } from "../../lib/api/config.ts";
 import { absent } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
@@ -55,6 +56,11 @@ const isGroup = (value: string | undefined): value is Group =>
   (groups as readonly string[]).includes(value ?? "");
 
 const panelId = "settings-group";
+
+type Hinted = (typeof hinted)[number];
+/** A setting's hint, for the few whose label alone does not say what to enter. */
+const hintOf = (id: string) =>
+  (hinted as readonly string[]).includes(id) ? t(`config.hint.${id as Hinted}`) : undefined;
 
 function GroupTabs({ active, onSelect }: { active: Group; onSelect: (group: Group) => void }) {
   return (
@@ -96,7 +102,7 @@ function GroupRows({
     <VStack key={setting.path} gap={0}>
       <Row
         label={t(`config.label.${settingId(setting)}`)}
-        hint={t(`config.hint.${settingId(setting)}`)}
+        hint={hintOf(settingId(setting))}
         note={setting.restart ? t("config.row.restart") : undefined}
       >
         <Control
@@ -187,9 +193,10 @@ export default function Configuration() {
     <PageFrame
       title={t("app.nav.config")}
       meta={
-        config.data && (
+        config.data &&
+        !version && (
           <Text type="supporting" color="secondary">
-            {version ? t("config.page.layout", { version }) : t("config.page.legacy")}
+            {t("config.page.legacy")}
           </Text>
         )
       }

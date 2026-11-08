@@ -5,9 +5,8 @@
 // - KPI values are Text at the metric size (display-3) with tabular figures, not Heading level 2:
 //   roles "Numbers".
 // - No time-window, environment or region controls: the server keeps 200 minutes for one proxy.
-// - Header line: the server host and whether it answers, not "Updated <time>"; the time would
-//   arrive with the data and push the header on a phone.
-// - The header lamp does not pulse: DESIGN.md "Motion" keeps pulses for live streams.
+// - No header line: "Updated <time>" would arrive with the data and push the header on a phone,
+//   and the sidebar footer already shows the server and whether it answers.
 // - The primary action is default size, not lg: roles.primaryAction.
 // - Tiles: three judgements with one basis line each, no delta and no sparkline (the chart below
 //   has the series); at least layout.summaryTileMin wide, not 240, so a phone shows two per row.
@@ -26,13 +25,9 @@ import { useMemo } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
-import { HStack } from "@astryxdesign/core/Layout";
-import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Text } from "@astryxdesign/core/Text";
 import { useConnectAccount } from "../../app/connect-entry.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useApiKeyUsage, useConfig, useCredentials } from "../../app/serverQueries.ts";
-import { useSession } from "../../app/Session.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
@@ -96,23 +91,6 @@ function useOverviewData() {
   };
 }
 
-/** The server host and whether it answers: the one line under the h1. */
-function Reachability() {
-  const { online } = useSession();
-  const reachability = t("overview.page.server", {
-    host: location.host,
-    state: online ? "up" : "down",
-  });
-  return (
-    <HStack gap={2} vAlign="center">
-      <StatusDot variant={online ? "success" : "error"} label={reachability} />
-      <Text type={roles.textType.supporting} color="secondary">
-        {reachability}
-      </Text>
-    </HStack>
-  );
-}
-
 export default function Overview() {
   const data = useOverviewData();
   const connect = useConnectAccount();
@@ -123,7 +101,6 @@ export default function Overview() {
     <PageFrame
       title={t("overview.page.title")}
       width="full"
-      meta={<Reachability />}
       actions={
         <Button
           label={t("overview.page.connect")}

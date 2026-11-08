@@ -163,7 +163,6 @@ export function AppearancePanel() {
       <SettingsRow
         title={t("app.settings.mode")}
         icon={SunMoon}
-        description={t("app.settings.modeHint")}
         control={
           <SegmentedControl
             label={t("app.settings.mode")}

@@ -53,28 +53,24 @@ const About = lazy(() =>
 const PANELS: {
   id: PanelId;
   label: () => string;
-  description: () => string;
   icon: IconProps["icon"];
   body: () => ReactNode;
 }[] = [
   {
     id: "appearance",
     label: () => t("app.settings.appearance"),
-    description: () => t("app.settings.appearanceHint"),
     icon: Paintbrush,
     body: () => <AppearancePanel />,
   },
   {
     id: "shortcuts",
     label: () => t("app.settings.shortcuts"),
-    description: () => t("app.settings.shortcutsHint"),
     icon: Keyboard,
     body: () => <ShortcutsPanel />,
   },
   {
     id: "about",
     label: () => t("app.settings.about"),
-    description: () => t("app.settings.aboutHint"),
     icon: Info,
     body: () => (
       <Suspense fallback={<Spinner aria-label={t("app.settings.about")} />}>
@@ -106,15 +102,7 @@ function CloseButton({ onClose }: { onClose: () => void }) {
 }
 
 function PanelHeading({ panel }: { panel: PanelId }) {
-  const config = panelOf(panel);
-  return (
-    <VStack gap={0.5}>
-      <Heading level={2}>{config.label()}</Heading>
-      <Text type="supporting" color="secondary">
-        {config.description()}
-      </Text>
-    </VStack>
-  );
+  return <Heading level={2}>{panelOf(panel).label()}</Heading>;
 }
 
 function SettingsSideNav({ titleId, active, onSelect }: Omit<ShellProps, "onClose">) {

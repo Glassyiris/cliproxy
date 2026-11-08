@@ -225,7 +225,6 @@ function Editor({
             title={title}
             subtitle={subtitle}
             busy={editor.isSaving}
-            busyLabel={t("app.editor.closeWhileSaving")}
             onClose={close}
           />
         }
@@ -410,21 +409,14 @@ function EditorFooter({
 
 function ReviewPane({ source, diff }: { source: ConfigSource; diff: string }) {
   return (
-    <>
-      <CodeColors>
-        <CodeBlock
-          code={diff}
-          language={format(source).toLowerCase()}
-          isDiff
-          hasCopyButton={false}
-          width="100%"
-        />
-      </CodeColors>
-      {"yaml" in source && (
-        <Text type="supporting" color="secondary">
-          {t("app.editor.yamlNote")}
-        </Text>
-      )}
-    </>
+    <CodeColors>
+      <CodeBlock
+        code={diff}
+        language={format(source).toLowerCase()}
+        isDiff
+        hasCopyButton={false}
+        width="100%"
+      />
+    </CodeColors>
   );
 }

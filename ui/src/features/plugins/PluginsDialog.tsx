@@ -42,21 +42,10 @@ const styles = stylex.create({
 
 type PanelId = "installed" | "store";
 
-const PANELS: { id: PanelId; label: () => string; hint: () => string; icon: IconProps["icon"] }[] =
-  [
-    {
-      id: "installed",
-      label: () => t("plugins.panel.installed"),
-      hint: () => t("plugins.panel.installedHint"),
-      icon: Package,
-    },
-    {
-      id: "store",
-      label: () => t("plugins.panel.store"),
-      hint: () => t("plugins.panel.storeHint"),
-      icon: Store,
-    },
-  ];
+const PANELS: { id: PanelId; label: () => string; icon: IconProps["icon"] }[] = [
+  { id: "installed", label: () => t("plugins.panel.installed"), icon: Package },
+  { id: "store", label: () => t("plugins.panel.store"), icon: Store },
+];
 
 const panelOf = (id: PanelId) => PANELS.find((p) => p.id === id) ?? PANELS[0];
 
@@ -148,7 +137,6 @@ function InstalledPanel({ onBrowse }: { onBrowse: () => void }) {
       {plugins && !plugins.length ? (
         <EmptyState
           title={t("plugins.empty.title")}
-          description={t("plugins.empty.description")}
           headingLevel={3}
           actions={<Button label={t("plugins.page.browse")} variant="primary" onClick={onBrowse} />}
         />
@@ -210,15 +198,7 @@ function StoreBody() {
 }
 
 function PanelHeading({ panel }: { panel: PanelId }) {
-  const config = panelOf(panel);
-  return (
-    <VStack gap={0.5}>
-      <Heading level={2}>{config.label()}</Heading>
-      <Text type="supporting" color="secondary">
-        {config.hint()}
-      </Text>
-    </VStack>
-  );
+  return <Heading level={2}>{panelOf(panel).label()}</Heading>;
 }
 
 function CloseButton({ onClose }: { onClose: () => void }) {

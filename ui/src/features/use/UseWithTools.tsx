@@ -50,7 +50,6 @@ function NoKey({ busy, create }: { busy: boolean; create: () => void }) {
   return (
     <EmptyState
       title={t("use.empty.title")}
-      description={t("use.empty.description")}
       headingLevel={roles.heading.section}
       actions={
         <Button

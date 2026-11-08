@@ -17,13 +17,7 @@ function Result({ result }: { result: KeyTest }) {
   switch (result.status) {
     case "idle":
     case "testing":
-      return (
-        <Banner
-          status="info"
-          title={t("use.test.testing")}
-          description={t("use.test.testingDescription")}
-        />
-      );
+      return <Banner status="info" title={t("use.test.testing")} />;
     case "ready":
       return (
         <Banner

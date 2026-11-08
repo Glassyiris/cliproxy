@@ -4,6 +4,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { Square } from "lucide-react";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { focusOutlineStyles } from "@astryxdesign/core/utils/focusOutline.stylex";
 import { swatch } from "../../themes/site/charts.ts";
 
@@ -32,8 +33,9 @@ function keepFocus(event: MouseEvent<HTMLElement>) {
 }
 
 /**
- * The layout every chart shares, loaded or not: the legend, the plot under the accessible name
- * `label`, and the one-sentence `summary` under it, which is also the plot's description.
+ * The layout every chart shares, loaded or not: the legend and the plot under the accessible name
+ * `label`. The one-sentence `summary` is the plot's description for screen readers only: the
+ * tiles beside the charts show the same numbers (owner, 2026-11-08: 「廢話太多了。」).
  */
 export function ChartFrame({
   label,
@@ -67,9 +69,7 @@ export function ChartFrame({
       >
         {children}
       </VStack>
-      <Text type="supporting" color="secondary" id={summaryId}>
-        {summary}
-      </Text>
+      <VisuallyHidden id={summaryId}>{summary}</VisuallyHidden>
     </VStack>
   );
 }
