@@ -2195,10 +2195,7 @@ async fn latest_version_uses_configured_and_environment_proxies() {
             async {
                 (
                     axum::http::StatusCode::FOUND,
-                    [(
-                        "location",
-                        "https://github.com/Glassyiris/cliproxy/releases/tag/v4.5.6",
-                    )],
+                    [("location", "https://github.com/Glassyiris/cliproxy/releases/tag/v4.5.6")],
                 )
             }
         });
@@ -2319,10 +2316,7 @@ async fn latest_version_keeps_tls_verification_through_proxy() {
         axum::Router::new().fallback(|| async {
             (
                 axum::http::StatusCode::FOUND,
-                [(
-                    "location",
-                    "https://github.com/Glassyiris/cliproxy/releases/tag/v4.5.6",
-                )],
+                [("location", "https://github.com/Glassyiris/cliproxy/releases/tag/v4.5.6")],
             )
         }),
         Some(Arc::new(tls.build())),

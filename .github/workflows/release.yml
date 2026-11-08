@@ -23,29 +23,8 @@ env:
   RUST_TOOLCHAIN: "1.99.0"
 
 jobs:
-  dashboard:
-    name: dashboard
-    if: github.event_name != 'release'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - name: Check, test and build
-        working-directory: ui
-        run: |
-          npm ci
-          npm run check
-          npm test
-          npm run build
-      # The binary embeds the committed ui/dist, so it must be what the source builds.
-      - name: Committed build matches the source
-        run: git diff --exit-code -- ui/dist
-
-  # The same fmt, clippy, network-denied tests and Windows check as every push.
+  # The same fmt, clippy, network-denied tests and Windows check as every push, and the
+  # dashboard's checks with its committed-build comparison (ci.yml's dashboard job).
   test:
     name: CI
     if: github.event_name != 'release'
@@ -54,7 +33,7 @@ jobs:
   build:
     name: build ${{ matrix.target }}
     if: github.event_name != 'release'
-    needs: [dashboard, test]
+    needs: test
     strategy:
       fail-fast: false
       matrix:
