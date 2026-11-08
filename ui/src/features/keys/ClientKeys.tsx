@@ -15,12 +15,10 @@ import { Plug, Plus } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
-import { Text } from "@astryxdesign/core/Text";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
-import { Identifier } from "../../components/Identifier.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { readPath } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
@@ -30,7 +28,6 @@ import { KeyTable } from "./KeyTable.tsx";
 import { RevokeKeyDialog } from "./RevokeKeyDialog.tsx";
 
 const KEYS_PATH = "access/api-keys";
-const apiKeyHeader = "x-api-key";
 
 /** Add key only once there is a key (the empty state has it); Use with a tool always: it can create one. */
 function HeaderActions({
@@ -54,14 +51,6 @@ function HeaderActions({
     </>
   );
 }
-
-const Intro = () => (
-  <Text type={roles.textType.supporting} color="secondary">
-    {t("keys.page.introBefore")}
-    <Identifier>{apiKeyHeader}</Identifier>
-    {t("keys.page.introAfter")}
-  </Text>
-);
 
 /** Opens "Use with a tool" over the page, with a key row's own key when given its position. */
 function useOpenUse() {
@@ -112,7 +101,6 @@ export default function ClientKeys() {
     <PageFrame
       title={t("keys.page.title")}
       width="full"
-      meta={<Intro />}
       actions={<HeaderActions hasKeys={hasKeys} onUse={() => openUse()} add={addButton} />}
     >
       {config.isError && (

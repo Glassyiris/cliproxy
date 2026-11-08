@@ -16,11 +16,10 @@ export const layout = {
   detailPanel: { defaultSize: 380, minSize: 320, maxSize: 560 },
   // BoothDex admin-shell widths: the sidebar opens at 260 and can be dragged between 220 and 360.
   sidebar: { defaultWidth: 260, minWidth: 220, maxWidth: 360 },
-  // The code editor's box grows with its lines from minRows up to maxHeight, then scrolls inside:
-  // the editor dialog's height (configEditor) less its title row, footer and padding.
-  codeEditor: { minRows: 8, maxHeight: "calc(100dvh - 13rem)" },
-  // The config editor dialog: as tall as its content, up to the viewport less 2rem.
-  configEditor: { maxHeight: "calc(100dvh - 2rem)" },
+  // The config editor dialog is the preferences dialog's size (owner, 2026-11-08: 「編輯器默認大小和
+  // 設置的差不多把？」); its code box takes that height less the title rows, footer and padding,
+  // and scrolls inside.
+  codeEditor: { height: "calc(min(50rem, 100dvh - 2rem) - 11rem)" },
   valueSkeleton: { width: "8rem", height: "1em" },
   summaryTileMin: 150,
   // The settings template's two columns, a Region's heading and its controls, are each at least

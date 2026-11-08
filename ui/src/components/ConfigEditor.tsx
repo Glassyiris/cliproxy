@@ -4,9 +4,8 @@
 // (REQUIREMENTS intentional design).
 // Template: the DialogFormDialog block: Dialog `purpose="form"`, a Layout with the DialogHeader,
 // the content, and Cancel beside the primary action at the end of a LayoutFooter; only the content
-// scrolls. Deviations: 800 wide for a value (roles.content.formWidth, as PageDialog) and the
-// settings-dialog template's 1120 for the whole file, not the block's 480, since code lines are
-// long; the height follows the editor's lines (CodeEditor) up to the viewport.
+// scrolls. Deviation: the preferences dialog's size (layout.settingsDialog), not the block's 480,
+// for every editor, since code lines are long (owner, 2026-11-08: 「編輯器默認大小和設置的差不多把？」).
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
@@ -32,7 +31,6 @@ import { lineDiff } from "../lib/compare.ts";
 import { t } from "../lib/i18n.ts";
 import { notify } from "../lib/notify.ts";
 import { layout } from "../themes/site/layout.ts";
-import { roles } from "../themes/site/roles.ts";
 import { CodeColors, CodeEditor } from "./CodeEditor.tsx";
 import { FormDialogHeader } from "./FormDialog.tsx";
 import { ReadError } from "./ReadError.tsx";
@@ -215,8 +213,8 @@ function Editor({
     <Dialog
       isOpen
       onOpenChange={(open) => !open && close()}
-      width={"yaml" in source ? layout.settingsDialog.width : roles.content.formWidth}
-      maxHeight={layout.configEditor.maxHeight}
+      width={layout.settingsDialog.width}
+      maxHeight={layout.settingsDialog.height}
       purpose="form"
     >
       <EditorContent

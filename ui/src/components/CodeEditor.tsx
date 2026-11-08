@@ -1,7 +1,7 @@
 // The one code editor (CodeMirror 6) and the Rosé Pine syntax colours every code surface shares.
 // CodeMirror is imported when the first editor mounts, so it stays out of the first load and out
-// of every route chunk; until then the editor's box is a skeleton of the same size. The box grows
-// with its lines from layout.codeEditor.minRows up to its maxHeight, then scrolls inside.
+// of every route chunk; until then the editor's box is a skeleton of the same size. The box has
+// layout.codeEditor's fixed height and scrolls inside.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { EditorView } from "@codemirror/view";
 import { Field } from "@astryxdesign/core/Field";
@@ -65,14 +65,9 @@ const loadCodeMirror = () =>
 type Modules = Awaited<ReturnType<typeof loadCodeMirror>>;
 type Compartment = InstanceType<Modules[0]["Compartment"]>;
 
-const { minRows, maxHeight } = layout.codeEditor;
-// One line of code and the content's block padding, as CodeMirror draws them below.
-const codeLine = "var(--text-code-leading) * var(--text-code-size)";
+const { height } = layout.codeEditor;
+// The content's block padding, as CodeMirror draws it below.
 const padding = "var(--spacing-2)";
-
-/** The box's height for `text` before CodeMirror measures it: its lines, within the limits. */
-const boxHeight = (text: string) =>
-  `min(calc(${Math.max(text.split("\n").length, minRows)} * ${codeLine} + 2 * ${padding}), ${maxHeight})`;
 
 const color = (token: string) => ({ color: `var(--color-syntax-${token})` });
 
@@ -119,7 +114,7 @@ function extensions(
     }),
     view.EditorView.theme({
       "&": {
-        maxHeight,
+        height,
         color: "var(--color-text-primary)",
         backgroundColor: "var(--color-syntax-background)",
         border: "var(--border-width) solid var(--color-border-emphasized)",
@@ -137,7 +132,6 @@ function extensions(
         overflow: "auto",
       },
       ".cm-content": { caretColor: "var(--color-text-primary)", paddingBlock: padding },
-      ".cm-content, .cm-gutter": { minHeight: `calc(${minRows} * ${codeLine})` },
       ".cm-cursor": { borderInlineStartColor: "var(--color-text-primary)" },
       ".cm-gutters": {
         backgroundColor: "var(--color-syntax-background)",
@@ -262,7 +256,7 @@ export function CodeEditor({
       statusVariant="detached"
     >
       <CodeColors>
-        {!isReady && <Skeleton width="100%" height={boxHeight(value)} />}
+        {!isReady && <Skeleton width="100%" height={height} />}
         {/* Empty until CodeMirror mounts into it, so the skeleton holds the height alone. */}
         <VStack ref={host} />
       </CodeColors>

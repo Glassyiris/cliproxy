@@ -3,8 +3,6 @@ export default {
     "keys.page.title": "Client keys",
     "keys.page.what": "client keys",
     "keys.page.add": "Add key",
-    "keys.page.introBefore": "Tools send a client key as a Bearer token or in the ",
-    "keys.page.introAfter": " header. It is not the management key.",
 
     "keys.table.key": "Key",
     "keys.table.actions": "Actions",
@@ -35,8 +33,6 @@ export default {
     "keys.page.title": "客户端密钥",
     "keys.page.what": "客户端密钥",
     "keys.page.add": "添加密钥",
-    "keys.page.introBefore": "工具通过 Bearer 令牌或 ",
-    "keys.page.introAfter": " 请求头发送客户端密钥。它不是管理密钥。",
 
     "keys.table.key": "密钥",
     "keys.table.actions": "操作",
@@ -67,8 +63,6 @@ export default {
     "keys.page.title": "用戶端金鑰",
     "keys.page.what": "用戶端金鑰",
     "keys.page.add": "新增金鑰",
-    "keys.page.introBefore": "工具透過 Bearer 權杖或 ",
-    "keys.page.introAfter": " 標頭傳送用戶端金鑰。它不是管理金鑰。",
 
     "keys.table.key": "金鑰",
     "keys.table.actions": "操作",
