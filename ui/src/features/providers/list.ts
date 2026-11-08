@@ -1,6 +1,6 @@
 // The Provider keys list as Accounts filters its own: by family, by status, by a search, and the
 // inbox views (the groups that need attention, or every group).
-import type { Family } from "../../components/keyFamilies.ts";
+import { familyName, type Family } from "../../components/keyFamilies.ts";
 import { isFailing, type Entry } from "./groups.ts";
 
 /** A group's status, as the status filter (`show=`) names it. */
@@ -30,7 +30,10 @@ export type Filters = { provider: Family | ""; view: View; show: Show | ""; sear
 function matches(entry: Entry, search: string) {
   const words = search.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
-  const text = [entry.name, entry.group["base-url"]].filter(Boolean).join("\n").toLowerCase();
+  const text = [entry.name, entry.group["base-url"], familyName(entry.family)]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
   return words.every((w) => text.includes(w));
 }
 

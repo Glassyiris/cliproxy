@@ -1,10 +1,12 @@
 // Provider keys' filter row and list body, as Accounts lays out its own: the views, the family and
 // status Selectors and the search in one row; then the list, its skeleton, or why it is empty.
+import { Search } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Icon } from "@astryxdesign/core/Icon";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { CountedSelector } from "../../components/CountedSelector.tsx";
 import { familyName, isFamily } from "../../components/keyFamilies.ts";
@@ -79,11 +81,12 @@ export function FilterRow({ page }: { page: Page }) {
         <FilterSelectors page={page} />
         <TextInput
           type="search"
+          startIcon={<Icon icon={Search} size="sm" />}
           label={t("providers.filters.search")}
           isLabelHidden
           placeholder={t("providers.filters.searchHint")}
           value={filters.search}
-          onChange={(search) => setFilters({ search })}
+          onChange={(search) => setFilters(search ? { search, view: "all" } : { search })}
           hasClear
         />
       </HStack>

@@ -3,6 +3,7 @@ import {
   accountRow,
   buckets,
   credName,
+  label,
   provider,
   type AccountRow,
   type Buckets,
@@ -76,12 +77,27 @@ export const hasShow = (row: Row, show: Show) =>
 /** The filters in the hash: family ("" is every family), view, status ("" is any) and search. */
 export type Filters = { provider: string; view: View; show: Show | ""; search: string };
 
-/** Name, email or note contains every word of `search`, ignoring case. */
+/**
+ * What the row shows contains every word of `search`, ignoring case: name, email, note, file,
+ * provider and plan, and the server's message, so "codex pro" or "429" finds what the list shows.
+ */
 export function matches(row: Row, search: string) {
   const words = search.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
   const a = row.account;
-  const text = [row.name, a.email, a.note, a.name].filter(Boolean).join("\n").toLowerCase();
+  const sub = row.view.sub;
+  const text = [
+    row.name,
+    a.email,
+    a.note,
+    a.name,
+    label(row.provider),
+    a.id_token?.plan_type,
+    sub?.kind === "detail" ? sub.text : null,
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
   return words.every((w) => text.includes(w));
 }
 

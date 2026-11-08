@@ -15,6 +15,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import type { Action } from "../../app/useAction.ts";
 import { t } from "../../lib/i18n.ts";
 import type { LevelFilter } from "./lines.ts";
+import { layout } from "../../themes/site/layout.ts";
 
 export type LogSource = "app" | "errors";
 export type Filters = { filter: string; withManagement: boolean; level: LevelFilter };
@@ -128,6 +129,7 @@ export function MoreMenu({
   return (
     <>
       <DropdownMenu
+        menuMaxHeight={layout.menuMaxHeight}
         button={{
           label,
           tooltip: label,

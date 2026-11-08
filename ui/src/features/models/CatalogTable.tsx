@@ -63,6 +63,7 @@ function Status({ row }: { row: ModelRow }) {
 function RowMenu({ row, actions }: { row: ModelRow; actions: ModelActions }) {
   return (
     <DropdownMenu
+      menuMaxHeight={layout.menuMaxHeight}
       button={{
         label: t("models.row.menu", { model: row.id }),
         variant: roles.rowAction.variant,

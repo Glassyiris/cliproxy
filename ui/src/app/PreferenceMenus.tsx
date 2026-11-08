@@ -12,6 +12,7 @@ import { isLocale, localeName, locales, t } from "../lib/i18n.ts";
 import { isPalette } from "../themes/site/index.ts";
 import { usePreferences } from "./preferences.ts";
 import { SettingsButton } from "./settings/SettingsDialog.tsx";
+import { layout } from "../themes/site/layout.ts";
 
 /**
  * Flips light and dark relative to what is shown, as BoothDex's ColorModeToggle; until the first
@@ -78,6 +79,7 @@ export function PreferenceMenus() {
     <HStack gap={1} vAlign="center">
       <ColorModeToggle />
       <DropdownMenu
+        menuMaxHeight={layout.menuMaxHeight}
         button={trigger(t("app.colors.label"), Palette)}
         hasChevron={false}
         alignment="end"
@@ -85,6 +87,7 @@ export function PreferenceMenus() {
         <PaletteOptions />
       </DropdownMenu>
       <DropdownMenu
+        menuMaxHeight={layout.menuMaxHeight}
         button={trigger(t("app.locale.label"), Languages)}
         hasChevron={false}
         alignment="end"

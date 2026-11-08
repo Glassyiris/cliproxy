@@ -17,7 +17,7 @@
 //   not the template's two-thirds pane: the list is what this page is for, the detail is short.
 // - The list is virtualized (DESIGN.md "Pages"), as LogRows.tsx does it.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw, Search } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
@@ -300,11 +300,12 @@ function FilterRow({
         <FilterSelectors rows={rows} filters={filters} setFilters={setFilters} />
         <TextInput
           type="search"
+          startIcon={<Icon icon={Search} size="sm" />}
           label={t("accounts.filters.search")}
           isLabelHidden
           placeholder={t("accounts.filters.searchHint")}
           value={filters.search}
-          onChange={(search) => setFilters({ search })}
+          onChange={(search) => setFilters(search ? { search, view: "all" } : { search })}
           hasClear
         />
         <StackItem size="fill" />

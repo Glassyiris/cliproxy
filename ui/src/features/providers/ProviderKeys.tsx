@@ -37,6 +37,7 @@ import { GroupPanel } from "./GroupPanel.tsx";
 import { entriesOf, entryId, type Entry } from "./groups.ts";
 import { inScope, inView, isShow, showOf, type Filters } from "./list.ts";
 import { useGroupWrites } from "./useGroupWrites.ts";
+import { layout } from "../../themes/site/layout.ts";
 
 /** Every family's groups with their keys' traffic; undefined until the config is read. */
 function useSections() {
@@ -65,6 +66,7 @@ function AddMenu({
   const unused = families.filter((f) => !configured.has(f));
   return (
     <DropdownMenu
+      menuMaxHeight={layout.menuMaxHeight}
       button={{
         label: t("providers.page.add"),
         variant: roles.primaryAction.variant,

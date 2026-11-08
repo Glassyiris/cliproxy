@@ -20,6 +20,10 @@ export const layout = {
   // 設置的差不多把？」); its code box takes that height less the title rows, footer and padding,
   // and scrolls inside.
   codeEditor: { height: "calc(min(50rem, 100dvh - 2rem) - 11rem)" },
+  // Menus and selectors show this many pixels of rows before scrolling; the viewport still bounds
+  // them. Astryx caps at 300, which scrolled an eight-row menu on a tall screen (owner,
+  // 2026-11-08: 「夠長的話其實不用那麼限高。」).
+  menuMaxHeight: 640,
   valueSkeleton: { width: "8rem", height: "1em" },
   summaryTileMin: 150,
   // The settings template's two columns, a Region's heading and its controls, are each at least
