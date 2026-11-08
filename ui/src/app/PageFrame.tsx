@@ -12,7 +12,7 @@
 // route's title, tabs and controls; inside a dialog, the dialog's frame draws the title, pins the
 // filter row under it and the footer at its foot, and scrolls the controls and body between.
 
-import { lazy, Suspense, useContext, type ReactNode } from "react";
+import { lazy, Suspense, useContext, useEffect, useRef, type ReactNode } from "react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import {
@@ -42,8 +42,56 @@ const BottomSheet = lazy(() =>
  */
 type DetailPanel = { label: string; content: ReactNode; onClose?: () => void };
 
+/** A field Esc belongs to: closing the panel from it would drop what was typed. */
+const isEditable = (el: Element) =>
+  el.matches("input:not([type=checkbox]):not([type=radio]), textarea, [contenteditable=true]");
+
+/**
+ * Esc from inside a closable panel closes it, as the phone's sheet does, unless focus is in a
+ * field; focus then goes back to what had it before it entered the panel (the row that opened it),
+ * when the page has not already put it somewhere.
+ */
+function useEscapeCloses(onClose: (() => void) | undefined) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Pages pass a fresh closure each render; the listeners read the latest and stay subscribed, so
+  // the opener they track survives re-renders.
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  });
+  const closable = !!onClose;
+  useEffect(() => {
+    if (!closable) return;
+    let outside: HTMLElement | null = null;
+    const onFocus = (event: FocusEvent) => {
+      const target = event.target as HTMLElement;
+      if (!ref.current?.contains(target)) outside = target;
+    };
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (event.key !== "Escape" || event.defaultPrevented || !ref.current?.contains(target))
+        return;
+      if (isEditable(target)) return;
+      close.current?.();
+      const opener = outside;
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if ((!active || active === document.body) && opener?.isConnected) opener.focus();
+      });
+    };
+    document.addEventListener("focusin", onFocus);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("focusin", onFocus);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [closable]);
+  return ref;
+}
+
 function EndPanel({ panel }: { panel: DetailPanel }) {
   const width = useResizable(layout.detailPanel);
+  const ref = useEscapeCloses(panel.onClose);
   return (
     <>
       <ResizeHandle
@@ -53,6 +101,7 @@ function EndPanel({ panel }: { panel: DetailPanel }) {
         label={t("app.panel.resize", { panel: panel.label })}
       />
       <LayoutPanel
+        ref={ref}
         resizable={width.props}
         hasDivider
         padding={panel.onClose ? 4 : 0}
