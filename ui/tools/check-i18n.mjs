@@ -1,9 +1,11 @@
-// i18n gate (REQUIREMENTS rows 10, 11). Catalogs are src/i18n/<area>.ts with
-// `export default { en, "zh-CN", "zh-TW" }`, flat keys `<area>.<part>.<name>`, ICU messages.
+// i18n gate (REQUIREMENTS rows 10, 11). An area's English catalog is src/i18n/<area>.ts with
+// `export default { en }`, and each translation is src/i18n/<locale>/<area>.ts with
+// `export default { "<locale>": … }`; flat keys `<area>.<part>.<name>`, ICU messages.
+// src/i18n/<locale>/index.ts merges that locale's areas into the one table the app loads.
 // A catalog may also export `dynamicKeys`, the one allowlist of its keys that are looked up
 // through a computed `t(...)` argument.
 //
-// Catalogs: same three locales and same keys; every message parses as ICU; argument names
+// Catalogs: every area in every locale, and in its index.ts; same keys; every message parses as ICU; argument names
 //   match across locales; key shape and area prefix; zh-TW has no Simplified-only and zh-CN
 //   no Traditional-only characters (opencc-js conversion must change nothing).
 // Source: every t("key") literal exists; every key is used by a literal or by `dynamicKeys`;
@@ -125,25 +127,21 @@ function checkScript(where, locale, message) {
   }
 }
 
-function checkLocales(file, area, catalog) {
-  const where = relative(ui, file);
-  const present = Object.keys(catalog ?? {});
-  if (present.length !== LOCALES.length || !LOCALES.every((locale) => present.includes(locale))) {
-    fail(where, `default export must have exactly the locales ${LOCALES.join(", ")}`);
-    return false;
-  }
+// `files` maps each locale to the file its messages came from.
+function checkLocales(files, area, catalog) {
+  const where = relative(ui, files.en);
   const reference = new Set(Object.keys(catalog.en));
   for (const locale of LOCALES) {
+    const own = relative(ui, files[locale]);
     const keys = new Set(Object.keys(catalog[locale]));
-    for (const key of reference) if (!keys.has(key)) fail(where, `${locale} lacks ${key}`);
-    for (const key of keys) if (!reference.has(key)) fail(where, `${locale} has extra ${key}`);
+    for (const key of reference) if (!keys.has(key)) fail(own, `${locale} lacks ${key}`);
+    for (const key of keys) if (!reference.has(key)) fail(own, `${locale} has extra ${key}`);
   }
   for (const key of reference) {
     const shape = KEY_SHAPE.exec(key);
     if (!shape) fail(where, `${key}: key must be <area>.<part>.<name> in camelCase`);
     else if (shape[1] !== area) fail(where, `${key}: key must start with the area "${area}"`);
   }
-  return true;
 }
 
 function checkMessages(file, catalog) {
@@ -163,32 +161,84 @@ function checkMessages(file, catalog) {
   }
 }
 
-async function loadCatalogs() {
-  const catalogs = [];
-  if (!existsSync(i18nDir)) return catalogs;
-  const files = readdirSync(i18nDir)
-    .filter((name) => name.endsWith(".ts") && !TEST_FILE.test(name))
-    .sort();
-  for (const name of files) {
-    const file = join(i18nDir, name);
-    let module;
-    try {
-      module = await import(pathToFileURL(file).href);
-    } catch (error) {
-      console.error(
-        `check-i18n: cannot run: ${file}: ${error instanceof Error ? error.message : error}`,
-      );
-      process.exit(2);
-    }
-    const area = basename(name, ".ts");
-    if (!checkLocales(file, area, module.default)) continue;
-    checkMessages(file, module.default);
-    const dynamic = module.dynamicKeys ?? [];
-    for (const key of dynamic)
-      if (!(key in module.default.en))
-        fail(relative(ui, file), `dynamicKeys lists unknown key ${key}`);
-    catalogs.push({ area, file, keys: Object.keys(module.default.en), dynamic });
+async function load(file) {
+  try {
+    return await import(pathToFileURL(file).href);
+  } catch (error) {
+    console.error(
+      `check-i18n: cannot run: ${file}: ${error instanceof Error ? error.message : error}`,
+    );
+    process.exit(2);
   }
+}
+
+const areaFiles = (dir) =>
+  existsSync(dir)
+    ? readdirSync(dir)
+        .filter((name) => name.endsWith(".ts") && !TEST_FILE.test(name) && name !== "index.ts")
+        .sort()
+    : [];
+
+// One locale's messages from a file whose default export must hold exactly that locale.
+async function localeMessages(file, locale) {
+  const exported = (await load(file)).default ?? {};
+  const present = Object.keys(exported);
+  if (present.length !== 1 || present[0] !== locale) {
+    fail(relative(ui, file), `default export must have exactly the locale ${locale}`);
+    return undefined;
+  }
+  return exported[locale];
+}
+
+const TRANSLATED = LOCALES.filter((locale) => locale !== "en");
+
+// One area: src/i18n/<area>.ts and its translations, checked against each other.
+async function loadArea(name) {
+  const files = { en: join(i18nDir, name) };
+  for (const locale of TRANSLATED) files[locale] = join(i18nDir, locale, name);
+  const catalog = {};
+  for (const locale of LOCALES) {
+    if (!existsSync(files[locale])) fail(relative(ui, files[locale]), "is missing");
+    else catalog[locale] = await localeMessages(files[locale], locale);
+  }
+  if (LOCALES.some((locale) => catalog[locale] === undefined)) return undefined;
+  const area = basename(name, ".ts");
+  checkLocales(files, area, catalog);
+  checkMessages(files.en, catalog);
+  const dynamic = (await load(files.en)).dynamicKeys ?? [];
+  for (const key of dynamic)
+    if (!(key in catalog.en)) fail(relative(ui, files.en), `dynamicKeys lists unknown key ${key}`);
+  return { area, file: files.en, keys: Object.keys(catalog.en), dynamic, catalog };
+}
+
+// The app loads a translation through its index.ts; an area left out of it would show English.
+async function checkIndexes(catalogs) {
+  for (const locale of TRANSLATED) {
+    const file = join(i18nDir, locale, "index.ts");
+    if (!existsSync(file)) {
+      fail(relative(ui, file), "is missing");
+      continue;
+    }
+    const merged = new Set(Object.keys((await load(file)).default ?? {}));
+    for (const { catalog } of catalogs)
+      for (const key of Object.keys(catalog[locale]))
+        if (!merged.has(key)) fail(relative(ui, file), `does not include ${key}`);
+  }
+}
+
+async function loadCatalogs() {
+  if (!existsSync(i18nDir)) return [];
+  const names = areaFiles(i18nDir);
+  for (const locale of TRANSLATED)
+    for (const name of areaFiles(join(i18nDir, locale)))
+      if (!names.includes(name))
+        fail(relative(ui, join(i18nDir, locale, name)), `has no English src/i18n/${name}`);
+  const catalogs = [];
+  for (const name of names) {
+    const loaded = await loadArea(name);
+    if (loaded) catalogs.push(loaded);
+  }
+  await checkIndexes(catalogs);
   return catalogs;
 }
 

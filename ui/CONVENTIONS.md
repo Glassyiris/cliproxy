@@ -22,7 +22,7 @@ src/components/  shared parts used by two or more features
 src/lib/api/     one module per Management API area, one typed function per route
 src/lib/         i18n, notify, session, pure domain logic (credentials, quota, time)
 src/themes/      the site theme, the only place a colour value may appear
-src/i18n/        catalogs per area: en, zh-CN, zh-TW
+src/i18n/        catalogs per area: <area>.ts (en), zh-CN/<area>.ts, zh-TW/<area>.ts
 ```
 
 - A feature imports from `components/`, `lib/` and `app/` only, never from another feature.

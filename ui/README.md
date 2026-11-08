@@ -36,7 +36,7 @@ The React dashboard in `dist-next/`. Code rules are in [CONVENTIONS.md](CONVENTI
 | `src/components/` | Parts used by two or more screens: the status lamp. |
 | `src/lib/api/` | One module per Management API area, one typed function per route; `routes.ts` is the registry `check:api` compares with the Rust router. |
 | `src/lib/` | The i18n runtime (`i18n.ts`), `notify()`, the session (sign-in, sign-in help, capability probes) and pure domain logic with tests. |
-| `src/i18n/` | Message catalogs, one per area, in en, zh-CN and zh-TW. |
+| `src/i18n/` | Message catalogs, one per area: English in `<area>.ts`, ships with the app; the translations in `zh-CN/` and `zh-TW/`, each locale loaded on demand as one chunk through its `index.ts`. |
 | `src/themes/layers.css` | The cascade layer order, imported first: reset, Astryx components, our StyleX (`app`), theme. |
 | `src/themes/site/` | The one theme in two palettes: `siteTheme.ts` (Rosé Pine Moon, built to `site.*`) and `siteMainTheme.ts` (Rosé Pine, built to `site-main.*`, loaded on demand) are the sources, both extending `@astryxdesign/theme-neutral` with tokens only (fonts, icons and components are neutral's), rebuilt with `astryx theme build`. |
 

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { setLocale } from "./i18n.ts";
+import { loadLocale, setLocale } from "./i18n.ts";
 import { ago, span } from "./time.ts";
 
 const now = Date.parse("2026-10-02T12:00:00Z");
@@ -18,8 +18,9 @@ test("durations round to the unit a reader needs", () => {
   assert.equal(ago(now - 125 * 60_000, now), "2h ago");
 });
 
-test("durations and ago follow the app locale", (t) => {
+test("durations and ago follow the app locale", async (t) => {
   t.after(() => setLocale("en"));
+  await Promise.all([loadLocale("zh-CN"), loadLocale("zh-TW")]);
   setLocale("zh-CN");
   assert.deepEqual(spans.map(span), ["59秒", "2分钟", "2小时5分钟", "3天"]);
   assert.equal(ago(at(-10_000), now), "刚刚");

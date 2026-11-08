@@ -6,8 +6,9 @@ const server = fakeServer();
 const { request, ConnectionError } = await import("./api/client.ts");
 const { routes } = await import("./api/routes.ts");
 const { openSession, SignInError } = await import("./session.ts");
-const { setLocale, t } = await import("./i18n.ts");
+const { loadLocale, setLocale, t } = await import("./i18n.ts");
 const catalog = (await import("../i18n/app.ts")).default;
+const zhTW = (await import("../i18n/zh-TW/app.ts")).default;
 
 const hooks = { unauthorized() {}, server() {} };
 const refusal = async (answer: () => Response | Promise<Response>) => {
@@ -85,10 +86,11 @@ test("a check given up through its signal counts as unreachable", async () => {
 });
 
 test("the help follows the chosen language", async () => {
+  await loadLocale("zh-TW");
   setLocale("zh-TW");
   assert.equal(
     await refusal(() => new Response(null, { status: 404 })),
-    catalog["zh-TW"]["app.signIn.apiOff"],
+    zhTW["zh-TW"]["app.signIn.apiOff"],
   );
   setLocale("en");
 });

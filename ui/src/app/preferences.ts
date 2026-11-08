@@ -1,6 +1,6 @@
 import { createContext, use } from "react";
 import type { ProviderMessagesByLocale } from "@astryxdesign/core/i18n";
-import { isLocale, type Locale } from "../lib/i18n.ts";
+import { isLocale, loadLocale, type Locale } from "../lib/i18n.ts";
 import { defaultPalette, isPalette, type Palette } from "../themes/site/index.ts";
 
 // The only three choices this dashboard keeps across reloads. index.html reads the same keys
@@ -46,8 +46,17 @@ export function storeLocale(locale: Locale) {
   document.documentElement.lang = locale;
 }
 
-/** Astryx's own strings for a locale. English is built in; the Chinese catalogs load on demand. */
+/**
+ * Astryx's own strings for a locale, resolved once the app's own table for it is in too: both
+ * callers (main.tsx before the first render, App before it switches) then show the locale whole.
+ * English is built in; the Chinese catalogs load on demand.
+ */
 export async function astryxMessages(locale: Locale): Promise<ProviderMessagesByLocale> {
+  const [messages] = await Promise.all([astryxCatalog(locale), loadLocale(locale)]);
+  return messages;
+}
+
+async function astryxCatalog(locale: Locale): Promise<ProviderMessagesByLocale> {
   if (locale === "zh-CN")
     return { "zh-CN": (await import("@astryxdesign/core/locales/zh-CN.generated.js")).default };
   if (locale === "zh-TW")
