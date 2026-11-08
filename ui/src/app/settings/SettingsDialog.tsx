@@ -18,7 +18,7 @@ import { t } from "../../lib/i18n.ts";
 import { AppearancePanel } from "./AppearancePanel.tsx";
 import { row } from "./SettingsRows.tsx";
 import { ShortcutsPanel } from "./ShortcutsPanel.tsx";
-import { settingsSizes } from "./sizes.ts";
+import { layout } from "../../themes/site/layout.ts";
 
 const styles = stylex.create({
   // SideNav sets a starting width but no flex-shrink, so the pane would squeeze the rail.
@@ -107,7 +107,12 @@ function SettingsSideNav({ titleId, active, onSelect }: Omit<ShellProps, "onClos
       // Hand-set rather than SideNavHeading, whose heading is pinned to the large text size; the
       // inset and row height are SideNavHeading's own.
       header={
-        <HStack gap={2} vAlign="center" paddingInline={2} minHeight={settingsSizes.headingRow}>
+        <HStack
+          gap={2}
+          vAlign="center"
+          paddingInline={2}
+          minHeight={layout.settingsDialog.headingRow}
+        >
           <Heading level={4} id={titleId}>
             {t("app.settings.title")}
           </Heading>
@@ -144,7 +149,7 @@ function ContentPane({ active, onClose }: Pick<ShellProps, "active" | "onClose">
           <StackItem size="fill">
             <PanelHeading panel={active} />
           </StackItem>
-          <VStack aria-hidden="true" width={settingsSizes.closeColumn} />
+          <VStack aria-hidden="true" width={layout.settingsDialog.closeColumn} />
         </HStack>
         {panelOf(active).body()}
       </VStack>
@@ -213,20 +218,20 @@ function SettingsDialog({
 }) {
   const [active, setActive] = useState<PanelId>("appearance");
   const titleId = useId();
-  const isNarrow = useMediaQuery(settingsSizes.narrowViewport);
+  const isNarrow = useMediaQuery(layout.settingsDialog.narrowViewport);
   const close = () => onOpenChange(false);
   return (
     <Dialog
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       purpose="form"
-      width={settingsSizes.dialogWidth}
-      maxHeight={settingsSizes.dialogHeight}
+      width={layout.settingsDialog.width}
+      maxHeight={layout.settingsDialog.height}
       padding={0}
       aria-labelledby={titleId}
     >
       {/* One height for every panel: the panel scrolls, the frame does not grow. */}
-      <VStack height={settingsSizes.dialogHeight}>
+      <VStack height={layout.settingsDialog.height}>
         {isNarrow ? (
           <NarrowShell titleId={titleId} active={active} onSelect={setActive} onClose={close} />
         ) : (

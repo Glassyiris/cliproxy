@@ -13,7 +13,7 @@ import { isLocale, localeName, locales, t } from "../../lib/i18n.ts";
 import { loadPalette, siteTheme, type Palette } from "../../themes/site/index.ts";
 import { usePreferences, type ThemeMode } from "../preferences.ts";
 import { SettingsCard, SettingsRow } from "./SettingsRows.tsx";
-import { settingsSizes } from "./sizes.ts";
+import { layout } from "../../themes/site/layout.ts";
 
 const preview = stylex.create({
   clip: {
@@ -111,9 +111,9 @@ function PaletteCards() {
     <Grid
       role="radiogroup"
       aria-label={t("app.colors.label")}
-      columns={{ minWidth: settingsSizes.previewMin, max: PALETTES.length }}
+      columns={{ minWidth: layout.settingsDialog.previewMin, max: PALETTES.length }}
       gap={2}
-      maxWidth={settingsSizes.previewsMax}
+      maxWidth={layout.settingsDialog.previewsMax}
     >
       {PALETTES.map((choice) => {
         const isSelected = choice.value === palette;
@@ -130,7 +130,7 @@ function PaletteCards() {
             <VStack gap={1.5}>
               <PalettePreview palette={choice.value} />
               <HStack hAlign="center">
-                <Text type="supporting" weight={isSelected ? "semibold" : undefined}>
+                <Text type="supporting" weight={isSelected ? "semibold" : "normal"}>
                   {choice.label()}
                 </Text>
               </HStack>

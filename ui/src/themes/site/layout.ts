@@ -26,4 +26,20 @@ export const layout = {
   // A column holding one short value (Logs' time, request id and level), which needs 78 to 100 on
   // one line; a share of the width broke them where the list is narrow.
   shortValueColumn: 100,
+  // The settings-dialog template's frame: 1120 x min(800, viewport less 2rem), one size for every
+  // panel so the frame does not jump as panels change; below 40rem the side rail becomes a tab
+  // strip (the template's 640px).
+  settingsDialog: {
+    width: 1120,
+    height: "min(50rem, calc(100dvh - 2rem))",
+    narrowViewport: "(max-width: 40rem)",
+    // SideNavHeading's own row height, so the hand-set title lines up with the nav labels.
+    headingRow: 32,
+    // The column the pinned close button floats over, so a long description wraps before it.
+    closeColumn: 32,
+    // Palette tiles: at least this wide each (the template's 96 holds one picture; a palette tile
+    // holds a light and a dark half), and the group capped so the pictures stay controls.
+    previewMin: 160,
+    previewsMax: 480,
+  },
 } as const;
