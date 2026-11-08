@@ -1,7 +1,8 @@
+import { Activity, UserCheck } from "lucide-react";
 import { Card } from "@astryxdesign/core/Card";
 import { Grid } from "@astryxdesign/core/Grid";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { StatusDot, type StatusDotVariant } from "@astryxdesign/core/StatusDot";
+import { Icon, type IconProps } from "@astryxdesign/core/Icon";
 import { Text } from "@astryxdesign/core/Text";
 import type { Buckets } from "../../lib/credentials.ts";
 import { currentLocale, t } from "../../lib/i18n.ts";
@@ -21,11 +22,11 @@ function percent(failed: number, total: number) {
 }
 
 type Judgement = "good" | "attention" | "urgent" | "none";
-const dot: Record<Judgement, StatusDotVariant> = {
+const colour: Record<Judgement, IconProps["color"]> = {
   good: "success",
   attention: "warning",
   urgent: "error",
-  none: "neutral",
+  none: "secondary",
 };
 const word = (j: Judgement) =>
   ({
@@ -38,17 +39,28 @@ const word = (j: Judgement) =>
 type TileData = { judgement: Judgement; value: string; basis: string };
 
 /**
- * One KPI tile as the template's KpiTile draws it: the judgement lamp beside the label, the value,
- * and one line of basis. `data` is undefined while loading; every line keeps its height then.
+ * One KPI tile as the template's KpiTile draws it: the tile's glyph in the judgement's colour
+ * beside the label, the value, and one line of basis. `data` is undefined while loading; every
+ * line keeps its height then.
  */
-function Tile({ label, data, index }: { label: string; data?: TileData; index: number }) {
+function Tile({
+  label,
+  icon,
+  data,
+  index,
+}: {
+  label: string;
+  icon: IconProps["icon"];
+  data?: TileData;
+  index: number;
+}) {
   const judgement = data?.judgement ?? "none";
   const lamp = data ? word(judgement) : t("overview.tiles.loading");
   return (
     <Card padding={4}>
       <VStack gap={2}>
         <HStack gap={2} vAlign="center" wrap="nowrap">
-          <StatusDot variant={dot[judgement]} label={lamp} tooltip={lamp} />
+          <Icon icon={icon} size="sm" color={colour[judgement]} label={lamp} />
           <Text type="label" color="secondary" maxLines={1}>
             {label}
           </Text>
@@ -138,17 +150,19 @@ export function Tiles({
   traffic: Buckets | null | undefined;
   now: number;
 }) {
-  const tiles = [
-    { label: t("overview.tiles.canServe"), data: summary && canServe(summary) },
+  const tiles: { label: string; icon: IconProps["icon"]; data?: TileData }[] = [
+    { label: t("overview.tiles.canServe"), icon: UserCheck, data: summary && canServe(summary) },
     {
       label: t("overview.tiles.requests"),
+      icon: Activity,
       data: traffic === undefined ? undefined : requests(traffic),
     },
     {
       label: t("overview.tiles.failureShare"),
+      icon: "error",
       data: traffic === undefined ? undefined : failureShare(traffic),
     },
-    { label: t("overview.tiles.cooling"), data: summary && cooling(summary, now) },
+    { label: t("overview.tiles.cooling"), icon: "clock", data: summary && cooling(summary, now) },
   ];
   return (
     <Grid
@@ -157,7 +171,7 @@ export function Tiles({
       aria-label={t("overview.tiles.label")}
     >
       {tiles.map((tile, index) => (
-        <Tile key={tile.label} label={tile.label} data={tile.data} index={index} />
+        <Tile key={tile.label} {...tile} index={index} />
       ))}
     </Grid>
   );

@@ -10,7 +10,7 @@
     // The sources `astryx theme build` compiles into site.* and site-main.*, which the app imports.
     "src/themes/site/siteTheme.ts",
     "src/themes/site/siteMainTheme.ts",
-    // The source charts in the charts module wait for the Traffic analysis rewrite; remove then.
+    // The charts module's Names and SourceNames types have no importer outside it yet.
     "src/components/charts/index.ts"
   ],
   "project": ["src/**/*.{ts,tsx}", "tools/**/*.mjs"]

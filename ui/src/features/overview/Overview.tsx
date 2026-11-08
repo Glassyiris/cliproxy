@@ -11,15 +11,20 @@
 // - Tiles: four judgements with one basis line each, no delta and no sparkline (the chart below
 //   has the series); at least layout.summaryTileMin wide, not 240, so a phone shows two per row
 //   and the first alert stays in the first screen.
-// - One chart card (requests with failures on top) instead of two: the API reports nothing else.
-// - No uptime roster and no service breakdown in the rail: per-source detail lives on Traffic
-//   analysis (#usage), linked from the chart card.
+// - Two chart cards as the template has, bar charts instead of line charts: requests per ten
+//   minutes with failures on top, and requests per source; the API reports no latency.
+// - The chart grid's columns are at least layout.settingsColumnMin wide (320, the template's
+//   value): check:ui keeps size literals in the theme and that is the theme's 320 two-column floor.
+// - No uptime roster and no service breakdown in the rail: per-source detail lives on Usage
+//   (#usage), linked from the source card.
 // - The rail is layout.detailPanel.defaultSize wide, not 400: check:ui keeps size literals in the
 //   theme, and that is the shared panel width.
 // - Below 1024 px the rail folds in under the tiles, not at the end, so on a phone the first alert
 //   is in the first screen (DESIGN.md "Routes").
-// - Alerts are rows that link to where they are fixed, without state Tokens or timestamps: the
-//   server reports states, not alert events.
+// - Alerts are one row per reason (icon, reason, one action) whose account count opens the
+//   affected accounts in place (Collapsible), without state Tokens or timestamps: the server
+//   reports account states, not alert events.
+// - Tile labels lead with a status-coloured icon instead of the StatusDot, which would repeat it.
 // - First run (no accounts): the template's EmptyState, in a card, replaces the tiles and chart.
 import { useMemo } from "react";
 import { Plus } from "lucide-react";
@@ -47,9 +52,9 @@ import { layout } from "../../themes/site/layout.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { AttentionFeed } from "./Attention.tsx";
 import { FirstRun } from "./FirstRun.tsx";
-import { bucketTimes, summarize, totalTraffic } from "./summary.ts";
+import { bucketTimes, sources, summarize, totalTraffic } from "./summary.ts";
 import { Tiles } from "./Tiles.tsx";
-import { TrafficCard, type Read } from "./Traffic.tsx";
+import { Charts, type Read } from "./Traffic.tsx";
 
 const failedRead = (
   query: { isError: boolean; error: unknown; refetch: () => unknown },
@@ -79,6 +84,10 @@ function useOverviewData() {
     () => (files && usage !== undefined ? totalTraffic(files, usage) : undefined),
     [files, usage],
   );
+  const bySource = useMemo(
+    () => (traffic ? files && sources(files, usage ?? null) : traffic),
+    [files, usage, traffic],
+  );
   const times = useMemo(
     () => (files && traffic ? bucketTimes(files, traffic.total.length) : []),
     [files, traffic],
@@ -89,6 +98,7 @@ function useOverviewData() {
     now,
     summary,
     traffic,
+    bySource,
     times,
     accounts,
     // With no accounts on screen, each region says why; with stale ones, the rail does.
@@ -159,9 +169,10 @@ export default function Overview() {
             {/* Folded, the rail grows from its skeleton to its rows, so on a phone the chart
                 waits for them rather than being pushed down. */}
             {!isFirstRun && (!isNarrow || data.summary) && (
-              <TrafficCard
+              <Charts
                 traffic={data.traffic}
                 times={data.times}
+                sources={data.bySource}
                 reads={present([data.unread, data.keyUsage])}
               />
             )}
