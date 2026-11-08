@@ -1,5 +1,5 @@
-// Template: settings-sidebar. A list of setting groups beside the open group; below the phone
-// breakpoint the list and the group are two views, the group with a back button.
+// Template: settings-sidebar, with its group list as a tab strip under the page header (owner,
+// 2026-11-08: 「按鈕改上面試試看？」). The strip scrolls on a phone, so one layout serves every width.
 // Deviations:
 // - In PageFrame with its LayoutHeader and h1 (DESIGN.md "Roles", Header): the template has no
 //   header, and its own nav heading ("Account settings") would stack under the h1, so it is gone.
@@ -9,28 +9,24 @@
 // - The group is `?section=` in the hash, so Back and reload keep it; the template keeps it in state.
 // - Icons are lucide, not heroicons; the "Professional hosting tools" list and the info cards are
 //   gone: cliproxy has no counterpart.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FileCode, KeyRound, Globe, Route, ScrollText, Send } from "lucide-react";
+import { FileCode, KeyRound, Globe, Route, ScrollText, Send } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Divider } from "@astryxdesign/core/Divider";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon, type IconProps } from "@astryxdesign/core/Icon";
-import { Layout, LayoutContent, LayoutPanel, VStack } from "@astryxdesign/core/Layout";
-import { List, ListItem } from "@astryxdesign/core/List";
+import { VStack } from "@astryxdesign/core/Layout";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Text } from "@astryxdesign/core/Text";
-import { Toolbar } from "@astryxdesign/core/Toolbar";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { serverKeys, useConfig } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams, useHashRoute, useUnsavedChanges } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
-import { SectionHeading } from "../../components/SectionHeading.tsx";
 import { replaceConfigValue, type Config } from "../../lib/api/config.ts";
 import { absent } from "../../lib/config-path.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
-import { layout } from "../../themes/site/layout.ts";
 import { Advanced } from "./Advanced.tsx";
 import { Access } from "./Access.tsx";
 import { ReviewDialog } from "./ReviewDialog.tsx";
@@ -58,31 +54,28 @@ const icons: Record<Group, IconProps["icon"]> = {
 const isGroup = (value: string | undefined): value is Group =>
   (groups as readonly string[]).includes(value ?? "");
 
-function GroupList({
-  active,
-  isNarrow,
-  onSelect,
-}: {
-  active: Group | null;
-  isNarrow: boolean;
-  onSelect: (group: Group) => void;
-}) {
+const panelId = "settings-group";
+
+function GroupTabs({ active, onSelect }: { active: Group; onSelect: (group: Group) => void }) {
   return (
-    <VStack paddingBlock={4} paddingInline={3} id="settings-nav">
-      <List density="spacious" aria-label={t("config.nav.label")}>
+    <VStack id="settings-nav">
+      <TabList
+        role="tablist"
+        aria-label={t("config.nav.label")}
+        isFullBleed
+        value={active}
+        onChange={(value) => isGroup(value) && onSelect(value)}
+      >
         {groups.map((group) => (
-          <ListItem
+          <Tab
             key={group}
+            value={group}
             label={t(`config.group.${group}`)}
-            startContent={<Icon icon={icons[group]} />}
-            endContent={
-              isNarrow ? <Icon icon="chevronRight" size="sm" color="secondary" /> : undefined
-            }
-            isSelected={!isNarrow && group === active}
-            onClick={() => onSelect(group)}
+            icon={<Icon icon={icons[group]} size="sm" />}
+            panelId={panelId}
           />
         ))}
-      </List>
+      </TabList>
     </VStack>
   );
 }
@@ -141,47 +134,6 @@ function useSaveChanges(onSaved: () => void) {
   return { action, save };
 }
 
-/** The open group: its heading (with the way back on a phone) and its rows. */
-function GroupPanel({
-  group,
-  isNarrow,
-  onBack,
-  children,
-}: {
-  group: Group;
-  isNarrow: boolean;
-  onBack: () => void;
-  children: ReactNode;
-}) {
-  const heading = <SectionHeading title={t(`config.group.${group}`)} />;
-  return (
-    <VStack gap={4} id="settings-group">
-      {isNarrow ? (
-        <Toolbar
-          label={t(`config.group.${group}`)}
-          gap={2}
-          startContent={
-            <>
-              <Button
-                label={t("config.nav.back")}
-                variant="ghost"
-                size="sm"
-                isIconOnly
-                icon={<Icon icon={ArrowLeft} size="sm" />}
-                onClick={onBack}
-              />
-              {heading}
-            </>
-          }
-        />
-      ) : (
-        heading
-      )}
-      {children}
-    </VStack>
-  );
-}
-
 /**
  * The changed settings across all groups, kept while the operator moves between them. `round` is
  * bumped when the draft is dropped, so the controls' typed text starts again from the file.
@@ -204,29 +156,23 @@ function useDraft(config: Config | undefined) {
 }
 
 /**
- * The open group, `?section=` in the hash; none on a phone until one is picked. An old
+ * The open group, `?section=` in the hash; the first by default. An old
  * `#config/<section>` or `#config/config.yaml` link lands on the YAML, which holds it.
  */
-function useGroup(isNarrow: boolean) {
+function useGroup() {
   const [params, setParams] = useHashParams();
   const legacy = useHashRoute().arg;
   useEffect(() => {
     if (legacy) location.replace("#settings?section=advanced");
   }, [legacy]);
-  const fallback = isNarrow ? null : groups[0];
-  const group: Group | null = isGroup(params.section)
-    ? params.section
-    : legacy
-      ? "advanced"
-      : fallback;
-  const select = (next: Group | null) => setParams({ section: next ?? undefined }, "push");
+  const group: Group = isGroup(params.section) ? params.section : legacy ? "advanced" : groups[0];
+  const select = (next: Group) => setParams({ section: next }, "push");
   return { group, select };
 }
 
 export default function Configuration() {
   const config = useConfig();
-  const isNarrow = useMediaQuery(layout.phone);
-  const { group, select } = useGroup(isNarrow);
+  const { group, select } = useGroup();
   const draft = useDraft(config.data);
   const [isReviewing, setReviewing] = useState(false);
   const close = () => {
@@ -235,16 +181,6 @@ export default function Configuration() {
   };
   const { action, save } = useSaveChanges(close);
   const version = config.data?.["config-version"];
-
-  const panel = group && (
-    <GroupPanel group={group} isNarrow={isNarrow} onBack={() => select(null)}>
-      <VStack gap={0} key={draft.round}>
-        <Divider />
-        <GroupRows group={group} config={config.data} draft={draft.draft} onChange={draft.set} />
-        {group === "advanced" && <Advanced action={action} />}
-      </VStack>
-    </GroupPanel>
-  );
 
   return (
     <PageFrame
@@ -266,6 +202,7 @@ export default function Configuration() {
           }
         />
       }
+      toolbar={<GroupTabs active={group} onSelect={select} />}
     >
       {config.isError && (
         <ReadError
@@ -274,17 +211,11 @@ export default function Configuration() {
           retry={() => void config.refetch()}
         />
       )}
-      {config.isError && !config.data ? null : isNarrow ? (
-        (panel ?? <GroupList active={null} isNarrow onSelect={select} />)
-      ) : (
-        <Layout
-          start={
-            <LayoutPanel hasDivider padding={0} label={t("config.nav.label")}>
-              <GroupList active={group} isNarrow={false} onSelect={select} />
-            </LayoutPanel>
-          }
-          content={<LayoutContent padding={4}>{panel}</LayoutContent>}
-        />
+      {config.isError && !config.data ? null : (
+        <VStack gap={0} key={draft.round} id={panelId} role="tabpanel">
+          <GroupRows group={group} config={config.data} draft={draft.draft} onChange={draft.set} />
+          {group === "advanced" && <Advanced action={action} />}
+        </VStack>
       )}
       {isReviewing && (
         <ReviewDialog

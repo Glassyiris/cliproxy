@@ -54,7 +54,6 @@ export default {
     "config.review.reread":
       "Each setting is reread before it is written; one changed elsewhere is not written.",
     "config.nav.label": "Setting groups",
-    "config.nav.back": "Back to setting groups",
     "config.row.restart": "Applies after a restart.",
     "config.row.duration": "Use a duration such as 30m or 1h.",
     "config.access.clients": "Client keys",
@@ -151,7 +150,6 @@ export default {
     "config.review.saved": "设置已保存。",
     "config.review.reread": "每项设置写入前都会重新读取；已被他处修改的项不会写入。",
     "config.nav.label": "设置分组",
-    "config.nav.back": "返回设置分组",
     "config.row.restart": "重启后生效。",
     "config.row.duration": "请输入时长，例如 30m 或 1h。",
     "config.access.clients": "客户端密钥",
@@ -237,7 +235,6 @@ export default {
     "config.review.saved": "設定已儲存。",
     "config.review.reread": "每項設定寫入前都會重新讀取；已被他處修改的項目不會寫入。",
     "config.nav.label": "設定分組",
-    "config.nav.back": "返回設定分組",
     "config.row.restart": "重新啟動後生效。",
     "config.row.duration": "請輸入時間長度，例如 30m 或 1h。",
     "config.access.clients": "用戶端金鑰",
