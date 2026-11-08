@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type FormEvent, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Network } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
@@ -81,17 +82,33 @@ function KeyHelp() {
   );
 }
 
-export function SignIn() {
+/**
+ * Raw input, a documented exception (REQUIREMENTS.md): the username a password manager files the
+ * key under, as Chromium's guidance for single-field sign-in forms asks. Astryx's VisuallyHidden
+ * is a span and must not wrap a control.
+ */
+function SavedUsername() {
+  return (
+    <input
+      type="text"
+      name="username"
+      autoComplete="username"
+      value={location.host}
+      readOnly
+      hidden
+    />
+  );
+}
+
+/** Sign in with the typed key, one request per press, and say what went wrong. */
+function useSubmit(input: RefObject<HTMLInputElement | null>) {
   const { signIn } = useSession();
-  const [secret, setSecret] = useState("");
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
   // One request per press: the ref blocks a second submit before the busy state renders.
   const pending = useRef(false);
-  const input = useRef<HTMLInputElement>(null);
-  useDocumentTitle(t("app.document.signInTitle"));
 
-  const submit = async () => {
+  const submit = async (secret: string, persist: boolean) => {
     if (pending.current) return;
     if (!secret) {
       setFailure(t("app.signIn.keyRequired"));
@@ -102,13 +119,30 @@ export function SignIn() {
     setBusy(true);
     setFailure("");
     try {
-      await signIn(secret);
+      await signIn(secret, persist);
     } catch (error) {
       setFailure(error instanceof Error ? error.message : String(error));
       setBusy(false);
       pending.current = false;
       input.current?.focus();
     }
+  };
+  return { failure, setFailure, busy, submit };
+}
+
+export function SignIn() {
+  const [secret, setSecret] = useState("");
+  // Off on every load: keeping the key on the device is chosen each time (owner, 2026-11-08).
+  const [persist, setPersist] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const { failure, setFailure, busy, submit } = useSubmit(input);
+  useDocumentTitle(t("app.document.signInTitle"));
+
+  // A real submit, so the browser's password manager offers to save the key; the form unmounts on
+  // success, which Chrome and Firefox take as a finished sign-in.
+  const onSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    void submit(secret, persist);
   };
 
   return (
@@ -121,9 +155,10 @@ export function SignIn() {
       <VStack hAlign="center" gap={4}>
         <Brand />
         <Card padding={8} width="100%" maxWidth={layout.signInWidth}>
-          {/* Enter is handled by the field's IME-safe onEnter; the form's own submit is dropped. */}
-          <VStack as="form" gap={4} onSubmit={(event) => event.preventDefault()}>
+          {/* Enter and Connect both submit the form; the key field holds Enter during IME input. */}
+          <VStack as="form" gap={4} onSubmit={onSubmit}>
             <CardTop />
+            <SavedUsername />
             <VStack gap={4}>
               <KeyField
                 label={t("app.signIn.managementKey")}
@@ -134,8 +169,14 @@ export function SignIn() {
                   if (failure) setFailure("");
                 }}
                 failure={failure}
-                submit={() => void submit()}
+                htmlName="password"
                 inputRef={input}
+              />
+              <CheckboxInput
+                label={t("app.signIn.remember")}
+                description={t("app.signIn.rememberHint")}
+                value={persist}
+                onChange={setPersist}
               />
               <Button
                 label={busy ? t("app.signIn.connecting") : t("app.signIn.connect")}
@@ -143,7 +184,7 @@ export function SignIn() {
                 size="lg"
                 isLoading={busy}
                 width="100%"
-                onClick={() => void submit()}
+                type="submit"
               />
             </VStack>
             <KeyHelp />

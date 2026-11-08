@@ -47,6 +47,43 @@ test("each refused sign-in names what to change, and the key is dropped", async 
   );
 });
 
+test("each refusal names its reason: only a 401 rejects the key", async () => {
+  const reason = async (answer: () => Response | Promise<Response>) => {
+    server.answer = answer;
+    const error = await openSession("guess", hooks).catch((e: unknown) => e);
+    assert.ok(error instanceof SignInError);
+    return error.reason;
+  };
+  assert.equal(
+    await reason(() => Response.json({ error: "invalid management key" }, { status: 401 })),
+    "rejected",
+  );
+  assert.equal(await reason(() => Promise.reject(new TypeError("Failed to fetch"))), "unreachable");
+  assert.equal(await reason(() => new Response(null, { status: 404 })), "other");
+  assert.equal(
+    await reason(() => Response.json({ error: "remote management disabled" }, { status: 403 })),
+    "other",
+  );
+  assert.equal(
+    await reason(() =>
+      Response.json({ error: "IP banned due to too many failed attempts" }, { status: 403 }),
+    ),
+    "other",
+  );
+  assert.equal(await reason(() => Response.json({ error: "boom" }, { status: 500 })), "other");
+});
+
+test("a check given up through its signal counts as unreachable", async () => {
+  server.answer = () => Response.json({});
+  const error = await openSession("guess", hooks, AbortSignal.abort()).catch((e: unknown) => e);
+  assert.ok(error instanceof SignInError);
+  assert.equal(error.reason, "unreachable");
+  await assert.rejects(
+    request(routes.readConfig),
+    (e) => e instanceof ConnectionError && e.reason === "signed-out",
+  );
+});
+
 test("the help follows the chosen language", async () => {
   setLocale("zh-TW");
   assert.equal(

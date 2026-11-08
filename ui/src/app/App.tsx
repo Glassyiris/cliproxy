@@ -1,9 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { Center } from "@astryxdesign/core/Center";
 import {
   InternationalizationProvider,
   type ProviderMessagesByLocale,
 } from "@astryxdesign/core/i18n";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { Theme, type DefinedTheme } from "@astryxdesign/core/theme";
 import { ToastViewport } from "@astryxdesign/core/Toast";
 import { setLocale as selectLocale, t, type Locale } from "../lib/i18n.ts";
@@ -26,8 +28,29 @@ import { SessionProvider, useSession } from "./Session.tsx";
 import { Shell } from "./Shell.tsx";
 import { SignIn } from "./SignIn.tsx";
 
+/** How long a stored-key check shows only the page background, so a quick one does not flash. */
+const QUIET_WAIT = 400;
+
+/** While a stored key is checked: the page background, then a spinner naming the server. */
+function RestoreWait() {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setShown(true), QUIET_WAIT);
+    return () => clearTimeout(timer);
+  }, []);
+  if (!shown) return null;
+  return (
+    <Center axis="both" minHeight="100dvh">
+      <Spinner label={t("app.signIn.restoring", { host: location.host })} />
+    </Center>
+  );
+}
+
+/** Shell or sign-in; neither shows while a stored key is checked, so the wrong one never flashes. */
 function Gate() {
-  return useSession().signedIn ? (
+  const { signedIn, restoring } = useSession();
+  if (restoring) return <RestoreWait />;
+  return signedIn ? (
     <QuotaProvider>
       <Shell />
     </QuotaProvider>

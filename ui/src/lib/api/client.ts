@@ -1,6 +1,7 @@
 import type { Route } from "./routes.ts";
 
-// The management key lives only in this module's memory. It is never written to storage.
+// Requests read the management key from this module's memory; lib/keyStore.ts keeps the stored
+// copy that a reload reads back once.
 // Requests go only to the server that served this page: the API sits next to it
 // (/management.html -> /v8/management, also under a reverse-proxy path prefix).
 export const base = new URL(".", location.href).href.replace(/\/$/, "");

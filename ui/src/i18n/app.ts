@@ -9,6 +9,7 @@ export default {
       "Use the plain text you set as {setting} (on first start the server replaces it in config.yaml with a hash), or the MANAGEMENT_PASSWORD the server was started with. It stays in this tab’s memory only; reloading signs you out.",
     "app.signIn.heading": "Connect to this server",
     "app.signIn.checking": "Checking {host}…",
+    "app.signIn.restoring": "Connecting to {host}…",
     "app.signIn.reachable": "{host} is reachable",
     "app.signIn.unreachable": "{host} is not reachable",
     "app.signIn.showKey": "Show key",
@@ -18,6 +19,9 @@ export default {
     "app.signIn.repository": "{repository}",
     "app.signIn.connect": "Connect",
     "app.signIn.connecting": "Connecting…",
+    "app.signIn.remember": "Remember on this device",
+    "app.signIn.rememberHint":
+      "Stays signed in after the browser closes. Anyone using this browser profile can open the dashboard.",
     "app.signIn.apiOff":
       "The management API is off on this server. Set management.secret-key in the server's config.yaml (or start it with MANAGEMENT_PASSWORD), then restart it.",
     "app.signIn.remoteDisabled":
@@ -176,6 +180,7 @@ export default {
       "输入为 {setting} 设置的明文（服务器首次启动时会把 config.yaml 中的值换成哈希），或启动服务器时设置的 MANAGEMENT_PASSWORD。密钥只保存在此标签页的内存中，刷新页面后需要重新登录。",
     "app.signIn.heading": "连接到此服务器",
     "app.signIn.checking": "正在检查 {host}…",
+    "app.signIn.restoring": "正在连接到 {host}…",
     "app.signIn.reachable": "{host} 可以访问",
     "app.signIn.unreachable": "{host} 无法访问",
     "app.signIn.showKey": "显示密钥",
@@ -185,6 +190,8 @@ export default {
     "app.signIn.repository": "{repository}",
     "app.signIn.connect": "连接",
     "app.signIn.connecting": "正在连接…",
+    "app.signIn.remember": "在这台设备上记住我",
+    "app.signIn.rememberHint": "关闭浏览器后仍保持登录。使用此浏览器配置文件的人都能打开管理面板。",
     "app.signIn.apiOff":
       "此服务器未开启管理 API。请在服务器的 config.yaml 中设置 management.secret-key（或以 MANAGEMENT_PASSWORD 启动），然后重启服务器。",
     "app.signIn.remoteDisabled":
@@ -336,6 +343,7 @@ export default {
       "輸入為 {setting} 設定的明文（伺服器首次啟動時會把 config.yaml 中的值換成雜湊），或啟動伺服器時設定的 MANAGEMENT_PASSWORD。金鑰只保存在此分頁的記憶體中，重新載入頁面後需要重新登入。",
     "app.signIn.heading": "連線到此伺服器",
     "app.signIn.checking": "正在檢查 {host}…",
+    "app.signIn.restoring": "正在連線到 {host}…",
     "app.signIn.reachable": "{host} 可以連線",
     "app.signIn.unreachable": "{host} 無法連線",
     "app.signIn.showKey": "顯示金鑰",
@@ -345,6 +353,8 @@ export default {
     "app.signIn.repository": "{repository}",
     "app.signIn.connect": "連線",
     "app.signIn.connecting": "正在連線…",
+    "app.signIn.remember": "在這台裝置記住我",
+    "app.signIn.rememberHint": "關閉瀏覽器後仍保持登入。使用這個瀏覽器設定檔的人都能開啟管理面板。",
     "app.signIn.apiOff":
       "此伺服器未開啟管理 API。請在伺服器的 config.yaml 中設定 management.secret-key（或以 MANAGEMENT_PASSWORD 啟動），然後重新啟動伺服器。",
     "app.signIn.remoteDisabled":
