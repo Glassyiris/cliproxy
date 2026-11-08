@@ -7,14 +7,12 @@ import { layout } from "../themes/site/layout.ts";
 import { roles } from "../themes/site/roles.ts";
 
 /** The row's end: its count, then a check on the chosen row (an empty slot keeps counts aligned). */
-function RowEnd({ count, isChosen }: { count: number | undefined; isChosen: boolean }) {
+function RowEnd({ count, isChosen }: { count: number; isChosen: boolean }) {
   return (
     <HStack gap={2} vAlign="center" wrap="nowrap">
-      {count !== undefined && (
-        <Text type={roles.textType.supporting} color="secondary" hasTabularNumbers>
-          {count}
-        </Text>
-      )}
+      <Text type={roles.textType.supporting} color="secondary" hasTabularNumbers>
+        {count}
+      </Text>
       {isChosen ? (
         <Icon icon={Check} size="sm" color="primary" />
       ) : (
@@ -30,7 +28,8 @@ function RowEnd({ count, isChosen }: { count: number | undefined; isChosen: bool
  * Astryx 0.7.11, which scrolled an eight-status menu on a tall screen (owner, 2026-11-08:
  * 「夠長的話其實不用那麼限高。」). Plain rows with a check on the chosen one at the end, not
  * radio rows: a column of ten empty circles was noise (owner, 2026-11-09: 「自己品」). Values that
- * keep no rows are left out unless chosen. `value` and `onChange` use "" for the first row.
+ * keep no rows are left out unless chosen. `value` and `onChange` use "" for the first row, whose
+ * count is the sum: each row falls under exactly one value (Accounts' Ready leaves out Low).
  */
 export function CountedSelector({
   label,
@@ -47,6 +46,7 @@ export function CountedSelector({
 }) {
   const current = options.find((o) => o.value === value)?.label ?? allLabel;
   const shown = options.filter((o) => o.count > 0 || o.value === value);
+  const total = options.reduce((sum, o) => sum + o.count, 0);
   return (
     <DropdownMenu
       button={{ label: current, "aria-label": `${label}: ${current}` }}
@@ -55,7 +55,7 @@ export function CountedSelector({
     >
       <DropdownMenuItem
         label={allLabel}
-        endContent={<RowEnd count={undefined} isChosen={!value} />}
+        endContent={<RowEnd count={total} isChosen={!value} />}
         onClick={() => onChange("")}
       />
       {shown.map((o) => (
