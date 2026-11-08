@@ -7,8 +7,6 @@ import { TabbedPage } from "./TabbedPage.tsx";
 export default function AccountsPage() {
   return (
     <TabbedPage
-      route="accounts"
-      title={t("app.nav.accounts")}
       tabs={[
         { id: "accounts", label: () => t("app.nav.accounts"), page: Accounts },
         { id: "providers", label: () => t("app.nav.providers"), page: ProviderKeys },

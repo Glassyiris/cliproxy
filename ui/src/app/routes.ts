@@ -1,7 +1,19 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import type { IconProps } from "@astryxdesign/core/Icon";
-import { Activity, Boxes, KeyRound, LayoutDashboard, Users } from "lucide-react";
+import {
+  Activity,
+  Boxes,
+  Braces,
+  ChartColumn,
+  Key,
+  KeyRound,
+  LayoutDashboard,
+  ScrollText,
+  Users,
+} from "lucide-react";
 import { t } from "../lib/i18n.ts";
+
+type RouteView = { id: string; title(): string; icon: IconProps["icon"] };
 
 export type PageRoute = {
   /** The hash segment: `#accounts`. */
@@ -10,6 +22,11 @@ export type PageRoute = {
   /** A semantic icon name from the theme or an icon component. */
   icon: IconProps["icon"];
   page: LazyExoticComponent<ComponentType>;
+  /**
+   * The pages grouped under this route in the side nav, each `#<id>?view=<view>`; the first has
+   * no `?view=`. A route with views is a collapsible category; one without is a single item.
+   */
+  views?: readonly RouteView[];
   /** Fetches the page's chunk ahead of the first visit. */
   preload(): Promise<unknown>;
 };
@@ -29,9 +46,9 @@ function page(load: () => Promise<{ default: ComponentType }>) {
   };
 }
 
-// Six pages, listed in this order in the side nav; the first one is the landing page. What used to
-// be a page of its own is a header tab (`?view=`) or a dialog (`?open=`) of one of them; old hashes
-// land there (src/lib/hash.ts).
+// The side nav, in order; the first route is the landing page. A route with views is a collapsible
+// category whose pages are `?view=` of it (owner, 2026-11-08: 「側邊欄可以做之前那種收起」, after the
+// header tabs read as 「切換太離譜了」); dialogs are `?open=`. Old hashes land there (src/lib/hash.ts).
 export const routes: readonly PageRoute[] = [
   {
     id: "overview",
@@ -43,6 +60,10 @@ export const routes: readonly PageRoute[] = [
     id: "accounts",
     title: () => t("app.nav.accounts"),
     icon: Users,
+    views: [
+      { id: "accounts", title: () => t("app.nav.accounts"), icon: Users },
+      { id: "providers", title: () => t("app.nav.providers"), icon: Key },
+    ],
     ...page(() => import("./pages/AccountsPage.tsx")),
   },
   {
@@ -55,12 +76,20 @@ export const routes: readonly PageRoute[] = [
     id: "models",
     title: () => t("app.nav.models"),
     icon: Boxes,
+    views: [
+      { id: "models", title: () => t("app.nav.models"), icon: Boxes },
+      { id: "payload", title: () => t("app.nav.payload"), icon: Braces },
+    ],
     ...page(() => import("./pages/ModelsPage.tsx")),
   },
   {
     id: "activity",
     title: () => t("app.nav.activity"),
     icon: Activity,
+    views: [
+      { id: "usage", title: () => t("app.nav.usage"), icon: ChartColumn },
+      { id: "logs", title: () => t("app.nav.logs"), icon: ScrollText },
+    ],
     ...page(() => import("./pages/ActivityPage.tsx")),
   },
   {

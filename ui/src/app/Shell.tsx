@@ -16,7 +16,13 @@ import { Kbd } from "@astryxdesign/core/Kbd";
 import { VStack } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Popover } from "@astryxdesign/core/Popover";
-import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
+import {
+  SideNav,
+  SideNavHeading,
+  SideNavItem,
+  SideNavSection,
+  useSideNavCollapse,
+} from "@astryxdesign/core/SideNav";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
@@ -34,7 +40,7 @@ import { destinations, routes, type PageRoute } from "./routes.ts";
 import { shortcuts } from "./settings/ShortcutsPanel.tsx";
 import { useSession } from "./Session.tsx";
 import { useDocumentTitle } from "./useDocumentTitle.ts";
-import { leaveOrAsk, useBlockedNavigation, useHashRoute } from "./useHashRoute.ts";
+import { leaveOrAsk, useBlockedNavigation, useHashParams, useHashRoute } from "./useHashRoute.ts";
 
 /** SideNavItem's link, opening in a new tab: the item has no `target` of its own. */
 function NewTabLink(props: AnchorHTMLAttributes<HTMLAnchorElement>) {
@@ -131,6 +137,73 @@ function GoToPage() {
   );
 }
 
+/** Which categories are open; a closed one opens again when navigation lands in it. */
+function useOpenRoutes(current: string) {
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(routes.map((r) => r.id)));
+  const [shown, setShown] = useState(current);
+  if (shown !== current) {
+    setShown(current);
+    if (!open.has(current)) setOpen(new Set([...open, current]));
+  }
+  const toggle = (id: string, isOpen: boolean) =>
+    setOpen((was) => {
+      const next = new Set(was);
+      if (isOpen) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  return [open, toggle] as const;
+}
+
+/**
+ * The pages: a route with views is a collapsible category (open by default) with its pages under
+ * it. In the collapsed rail every page is its own icon, so reaching one is one click, never a
+ * flyout (owner, 2026-11-08: 「這個不人體工學」).
+ */
+function PageItems({ current }: { current: PageRoute }) {
+  const { isCollapsed } = useSideNavCollapse();
+  const [params] = useHashParams();
+  const [open, toggle] = useOpenRoutes(current.id);
+  return routes.map((r) => {
+    if (!r.views) {
+      return (
+        <SideNavItem
+          key={r.id}
+          label={r.title()}
+          icon={r.icon}
+          href={`#${r.id}`}
+          isSelected={r === current}
+        />
+      );
+    }
+    const first = r.views[0].id;
+    const active = r === current ? (r.views.find((v) => v.id === params.view)?.id ?? first) : null;
+    const items = r.views.map((v) => (
+      <SideNavItem
+        key={`${r.id}-${v.id}`}
+        label={v.title()}
+        icon={v.icon}
+        href={v.id === first ? `#${r.id}` : `#${r.id}?view=${v.id}`}
+        isSelected={v.id === active}
+      />
+    ));
+    if (isCollapsed) return items;
+    return (
+      <SideNavItem
+        key={r.id}
+        label={r.title()}
+        icon={r.icon}
+        collapsible={{
+          isCollapsed: !open.has(r.id),
+          onCollapsedChange: (isClosed) => toggle(r.id, !isClosed),
+        }}
+      >
+        {items}
+      </SideNavItem>
+    );
+  });
+}
+
 function PageNav({ current }: { current: PageRoute }) {
   const { signOut } = useSession();
   return (
@@ -138,8 +211,7 @@ function PageNav({ current }: { current: PageRoute }) {
       collapsible
       // Astryx keeps the width and the collapsed rail in localStorage under this key (read and
       // written in try/catch), so someone who prefers the rail keeps it across reloads. Collapsed,
-      // each page is one icon with its name as SideNavItem's own tooltip; no item has children,
-      // so no flyout.
+      // each page is one icon with its name as SideNavItem's own tooltip (PageItems).
       resizable={{ ...layout.sidebar, autoSaveId: "cliproxy-side-nav" }}
       header={
         <SideNavHeading
@@ -170,15 +242,7 @@ function PageNav({ current }: { current: PageRoute }) {
       }
     >
       <SideNavSection title={t("app.nav.pages")} isHeaderHidden>
-        {routes.map((r) => (
-          <SideNavItem
-            key={r.id}
-            label={r.title()}
-            icon={r.icon}
-            href={`#${r.id}`}
-            isSelected={r === current}
-          />
-        ))}
+        <PageItems current={current} />
       </SideNavSection>
     </SideNav>
   );

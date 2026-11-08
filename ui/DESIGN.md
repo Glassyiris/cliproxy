@@ -111,17 +111,20 @@ deviation with its reason.
 ### Routes
 
 Six hash routes (owner, 2026-11-08: 「很多東西沒必要一定是一個頁面」). What used to be a page of its
-own is a header tab or a dialog of one of them. Sign-in is not a route. The R1 to R5 rewrites
+own is a view of one of them (`?view=`, listed under its route in the side nav, which is a
+collapsible category, open by default; in the collapsed rail each view is its own icon) or a
+dialog (`?open=`). Pages carry no tab strip (owner, 2026-11-08: header tabs read as 「切換太離譜了」;
+「側邊欄可以做之前那種收起」). Sign-in is not a route. The R1 to R5 rewrites
 redesign the content of Accounts, Clients, Models, Activity and Settings; until then each tab and
 dialog hosts the earlier page unchanged through a thin host in `src/app/pages/`.
 
-| Route (`#id`) | Answers first | Template | Tabs and dialogs |
+| Route (`#id`) | Answers first | Template | Views (side nav) and dialogs |
 | --- | --- | --- | --- |
 | Overview (`overview`) | Can the proxy serve now, and what needs me? | `dashboard-alert-rail` | Three tiles (can serve, requests, failure share); "Needs attention", one card per reason with accounts, each linking to where it is fixed, or one all-clear line; two chart cards. The first attention card is inside the first screen on a phone |
-| Accounts (`accounts`) | Which accounts cannot serve, and when do they recover? | `table-inbox` | Tabs: Accounts, Provider keys (`?view=providers`) |
+| Accounts (`accounts`) | Which accounts cannot serve, and when do they recover? | `table-inbox` | Views: Accounts, Provider keys (`?view=providers`) |
 | Clients (`clients`) | Which key do I use, and how do I revoke one? | `table-page` (minimal) | Dialog: Use with a tool (`?open=use`), from the header and from a key's row menu |
-| Models (`models`) | Which models can clients ask for, and where do they go? | `table-filter` | Tabs: Models, Payload rules (`?view=payload`) |
-| Activity (`activity`) | Where does traffic come from, and what happened to a request? | `dashboard-comparison`, `table-filter` | Tabs: Usage, Logs (`?view=logs`) |
+| Models (`models`) | Which models can clients ask for, and where do they go? | `table-filter` | Views: Models, Payload rules (`?view=payload`) |
+| Activity (`activity`) | Where does traffic come from, and what happened to a request? | `dashboard-comparison`, `table-filter` | Views: Usage, Logs (`?view=logs`) |
 | Settings (`settings`) | Which server setting do I change, and what does it affect? | `settings-sidebar` | Dialog: Plugins (`?open=plugins`), from the header |
 | Sign-in (not a route) | Which server do I connect to, and what do I enter? | `login-card` | — |
 | Connect an account (dialog over any page, `?open=connect`) | Which kind of account, and how far is the authorization? | `form-wizard-dialog` | After the type is chosen only that flow shows |
@@ -211,8 +214,8 @@ built from the same template.
   data, so nothing moves), the page's controls and at most one primary action. A list's search
   and filters sit in the `LayoutHeader` (as `table-filter` does), so they stay while the content
   scrolls; on phones they fold as the template's narrow layout folds them
-  (`table-filter:2034-2088`). A rarely used action (Clear) goes into a menu. A route's tabs
-  (`TabList isFullBleed`) close the header, on its divider.
+  (`table-filter:2034-2088`). A rarely used action (Clear) goes into a menu. A route's views are
+  side-nav items, never a tab strip in the header.
 - A page hosted by a route renders through `PageHostContext` (`src/app/pageHost.ts`): as a tab,
   its frame takes the route's title, tabs and controls; in a dialog, it draws only its controls
   and body under the dialog's title.
