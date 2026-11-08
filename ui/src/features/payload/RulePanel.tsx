@@ -8,7 +8,6 @@ import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
-import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { t } from "../../lib/i18n.ts";
@@ -16,7 +15,6 @@ import { roles } from "../../themes/site/roles.ts";
 import { fieldsOf } from "./RuleTable.tsx";
 import { modelsOf, type RuleRow } from "./rules.ts";
 import { entryLabel, kindMeaning, modelWord } from "./words.ts";
-import { editHref } from "./useRules.ts";
 
 export function RulePanel({
   row,
@@ -68,7 +66,7 @@ export function RulePanel({
       </MetadataList>
       <CodeBlock code={code} language="json" hasLanguageLabel={false} isWrapped width="100%" />
       <Text type={roles.textType.supporting} color="secondary">
-        {t("payload.panel.editHint")} <Link href={editHref}>{t("payload.page.editLink")}</Link>
+        {t("payload.panel.editHint")}
       </Text>
     </VStack>
   );

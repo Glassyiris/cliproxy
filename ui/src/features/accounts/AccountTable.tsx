@@ -1,6 +1,6 @@
 // The account list of the table-inbox template: Astryx Table in `balanced` density with no column
-// dividers, every row a doorway to the detail (click, Enter or Space; `isRowItself` keeps the
-// checkbox from opening it), the open row one step past hover. The columns follow the room the
+// dividers, every row a doorway to the detail (click, Enter or Space, Escape closes it; the row keys are
+// `components/rowKeys.ts`, shared with Provider keys; `isRowItself` keeps the checkbox from opening it), the open row one step past hover. The columns follow the room the
 // list has, as the template's do (`STACK_ROWS_BELOW`, `TIGHTEN_COLUMNS_BELOW`): wide, the quota
 // windows, recovery and requests; tight (beside the open panel), the quota windows only; stacked
 // (a phone), one summary cell per row with the name first. Deviation: the stacked rows keep their
@@ -11,7 +11,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type Dispatch,
   type ReactNode,
@@ -21,12 +20,9 @@ import * as stylex from "@stylexjs/stylex";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import {
   Table,
   TableCell,
-  pixel,
-  proportional,
   useTableSelectionState,
   type TableColumn,
   type TablePlugin,
@@ -35,11 +31,13 @@ import { Text } from "@astryxdesign/core/Text";
 import { colorVars } from "@astryxdesign/core/theme/tokens.stylex";
 import { QuotaWindow } from "../../components/QuotaWindow.tsx";
 import { RequestSparkline } from "../../components/RequestSparkline.tsx";
+import { listColumns, type ListShape } from "../../components/listShape.ts";
+import { ListSkeleton } from "../../components/loadingRows.tsx";
+import { isRowItself, onRowKey, rowAt, useReturnFocus } from "../../components/rowKeys.ts";
 import { lampStatus, StatusLamp } from "../../components/StatusLamp.tsx";
+import { TwoLines } from "../../components/TwoLines.tsx";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
-import type { ListShape } from "../../components/listShape.ts";
-import { layout } from "../../themes/site/layout.ts";
 import { roles } from "../../themes/site/roles.ts";
 import type { Row } from "./rows.ts";
 import { reasonOf, recoveryOf, statusOf } from "./words.ts";
@@ -64,12 +62,6 @@ const spacerOf = (item: Row) => {
   const height = (item as unknown as Partial<Spacer>).spacer;
   return typeof height === "number" ? height : undefined;
 };
-
-/** table-inbox `INTERACTIVE_WITHIN_ROW`: controls inside the row that are not the row. */
-const isRowItself = (target: EventTarget | null) =>
-  !(target as HTMLElement | null)?.closest(
-    'button, input, a, label, [role="checkbox"], [role="button"], [role="img"]',
-  );
 
 /** Where the table body starts in the scrolled content, measured again on every resize. */
 function useScrollMargin(scroller: HTMLElement | null, body: HTMLElement | null) {
@@ -109,18 +101,6 @@ export type TableProps = {
 };
 
 type Selection = ReturnType<typeof useTableSelectionState<Row>>["selectionConfig"];
-
-/** A cell of two lines: the value, and a secondary line under it. */
-function TwoLines({ first, second }: { first: ReactNode; second: string }) {
-  return (
-    <VStack gap={0.5}>
-      {first}
-      <Text type={roles.textType.supporting} color="secondary" maxLines={1} hasTabularNumbers>
-        {second}
-      </Text>
-    </VStack>
-  );
-}
 
 function Name({ row }: { row: Row }) {
   return (
@@ -182,20 +162,14 @@ function Summary({ row, now }: { row: Row; now: number }) {
   );
 }
 
-const share = (n: number) => proportional(n, { minWidth: layout.tableColumnFloor });
-
-/**
- * Each column's width, the same for the list and its skeleton. The name gets the largest share,
- * so a 28-character email fits at 1440 without the panel; the status's reason ("transient error,
- * HTTP 502") fits in a smaller one; the requests column is as wide as its fixed-width content.
- */
+/** Each column's width, the same for the list and its skeleton (shared with Provider keys). */
 const widths = {
-  account: share(2.5),
-  status: share(1.5),
-  session: share(1.25),
-  weekly: share(1.25),
-  recovery: share(1.25),
-  requests: pixel(layout.requests.column),
+  account: listColumns.name,
+  status: listColumns.status,
+  session: listColumns.window,
+  weekly: listColumns.window,
+  recovery: listColumns.window,
+  requests: listColumns.requests,
 };
 
 type Cell = (render: (r: Row) => ReactNode) => (r: Row) => ReactNode;
@@ -252,7 +226,7 @@ function columnsOf(
     return [
       {
         ...accountColumn(selection, allSelected, cell, (r) => <Summary row={r} now={now} />),
-        width: share(1),
+        width: listColumns.stacked,
       },
     ];
   const columns: TableColumn<Row>[] = [
@@ -342,14 +316,12 @@ function useRowPlugin(
             onClick: (event) => {
               if (isRowItself(event.target)) onToggle(item);
             },
-            onKeyDown: (event) => {
-              if (!isRowItself(event.target)) return;
-              const to = moveOf(event.key, indexOf.get(item) ?? 0);
-              if (to === null && event.key !== "Enter" && event.key !== " ") return;
-              event.preventDefault();
-              if (to === null) onToggle(item);
-              else moveTo(to);
-            },
+            onKeyDown: (event) =>
+              onRowKey(
+                event,
+                { index: indexOf.get(item) ?? 0, isOpen, toggle: () => onToggle(item) },
+                moveTo,
+              ),
           },
           xstyle: props.xstyle.concat(
             isOpen ? [styles.clickableRow, styles.activeRow] : styles.clickableRow,
@@ -361,36 +333,47 @@ function useRowPlugin(
   );
 }
 
-/** Where an arrow, Home or End key moves from the row at `index` (clamped later); else null. */
-function moveOf(key: string, index: number) {
-  if (key === "ArrowDown") return index + 1;
-  if (key === "ArrowUp") return index - 1;
-  if (key === "Home") return 0;
-  if (key === "End") return Infinity;
-  return null;
-}
-
-/** Closing the panel brings focus back to the row that opened it, scrolled into the window. */
-function useReturnFocus(
+/**
+ * The windowed list's focus: closing the panel scrolls the row that opened it into the window
+ * and focuses it; a move to a row outside the window scrolls it in first and focuses it once it
+ * is rendered.
+ */
+function useRowFocus(
   shown: Row[],
   openId: string,
   holder: HTMLElement | null,
   scrollToIndex: (index: number) => void,
 ) {
-  const opened = useRef(openId);
-  useEffect(() => {
-    const was = opened.current;
-    opened.current = openId;
-    if (!was || openId) return;
-    const index = shown.findIndex((r) => r.id === was);
-    if (index < 0) return;
-    scrollToIndex(index);
-    requestAnimationFrame(() =>
-      holder
-        ?.querySelector<HTMLElement>(`tbody tr[data-account="${CSS.escape(was)}"]`)
-        ?.focus({ preventScroll: true }),
-    );
-  }, [openId, shown, holder, scrollToIndex]);
+  const reveal = useCallback(
+    (id: string) => {
+      const index = shown.findIndex((r) => r.id === id);
+      if (index >= 0) scrollToIndex(index);
+      return index >= 0;
+    },
+    [shown, scrollToIndex],
+  );
+  const rowOf = useCallback(
+    (id: string) =>
+      holder?.querySelector<HTMLElement>(`tbody tr[data-account="${CSS.escape(id)}"]`) ?? null,
+    [holder],
+  );
+  useReturnFocus(openId, reveal, rowOf);
+  return useCallback(
+    (index: number) => {
+      const to = Math.max(0, Math.min(shown.length - 1, index));
+      const rendered = rowAt(holder, to);
+      if (rendered) return rendered.focus();
+      scrollToIndex(to);
+      let tries = 60;
+      const focus = () => {
+        const row = rowAt(holder, to);
+        if (row) row.focus();
+        else if (tries-- > 0) requestAnimationFrame(focus);
+      };
+      requestAnimationFrame(focus);
+    },
+    [shown.length, holder, scrollToIndex],
+  );
 }
 
 export function AccountTable(props: TableProps) {
@@ -432,25 +415,7 @@ export function AccountTable(props: TableProps) {
     (index: number) => virtualizer.scrollToIndex(index, { align: "auto" }),
     [virtualizer],
   );
-  useReturnFocus(shown, props.openId, holder, scrollToIndex);
-  // A row outside the window is scrolled in first and focused once it is rendered.
-  const moveTo = useCallback(
-    (index: number) => {
-      const to = Math.max(0, Math.min(shown.length - 1, index));
-      const rowAt = () => holder?.querySelector<HTMLElement>(`tbody tr[data-index="${to}"]`);
-      const rendered = rowAt();
-      if (rendered) return rendered.focus();
-      scrollToIndex(to);
-      let tries = 60;
-      const focus = () => {
-        const row = rowAt();
-        if (row) row.focus();
-        else if (tries-- > 0) requestAnimationFrame(focus);
-      };
-      requestAnimationFrame(focus);
-    },
-    [shown.length, holder, scrollToIndex],
-  );
+  const moveTo = useRowFocus(shown, props.openId, holder, scrollToIndex);
   const rowPlugin = useRowPlugin(props, virtualizer.measureElement, indexOf, moveTo);
   const plugins = useMemo(() => ({ rows: rowPlugin }), [rowPlugin]);
 
@@ -481,38 +446,18 @@ const headers: Record<string, () => string> = {
   requests: () => t("accounts.columns.requests"),
 };
 
-const LOADING_ROWS = 8;
-const placeholders = Array.from({ length: LOADING_ROWS }, (_, i) => ({ key: String(i) }));
-
 /** The list's shape while the first read is pending: its columns over eight skeleton rows. */
 export function LoadingTable({ shape }: { shape: ListShape }) {
-  const cell = (r: { key: string }) => (
-    <TwoLines
-      first={<Skeleton width="100%" height={layout.valueSkeleton.height} index={Number(r.key)} />}
-      second={" "}
-    />
-  );
   const keys: (keyof typeof widths)[] =
     shape === "stacked"
       ? ["account"]
       : shape === "tight"
         ? ["account", "status", "session", "weekly"]
         : ["account", "status", "session", "weekly", "recovery", "requests"];
-  const columns: TableColumn<{ key: string }>[] = keys.map((key) => ({
+  const columns = keys.map((key) => ({
     key,
     header: headers[key](),
-    width: shape === "stacked" ? share(1) : widths[key],
-    renderCell: cell,
+    width: shape === "stacked" ? listColumns.stacked : widths[key],
   }));
-  return (
-    <VStack gap={0} aria-busy aria-label={t("accounts.page.loading")}>
-      <Table
-        data={placeholders}
-        columns={columns}
-        idKey="key"
-        density={roles.table.density}
-        dividers="rows"
-      />
-    </VStack>
-  );
+  return <ListSkeleton label={t("accounts.page.loading")} columns={columns} />;
 }

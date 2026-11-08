@@ -168,7 +168,7 @@ function MoreActions(props: PanelProps) {
   const items: DropdownMenuOption[] = [...rest.map(item), { type: "divider" }, item(remove)];
   return (
     <MoreMenu
-      label={t("accounts.actions.more")}
+      label={t("app.list.moreActions")}
       variant="secondary"
       size="sm"
       alignment="end"

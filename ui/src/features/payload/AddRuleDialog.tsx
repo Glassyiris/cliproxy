@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { VStack } from "@astryxdesign/core/Layout";
-import { Link } from "@astryxdesign/core/Link";
 import { Selector } from "@astryxdesign/core/Selector";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -8,7 +7,6 @@ import { FormDialog } from "../../components/FormDialog.tsx";
 import { t } from "../../lib/i18n.ts";
 import { kindMeaning, paramsMessage } from "./words.ts";
 import { kinds, parseParams, protocols, type Kind, type Rule } from "./rules.ts";
-import { editHref } from "./useRules.ts";
 
 // Selector holds no empty value, so "Any protocol" has a name of its own.
 const ANY = "any";
@@ -20,7 +18,7 @@ const protocolOptions = () => [
   ...protocols.map((p) => ({ value: p, label: p })),
 ];
 
-/** The kind picker; a kind whose stored value is not a list says so and points at Configuration. */
+/** The kind picker; a kind whose stored value is not a list says so. */
 function KindField({
   kind,
   blocked,
@@ -31,20 +29,15 @@ function KindField({
   onChange: (kind: Kind) => void;
 }) {
   return (
-    <VStack gap={1}>
-      <Selector
-        label={t("payload.add.kind")}
-        value={kind}
-        options={kindOptions()}
-        status={
-          blocked
-            ? { type: "error", message: t("payload.group.storedNotList", { kind }) }
-            : undefined
-        }
-        onChange={(value) => onChange(value as Kind)}
-      />
-      {blocked && <Link href={editHref}>{t("payload.page.editLink")}</Link>}
-    </VStack>
+    <Selector
+      label={t("payload.add.kind")}
+      value={kind}
+      options={kindOptions()}
+      status={
+        blocked ? { type: "error", message: t("payload.group.storedNotList", { kind }) } : undefined
+      }
+      onChange={(value) => onChange(value as Kind)}
+    />
   );
 }
 

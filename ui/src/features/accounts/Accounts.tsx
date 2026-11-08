@@ -25,14 +25,13 @@ import { FileInput } from "@astryxdesign/core/FileInput";
 import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { Selector } from "@astryxdesign/core/Selector";
-import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useConnectAccount } from "../../app/connect-entry.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useQuota } from "../../app/QuotaProvider.tsx";
 import { useCredentials, usePlugins } from "../../app/serverQueries.ts";
 import { useHashParams, useHashRoute } from "../../app/useHashRoute.ts";
+import { CountedSelector } from "../../components/CountedSelector.tsx";
 import { MissingActions, useAvailable } from "../../components/MissingActions.tsx";
 import { useListShape, type ListShape } from "../../components/listShape.ts";
 import { ReadError } from "../../components/ReadError.tsx";
@@ -206,25 +205,6 @@ function useCollection(
   return { scope, shown, needs, checking, checkAll };
 }
 
-/**
- * One line per option, its account count at the end: as a second line the count doubled every
- * option's height and the family menu scrolled (owner, 2026-11-08, screenshot).
- */
-function CountedOption({ label: text, count }: { label: string; count: number | undefined }) {
-  return (
-    <HStack gap={3} vAlign="center" wrap="nowrap" width="100%">
-      <StackItem size="fill">
-        <Text type={roles.textType.body}>{text}</Text>
-      </StackItem>
-      {count !== undefined && (
-        <Text type={roles.textType.supporting} color="secondary" hasTabularNumbers>
-          {count}
-        </Text>
-      )}
-    </HStack>
-  );
-}
-
 /** The family and status Selectors, each option with how many accounts it keeps. */
 function FilterSelectors({
   rows,
@@ -244,33 +224,24 @@ function FilterSelectors({
     search: filters.search,
   });
   const statusCounts = countBy(unfiltered, shows, hasShow);
-  const all = "\u0000all";
   return (
     <>
       {/* Drawn with one family too, so the row does not grow once the accounts arrive. */}
-      <Selector
-        label={t("accounts.filters.family")}
-        isLabelHidden
-        value={filters.provider || all}
-        onChange={(p) => setFilters({ provider: p === all ? "" : p })}
-        options={[
-          { value: all, label: t("accounts.filters.allFamilies") },
-          ...families.map((p) => ({
-            value: p,
-            label: label(p),
-          })),
-        ]}
-        renderOption={(o) => (
-          <CountedOption
-            label={o.label ?? o.value}
-            count={o.value === all ? undefined : (familyCounts.get(o.value) ?? 0)}
-          />
-        )}
+      <CountedSelector
+        label={t("app.list.family")}
+        allLabel={t("app.list.allFamilies")}
+        value={filters.provider}
+        onChange={(provider) => setFilters({ provider })}
+        options={families.map((p) => ({
+          value: p,
+          label: label(p),
+          count: familyCounts.get(p) ?? 0,
+        }))}
       />
-      <Selector
-        label={t("accounts.filters.status")}
-        isLabelHidden
-        value={filters.show || all}
+      <CountedSelector
+        label={t("app.list.status")}
+        allLabel={t("app.list.anyStatus")}
+        value={filters.show}
         onChange={(s) =>
           // Ready and low-quota accounts can serve, so the "needs attention" view would hide them.
           setFilters(
@@ -279,19 +250,11 @@ function FilterSelectors({
               : { show: "" },
           )
         }
-        options={[
-          { value: all, label: t("accounts.filters.anyStatus") },
-          ...shows.map((s) => ({
-            value: s,
-            label: showWord(s),
-          })),
-        ]}
-        renderOption={(o) => (
-          <CountedOption
-            label={o.label ?? o.value}
-            count={isShow(o.value) ? (statusCounts.get(o.value) ?? 0) : undefined}
-          />
-        )}
+        options={shows.map((s) => ({
+          value: s,
+          label: showWord(s),
+          count: statusCounts.get(s) ?? 0,
+        }))}
       />
     </>
   );
@@ -318,17 +281,14 @@ function FilterRow({
 }) {
   const views = (
     <SegmentedControl
-      label={t("accounts.filters.view")}
+      label={t("app.list.view")}
       value={filters.view}
       onChange={(view) => setFilters({ view: view === "all" ? "all" : "needs" })}
     >
-      <SegmentedControlItem
-        value="needs"
-        label={t("accounts.filters.needs", { count: collected.needs })}
-      />
+      <SegmentedControlItem value="needs" label={t("app.list.needs", { count: collected.needs })} />
       <SegmentedControlItem
         value="all"
-        label={t("accounts.filters.all", { count: collected.scope.length })}
+        label={t("app.list.all", { count: collected.scope.length })}
       />
     </SegmentedControl>
   );
@@ -394,7 +354,7 @@ function EmptyView({
       headingLevel={roles.heading.section}
       actions={
         <Button
-          label={t("accounts.empty.clear")}
+          label={t("app.list.clear")}
           onClick={() => setFilters({ provider: "", show: "", search: "" })}
         />
       }

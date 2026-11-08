@@ -4,7 +4,6 @@ export default {
     "payload.page.what": "payload rules",
     "payload.page.add": "Add rule",
     "payload.page.intro": "Rules match on model name and, optionally, protocol.",
-    "payload.page.editLink": "Edit in Settings",
 
     "payload.group.storedNotList":
       "The stored {kind} value is not a list, so rules cannot be added to it.",
@@ -63,7 +62,6 @@ export default {
     "payload.page.what": "请求体规则",
     "payload.page.add": "添加规则",
     "payload.page.intro": "规则按模型名匹配，也可以再按协议匹配。",
-    "payload.page.editLink": "在设置中编辑",
 
     "payload.group.storedNotList": "已存储的 {kind} 值不是列表，无法向其中添加规则。",
     "payload.row.remove": "移除",
@@ -118,7 +116,6 @@ export default {
     "payload.page.what": "請求內容規則",
     "payload.page.add": "新增規則",
     "payload.page.intro": "規則依模型名稱比對，也可以再依協定比對。",
-    "payload.page.editLink": "在設定中編輯",
 
     "payload.group.storedNotList": "已儲存的 {kind} 值不是清單，無法在其中新增規則。",
     "payload.row.remove": "移除",

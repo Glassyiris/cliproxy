@@ -1,19 +1,35 @@
 // The words for a group's state, in the current language.
 import { t } from "../../lib/i18n.ts";
 import type { Status } from "../../themes/site/index.ts";
-import { isFailing, type Entry } from "./groups.ts";
+import type { Entry } from "./groups.ts";
+import { failingKeys, showOf, type Show } from "./list.ts";
 
-/**
- * Whether a group serves: switched off, holding no key, every key failing in the window, some
- * failing (how many), or serving.
- */
+const lamps: Record<Show, Status> = {
+  ready: "ready",
+  someFailing: "cooling",
+  failing: "failing",
+  noKeys: "disabled",
+  disabled: "disabled",
+};
+
+/** The status filter's name for `show`. */
+export const showWord = (show: Show) =>
+  ({
+    ready: () => t("providers.status.serving"),
+    someFailing: () => t("providers.filters.someFailing"),
+    failing: () => t("providers.status.failing"),
+    noKeys: () => t("providers.status.noKeys"),
+    disabled: () => t("providers.status.disabled"),
+  })[show]();
+
+/** The lamp and the word beside it; some keys failing says how many. */
 export function statusOf(entry: Entry): { status: Status; label: string } {
-  if (entry.group.disabled) return { status: "disabled", label: t("providers.status.disabled") };
-  if (!entry.keys.length) return { status: "disabled", label: t("providers.status.noKeys") };
-  const failing = entry.keys.filter((k) => isFailing(k.traffic)).length;
-  if (failing === entry.keys.length)
-    return { status: "failing", label: t("providers.status.failing") };
-  if (failing)
-    return { status: "cooling", label: t("providers.status.someFailing", { count: failing }) };
-  return { status: "ready", label: t("providers.status.serving") };
+  const show = showOf(entry);
+  return {
+    status: lamps[show],
+    label:
+      show === "someFailing"
+        ? t("providers.status.someFailing", { count: failingKeys(entry) })
+        : showWord(show),
+  };
 }

@@ -5,9 +5,6 @@ import { isList, kinds, rulesOf, storedRules, type Group, type Kind } from "./ru
 const PAYLOAD_PATH = "requests/payload";
 const rulesPath = (kind: Kind) => `${PAYLOAD_PATH}/${kind}`;
 
-/** The rules as JSON in the Settings editor, for what the form here does not edit. */
-export const editHref = `#settings?section=advanced&key=${PAYLOAD_PATH}`;
-
 /** The config's payload rules as groups, and the one write that replaces a kind's list. */
 export function useRules() {
   const config = useConfig();

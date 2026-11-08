@@ -1,40 +1,41 @@
-// Provider keys, from the table-grouped template: which upstream groups serve, and which key has a
-// problem. The header holds the h1 with one line and the Add menu, the one primary action; the
-// table groups the key groups by provider family; a group's keys open in the detail panel.
-// Deviations from the template, each with its reason:
-// - No PowerSearch and no grouping options: the families are the only grouping, and a server
-//   holds a handful of groups, so the template's filters would filter nothing.
-// - The Add button is a menu of families: a group is stored under its family, and the families
-//   with no group yet are only reachable there (they have no header row to add from).
-// - Group header rows are drawn by a row plugin on the data-driven Table, not hand-composed rows
-//   with a styled colgroup (`style` is banned here; DESIGN.md "Not doing").
-// - The detail is the shared detail panel (`roles.detailPanel`), as on Accounts, not the
-//   template's own panel width.
-import { useCallback, useMemo, useState } from "react";
+// Provider keys, on the Accounts frame (table-inbox): which upstream key groups serve, and which
+// key has a problem. Both pages list upstream credentials, so they read as one design (owner,
+// 2026-11-08: 「帳號 / 供應商金鑰其實是差不多的東西為什麼不統一一下設計」). The header holds the h1, the
+// jump to Settings and the Add menu, the one primary action; the filter row holds the views, the
+// family and status Selectors and the search, as on Accounts; a group opens in the detail panel
+// (a bottom sheet on phones). Deviations from the template, each with its reason:
+// - The views and filters are Accounts' (SegmentedControl and Selectors in the filter row, not a
+//   TabList), for the reasons Accounts.tsx gives.
+// - The Add button is a menu of families: a group is stored under its family, so the family comes
+//   first.
+// - No selection and no batch band: a write replaces one family's list (`useGroupWrites.ts`), so
+//   a batch over several families would be several unrelated writes.
+// - The detail is the shared detail panel (`roles.detailPanel`), as on Accounts.
+import { useCallback, useMemo } from "react";
 import { Plus } from "lucide-react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Banner } from "@astryxdesign/core/Banner";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
-import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { VStack } from "@astryxdesign/core/Layout";
-import { Link } from "@astryxdesign/core/Link";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { usePreferences } from "../../app/preferences.ts";
 import { useApiKeyUsage, useConfig } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
-import { useListShape } from "../../components/listShape.ts";
+import { families, familyName, isFamily, type Family } from "../../components/keyFamilies.ts";
+import { useListShape, type ListShape } from "../../components/listShape.ts";
 import { ReadError } from "../../components/ReadError.tsx";
+import { SettingsLink } from "../../components/SettingsLink.tsx";
 import { ApiError } from "../../lib/api/client.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
-import { families, familyName, isFamily, type Family } from "../../components/keyFamilies.ts";
 import { AddGroupDialog } from "./AddGroupDialog.tsx";
 import { DeleteGroupDialog } from "./DeleteGroupDialog.tsx";
+import { FilterRow, ProviderList } from "./FilterRow.tsx";
 import { GroupPanel } from "./GroupPanel.tsx";
 import { entriesOf, entryId, type Entry } from "./groups.ts";
-import { ProviderTable, ProviderTableSkeleton } from "./ProviderTable.tsx";
+import { inScope, inView, isShow, showOf, type Filters } from "./list.ts";
 import { useGroupWrites } from "./useGroupWrites.ts";
 
 /** Every family's groups with their keys' traffic; undefined until the config is read. */
@@ -108,11 +109,31 @@ function UsageNotice({ usage }: { usage: ReturnType<typeof useSections>["usage"]
   );
 }
 
-/** The open group, kept in the hash as `group=<family>:<index>`. */
-function useOpenGroup(sections: [Family, Entry[]][] | undefined) {
+/**
+ * The filters, the open group and the family being added, kept in the hash
+ * (`#accounts?view=providers&provider=codex&list=all&show=failing&q=&group=<family>:<index>`,
+ * `add=<family>` so Connect can open the add form). `list` is the inbox view, as on Accounts.
+ */
+function useHashState(entries: Entry[] | undefined) {
   const [params, setParams] = useHashParams();
+  const filters: Filters = {
+    provider: isFamily(params.provider) ? params.provider : "",
+    view: params.list === "all" ? "all" : "needs",
+    show: isShow(params.show) ? params.show : "",
+    search: params.q ?? "",
+  };
+  const setFilters = (f: Partial<Filters>) =>
+    setParams(
+      {
+        ...("provider" in f ? { provider: f.provider || undefined } : {}),
+        ...(f.view ? { list: f.view === "all" ? "all" : undefined } : {}),
+        ...("show" in f ? { show: f.show || undefined } : {}),
+        ...("search" in f ? { q: f.search || undefined } : {}),
+      },
+      "replace",
+    );
   const openId = params.group ?? "";
-  const open = sections?.flatMap(([, list]) => list).find((e) => entryId(e) === openId);
+  const open = entries?.find((e) => entryId(e) === openId);
   const go = useCallback(
     (entry: Entry | null) => setParams({ group: entry ? entryId(entry) : undefined }, "replace"),
     [setParams],
@@ -121,42 +142,12 @@ function useOpenGroup(sections: [Family, Entry[]][] | undefined) {
     (entry: Entry) => go(entryId(entry) === openId ? null : entry),
     [go, openId],
   );
-  return { open, openId, go, onOpen };
-}
-
-/** The family whose add form is open, kept in the hash as `add=<family>` so Connect can open it. */
-function useAdding() {
-  const [params, setParams] = useHashParams();
   const adding = isFamily(params.add) ? params.add : null;
   const setAdding = useCallback(
     (family: Family | null) => setParams({ add: family ?? undefined }, "replace"),
     [setParams],
   );
-  return [adding, setAdding] as const;
-}
-
-/** The families folded shut; every family starts open. */
-function useCollapsed() {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<Family>>(() => new Set());
-  const toggle = useCallback(
-    (f: Family) =>
-      setCollapsed((s) => {
-        const next = new Set(s);
-        if (!next.delete(f)) next.add(f);
-        return next;
-      }),
-    [],
-  );
-  return [collapsed, toggle] as const;
-}
-
-function Meta() {
-  return (
-    <Link href="#settings?section=advanced&key=api-keys" type="supporting">
-      {t("providers.page.edit")}
-      <Icon icon="chevronRight" size="sm" />
-    </Link>
-  );
+  return { filters, setFilters, open, openId, go, onOpen, adding, setAdding };
 }
 
 function Dialogs({
@@ -195,43 +186,74 @@ function Dialogs({
   );
 }
 
-export default function ProviderKeys() {
+/** Everything the page reads and keeps, so the frame below only lays it out. */
+function useProviderPage(listShape: ListShape, focusFirst: () => void) {
   const action = useAction();
   const { config, usage, sections } = useSections();
-  const { open, openId, go, onOpen } = useOpenGroup(sections);
-  const [adding, setAdding] = useAdding();
-  const [collapsed, onToggleFamily] = useCollapsed();
-  const [listRef, listShape] = useListShape();
-  const { isMobile } = useAppShellMobile();
+  const entries = useMemo(() => sections?.flatMap(([, list]) => list), [sections]);
+  const hash = useHashState(entries);
+  const { filters } = hash;
   const byFamily = useMemo(() => new Map(sections ?? []), [sections]);
   const configured = useMemo(() => new Set(byFamily.keys()), [byFamily]);
   const writes = useGroupWrites(
     action,
     (f) => (config.data ? (byFamily.get(f)?.map((e) => e.group) ?? []) : undefined),
     (f, i) => byFamily.get(f)?.[i]?.name ?? "",
-    () => listRef.current?.querySelector<HTMLElement>("tbody tr[tabindex]")?.focus(),
+    focusFirst,
   );
-  const addMenu = sections && <AddMenu configured={configured} onPick={setAdding} />;
+  const { provider, show, search, view } = filters;
+  const scope = useMemo(
+    () => inScope(entries ?? [], { provider, show, search }),
+    [entries, provider, show, search],
+  );
+  const shown = useMemo(() => inView(scope, view), [scope, view]);
+  const needs = scope.filter((e) => showOf(e) !== "ready").length;
+  const { isMobile } = useAppShellMobile();
+  const shape: ListShape = isMobile ? "stacked" : listShape;
+  return {
+    ...{ action, config, usage, entries, configured, writes, scope, shown, needs, isMobile, shape },
+    ...hash,
+  };
+}
+
+export type Page = ReturnType<typeof useProviderPage>;
+
+export default function ProviderKeys() {
+  const [listRef, listShape] = useListShape();
+  const page = useProviderPage(listShape, () =>
+    listRef.current?.querySelector<HTMLElement>("tbody tr[tabindex]")?.focus(),
+  );
+  const { config, usage, entries, open, go, writes, isMobile } = page;
+  const addMenu = entries && <AddMenu configured={page.configured} onPick={page.setAdding} />;
   const panel = open && {
     label: t("providers.panel.label", { name: open.name }),
     content: (
       <GroupPanel
         key={entryId(open)}
         entry={open}
-        busy={action.busy}
+        busy={page.action.busy}
+        toggling={writes.toggling === entryId(open)}
         onAction={writes.press}
         onClose={() => go(null)}
       />
     ),
     onClose: () => go(null),
   };
+  // Drawn while the config loads too, so the rows land where the skeleton was.
+  const band = (config.isPending || !!entries?.length) && <FilterRow page={page} />;
   return (
     <PageFrame
       title={t("providers.page.title")}
       width="full"
-      meta={<Meta />}
-      actions={!!sections?.length && addMenu}
+      actions={
+        <>
+          <SettingsLink />
+          {/* The empty state carries Add itself, so the page keeps one primary action. */}
+          {!!entries?.length && addMenu}
+        </>
+      }
       panel={panel}
+      toolbar={!isMobile && band}
     >
       {config.isError && (
         <ReadError
@@ -241,33 +263,14 @@ export default function ProviderKeys() {
         />
       )}
       <UsageNotice usage={usage} />
+      {isMobile && band}
       <VStack gap={0} ref={listRef}>
-        {config.isPending && <ProviderTableSkeleton />}
-        {sections?.length === 0 && (
-          <EmptyState
-            title={t("providers.empty.title")}
-            headingLevel={roles.heading.section}
-            actions={addMenu}
-          />
-        )}
-        {!!sections?.length && (
-          <ProviderTable
-            sections={sections}
-            collapsed={collapsed}
-            onToggleFamily={onToggleFamily}
-            openId={openId}
-            onOpen={onOpen}
-            trafficPending={usage.isPending}
-            toggling={writes.toggling}
-            onAction={writes.press}
-            shape={isMobile ? "stacked" : listShape}
-          />
-        )}
+        <ProviderList page={page} addMenu={addMenu} />
       </VStack>
       <Dialogs
-        adding={adding}
-        onAdded={() => setAdding(null)}
-        busy={action.busy}
+        adding={page.adding}
+        onAdded={() => page.setAdding(null)}
+        busy={page.action.busy}
         writes={writes}
         onDeleted={() => go(null)}
       />

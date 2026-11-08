@@ -1,6 +1,7 @@
 // Payload rules tab, from the `table-grouped` template: which requests get changed, and how. The
-// template's LayoutHeader is PageFrame's, with the search in its filter row; rules group by the
-// model they match and a rule opens in the detail panel (a bottom sheet on phones).
+// template's LayoutHeader is PageFrame's, with the search in its filter row and the page's one jump
+// to Settings before the primary action, as on Provider keys; rules group by the model they match
+// and a rule opens in the detail panel (a bottom sheet on phones).
 // Deviations from the template:
 // - No PowerSearch and no "View options" group-by popover: rules group by model only, and a plain
 //   search over model names is the one filter the rules need.
@@ -13,12 +14,12 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
-import { Link } from "@astryxdesign/core/Link";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
+import { SettingsLink } from "../../components/SettingsLink.tsx";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { AddRuleDialog } from "./AddRuleDialog.tsx";
@@ -27,7 +28,7 @@ import { RulePanel } from "./RulePanel.tsx";
 import { groupName, RuleTable, type RuleGroup } from "./RuleTable.tsx";
 import { groupByModel, type Group } from "./rules.ts";
 import { useRemoveRule } from "./useRemoveRule.ts";
-import { editHref, useRules } from "./useRules.ts";
+import { useRules } from "./useRules.ts";
 
 const search = (groups: RuleGroup[], query: string) => {
   const q = query.trim().toLowerCase();
@@ -42,7 +43,6 @@ function NotListBanners({ groups }: { groups: Group[] }) {
         key={g.kind}
         status="warning"
         title={t("payload.group.storedNotList", { kind: g.kind })}
-        endContent={<Link href={editHref}>{t("payload.page.editLink")}</Link>}
       />
     ));
 }
@@ -94,7 +94,7 @@ function Body({ page, addButton }: { page: Page; addButton: ReactNode }) {
   return (
     <>
       <Text type={roles.textType.supporting} color="secondary">
-        {t("payload.page.intro")} <Link href={editHref}>{t("payload.page.editLink")}</Link>
+        {t("payload.page.intro")}
       </Text>
       {config.isError && (
         <ReadError
@@ -180,7 +180,12 @@ export default function PayloadRules() {
           </Text>
         )
       }
-      actions={hasRules ? addButton : undefined}
+      actions={
+        <>
+          <SettingsLink />
+          {hasRules && addButton}
+        </>
+      }
       toolbar={
         (page.config.isPending || hasRules) && (
           <TextInput
