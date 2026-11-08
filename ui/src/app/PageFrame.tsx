@@ -12,9 +12,8 @@
 // route's title, tabs and controls; inside a dialog, the dialog's frame draws the title, pins the
 // filter row under it and the footer at its foot, and scrolls the controls and body between.
 
-import { useContext, type ReactNode } from "react";
+import { lazy, Suspense, useContext, type ReactNode } from "react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
-import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import {
   HStack,
@@ -31,6 +30,11 @@ import { t } from "../lib/i18n.ts";
 import { layout } from "../themes/site/layout.ts";
 import { roles } from "../themes/site/roles.ts";
 import { PageHostContext, type PageHost } from "./pageHost.ts";
+
+// Only a phone shows the detail panel as a sheet, so the desktop never loads it.
+const BottomSheet = lazy(() =>
+  import("@astryxdesign/core/BottomSheet").then((m) => ({ default: m.BottomSheet })),
+);
 
 /**
  * The open detail of a row; the page closes it by no longer passing it. Without `onClose` it is a
@@ -154,14 +158,16 @@ export function PageFrame(props: FrameProps) {
         }
       />
       {isMobile && (
-        <BottomSheet
-          isOpen={!!panel}
-          onOpenChange={(open) => !open && panel?.onClose?.()}
-          label={panel?.label ?? ""}
-          height={roles.detailSheet.height}
-        >
-          {panel?.content}
-        </BottomSheet>
+        <Suspense fallback={null}>
+          <BottomSheet
+            isOpen={!!panel}
+            onOpenChange={(open) => !open && panel?.onClose?.()}
+            label={panel?.label ?? ""}
+            height={roles.detailSheet.height}
+          >
+            {panel?.content}
+          </BottomSheet>
+        </Suspense>
       )}
     </>
   );

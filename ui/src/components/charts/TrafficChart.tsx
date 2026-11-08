@@ -1,12 +1,9 @@
-import { lazy, Suspense, useEffect } from "react";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import type { Buckets } from "../../lib/credentials.ts";
 import { chartPlot } from "../../themes/site/charts.ts";
 import { ChartFrame } from "./ChartFrame.tsx";
-import { loadedPlots, loadPlots } from "./loadPlots.ts";
+import { usePlots } from "./loadPlots.ts";
 import type { Names } from "./plots.tsx";
-
-const LazyPlot = lazy(() => loadPlots().then((plots) => ({ default: plots.TrafficPlot })));
 
 /**
  * Requests in the server's ten-minute buckets with failures marked, as the dashboard-alert-rail
@@ -31,19 +28,10 @@ export function TrafficChart({
   summary: string;
   loading?: boolean;
 }) {
-  useEffect(() => void loadPlots(), []);
-  const plots = loadedPlots();
+  const plots = usePlots(!loading);
   const props = { categories, buckets, names };
   const placeholder = <Skeleton />;
-  const plot = loading ? (
-    placeholder
-  ) : plots ? (
-    <plots.TrafficPlot {...props} />
-  ) : (
-    <Suspense fallback={placeholder}>
-      <LazyPlot {...props} />
-    </Suspense>
-  );
+  const plot = loading || !plots ? placeholder : <plots.TrafficPlot {...props} />;
   return (
     <ChartFrame
       label={label}

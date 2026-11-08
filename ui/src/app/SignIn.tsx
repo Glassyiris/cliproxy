@@ -16,6 +16,7 @@ import { t } from "../lib/i18n.ts";
 import { repository } from "../lib/repository.ts";
 import { layout } from "../themes/site/layout.ts";
 import { roles } from "../themes/site/roles.ts";
+import { preloadSignedIn } from "./chunks.ts";
 import { PreferenceMenus } from "./PreferenceMenus.tsx";
 import { useSession } from "./Session.tsx";
 import { useDocumentTitle } from "./useDocumentTitle.ts";
@@ -116,6 +117,8 @@ function useSubmit(input: RefObject<HTMLInputElement | null>) {
       return;
     }
     pending.current = true;
+    // The shell loads while the key is checked.
+    preloadSignedIn();
     setBusy(true);
     setFailure("");
     try {
@@ -165,6 +168,8 @@ export function SignIn() {
                 kind="sign-in"
                 secret={secret}
                 onChange={(value) => {
+                  // Typing a key is the sign that the shell will be needed.
+                  preloadSignedIn();
                   setSecret(value);
                   if (failure) setFailure("");
                 }}

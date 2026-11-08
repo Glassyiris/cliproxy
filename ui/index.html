@@ -8,6 +8,11 @@
     <meta name="darkreader-lock" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>cliproxy-rs</title>
+    <!-- The Figtree faces every first screen draws (src/themes/site/index.ts), fetched with the
+         entry instead of after the stylesheet and the first render ask for them. -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/node_modules/@fontsource/figtree/files/figtree-latin-400-normal.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/node_modules/@fontsource/figtree/files/figtree-latin-500-normal.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/node_modules/@fontsource/figtree/files/figtree-latin-600-normal.woff2" />
     <!-- Before first paint: the stored theme, palette and language (src/app/preferences.ts), else
          the system's and the default palette. -->
     <script>

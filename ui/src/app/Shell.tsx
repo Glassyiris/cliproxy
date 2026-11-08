@@ -34,10 +34,11 @@ import { layout } from "../themes/site/layout.ts";
 import { roles } from "../themes/site/roles.ts";
 import { PageDialog, useDialogParam } from "./pages/PageDialog.tsx";
 import { PageWarning } from "./Notices.tsx";
-import { FooterPreferences } from "./PreferenceMenus.tsx";
+import { ColorModeToggle } from "./PreferenceMenus.tsx";
 import { usePreferences } from "./preferences.ts";
 import { QueryBoundary } from "./QueryBoundary.tsx";
 import { destinations, routes, type PageRoute } from "./routes.ts";
+import { SettingsButton } from "./settings/SettingsDialog.tsx";
 import { shortcuts } from "./settings/ShortcutsPanel.tsx";
 import { useSession } from "./Session.tsx";
 import { useDocumentTitle } from "./useDocumentTitle.ts";
@@ -95,6 +96,19 @@ function ConnectionItem() {
         endContent={<StatusDot variant={lampVariant[status]} label={state} />}
       />
     </Popover>
+  );
+}
+
+/**
+ * The side nav's footer icon row, beside its collapse button: the colour-mode toggle and the
+ * settings button. `footerIcons` is the slot SideNav also stacks in the collapsed rail.
+ */
+function FooterPreferences() {
+  return (
+    <>
+      <ColorModeToggle iconSize="sm" />
+      <SettingsButton />
+    </>
   );
 }
 

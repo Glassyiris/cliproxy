@@ -167,7 +167,8 @@ export function Attention({
               {[0, 1, 2].map((i) => (
                 <MetricCard
                   key={i}
-                  label=""
+                  // A held line: the label row keeps the height a card's title gives it.
+                  label={"\u00a0"}
                   icon="clock"
                   value={<LineSkeleton role="metric" index={i} />}
                   detail={<LineSkeleton role="supporting" index={i} />}

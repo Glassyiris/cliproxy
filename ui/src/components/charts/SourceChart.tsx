@@ -1,11 +1,8 @@
-import { lazy, Suspense, useEffect } from "react";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { chartPlot } from "../../themes/site/charts.ts";
 import { ChartFrame } from "./ChartFrame.tsx";
-import { loadedPlots, loadPlots } from "./loadPlots.ts";
+import { usePlots } from "./loadPlots.ts";
 import type { SourceNames, SourceRow } from "./plots.tsx";
-
-const LazyPlot = lazy(() => loadPlots().then((plots) => ({ default: plots.SourcePlot })));
 
 /**
  * Traffic sources compared by requests, busiest first, one bar each in a single series colour; the
@@ -27,18 +24,9 @@ export function SourceChart({
   summary: string;
   loading?: boolean;
 }) {
-  useEffect(() => void loadPlots(), []);
-  const plots = loadedPlots();
+  const plots = usePlots(!loading);
   const placeholder = <Skeleton />;
-  const plot = loading ? (
-    placeholder
-  ) : plots ? (
-    <plots.SourcePlot rows={rows} names={names} />
-  ) : (
-    <Suspense fallback={placeholder}>
-      <LazyPlot rows={rows} names={names} />
-    </Suspense>
-  );
+  const plot = loading || !plots ? placeholder : <plots.SourcePlot rows={rows} names={names} />;
   return (
     <ChartFrame label={label} summary={summary} plot={chartPlot.sources(rows.length)}>
       {plot}

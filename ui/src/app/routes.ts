@@ -1,4 +1,4 @@
-import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { createElement, lazy, useState, type ComponentType } from "react";
 import type { IconProps } from "@astryxdesign/core/Icon";
 import {
   Activity,
@@ -13,6 +13,7 @@ import {
   Users,
 } from "lucide-react";
 import { t } from "../lib/i18n.ts";
+import { PageLoadError, pageChunks, type Chunk } from "./chunks.ts";
 
 type RouteView = { id: string; title(): string; icon: IconProps["icon"] };
 
@@ -22,7 +23,7 @@ export type PageRoute = {
   title(): string;
   /** A semantic icon name from the theme or an icon component. */
   icon: IconProps["icon"];
-  page: LazyExoticComponent<ComponentType>;
+  page: ComponentType;
   /**
    * The pages grouped under this route in the side nav, each `#<id>?view=<view>`; the first has
    * no `?view=`. A route with views is a collapsible category; one without is a single item.
@@ -38,18 +39,22 @@ export type PageRoute = {
   preload(): Promise<unknown>;
 };
 
-/** A page chunk failed to load. React.lazy keeps the rejection, so only a reload fetches it again. */
-export class PageLoadError extends Error {}
-
-function page(load: () => Promise<{ default: ComponentType }>) {
+function page(source: Chunk<{ default: ComponentType }>) {
+  const Lazy = lazy(() =>
+    source.load().catch((cause: unknown) => {
+      throw new PageLoadError("Page chunk failed to load", { cause });
+    }),
+  );
+  // A chunk already in renders at once (chunks.ts); the choice is kept for the visit, so a chunk
+  // arriving later does not remount the page.
+  function Page() {
+    const [shown] = useState(() => source.loaded()?.default ?? Lazy);
+    return createElement(shown);
+  }
   return {
-    page: lazy(() =>
-      load().catch((cause: unknown) => {
-        throw new PageLoadError("Page chunk failed to load", { cause });
-      }),
-    ),
+    page: Page,
     // A failed prefetch is retried by the visit itself, which reports it.
-    preload: () => load().catch(() => undefined),
+    preload: () => source.load().catch(() => undefined),
   };
 }
 
@@ -61,7 +66,7 @@ export const routes: readonly PageRoute[] = [
     id: "overview",
     title: () => t("app.nav.overview"),
     icon: LayoutDashboard,
-    ...page(() => import("../features/overview/index.ts")),
+    ...page(pageChunks.overview),
   },
   {
     id: "accounts",
@@ -71,7 +76,7 @@ export const routes: readonly PageRoute[] = [
       { id: "accounts", title: () => t("app.nav.accounts"), icon: Users },
       { id: "providers", title: () => t("app.nav.providers"), icon: Key },
     ],
-    ...page(() => import("./pages/AccountsPage.tsx")),
+    ...page(pageChunks.accounts),
   },
   {
     id: "clients",
@@ -79,7 +84,7 @@ export const routes: readonly PageRoute[] = [
     navGroup: "settings",
     navTitle: () => t("keys.page.title"),
     icon: KeyRound,
-    ...page(() => import("./pages/ClientsPage.tsx")),
+    ...page(pageChunks.clients),
   },
   {
     id: "models",
@@ -89,7 +94,7 @@ export const routes: readonly PageRoute[] = [
       { id: "models", title: () => t("app.nav.models"), icon: Boxes },
       { id: "payload", title: () => t("app.nav.payload"), icon: Braces },
     ],
-    ...page(() => import("./pages/ModelsPage.tsx")),
+    ...page(pageChunks.models),
   },
   {
     id: "activity",
@@ -99,7 +104,7 @@ export const routes: readonly PageRoute[] = [
       { id: "usage", title: () => t("app.nav.usage"), icon: ChartColumn },
       { id: "logs", title: () => t("app.nav.logs"), icon: ScrollText },
     ],
-    ...page(() => import("./pages/ActivityPage.tsx")),
+    ...page(pageChunks.activity),
   },
   {
     id: "settings",
@@ -107,7 +112,7 @@ export const routes: readonly PageRoute[] = [
     navTitle: () => t("app.nav.config"),
     groupIcon: ServerCog,
     icon: "wrench",
-    ...page(() => import("./pages/SettingsPage.tsx")),
+    ...page(pageChunks.settings),
   },
 ];
 

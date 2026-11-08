@@ -22,11 +22,15 @@ import {
   storePalette,
   type ThemeMode,
 } from "./preferences.ts";
-import { QuotaProvider } from "./QuotaProvider.tsx";
+import { recall } from "../lib/keyStore.ts";
+import { loadedSignedIn, loadSignedIn, PageLoadError, preloadSignedIn } from "./chunks.ts";
+import { QueryBoundary } from "./QueryBoundary.tsx";
 import { queryClient } from "./queryClient.ts";
 import { SessionProvider, useSession } from "./Session.tsx";
-import { Shell } from "./Shell.tsx";
 import { SignIn } from "./SignIn.tsx";
+
+// A stored key is checked before anything shows; its shell and page load in the meantime.
+if (recall() !== null) preloadSignedIn();
 
 /** How long a stored-key check shows only the page background, so a quick one does not flash. */
 const QUIET_WAIT = 400;
@@ -46,14 +50,38 @@ function RestoreWait() {
   );
 }
 
+/**
+ * The shell once its chunk and the current page's are in; until then the restore wait goes on.
+ * State, not Suspense: a revealed boundary is held back for up to 300 ms. A failed load is thrown
+ * to the boundary around it.
+ */
+function SignedIn() {
+  const [shell, setShell] = useState(loadedSignedIn);
+  const [failed, setFailed] = useState<{ error: unknown } | null>(null);
+  useEffect(() => {
+    if (shell) return;
+    let live = true;
+    loadSignedIn().then(
+      (module) => live && setShell(module),
+      (cause: unknown) =>
+        live && setFailed({ error: new PageLoadError("Shell chunk failed to load", { cause }) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [shell]);
+  if (failed) throw failed.error;
+  return shell ? <shell.default /> : <RestoreWait />;
+}
+
 /** Shell or sign-in; neither shows while a stored key is checked, so the wrong one never flashes. */
 function Gate() {
   const { signedIn, restoring } = useSession();
   if (restoring) return <RestoreWait />;
   return signedIn ? (
-    <QuotaProvider>
-      <Shell />
-    </QuotaProvider>
+    <QueryBoundary resetKey="signed-in">
+      <SignedIn />
+    </QueryBoundary>
   ) : (
     <SignIn />
   );

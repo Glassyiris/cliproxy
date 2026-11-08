@@ -11,14 +11,13 @@ import { HStack } from "@astryxdesign/core/Layout";
 import { isLocale, localeName, locales, t } from "../lib/i18n.ts";
 import { isPalette } from "../themes/site/index.ts";
 import { usePreferences } from "./preferences.ts";
-import { SettingsButton } from "./settings/SettingsDialog.tsx";
 import { layout } from "../themes/site/layout.ts";
 
 /**
  * Flips light and dark relative to what is shown, as BoothDex's ColorModeToggle; until the first
  * press the page follows the system.
  */
-function ColorModeToggle({ iconSize = "md" }: { iconSize?: "sm" | "md" }) {
+export function ColorModeToggle({ iconSize = "md" }: { iconSize?: "sm" | "md" }) {
   const { mode, setMode } = usePreferences();
   const prefersDark = useMediaQuery("(prefers-color-scheme: dark)");
   const isDark = mode === "dark" || (mode === "system" && prefersDark);
@@ -95,18 +94,5 @@ export function PreferenceMenus() {
         <LanguageOptions />
       </DropdownMenu>
     </HStack>
-  );
-}
-
-/**
- * The side nav's footer icon row, beside its collapse button: the colour-mode toggle and the
- * settings button. `footerIcons` is the slot SideNav also stacks in the collapsed rail.
- */
-export function FooterPreferences() {
-  return (
-    <>
-      <ColorModeToggle iconSize="sm" />
-      <SettingsButton />
-    </>
   );
 }

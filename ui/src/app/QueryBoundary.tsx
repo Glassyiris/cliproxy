@@ -5,7 +5,7 @@ import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { VStack } from "@astryxdesign/core/Layout";
 import { t } from "../lib/i18n.ts";
-import { PageLoadError } from "./routes.ts";
+import { PageLoadError } from "./chunks.ts";
 
 /**
  * Catches a page that failed to render or to load its chunk, so the shell stays up and the page
