@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { dynamicKeys, hinted } from "../../i18n/config.ts";
-import { changes, diffText, groups, isValid, settingId, settings, shown } from "./settings.ts";
+import {
+  changes,
+  editDraft,
+  diffText,
+  groups,
+  isValid,
+  settingId,
+  settings,
+  shown,
+} from "./settings.ts";
 
 const setting = (path: string) => settings.find((s) => s.path === path)!;
 
@@ -54,4 +63,20 @@ test("every hint belongs to a setting", () => {
     hinted.filter((id) => !ids.has(id)),
     [],
   );
+});
+
+test("draft baseline survives a refetch and subsequent edits", () => {
+  const path = "server/port";
+  const first = editDraft({ server: { port: 0 } }, {}, path, 2);
+  const next = editDraft({ server: { port: 4 } }, first.values, path, 3, first.baseline);
+  assert.equal(changes({ server: { port: 4 } }, next.values, next.baseline)[0]?.before, 0);
+});
+
+test("each field keeps the value from its own first edit", () => {
+  const first = editDraft({ server: { port: 9000, host: "a" } }, {}, "server/port", 9001);
+  const latest = { server: { port: 9002, host: "b" } };
+  const second = editDraft(latest, first.values, "server/host", "c", first.baseline);
+  const pending = changes(latest, second.values, second.baseline);
+  assert.equal(pending.find((c) => c.setting.path === "server/port")?.before, 9000);
+  assert.equal(pending.find((c) => c.setting.path === "server/host")?.before, "b");
 });

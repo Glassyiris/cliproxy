@@ -174,10 +174,12 @@ export function isValid(setting: Setting, value: unknown): boolean {
  * what is saved is no change. An unset key counts as its default, so choosing the default writes
  * nothing.
  */
-export function changes(config: Config, draft: Draft) {
+export function changes(config: Config, draft: Draft, baseline: Draft = {}) {
   return settings.flatMap((setting) => {
     if (!Object.hasOwn(draft, setting.path)) return [];
-    const stored = storedValue(config, setting.path);
+    const stored = Object.hasOwn(baseline, setting.path)
+      ? baseline[setting.path]
+      : storedValue(config, setting.path);
     const before = stored === absent || stored === null ? setting.fallback : stored;
     const after = draft[setting.path];
     return JSON.stringify(before) === JSON.stringify(after)
@@ -199,4 +201,19 @@ export function diffText(list: readonly Change[], unset: string) {
       ];
     })
     .join("\n");
+}
+
+export function editDraft(
+  config: Config,
+  draft: Draft,
+  path: string,
+  value: unknown,
+  baseline: Draft = {},
+) {
+  return {
+    values: { ...draft, [path]: value },
+    baseline: Object.hasOwn(baseline, path)
+      ? baseline
+      : { ...baseline, [path]: storedValue(config, path) },
+  };
 }

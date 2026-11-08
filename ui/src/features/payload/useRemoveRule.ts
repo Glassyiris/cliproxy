@@ -27,7 +27,7 @@ export function useRemoveRule({
 }: {
   groups: Group[] | undefined;
   busy: boolean;
-  remove: (kind: Kind, index: number) => Promise<boolean>;
+  remove: (kind: Kind, index: number, confirmed: unknown) => Promise<boolean>;
   addRef: RefObject<HTMLButtonElement | null>;
 }) {
   const [target, setTarget] = useState<RemoveTarget | null>(null);
@@ -50,13 +50,14 @@ export function useRemoveRule({
       setTarget({
         kind,
         index,
+        confirmed: groups?.find((g) => g.kind === kind)?.entries[index],
         label: entryLabel(groups?.find((g) => g.kind === kind)?.entries[index]),
       });
     },
     confirm: async () => {
       if (!target || busy) return;
       const { kind, index } = target;
-      const ok = await remove(kind, index);
+      const ok = await remove(kind, index, target.confirmed);
       const dialog = dialogRef.current;
       setTarget(null);
       if (ok && dialog?.open)

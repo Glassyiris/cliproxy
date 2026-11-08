@@ -20,6 +20,7 @@ import { PageFrame } from "../../app/PageFrame.tsx";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
 import { SettingsLink } from "../../components/SettingsLink.tsx";
+import { removeConfirmed } from "../../lib/api/configRemoval.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { AddRuleDialog } from "./AddRuleDialog.tsx";
@@ -57,10 +58,10 @@ function usePayloadPage(addRef: RefObject<HTMLButtonElement | null>) {
     groups,
     busy: action.busy,
     addRef,
-    remove: async (kind, index) => {
+    remove: async (kind, index, confirmed) => {
       const ok = await change(
         kind,
-        (e) => e.filter((_, n) => n !== index),
+        (e) => removeConfirmed(e, index, confirmed, `requests/payload/${kind}`),
         t("payload.remove.removed"),
       );
       // Every later entry of the kind moves up one place, so the open key no longer names it.

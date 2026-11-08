@@ -1,5 +1,6 @@
 import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
+import { removeConfirmed } from "../../lib/api/configRemoval.ts";
 import { t } from "../../lib/i18n.ts";
 import {
   configPath,
@@ -47,8 +48,8 @@ export function useModelSettings() {
         row.kind === "alias"
           ? t("models.rules.aliasRemoved", { alias: row.alias ?? "" })
           : t("models.rules.allowed", { model: row.pattern });
-      const next = list.filter((_, i) => i !== row.index);
-      return write(configPath(section, row.channel), next, done);
+      const path = configPath(section, row.channel);
+      return write(path, () => removeConfirmed(list, row.index, row.confirmed, path), done);
     },
   };
 }

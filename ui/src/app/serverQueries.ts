@@ -69,17 +69,23 @@ export const useApiKeyUsage = ({ poll }: { poll?: boolean } = {}) =>
  * server copy changed (REQUIREMENTS intentional design), and reread the config either way, so a
  * refused write leaves the page showing the server copy. The compare baseline is the value at
  * `path` in the config this render shows, `null` and an absent key kept apart, so no page can
- * hand in a baseline that a read with a fallback has collapsed.
+ * hand in a baseline that a read with a fallback has collapsed. `next` may be a function, run
+ * inside the action, so a removal that finds its target gone fails as a refused write.
  */
 export function useConfigWrite(action: Action) {
   const queryClient = useQueryClient();
   const config = useConfig().data;
   // Before the first read there is nothing shown to write over; pages offer no write then.
-  return (path: string, next: unknown, success?: string) =>
+  return (path: string, next: unknown | (() => unknown), success?: string) =>
     config
       ? action.run(async () => {
           try {
-            await replaceConfigValue(path, storedValue(config, path), next, absent);
+            await replaceConfigValue(
+              path,
+              storedValue(config, path),
+              typeof next === "function" ? next() : next,
+              absent,
+            );
           } finally {
             await queryClient.invalidateQueries({ queryKey: serverKeys.config });
           }

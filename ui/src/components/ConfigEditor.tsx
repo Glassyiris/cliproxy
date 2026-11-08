@@ -388,7 +388,12 @@ function EditorFooter({
       <HStack gap={2} hAlign="end">
         {isReviewing ? (
           <>
-            <Button label={t("app.unsaved.keep")} variant="secondary" onClick={onBack} />
+            <Button
+              label={t("app.unsaved.keep")}
+              variant="secondary"
+              isDisabled={isSaving}
+              onClick={onBack}
+            />
             <Button
               label={t("app.editor.save")}
               variant="primary"

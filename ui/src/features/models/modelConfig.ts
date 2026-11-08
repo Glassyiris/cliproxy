@@ -118,6 +118,7 @@ export interface RuleRow extends Record<string, unknown> {
   kind: "alias" | "excluded";
   /** The position in the stored list, which the removal writes by. */
   index: number;
+  confirmed: unknown;
   /** The upstream model of an alias, or the excluded pattern. */
   pattern: string;
   alias?: string;
@@ -131,6 +132,7 @@ export function ruleRows(channel: Channel, aliases: Alias[], excluded: string[])
       channel,
       kind: "alias" as const,
       index,
+      confirmed: a,
       pattern: a.name,
       alias: a.alias,
       fork: a.fork,
@@ -140,6 +142,7 @@ export function ruleRows(channel: Channel, aliases: Alias[], excluded: string[])
       channel,
       kind: "excluded" as const,
       index,
+      confirmed: pattern,
       pattern,
     })),
   ];
@@ -151,10 +154,17 @@ export function matchesQuery(texts: (string | undefined)[], query: string) {
   return !q || texts.some((text) => text?.toLowerCase().includes(q));
 }
 
-/** Thousands as `128k`; null when the definition gives no limit. */
+/**
+ * Token counts as `200K`, `1.5K`, `1M` in every language, as model cards write them (a Chinese
+ * compact form would read 20万); null when the definition gives no limit.
+ */
 export function kilo(n: number) {
-  if (n >= 1000) return `${Math.round(n / 1000)}k`;
-  return n > 0 ? String(n) : null;
+  return n > 0
+    ? new Intl.NumberFormat("en", {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }).format(n)
+    : null;
 }
 
 /** DESIGN.md "Pages": a long list pages at 20 rows. */

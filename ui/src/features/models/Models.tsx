@@ -58,6 +58,7 @@ const allowRow = (row: ModelRow, excluded: string[]): RuleRow => ({
   kind: "excluded",
   index: excluded.indexOf(row.excludedBy ?? ""),
   pattern: row.excludedBy ?? "",
+  confirmed: row.excludedBy ?? "",
 });
 
 export default function Models() {

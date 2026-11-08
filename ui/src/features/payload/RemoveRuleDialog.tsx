@@ -3,7 +3,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { t } from "../../lib/i18n.ts";
 import type { Kind } from "./rules.ts";
 
-export type RemoveTarget = { kind: Kind; index: number; label: string };
+export type RemoveTarget = { kind: Kind; index: number; confirmed: unknown; label: string };
 
 /**
  * Names the rule by its kind and models. The last rule stays named while the dialog closes, and

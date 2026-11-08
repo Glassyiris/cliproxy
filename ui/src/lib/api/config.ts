@@ -21,12 +21,13 @@ const params = (path: string) => ({ path: fieldPath(path).slice("/config/".lengt
 /** One config value. With `fallback`, a key the file does not set reads as that value. */
 export async function readConfigValue<T = unknown>(
   path: string,
-  options: { signal?: AbortSignal; fallback?: T } = {},
+  options: { signal?: AbortSignal; fallback?: T; onHeaders?: (headers: Headers) => void } = {},
 ) {
   try {
     return await request<T>(routes.readConfigValue, {
       params: params(path),
       signal: options.signal,
+      onHeaders: options.onHeaders,
     });
   } catch (e) {
     if (
@@ -40,8 +41,8 @@ export async function readConfigValue<T = unknown>(
   }
 }
 
-const writeConfigValue = (path: string, value: unknown) =>
-  request<ConfigWrite>(routes.writeConfigValue, { params: params(path), body: value });
+const writeConfigValue = (path: string, value: unknown, ifMatch?: string) =>
+  request<ConfigWrite>(routes.writeConfigValue, { params: params(path), body: value, ifMatch });
 
 /** Nothing was written: the value on the server is no longer the one the page showed. */
 export class ConfigChangedError extends Error {
@@ -63,7 +64,23 @@ export async function replaceConfigValue(
   next: unknown,
   unset: unknown = Array.isArray(before) ? [] : {},
 ) {
-  const latest = await readConfigValue(path, { fallback: unset });
+  let etag: string | undefined;
+  const onHeaders = (headers: Headers) => {
+    etag = headers.get("ETag") ?? undefined;
+  };
+  let latest = await readConfigValue(path, { fallback: unset, onHeaders });
   if (!equal(latest, before)) throw new ConfigChangedError(path);
-  return writeConfigValue(path, next);
+  // Missing keys return 404 without ETag; read the file version before checking again.
+  if (!etag) {
+    await request<Config>(routes.readConfig, { onHeaders });
+    latest = await readConfigValue(path, { fallback: unset });
+    if (!equal(latest, before)) throw new ConfigChangedError(path);
+  }
+  if (!etag) throw new ConfigChangedError(path);
+  try {
+    return await writeConfigValue(path, next, etag);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 412) throw new ConfigChangedError(path);
+    throw e;
+  }
 }

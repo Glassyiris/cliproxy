@@ -96,6 +96,8 @@ export type Call = {
   /** Aborting it drops the request, so the latest read of a value wins. */
   signal?: AbortSignal;
   as?: "json" | "text" | "blob";
+  ifMatch?: string;
+  onHeaders?: (headers: Headers) => void;
 };
 
 function url(route: Route, call: Call) {
@@ -120,6 +122,7 @@ async function send(route: Route, call: Call) {
   const headers: Record<string, string> = { Authorization: `Bearer ${key}` };
   if (call.body !== undefined && !form)
     headers["Content-Type"] = yaml ? "application/yaml" : "application/json";
+  if (call.ifMatch) headers["If-Match"] = call.ifMatch;
   const timeout = AbortSignal.timeout(path.includes("/refresh") ? 300_000 : 30_000);
   let response: Response;
   try {
@@ -154,6 +157,7 @@ async function send(route: Route, call: Call) {
 export async function request<T>(route: Route, call: Call = {}): Promise<T> {
   const at = revision;
   const response = await send(route, call);
+  call.onHeaders?.(response.headers);
   const as = call.as ?? "json";
   let value;
   try {

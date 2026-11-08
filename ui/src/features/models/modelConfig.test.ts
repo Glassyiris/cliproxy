@@ -69,7 +69,7 @@ test("modelRows reads either limit spelling, its aliases and the pattern that hi
   });
   assert.equal(gemini.name, "G");
   assert.equal(gemini.excludedBy, undefined);
-  assert.equal(kilo(gemini.context), "1049k");
+  assert.equal(kilo(gemini.context), "1M");
   assert.equal(kilo(gemini.output), null);
   assert.equal(kilo(512), "512");
 });
@@ -90,6 +90,10 @@ test("wildcard matches as the server does", () => {
 
 test("ruleRows keeps each entry's stored index", () => {
   const rows = ruleRows("codex", [newAlias("m", "a", true)], ["x", "y"]);
+  assert.deepEqual(
+    rows.map((r) => r.confirmed),
+    [newAlias("m", "a", true), "x", "y"],
+  );
   assert.deepEqual(
     rows.map((r) => [r.kind, r.index, r.pattern, r.alias, r.fork]),
     [
@@ -112,4 +116,16 @@ test("pageOf clamps the page and slices 20 rows", () => {
   assert.equal(pageOf(rows, 9).page, 3);
   assert.equal(pageOf(rows, Number.NaN).page, 1);
   assert.deepEqual(pageOf([], 2), { page: 1, rows: [] });
+});
+
+test("token counts read the same in every language", async () => {
+  const { setLocale } = await import("../../lib/i18n.ts");
+  try {
+    assert.equal(kilo(1500), "1.5K");
+    assert.equal(kilo(1_048_576), "1M");
+    setLocale("zh-CN");
+    assert.equal(kilo(200_000), "200K");
+  } finally {
+    setLocale("en");
+  }
 });

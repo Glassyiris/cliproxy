@@ -34,6 +34,7 @@ import { ReviewDialog } from "./ReviewDialog.tsx";
 import { Control, Row } from "./SettingRow.tsx";
 import {
   changes,
+  editDraft,
   groups,
   settingId,
   settingsOf,
@@ -145,17 +146,22 @@ function useSaveChanges(onSaved: () => void) {
  * bumped when the draft is dropped, so the controls' typed text starts again from the file.
  */
 function useDraft(config: Config | undefined) {
-  const [draft, setDraft] = useState<Draft>({});
+  const [state, setDraft] = useState<{ values: Draft; baseline: Draft }>({
+    values: {},
+    baseline: {},
+  });
+  const draft = state.values;
   const [round, setRound] = useState(0);
-  const pending = config ? changes(config, draft) : [];
+  const pending = config ? changes(config, draft, state.baseline) : [];
   useUnsavedChanges(pending.length > 0);
   return {
     draft,
     round,
     pending,
-    set: (path: string, value: unknown) => setDraft((d) => ({ ...d, [path]: value })),
+    set: (path: string, value: unknown) =>
+      setDraft((d) => (config ? editDraft(config, d.values, path, value, d.baseline) : d)),
     reset: () => {
-      setDraft({});
+      setDraft({ values: {}, baseline: {} });
       setRound((n) => n + 1);
     },
   };

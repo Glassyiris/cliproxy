@@ -103,7 +103,12 @@ export function Advanced({ action, config }: { action: Action; config: Config | 
   const key = params.key;
   return (
     <VStack gap={0}>
-      <Entry name={YAML_KEY} value={null} onEdit={() => open(YAML_KEY)} />
+      <Entry
+        name={YAML_KEY}
+        purpose={t("config.yaml.label")}
+        value={null}
+        onEdit={() => open(YAML_KEY)}
+      />
       {sectionsOf(config).map((name) => (
         <Entry
           key={name}
