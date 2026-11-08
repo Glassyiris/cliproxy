@@ -14,6 +14,11 @@ type SessionState = {
 type Session = SessionState & {
   signIn: (secret: string) => Promise<void>;
   signOut: () => void;
+  /**
+   * Run `work` when the operator signs out, while the key is still set, so a page can end what it
+   * started on the server. A rejected key signs out without it. Returns the unregister function.
+   */
+  beforeSignOut: (work: () => void) => () => void;
 };
 
 const signedOut: SessionState = {
@@ -30,8 +35,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [state, setState] = useState(signedOut);
   const signedIn = useRef(false);
+  const [leaving] = useState(() => new Set<() => void>());
 
-  const signOut = useCallback(() => {
+  const dropSession = useCallback(() => {
     closeSession();
     signedIn.current = false;
     // Every cached answer belongs to the old key.
@@ -39,12 +45,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setState(signedOut);
   }, [queryClient]);
 
+  const signOut = useCallback(() => {
+    for (const work of leaving) work();
+    dropSession();
+  }, [leaving, dropSession]);
+
+  const beforeSignOut = useCallback(
+    (work: () => void) => {
+      leaving.add(work);
+      return () => void leaving.delete(work);
+    },
+    [leaving],
+  );
+
   const signIn = useCallback(
     async (secret: string) => {
       await openSession(secret, {
         unauthorized() {
           if (!signedIn.current) return;
-          signOut();
+          dropSession();
           notify("error", t("app.signIn.rejected"));
         },
         server(build) {
@@ -62,10 +81,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       signedIn.current = true;
       setState((s) => ({ ...s, signedIn: true }));
     },
-    [signOut],
+    [dropSession],
   );
 
-  const value = useMemo(() => ({ ...state, signIn, signOut }), [state, signIn, signOut]);
+  const value = useMemo(
+    () => ({ ...state, signIn, signOut, beforeSignOut }),
+    [state, signIn, signOut, beforeSignOut],
+  );
   return <SessionContext value={value}>{children}</SessionContext>;
 }
 
