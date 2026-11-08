@@ -17,7 +17,7 @@ Producers:
 
 - `perf-1`: the perf job with 1 auth file. `bench/gate.sh size` and `idle` append one JSON line per check to `$GATE_REPORT`; the job wraps the lines as above. Keys: `size.x86_64-unknown-linux-gnu.{binary,text,rodata,archive}_bytes`, `deps.x86_64-unknown-linux-gnu.duplicate_crates` and `idle.linux.1.{wakeups,cpu_ticks,threads,rss_kb}`.
 - `perf-2000`: the perf job with 2,000 auth files, `idle.linux.2000.*`.
-- `dashboard`: `node tools/size.mjs --json <file>` in the dashboard job. Keys: `initialJs`, `initialCss`, `largestLazyChunk` (with `detail`), `totalJs` and `totalCss`, gzip bytes of the committed `ui/dist`.
+- `dashboard`: `node tools/size.mjs --json <file>` in the dashboard job. Keys: `initialJs`, `initialCss`, `largestLazyChunk` (with `detail`), `totalJs` and `totalCss`, gzip bytes of `ui/dist` after the job's check rebuilt it; the job then fails unless that build matches the committed one.
 
 The workflow passes the renderer a context file:
 

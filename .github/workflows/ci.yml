@@ -10,7 +10,9 @@
 # branch push used to start a second run of every job for the same commit. Runs are
 # grouped per pull request (or per ref outside one), and a newer push cancels the older
 # run.
-# No job uploads an artifact: release.yml publishes every artifact of its run.
+# The only artifacts are the size report's metrics (ci-report-*, .github/ci/report), and
+# only pull requests and pushes to master upload them: release.yml calls this workflow and
+# publishes the build artifacts of its run.
 name: CI
 
 on:
@@ -60,6 +62,9 @@ jobs:
           fetch-depth: 2
       - name: Selector tests
         run: python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes.py'
+      # The size report's renderer (report.yml runs master's copy after each pull request run).
+      - name: Size report renderer tests
+        run: python3 -I -m unittest discover -s .github/ci/report -p 'test_render.py'
       - name: Select lanes
         id: select
         run: python3 .github/scripts/ci-lanes.py
@@ -80,7 +85,7 @@ jobs:
     timeout-minutes: 120
     # Each shard sets only its own output; an empty output does not replace another
     # leg's value. Outputs rather than artifacts, because release.yml calls this
-    # workflow and publishes every artifact of its run.
+    # workflow and publishes the artifacts of its run.
     outputs:
       counts-1: ${{ steps.counts.outputs.counts-1 }}
       counts-2: ${{ steps.counts.outputs.counts-2 }}
@@ -290,6 +295,23 @@ jobs:
         run: |
           npm ci
           npm run check
+      # The bundle sizes and ceilings for the size report comment, also when a gate above
+      # failed. size.mjs needs no packages; it exits 1 over a ceiling, which the check above
+      # already reports.
+      - name: Size report
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+        working-directory: ui
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-report"
+          node tools/size.mjs --json "$RUNNER_TEMP/ci-report/dashboard.json" || [ $? -eq 1 ]
+      - name: Upload the size report
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-report-dashboard
+          path: ${{ runner.temp }}/ci-report/dashboard.json
+          if-no-files-found: ignore
+          retention-days: 90
       - name: Rebuild
         working-directory: ui
         run: npm run build
@@ -339,9 +361,12 @@ jobs:
             exit 1
           fi
           cargo build --release --locked -p cliproxy
-      # Bytes and counts against bench/budgets.txt, never elapsed time.
+      # Bytes and counts against bench/budgets.txt, never elapsed time. GATE_REPORT collects
+      # every measurement and its ceiling for the size report comment.
       - name: Size
         if: matrix.auth-files == 1
+        env:
+          GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
         run: |
           name=cliproxy-ci-x86_64-unknown-linux-gnu
           mkdir -p "$name" && cp target/release/cliproxy README.md LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES "$name/"
@@ -350,7 +375,27 @@ jobs:
       - name: Idle
         env:
           AUTH_FILES: ${{ matrix.auth-files }}
+          GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
         run: bench/gate.sh idle linux target/release/cliproxy "$AUTH_FILES"
+      # Also after a failed gate; nothing when the build failed before any gate ran.
+      - name: Size report
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+        env:
+          LANE: perf-${{ matrix.auth-files }}
+          GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
+        run: |
+          [ -f "$GATE_REPORT" ] || exit 0
+          mkdir -p "$RUNNER_TEMP/ci-report"
+          jq -s --arg lane "$LANE" '{schema_version: 1, lane: $lane, metrics: .}' "$GATE_REPORT" \
+            > "$RUNNER_TEMP/ci-report/$LANE.json"
+      - name: Upload the size report
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-report-perf-${{ matrix.auth-files }}
+          path: ${{ runner.temp }}/ci-report/perf-${{ matrix.auth-files }}.json
+          if-no-files-found: ignore
+          retention-days: 90
 
   # Clippy over every target (tests, examples, benches) with warnings as errors, so code
   # that only builds on Windows, test-only code included, is held to the Linux rules.
