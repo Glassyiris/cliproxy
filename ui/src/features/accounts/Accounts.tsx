@@ -26,6 +26,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
+import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useConnectAccount } from "../../app/connect-entry.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
@@ -205,6 +206,25 @@ function useCollection(
   return { scope, shown, needs, checking, checkAll };
 }
 
+/**
+ * One line per option, its account count at the end: as a second line the count doubled every
+ * option's height and the family menu scrolled (owner, 2026-11-08, screenshot).
+ */
+function CountedOption({ label: text, count }: { label: string; count: number | undefined }) {
+  return (
+    <HStack gap={3} vAlign="center" wrap="nowrap" width="100%">
+      <StackItem size="fill">
+        <Text type={roles.textType.body}>{text}</Text>
+      </StackItem>
+      {count !== undefined && (
+        <Text type={roles.textType.supporting} color="secondary" hasTabularNumbers>
+          {count}
+        </Text>
+      )}
+    </HStack>
+  );
+}
+
 /** The family and status Selectors, each option with how many accounts it keeps. */
 function FilterSelectors({
   rows,
@@ -238,9 +258,14 @@ function FilterSelectors({
           ...families.map((p) => ({
             value: p,
             label: label(p),
-            description: t("accounts.filters.accounts", { count: familyCounts.get(p) ?? 0 }),
           })),
         ]}
+        renderOption={(o) => (
+          <CountedOption
+            label={o.label ?? o.value}
+            count={o.value === all ? undefined : (familyCounts.get(o.value) ?? 0)}
+          />
+        )}
       />
       <Selector
         label={t("accounts.filters.status")}
@@ -259,9 +284,14 @@ function FilterSelectors({
           ...shows.map((s) => ({
             value: s,
             label: showWord(s),
-            description: t("accounts.filters.accounts", { count: statusCounts.get(s) ?? 0 }),
           })),
         ]}
+        renderOption={(o) => (
+          <CountedOption
+            label={o.label ?? o.value}
+            count={isShow(o.value) ? (statusCounts.get(o.value) ?? 0) : undefined}
+          />
+        )}
       />
     </>
   );
