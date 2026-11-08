@@ -1,9 +1,6 @@
 # cliproxy-rs dashboard
 
-The management dashboard for cliproxy-rs, written in Svelte 5 with plain CSS. It talks to the v8 Management API defined by Go CLIProxyAPI, and it has two outputs built from one source tree:
-
-- `dist/` is embedded by the Rust binary (`crates/cpa-server/build.rs`) and served at `/management.html`.
-- `dist-panel/management.html` is one self-contained file for existing Go CLIProxyAPI servers. See [PANEL.md](PANEL.md).
+The management dashboard for cliproxy-rs, written in React 19 with the Astryx design system. It talks to the v8 Management API defined by Go CLIProxyAPI. `dist/` is the build output, checked in: the Rust binary embeds it (`crates/cpa-server/build.rs`) and serves it at `/management.html`. The dashboard ships only inside that binary.
 
 Product rules are in [PRODUCT.md](PRODUCT.md) and the visual system in [DESIGN.md](DESIGN.md).
 
@@ -13,28 +10,32 @@ Requires Node 22.12 or newer.
 
 ```sh
 npm ci
-npm run dev      # Vite on :5173, proxies /v8 to 127.0.0.1:8317 (override with CPA_BACKEND=...)
-npm run check    # svelte-check, 0 errors and 0 warnings expected
-npm test         # unit tests for src/core.ts
-npm run build    # dist/, dist-panel/, then the size budget
+npm run dev        # Vite on :5173, proxies /v8 and /healthz to 127.0.0.1:8317 (override with CPA_BACKEND=...)
+npm run typecheck  # tsc --noEmit, 0 errors expected
+npm test           # unit tests under src/ and scripts/private-auth-dir.test.mjs
+npm run build      # vite build into dist/
+npm run check:api  # src/lib/api/routes.ts against the Rust management router
 ```
 
-`npm run build` runs `vite build`, then `scripts/panel.mjs` (inlines JS, CSS, font and favicon into `dist-panel/management.html`, writes its SHA-256 to `dist-panel/management.html.sha256` and into PANEL.md), then `scripts/size.mjs`, which fails the build if gzip JavaScript exceeds 52,000 B or CSS exceeds 6,853 B. The ceilings began as the sizes of the dashboard this one replaced (42,642 B and 6,853 B); JavaScript was raised three times: for the beginner onboarding, for the Claude usage parser and plan limits, then for 0.4.2's Accounts page, Connect result and sign-in recovery.
+`ui/dist` is committed because the Rust binary embeds it at compile time. After a source change run `npm run build` and commit the result; CI rebuilds and fails when `ui/dist` differs from the source.
 
-Rebuild the UI before compiling Rust when UI sources change; `ui/dist` is checked in and embedded at compile time.
+`npm run check:api` reads `fn router` in `crates/cpa-server/src/management.rs` and fails (exit 1) when the registry names a route the server lacks, or when a `/v8/management` route has neither a registry entry nor a line with a reason in `tools/api-allowlist.json`. It exits 2 when the router uses a construct it cannot follow.
 
 ## Structure
 
+The React dashboard source. Code rules are in [CONVENTIONS.md](CONVENTIONS.md).
+
 | Path | Role |
 | --- | --- |
-| `src/api.ts` | Fetch wrapper. Holds the management key in memory and reports unimplemented routes (Go-style empty 404, 501, 405). |
-| `src/store.svelte.ts` | Shared state: session, server kind from version headers, config, credentials, plugins, capabilities, toasts, writes with stale checks. |
-| `src/core.ts` | Pure helpers: credential state, traffic buckets, usage records, quota windows, diffs. Tested in `src/core.test.ts`. |
-| `src/Load.svelte` | Loading, error, not-available and data states for one read. |
-| `src/Missing.svelte` | One line naming actions this server does not implement. |
-| `src/Grille.svelte` | The 20-bucket traffic grille. |
-| `src/Editor.svelte` | JSON or YAML editor with a reviewed diff and a reread before writing. |
-| `src/pages/*.svelte` | One component per screen. |
+| `src/main.tsx` | Entry. Loads Astryx's Chinese strings first when the page starts in Chinese, then renders `App`. |
+| `src/app/` | Providers, sign-in, the shell (`AppShell` and the side nav), the page frame `PageFrame.tsx`, the route table `routes.ts` with hash routing and one lazy chunk per page, the page error boundary, the theme and language switches. |
+| `src/features/<page>/` | One directory per screen: the page, its query hooks in `queries.ts`, tests. Now: `system`. |
+| `src/components/` | Parts used by two or more screens: the status lamp. |
+| `src/lib/api/` | One module per Management API area, one typed function per route; `routes.ts` is the registry `check:api` compares with the Rust router. |
+| `src/lib/` | The i18n runtime (`i18n.ts`), `notify()`, the session (sign-in, sign-in help, capability probes) and pure domain logic with tests. |
+| `src/i18n/` | Message catalogs, one per area: English in `<area>.ts`, ships with the app; the translations in `zh-CN/` and `zh-TW/`, each locale loaded on demand as one chunk through its `index.ts`. |
+| `src/themes/layers.css` | The cascade layer order, imported first: reset, Astryx components, our StyleX (`app`), theme. |
+| `src/themes/site/` | The one theme in two palettes: `siteTheme.ts` (Rosé Pine Moon, built to `site.*`) and `siteMainTheme.ts` (Rosé Pine, built to `site-main.*`, loaded on demand) are the sources, both extending `@astryxdesign/theme-neutral` with tokens only (fonts, icons and components are neutral's), rebuilt with `astryx theme build`. |
 
 ## Honest states
 
@@ -70,7 +71,6 @@ Config list writes reread the target first and refuse to write if it changed sin
 Both scripts are for disposable servers with fake credentials only: they edit configuration and credential files. Fixture requirements: management key `orb-dashboard-test-only`, a disabled fake Claude credential with email `operator@example.invalid`, routing strategy `round-robin`, and an empty `requests.payload.default`.
 
 - `node scripts/browser-check-rust.mjs [url] [capture-dir]` drives the dashboard with agent-browser against the Rust binary (or Go): nine screens in both themes, unsupported actions disabled on Rust, a payload rule written and removed, a YAML diff discarded, 390 px layout, and no key in storage.
-- `CHROME_PATH=... node scripts/panel-check-go.mjs [url] [capture-dir]` drives the single-file panel with Playwright against Go: all 13 screens in both themes, credential edits, a Codex OAuth start and cancel, config list writes, the section editor, request logs, the live usage view, phone layouts, and asserts that no request leaves the serving origin, Go is never probed, there are no console errors, and the key is not stored. `playwright-core` is a dev dependency for this script only; it downloads no browser.
 - `node scripts/fake-logins.mjs [port]` serves fake provider login endpoints (Claude, Codex, Kimi, Meta token, profile, device-code and key-mint routes) and a Claude usage endpoint that echoes its `Authorization` header. Fake tokens and `@example.invalid` emails only.
 - `scripts/login-harness/` is a test build of cliproxy-rs whose only change is `Options.login_base`, which points every provider login endpoint at the fake. It is never shipped. Build it with `cp ../../../Cargo.lock . && CARGO_TARGET_DIR=../../../target cargo build` inside that directory.
 - `CHROME_PATH=... node scripts/oauth-check.mjs <url> --mode fake` drives Claude and Codex sign-in through a pasted callback URL and Kimi and Meta through the device code against the harness, and checks each new credential appears and that a provider the server lacks gets an honest message. `--mode dead` runs against the shipped binary with a dead `requests.proxy-url` and checks that a pasted callback ends in an honest failure.
@@ -82,8 +82,12 @@ Both scripts are for disposable servers with fake credentials only: they edit co
 
 ## Security
 
-The management key lives in `src/api.ts` module memory and is cleared on sign-out; reloading signs out. Only the theme is stored. Plugin store descriptions are decoded as text, never inserted as HTML. Downloaded credential files and configuration previews contain secrets; treat them accordingly. Do not use the dashboard over plain HTTP across a network.
+The management key lives in `src/lib/api/client.ts` module memory and is cleared on sign-out; reloading signs out. Only the theme mode, the palette and the language are stored (`src/app/preferences.ts`), plus the first-run card's flags (`src/lib/first-run.ts`). Plugin store descriptions are decoded as text, never inserted as HTML. Downloaded credential files and configuration previews contain secrets; treat them accordingly. Do not use the dashboard over plain HTTP across a network.
 
 ## Fonts
 
-Host Grotesk (SIL Open Font License, `public/fonts/OFL.txt`), subset to Latin and weights 400–650 with fontTools.
+Neutral's own: Figtree (body and headings, SIL Open Font License 1.1) and the system monospace stack, as `@astryxdesign/theme-neutral` (MIT) sets them; the theme package bundles no font files and its `fonts.css` loads Figtree from Google Fonts at run time, so `src/themes/site/index.ts` imports the same weights (400 to 700) from `@fontsource/figtree` (OFL 1.1) instead and the dashboard makes no third-party request. CJK text uses the system fonts.
+
+## Colours
+
+Rosé Pine palette (MIT, https://github.com/rose-pine/palette), values unmodified in `src/themes/site/rosePine.ts`.

@@ -32,7 +32,7 @@ CI holds the binary to the numbers in [`bench/budgets.txt`](bench/budgets.txt), 
 
 To run the Linux gates locally, build with `cargo build --release -p cliproxy`, then run `bench/gate.sh size x86_64-unknown-linux-gnu target/release/cliproxy` and `bench/gate.sh idle linux target/release/cliproxy 1`. When a change needs more, raise the value in `bench/budgets.txt` and add a dated line above it that names the feature and its cost.
 
-The dashboard lives in `ui/` (Svelte 5). `npm ci`, `npm run check`, `npm test` and `npm run build` there; the build also checks the bundle size budget. See [ui/README.md](ui/README.md).
+The dashboard lives in `ui/` (React 19 and Astryx). `npm ci`, `npm run check`, `npm test` and `npm run build` there; the build also checks the bundle size budget. See [ui/README.md](ui/README.md).
 
 ## Pull requests
 

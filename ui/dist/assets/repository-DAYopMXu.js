@@ -1,0 +1,1 @@
+var e={url:`https://github.com/Glassyiris/cliproxy`,name:`Glassyiris/cliproxy`};export{e as t};

@@ -44,6 +44,7 @@ fn main() {
             "js" => "text/javascript; charset=utf-8",
             "css" => "text/css; charset=utf-8",
             "svg" => "image/svg+xml",
+            "woff" => "font/woff",
             "woff2" => "font/woff2",
             _ => "application/octet-stream",
         };
@@ -53,6 +54,16 @@ fn main() {
             path.to_str().unwrap()
         )
         .unwrap();
+        // The page is served at /management.html (the URL the Go dashboard used) and the build
+        // emits only index.html, so one file answers both.
+        if name == "/index.html" {
+            writeln!(
+                output,
+                "\"/management.html\" => Some((include_bytes!({:?}), {mime:?})),",
+                path.to_str().unwrap()
+            )
+            .unwrap();
+        }
     }
     output.push_str("_ => None, } }\n");
     std::fs::write(
