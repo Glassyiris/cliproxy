@@ -43,8 +43,9 @@ from `palette.json`, the highlight roles from `dist/css/rose-pine.css`; they liv
 finds Rosé Pine too colourful (owner, 2026-11-09: 「至少把中性主題加回來把，這個主題顏色太豐富了可能有人不喜歡」).
 `siteNeutralTheme.ts` builds `site-neutral` (in the entry) with the site's sizes, type scale
 and motion rule, and a few colours so it reads monochrome (owner, 2026-11-09: 「不太中性感覺」
-「難看的配色」): bar fills and chart volume take neutral's greys (#919191 light, #777777 dark)
-instead of core's blue-grey, and warning takes neutral's orange family (soft #ffc7a1 / #503424
+「難看的配色」): bar fills take neutral's greys (#919191 light, #777777 dark) instead of core's
+blue-grey, chart volume takes Astryx's categorical blue #0171E3 in both modes, as BoothDex's trend
+charts draw it (「這個統計圖死灰色還要改」, chose 「Astryx 藍」), and warning takes neutral's orange family (soft #ffc7a1 / #503424
 fill, #622700 / #ffb37e ink; light icons and dots core's #d66100) instead of its bright yellow
 #ffce2f. Accent, focus ring, error, success and info stay neutral's. Each override and its source
 value is commented in the file. The role table below is the Rosé Pine palettes'.

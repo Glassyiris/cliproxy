@@ -124,8 +124,9 @@ to both palettes.
 
 Neutral, the default palette (2026-11-09), computed from the built `site-neutral.css` values:
 body 18.59 light (on #f1f1f1) and 15.13 dark (on #262626), secondary 8.23 and 5.65, warning text
-10.27 and 8.65, the warning badge 7.70 and 6.46, chart volume and bar fills 3.15 (#919191 on
-white) and 3.85 (#777777 on #1b1b1b) against the 3:1 non-text limit. Two of neutral's own status
+10.27 and 8.65, the warning badge 7.70 and 6.46, bar fills 3.15 (#919191 on white) and 3.85
+(#777777 on #1b1b1b), chart volume 4.70 (#0171E3 on white) and 3.67 (on #1b1b1b), all against the
+3:1 non-text limit. Two of neutral's own status
 colours miss the 5:1 limit on the light page and stay unmodified (they pass WCAG AA):
 
 | Mode | Foreground on background | Ratio | Limit | Measured | Where | Owner ruling |

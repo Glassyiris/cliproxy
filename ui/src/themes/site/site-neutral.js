@@ -218,7 +218,7 @@ export const siteNeutralTheme = {
     "--size-element-sm": "32px",
     "--size-element-md": "36px",
     "--size-element-lg": "40px",
-    "--color-data-neutral": "light-dark(#919191, #777777)",
+    "--color-data-neutral": "light-dark(#0171E3, #0171E3)",
     "--color-icon-warning": "light-dark(#d66100, #ff9e55)"
   },
   localTokens: {
