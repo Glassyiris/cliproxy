@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Eye, Plug, Trash2 } from "lucide-react";
-import { Code } from "@astryxdesign/core/Code";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack } from "@astryxdesign/core/Layout";
 import { Table, type TableColumn } from "@astryxdesign/core/Table";
+import { Text } from "@astryxdesign/core/Text";
 import { loadingCell, placeholderRows, type LoadingRow } from "../../components/loadingRows.tsx";
 import { mask } from "../../lib/client-keys.ts";
 import { t } from "../../lib/i18n.ts";
@@ -74,7 +74,7 @@ export function KeyTable({
       key: "value",
       header: t("keys.table.key"),
       renderCell: loadingCell(({ value, index }: Key) => (
-        <Code>{shown.has(index) ? value : mask(value)}</Code>
+        <Text type={roles.textType.identifier}>{shown.has(index) ? value : mask(value)}</Text>
       )),
     },
     {
