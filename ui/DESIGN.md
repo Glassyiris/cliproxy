@@ -44,9 +44,11 @@ from `palette.json`, the highlight roles from `dist/css/rose-pine.css`; they liv
   `siteMainTheme.ts` builds `site-main` (loaded on demand when chosen), both with
   `astryx theme build`; the colour and type tokens are shared (`roseTokens`). Both modes are
   first-class, following the system by default with a manual switch.
-- Palette and mode are separate choices: the side nav has one menu for each (with language, in
-  its footer icon row), and the sign-in theme menu lists the modes, then the palettes. The choice
-  is stored like the mode and applied before the first render.
+- Palette and mode are separate choices. Mode is one click: a ghost icon button flips light and
+  dark relative to what is shown (BoothDex's ColorModeToggle), and until the first press the page
+  follows the system. Palette is a menu. Both sit in the side nav's footer icon row (with
+  language) and at the sign-in page's top end. The choice is stored and applied before the first
+  render.
 - Roles, the same for both palettes, following Rosé Pine's own usage table:
 
   | Dashboard role | Rosé Pine role |
@@ -116,7 +118,8 @@ built from the same template.
   lists every page grouped by section; SideNav has no search slot), GitHub (new tab) and Sign
   out.
 - Footer icon row (`SideNav footerIcons`, beside the collapse button): language, colour mode and
-  palette, each a ghost icon button with a tooltip opening a radio menu. BoothDex keeps these in
+  palette, each a ghost icon button with a tooltip; language and palette open a radio menu, the
+  colour mode flips on click. BoothDex keeps these in
   an `HStack` inside the footer section; here that row was wider than the collapsed rail and
   pushed every footer item out of it, and `footerIcons` is the slot SideNav stacks in the rail.
 - Phones (below Astryx `md`): AppShell's own phone bar and drawer, nothing hand-built; the bar

@@ -1,38 +1,35 @@
 import type { ReactNode } from "react";
-import { Contrast, Languages, Moon, Palette, Sun } from "lucide-react";
+import { Languages, Moon, Palette, Sun } from "lucide-react";
 import {
   DropdownMenu,
-  DropdownMenuDivider,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from "@astryxdesign/core/DropdownMenu";
 import { Icon, type IconProps } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { HStack } from "@astryxdesign/core/Layout";
 import { isLocale, localeName, locales, t } from "../lib/i18n.ts";
 import { isPalette } from "../themes/site/index.ts";
-import { usePreferences, type ThemeMode } from "./preferences.ts";
+import { usePreferences } from "./preferences.ts";
 
-const modeIcon = {
-  system: Contrast,
-  light: Sun,
-  dark: Moon,
-} as const satisfies Record<ThemeMode, IconProps["icon"]>;
-const isMode = (value: string): value is ThemeMode => value in modeIcon;
-
-/** The theme choices, as menu rows. */
-function ThemeOptions() {
+/**
+ * Flips light and dark relative to what is shown, as BoothDex's ColorModeToggle; until the first
+ * press the page follows the system.
+ */
+function ColorModeToggle({ iconSize }: { iconSize?: "sm" }) {
   const { mode, setMode } = usePreferences();
+  const prefersDark = useMediaQuery("(prefers-color-scheme: dark)");
+  const isDark = mode === "dark" || (mode === "system" && prefersDark);
+  const label = isDark ? t("app.theme.toLight") : t("app.theme.toDark");
   return (
-    <DropdownMenuRadioGroup
-      label={t("app.theme.label")}
-      value={mode}
-      onChange={(value) => isMode(value) && setMode(value)}
-    >
-      <DropdownMenuRadioItem value="system" label={t("app.theme.system")} icon={modeIcon.system} />
-      <DropdownMenuRadioItem value="light" label={t("app.theme.light")} icon={modeIcon.light} />
-      <DropdownMenuRadioItem value="dark" label={t("app.theme.dark")} icon={modeIcon.dark} />
-    </DropdownMenuRadioGroup>
+    <IconButton
+      label={label}
+      tooltip={label}
+      variant="ghost"
+      icon={<Icon icon={isDark ? Sun : Moon} size={iconSize} />}
+      onClick={() => setMode(isDark ? "light" : "dark")}
+    />
   );
 }
 
@@ -75,18 +72,16 @@ const trigger = (label: string, icon: IconProps["icon"]) => ({
   variant: "ghost" as const,
 });
 
-/** The theme (with palette) and language switches of the sign-in page, side by side at the page's top end. */
+/** The colour-mode, palette and language switches of the sign-in page, at the page's top end. */
 export function PreferenceMenus() {
-  const { mode } = usePreferences();
   return (
     <HStack gap={1} vAlign="center">
+      <ColorModeToggle />
       <DropdownMenu
-        button={trigger(t("app.theme.label"), modeIcon[mode])}
+        button={trigger(t("app.colors.label"), Palette)}
         hasChevron={false}
         alignment="end"
       >
-        <ThemeOptions />
-        <DropdownMenuDivider />
         <PaletteOptions />
       </DropdownMenu>
       <DropdownMenu
@@ -135,15 +130,12 @@ function FooterMenu({
  * which also stacks them in the collapsed rail; inside the footer section they overflowed it.
  */
 export function FooterPreferences() {
-  const { mode } = usePreferences();
   return (
     <>
       <FooterMenu label={t("app.locale.label")} icon={Languages}>
         <LanguageOptions />
       </FooterMenu>
-      <FooterMenu label={t("app.theme.label")} icon={modeIcon[mode]}>
-        <ThemeOptions />
-      </FooterMenu>
+      <ColorModeToggle iconSize="sm" />
       <FooterMenu label={t("app.colors.label")} icon={Palette}>
         <PaletteOptions />
       </FooterMenu>
