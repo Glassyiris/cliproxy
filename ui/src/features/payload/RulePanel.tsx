@@ -1,7 +1,6 @@
 // The open rule in the detail panel, as table-grouped's TaskDetailPanel: facts in a MetadataList,
-// then the rule's JSON read-only in a CodeBlock. Editing stays where it is today, in Settings'
-// config editor; the CodeMirror editor R5 adds for Settings is the one to replace this CodeBlock
-// once it can be shared.
+// then the rule's JSON read-only in a CodeBlock. Editing stays in Settings' config editor so
+// every change goes through its review and reread-and-compare.
 import { X } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fakeServer } from "./fake-server.test-support.ts";
+import { fakeServer } from "./fakeServer.testSupport.ts";
 fakeServer();
 const { ConfigChangedError } = await import("./config.ts");
 const { removeConfirmed } = await import("./configRemoval.ts");

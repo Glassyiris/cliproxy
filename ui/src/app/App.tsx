@@ -89,7 +89,6 @@ function Gate() {
 
 type ShownPalette = { name: Palette; theme: DefinedTheme };
 
-/** Providers, in order: data, Astryx strings, theme, preferences, toasts, session. */
 export function App({
   messages: initialMessages,
   palette: initialPalette,

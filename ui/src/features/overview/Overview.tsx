@@ -11,8 +11,7 @@
 // - Tiles: three judgements with one basis line each, no delta and no sparkline (the chart below
 //   has the series); at least layout.summaryTileMin wide, not 240, so a phone shows two per row.
 // - No alert rail: the reasons are a fixed, small set, so they are the nbcards admin's "Open work"
-//   cards under the tiles, one per reason with accounts, each linking to where it is fixed (owner,
-//   2026-11-08: 「這個既然固定了為什麼不換個佈局？」). The content takes the full width.
+//   cards under the tiles, one per reason with accounts, each linking to where it is fixed. The content takes the full width.
 // - Two chart cards as the template has, bar charts instead of line charts: requests per ten
 //   minutes with failures on top, and requests per source; the API reports no latency. Each card
 //   keeps its own height, aligned at the top.
@@ -25,11 +24,11 @@ import { useMemo } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
-import { useConnectAccount } from "../../app/connect-entry.ts";
+import { useConnectAccount } from "../../app/connectEntry.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useApiKeyUsage, useConfig, useCredentials } from "../../app/serverQueries.ts";
 import { ReadError } from "../../components/ReadError.tsx";
-import { readPath } from "../../lib/config-path.ts";
+import { readPath } from "../../lib/configPath.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { Attention } from "./Attention.tsx";

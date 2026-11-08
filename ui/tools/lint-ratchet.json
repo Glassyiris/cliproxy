@@ -1,53 +1,33 @@
 {
   "@typescript-eslint/no-base-to-string": {
-    "src/lib/api/fake-server.test-support.ts": 1,
+    "src/lib/api/fakeServer.testSupport.ts": 1,
     "src/lib/routing.ts": 1,
     "src/lib/time.ts": 1
-  },
-  "@typescript-eslint/no-explicit-any": {
-    "src/lib/compare.ts": 2,
-    "src/lib/config-path.ts": 2,
-    "src/lib/json.ts": 1
   },
   "@typescript-eslint/no-floating-promises": {
     "src/lib/quota.ts": 1
   },
-  "@typescript-eslint/no-unsafe-argument": {
-    "src/lib/compare.ts": 3,
-    "src/lib/credentials.ts": 6,
-    "src/lib/quota-windows.ts": 13
-  },
   "@typescript-eslint/no-unsafe-assignment": {
     "src/lib/api/client.ts": 1,
-    "src/lib/api/fake-server.test-support.ts": 1,
+    "src/lib/api/fakeServer.testSupport.ts": 1,
     "src/lib/api/proxy.ts": 1,
-    "src/lib/credentials.ts": 1,
-    "src/lib/quota-windows.ts": 11,
-    "src/lib/tool-setup.test.ts": 3
-  },
-  "@typescript-eslint/no-unsafe-call": {
-    "src/lib/quota-windows.ts": 1
+    "src/lib/toolSetup.test.ts": 3
   },
   "@typescript-eslint/no-unsafe-member-access": {
     "src/lib/api/client.ts": 4,
-    "src/lib/compare.ts": 2,
-    "src/lib/quota-windows.ts": 22,
-    "src/lib/tool-setup.test.ts": 5,
-    "src/lib/usage.ts": 3
+    "src/lib/toolSetup.test.ts": 5
   },
   "@typescript-eslint/no-unsafe-return": {
-    "src/lib/api/fake-server.test-support.ts": 1,
-    "src/lib/config-path.ts": 1,
-    "src/lib/quota-windows.ts": 1,
-    "src/lib/tool-setup.test.ts": 1
+    "src/lib/api/fakeServer.testSupport.ts": 1,
+    "src/lib/toolSetup.test.ts": 1
   },
   "@typescript-eslint/no-unused-vars": {
-    "src/lib/api/fake-server.test-support.ts": 1
+    "src/lib/api/fakeServer.testSupport.ts": 1
   },
   "complexity": {
     "src/lib/api/client.ts": 2,
     "src/lib/credentials.ts": 2,
-    "src/lib/quota-windows.ts": 3,
+    "src/lib/quotaWindows.ts": 3,
     "src/lib/usage.ts": 1,
     "tools/check-api.mjs": 2,
     "tools/mock/server.mjs": 2,
@@ -62,16 +42,13 @@
     "tools/perf/run.mjs": 1
   },
   "no-control-regex": {
-    "src/lib/config-path.ts": 1
+    "src/lib/configPath.ts": 1
   },
   "no-empty": {
-    "src/lib/first-run.ts": 1,
+    "src/lib/firstRun.ts": 1,
     "tools/perf/run.mjs": 3
   },
   "no-unused-vars": {
     "tools/mock/server.mjs": 2
-  },
-  "no-useless-assignment": {
-    "tools/mock/server.mjs": 1
   }
 }

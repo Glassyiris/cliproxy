@@ -1,6 +1,5 @@
 // Provider keys, on the Accounts frame (table-inbox): which upstream key groups serve, and which
-// key has a problem. Both pages list upstream credentials, so they read as one design (owner,
-// 2026-11-08: 「帳號 / 供應商金鑰其實是差不多的東西為什麼不統一一下設計」). The header holds the h1, the
+// key has a problem. Both pages list upstream credentials, so they share one design. The header holds the h1, the
 // jump to Settings and the Add menu, the one primary action; the filter row holds the views, the
 // family and status Selectors and the search, as on Accounts; a group opens in the detail panel
 // (a bottom sheet on phones). Deviations from the template, each with its reason:

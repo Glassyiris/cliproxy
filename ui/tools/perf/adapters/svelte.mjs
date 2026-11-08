@@ -7,7 +7,6 @@
 //   ctx.n      number of accounts the mock serves
 //   ctx.title  the expected page heading
 
-/** A page is ready when its heading is shown and no loading placeholder remains. */
 const pageReady =
   "(() => { const h = document.querySelector('main#main h1'); return !!h && h.textContent.trim().startsWith(ctx.title) && !document.querySelector('main#main [aria-busy=\"true\"]') && !document.querySelector('main#main .skel'); })()";
 

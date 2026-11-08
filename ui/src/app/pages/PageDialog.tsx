@@ -1,4 +1,4 @@
-// An earlier page hosted unchanged in a dialog (DESIGN.md "Routes"), on the form-wizard-dialog
+// A page hosted in a dialog (DESIGN.md "Routes"), on the form-wizard-dialog
 // template's frame: Dialog `purpose="form"`, a fill Layout with padding 4 and dividers, the
 // DialogHeader with the close button, the page in the content. A page can pin a part under the
 // title (a wizard's stepper, in the template's second header row) and one at the foot (its
@@ -6,7 +6,7 @@
 // its parts to the host's `frame`, so the hosted page keeps its state. The dialog keeps one height
 // (layout.pageDialog) as the template's fixed-height rule asks, so it does not jump as a wizard's
 // steps change. The dialog is `?open=<id>` on the route, so Back, reload and links reach it.
-// Deviation: 800 wide, not the template's 620, because the hosted pages were laid out for a page's
+// Deviation: 800 wide, not the template's 620, because the hosted pages need a page's
 // reading width (roles.content.formWidth).
 
 import { Suspense, type ReactNode } from "react";

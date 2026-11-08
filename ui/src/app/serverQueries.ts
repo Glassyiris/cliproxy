@@ -6,7 +6,7 @@ import { listCredentials, type Credential, type CredentialList } from "../lib/ap
 import { apiKeyUsage } from "../lib/api/observability.ts";
 import { listPlugins } from "../lib/api/plugins.ts";
 import { reconcile } from "../lib/compare.ts";
-import { absent, storedValue } from "../lib/config-path.ts";
+import { absent, storedValue } from "../lib/configPath.ts";
 import type { Action } from "./useAction.ts";
 
 export const serverKeys = {

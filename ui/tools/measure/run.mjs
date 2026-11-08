@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `npm run measure`: DOM measurement of the rewritten pages against the roles table (DESIGN.md
+// `npm run measure`: DOM measurement of dashboard pages against the roles table (DESIGN.md
 // "Roles"). A browser check, run once per milestone; not part of `npm run check`.
 //
 //   npx vite build && npm run measure [-- --routes overview,accounts] [--out <dir>]
@@ -38,11 +38,8 @@ const OPTIONAL = [
   "cardPadding",
   "skeletonShift",
 ];
-// The six routes (DESIGN.md "Routes"), each with the element that answers its question (plan 五,
-// checked to be in view) and its OPTIONAL measurements. `pending` names the rewrite that still owns
-// a route's content (R1 to R5): until then the frame's roles are measured and must hold, but the
-// load limits (CLS, skeleton shift) belong to the content and are reported without failing, and
-// Accounts, Activity and Server answer with their h1 until their rewrite gives them an answer.
+// Each route declares its answer element, which must be in view, and its optional measurements.
+// A route with no instance of a role leaves that measurement out.
 const ROUTES = {
   overview: {
     answer: "#overview-attention a[href], #overview-attention-clear",

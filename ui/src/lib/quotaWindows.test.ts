@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { otherSignals, quotaWindows, signalWindows } from "./quota-windows.ts";
+import { otherSignals, quotaWindows, signalWindows } from "./quotaWindows.ts";
 
 
 test("quota is percent used, not remaining; unknown payloads stay empty", () => {

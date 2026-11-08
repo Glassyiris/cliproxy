@@ -4,7 +4,7 @@ import { Text } from "@astryxdesign/core/Text";
 import type { Bar, QuotaWhy } from "../lib/credentials.ts";
 import { money, t } from "../lib/i18n.ts";
 import type { QuotaError } from "../lib/quota.ts";
-import type { Window, WindowLabel } from "../lib/quota-windows.ts";
+import type { Window, WindowLabel } from "../lib/quotaWindows.ts";
 import { span } from "../lib/time.ts";
 import { Words } from "./Words.tsx";
 

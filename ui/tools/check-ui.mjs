@@ -6,7 +6,7 @@
 //   scale props (gap, padding) take scale steps and stay legal; "100%" and full-viewport lengths
 //   fill their container and are not sizes.
 // - CSS files and CSS imports: only src/themes/ and the entry src/main.tsx (imports only). Under
-//   src/themes/, CSS other than the generated site.css and site-main.css selects only html, body
+//   src/themes/, CSS other than the generated site.css and siteMainTokens.css selects only html, body
 //   and :root (with attribute selectors) and has no transition, animation or @keyframes.
 // - transition/animation/keyframes and animation libraries: only under src/components/motion/.
 // - Raw <div> and <span>: Astryx has Stack, HStack, Grid, Center, Layout and Text (0.7.11).
@@ -67,7 +67,7 @@ const SIZE_PROPERTY = new Set([
 const LENGTH = /(?:^|[^\w.])-?(?:\d+\.?\d*|\.\d+)(?:[a-z]+|%)?(?![\w.])/i;
 const FILL_ANYWHERE = /\b100(?:%|[dls]?v[hw]|v(?:min|max|[bi]))(?![\w.])|\b0(?![\w.%])/g;
 // What `astryx theme build` writes; every other CSS file under src/themes/ is hand-written.
-const GENERATED_CSS = new Set(["src/themes/site/site.css", "src/themes/site/site-main.css"]);
+const GENERATED_CSS = new Set(["src/themes/site/site.css", "src/themes/site/siteMainTokens.css"]);
 const PAGE_SELECTOR = /^(?:html|body|:root)(?:\[[^\]]+\])*$/;
 const BANNED_NAME = /^(?:utils?|common|helpers?|shared|misc)$/i;
 const TEST_FILE = /\.test(?:-support)?\.tsx?$/;
@@ -87,7 +87,6 @@ const CARD_PADDING_EXCEPTIONS = {
   "src/app/SignIn.tsx": "sign-in card",
   // A chart tooltip is a popover drawn as a small card, as card-v2's TrendTip draws it.
   "src/components/charts/plots.tsx": "chart tooltip",
-  // Pages R1 to R5 rewrite next; each leaves this list when it is rewritten.
 };
 const DEFAULT_EXPORT = /export\s*\{\s*default\s*\}\s*from\s*["'](\.\/[^"']+)["']/;
 

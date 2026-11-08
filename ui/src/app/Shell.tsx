@@ -1,4 +1,4 @@
-// The app frame, as the owner's BoothDex console has it (admin/admin-shell.tsx) from the Astryx page
+// The app frame, as the BoothDex console has it (admin/admin-shell.tsx) from the Astryx page
 // template shell-side-nav: AppShell with one collapsible, resizable SideNav: its heading on top, the
 // six pages from routes.ts as flat items, the session rows in the footer, and the colour-mode toggle and the
 // settings button in the footer icon row beside the collapse button. On phones AppShell turns the nav into its drawer
@@ -206,7 +206,7 @@ function navCategories(current: PageRoute, view: string | undefined): NavCategor
 /**
  * The pages: a category with more than one page is collapsible (open by default) with its pages
  * under it; a lone page is a plain item. In the collapsed rail every page is its own icon, so
- * reaching one is one click, never a flyout (owner, 2026-11-08: 「這個不人體工學」).
+ * reaching one is one click, never a flyout.
  */
 function PageItems({ current }: { current: PageRoute }) {
   const { isCollapsed } = useSideNavCollapse();
@@ -227,8 +227,7 @@ function PageItems({ current }: { current: PageRoute }) {
           onCollapsedChange: (isClosed) => toggle(c.id, !isClosed),
         }}
       >
-        {/* SideNav spaces its top rows 2 px apart but stacks a category's pages flush, so a hovered
-            page's fill touched the selected one (owner, 2026-11-08: 「黏在一起了」). */}
+        {/* SideNav stacks a category's pages flush; spacing keeps hovered and selected fills apart. */}
         <VStack gap={roles.nav.rowGap} paddingBlockStart={roles.nav.rowGap}>
           {items}
         </VStack>

@@ -1,13 +1,9 @@
 // Provider keys' filter row and list body, as Accounts lays out its own: the views, the family and
 // status Selectors and the search in one row; then the list, its skeleton, or why it is empty.
-import { Search } from "lucide-react";
+import { ListFilters } from "../../components/ListFilters.tsx";
 import type { ReactNode } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { Icon } from "@astryxdesign/core/Icon";
-import { TextInput } from "@astryxdesign/core/TextInput";
 import { CountedSelector } from "../../components/CountedSelector.tsx";
 import { familyName, isFamily } from "../../components/keyFamilies.ts";
 import { t } from "../../lib/i18n.ts";
@@ -62,35 +58,17 @@ function FilterSelectors({ page }: { page: Page }) {
 /** The views, the Selectors and the search; on a phone the views take their own line. */
 export function FilterRow({ page }: { page: Page }) {
   const { filters, setFilters } = page;
-  const views = (
-    <SegmentedControl
-      label={t("app.list.view")}
-      value={filters.view}
-      onChange={(view) => setFilters({ view: view === "all" ? "all" : "needs" })}
-    >
-      <SegmentedControlItem value="needs" label={t("app.list.needs", { count: page.needs })} />
-      <SegmentedControlItem value="all" label={t("app.list.all", { count: page.scope.length })} />
-    </SegmentedControl>
-  );
-  const isStacked = page.shape === "stacked";
   return (
-    <VStack gap={3}>
-      {isStacked && views}
-      <HStack gap={3} vAlign="center" wrap="wrap">
-        {!isStacked && views}
-        <FilterSelectors page={page} />
-        <TextInput
-          type="search"
-          startIcon={<Icon icon={Search} size="sm" />}
-          label={t("providers.filters.search")}
-          isLabelHidden
-          placeholder={t("providers.filters.searchHint")}
-          value={filters.search}
-          onChange={(search) => setFilters(search ? { search, view: "all" } : { search })}
-          hasClear
-        />
-      </HStack>
-    </VStack>
+    <ListFilters
+      filters={filters}
+      setFilters={setFilters}
+      needs={page.needs}
+      total={page.scope.length}
+      isStacked={page.shape === "stacked"}
+      searchLabel={t("providers.filters.search")}
+      searchHint={t("providers.filters.searchHint")}
+      selectors={<FilterSelectors page={page} />}
+    />
   );
 }
 

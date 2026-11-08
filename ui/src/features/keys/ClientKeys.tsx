@@ -20,7 +20,7 @@ import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
-import { readPath } from "../../lib/config-path.ts";
+import { readPath } from "../../lib/configPath.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { AddKeyDialog } from "./AddKeyDialog.tsx";

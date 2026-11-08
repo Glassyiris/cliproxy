@@ -9,7 +9,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { ReadError } from "../../components/ReadError.tsx";
 import { SectionHeading } from "../../components/SectionHeading.tsx";
 import type { Credential } from "../../lib/api/credentials.ts";
-import { flag } from "../../lib/first-run.ts";
+import { flag } from "../../lib/firstRun.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
 import { layout } from "../../themes/site/layout.ts";

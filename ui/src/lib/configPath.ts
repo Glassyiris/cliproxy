@@ -1,5 +1,3 @@
-import type { Data } from "./json.ts";
-
 export function fieldPath(path: string): string {
   return (
     "/config/" +
@@ -14,8 +12,13 @@ export function fieldPath(path: string): string {
   );
 }
 
-export function readPath(value: Data, path: string, fallback: any = undefined): any {
-  return path.split("/").reduce((v, k) => v?.[k], value) ?? fallback;
+export function readPath(value: object, path: string, fallback: unknown = undefined): unknown {
+  return (
+    path
+      .split("/")
+      .reduce<unknown>((v, k) => (v as Record<string, unknown> | null | undefined)?.[k], value) ??
+    fallback
+  );
 }
 
 /** No value at a config path: the server answers 404 there. Distinct from a stored `null`. */
@@ -25,7 +28,7 @@ export const absent: unique symbol = Symbol("absent");
  * The value at `path` exactly as stored, the baseline a config write compares against: `null`
  * stays `null`, and a key the file lacks, or a parent that is not an object, is `absent`.
  */
-export function storedValue(value: Data, path: string): unknown {
+export function storedValue(value: object, path: string): unknown {
   let v: unknown = value;
   for (const k of path.split("/")) {
     if (!v || typeof v !== "object" || !Object.hasOwn(v, k)) return absent;

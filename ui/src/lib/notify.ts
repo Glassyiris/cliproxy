@@ -17,7 +17,6 @@ export function notify(level: NoticeLevel, message: string) {
   return notice.id;
 }
 
-/** Takes down the toast `notify` returned `id` for, if it is still shown. */
 export function dismissNotice(id: number) {
   for (const dismisser of dismissers) dismisser(id);
 }
@@ -32,13 +31,11 @@ export function placement(level: NoticeLevel) {
   return { surface: "toast", type: error ? "error" : "info", autoHide: !error } as const;
 }
 
-/** The shell's toast viewport and page banner subscribe here. */
 export function onNotice(listener: (notice: Notice) => void) {
   listeners.add(listener);
   return () => void listeners.delete(listener);
 }
 
-/** The toast viewport subscribes here to take a toast down by its notice id. */
 export function onDismissNotice(dismisser: (id: number) => void) {
   dismissers.add(dismisser);
   return () => void dismissers.delete(dismisser);

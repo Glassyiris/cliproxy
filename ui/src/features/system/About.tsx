@@ -22,7 +22,7 @@ import { ReadError } from "../../components/ReadError.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
 import { ApiError, base } from "../../lib/api/client.ts";
 import type { Config } from "../../lib/api/config.ts";
-import { readPath } from "../../lib/config-path.ts";
+import { readPath } from "../../lib/configPath.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
 import { repository } from "../../lib/repository.ts";
@@ -74,8 +74,7 @@ function RemoteManagement({ config }: { config: Config }) {
   );
 }
 
-// No icon before the label: with one, MetadataList drops every value 3 px below its label
-// (owner, 2026-11-08: 「完全沒對齊」). Values are body text for the same reason: the code type sits
+// No icon before the label: with one, MetadataList drops every value 3 px below its label. Values are body text for the same reason: the code type sits
 // 5 px lower again.
 function Item({ label, children }: { label: string; children: ReactNode }) {
   return <MetadataListItem label={label}>{children}</MetadataListItem>;

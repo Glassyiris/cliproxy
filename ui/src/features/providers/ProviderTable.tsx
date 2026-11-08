@@ -5,13 +5,12 @@
 // keys column takes the room of the quota columns a group lacks. Below the list's stacking width
 // (a phone) each row is one summary cell, as on Accounts. A server holds a handful of groups, so
 // the list is not windowed.
+import { rowStyles } from "../../components/rowStyles.ts";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import * as stylex from "@stylexjs/stylex";
 import { VStack } from "@astryxdesign/core/Layout";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Table, type TableColumn, type TablePlugin } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
-import { colorVars } from "@astryxdesign/core/theme/tokens.stylex";
 import { familyName } from "../../components/keyFamilies.ts";
 import { listColumns, type ListShape } from "../../components/listShape.ts";
 import { ListSkeleton } from "../../components/loadingRows.tsx";
@@ -25,14 +24,6 @@ import { roles } from "../../themes/site/roles.ts";
 import { entryId, type Entry } from "./groups.ts";
 import { endpointParts, MiddleText } from "./MiddleText.tsx";
 import { statusOf } from "./words.ts";
-
-const styles = stylex.create({
-  clickableRow: { cursor: "pointer" },
-  activeRow: {
-    backgroundColor: colorVars["--color-overlay-pressed"],
-    "--table-row-overlay": colorVars["--color-overlay-pressed"],
-  },
-});
 
 type Item = Entry & Record<string, unknown>;
 
@@ -172,7 +163,7 @@ function useRowPlugin(
               ),
           },
           xstyle: props.xstyle.concat(
-            isOpen ? [styles.clickableRow, styles.activeRow] : styles.clickableRow,
+            isOpen ? [rowStyles.clickableRow, rowStyles.activeRow] : rowStyles.clickableRow,
           ),
         };
       },

@@ -16,20 +16,19 @@ export const layout = {
   detailPanel: { defaultSize: 380, minSize: 320, maxSize: 560 },
   // BoothDex admin-shell widths: the sidebar opens at 260 and can be dragged between 220 and 360.
   sidebar: { defaultWidth: 260, minWidth: 220, maxWidth: 360 },
-  // The config editor dialog is the preferences dialog's size (owner, 2026-11-08: 「編輯器默認大小和
-  // 設置的差不多把？」); its code box takes that height less the title rows, footer and padding,
+  // The config editor dialog uses the preferences dialog's size; its code box takes that height
+  // less the title rows, footer and padding,
   // and scrolls inside.
   codeEditor: { height: "calc(min(50rem, 100dvh - 2rem) - 11rem)" },
   // Menus and selectors show this many pixels of rows before scrolling; the viewport still bounds
-  // them. Astryx caps at 300, which scrolled an eight-row menu on a tall screen (owner,
-  // 2026-11-08: 「夠長的話其實不用那麼限高。」).
+  // them. Astryx Selector's 300 px cap requires scrolling even for eight rows on a tall screen.
   menuMaxHeight: 640,
   // Icon size="sm" (Astryx 0.7.11): the empty slot that keeps a menu's counts in line with a check.
   smallIcon: 16,
   valueSkeleton: { width: "8rem", height: "1em" },
   // The three summary tiles stay in one column until two of them fit side by side with the value
-  // "169 / 200" at the metric size on one line: at 150 a 390px phone made two columns, wrapped the
-  // value and left the third tile alone. 200 makes a phone one column (two columns from 416px of
+  // "169 / 200" at the metric size on one line: a 150 px minimum makes two columns on a 390px
+  // phone, wrapping the value and leaving the third tile alone. 200 makes a phone one column (two columns from 416px of
   // content) and still gives three columns from 632px, so tablets and desktop keep one row.
   summaryTileMin: 200,
   // The settings template's two columns, a Region's heading and its controls, are each at least

@@ -2,14 +2,13 @@
 // the shared PageFrame. Deviations from the template, one per line with its reason:
 // - The header is PageFrame's: the view's title, the controls at the end,
 //   then the filter row; padded by the page roles, not the template's 0/16.
-// - The line count ends the filter row, not the header line (owner: counts belong to the list).
-// - The filter row stays in the header on a phone too (owner: h1, line, then the toolbar at every
-//   width; the line was cut as filler on 2026-11-08), so the search is in view while following the
+// - The line count ends the filter row, not the header line.
+// - The filter row stays in the header on a phone too, so the search is in view while following the
 //   end of the log.
 // - No saved views, power search, bulk edit, view options or density switch: a log has no saved
 //   state or columns to choose, and roles "Table density" removes the switch.
 // - The filter chips are a log choice (SegmentedControl: application log or error logs, the
-//   earlier page's own tabs) and, for the application log, a level Selector and the management
+//   page's own tabs) and, for the application log, a level Selector and the management
 //   calls switch; they all fit one row, so there is no overflow list.
 // - Header controls are default size (36), not the template's sm: roles "Primary action" keeps
 //   every header control at one height.

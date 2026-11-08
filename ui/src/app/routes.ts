@@ -35,7 +35,6 @@ export type PageRoute = {
   navTitle?: () => string;
   /** The category's icon when the route's own icon marks its item. */
   groupIcon?: IconProps["icon"];
-  /** Fetches the page's chunk ahead of the first visit. */
   preload(): Promise<unknown>;
 };
 
@@ -59,8 +58,7 @@ function page(source: Chunk<{ default: ComponentType }>) {
 }
 
 // The side nav, in order; the first route is the landing page. A route with views is a collapsible
-// category whose pages are `?view=` of it (owner, 2026-11-08: 「側邊欄可以做之前那種收起」, after the
-// header tabs read as 「切換太離譜了」); dialogs are `?open=`. Old hashes land there (src/lib/hash.ts).
+// category whose pages are `?view=` of it; dialogs are `?open=`. Old hashes land there (src/lib/hash.ts).
 export const routes: readonly PageRoute[] = [
   {
     id: "overview",

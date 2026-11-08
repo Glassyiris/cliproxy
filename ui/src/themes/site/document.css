@@ -6,8 +6,7 @@ body {
 
 /*
  * Scrollbars in the palette: scrollbar-color inherits, so every scroller takes it, and setting it
- * makes Chrome draw the standard bar without the grey track and arrow buttons the default has
- * (owner, 2026-11-08, screenshot of the accounts list beside an open panel).
+ * makes Chrome draw the standard bar without the grey track and arrow buttons the default has.
  */
 :root {
   scrollbar-color: var(--color-border-emphasized) transparent;

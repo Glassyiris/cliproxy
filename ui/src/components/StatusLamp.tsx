@@ -60,7 +60,7 @@ const styles = stylex.create({
 
 /**
  * A status lamp with its word beside it, so the state never rests on colour alone. The word is
- * secondary text, as in the owner's BoothDex console (admin/live-status.tsx): Astryx's Text has
+ * secondary text, as in the BoothDex console (admin/live-status.tsx): Astryx's Text has
  * no status colours, and the theme adds none. `isPulsing` marks a live thing (log tail, sign-in
  * waiting, live usage). `isLabelHidden` drops the word where the control around the lamp already
  * says it (a toggle button's label); the lamp keeps it as its accessible label. `isBodyLine` sets

@@ -1,5 +1,5 @@
 import type { Config } from "../../lib/api/config.ts";
-import { absent, storedValue } from "../../lib/config-path.ts";
+import { absent, storedValue } from "../../lib/configPath.ts";
 import type { MessageKey } from "../../lib/i18n.ts";
 import { strategies } from "../../lib/routing.ts";
 

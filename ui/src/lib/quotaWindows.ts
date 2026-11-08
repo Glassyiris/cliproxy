@@ -1,5 +1,46 @@
 import type { Data } from "./json.ts";
 
+type PluginBucket = {
+  remainingFraction?: unknown;
+  remaining_fraction?: unknown;
+  window?: string;
+  description?: string;
+  resetTime?: string;
+  reset_time?: string;
+};
+type PluginGroup = { displayName?: string; display_name?: string; buckets?: PluginBucket[] };
+type CodexLimit = {
+  used_percent?: unknown;
+  limit_window_seconds?: unknown;
+  reset_at?: number;
+  reset_after_seconds?: unknown;
+};
+type KimiLimit = { limit: number; used?: unknown; reset_time?: string };
+type ClaudeLimit = {
+  group?: unknown;
+  percent?: unknown;
+  scope?: { model?: { display_name?: string } } | null;
+  kind?: string;
+  resets_at?: string | null;
+};
+type ClaudeBucket = { utilization?: unknown; resets_at?: string | null };
+type QuotaPayload = Data & {
+  groups?: PluginGroup[];
+  rate_limit?: Record<string, CodexLimit>;
+  rateLimit?: Record<string, CodexLimit>;
+  usages?: Record<string, KimiLimit>;
+  limits?: ClaudeLimit[];
+  extra_usage?: {
+    is_enabled?: boolean;
+    used_credits?: unknown;
+    decimal_places?: number;
+    currency?: string;
+    monthly_limit?: unknown;
+    utilization?: unknown;
+  };
+};
+type QuotaObservation = { observed_at?: string; signals?: Record<string, string> };
+
 /**
  * A window's title. Built-in ones are names the dashboard translates, titled as the provider's
  * own CLI titles them; plugin groups and Kimi limits bring their own text from the server.
@@ -39,7 +80,7 @@ export type Window = {
 };
 const clamp = (n: number) => Math.round(Math.max(0, Math.min(100, n)) * 10) / 10;
 /** Normalised plugin groups first; then the built-in Claude, Codex and Kimi usage payloads. */
-export function quotaWindows(p: string, payload: Data): Window[] {
+export function quotaWindows(p: string, payload: QuotaPayload): Window[] {
   const out: Window[] = [];
   if (Array.isArray(payload.groups)) {
     for (const g of payload.groups)
@@ -60,7 +101,7 @@ export function quotaWindows(p: string, payload: Data): Window[] {
   }
   if (p === "claude") return claudeWindows(payload);
   if (p === "codex") {
-    for (const [k, v] of Object.entries<Data>(payload.rate_limit || payload.rateLimit || {}))
+    for (const [k, v] of Object.entries<CodexLimit>(payload.rate_limit || payload.rateLimit || {}))
       if (v && typeof v.used_percent === "number")
         out.push({
           label: codexWindow(
@@ -75,7 +116,7 @@ export function quotaWindows(p: string, payload: Data): Window[] {
               : "",
         });
   } else if (p === "kimi" || p === "kimi-ai") {
-    for (const [k, v] of Object.entries<Data>(payload.usages || {}))
+    for (const [k, v] of Object.entries<KimiLimit>(payload.usages || {}))
       if (v?.limit > 0)
         out.push({
           label: { text: k.replaceAll("_", " ") },
@@ -112,9 +153,9 @@ const money = (minor: number, places: number, currency: string): Money => ({
  * Percentages are percent used, 0 to 100; null means the limit does not apply and is left
  * out, never shown as 0%. Extra usage is in cents and shows only when enabled.
  */
-function claudeWindows(payload: Data): Window[] {
+function claudeWindows(payload: QuotaPayload): Window[] {
   const out: Window[] = [];
-  const limits: Data[] = Array.isArray(payload.limits) ? payload.limits : [];
+  const limits: ClaudeLimit[] = Array.isArray(payload.limits) ? payload.limits : [];
   if (limits.length) {
     const groups: string[] = [];
     for (const l of limits) if (!groups.includes(String(l?.group))) groups.push(String(l?.group));
@@ -135,8 +176,9 @@ function claudeWindows(payload: Data): Window[] {
       }
   } else
     for (const [key, label] of claudeBuckets) {
-      const used = percent(payload[key]?.utilization);
-      if (used !== null) out.push({ label, used, reset: payload[key].resets_at || "" });
+      const used = percent((payload[key] as ClaudeBucket | undefined)?.utilization);
+      if (used !== null)
+        out.push({ label, used, reset: (payload[key] as ClaudeBucket).resets_at || "" });
     }
   const extra = payload.extra_usage;
   if (extra?.is_enabled === true && typeof extra.used_credits === "number") {
@@ -173,10 +215,10 @@ const codexWindow = (seconds: number, fallback: "primaryLimit" | "secondaryLimit
  * headers (x-codex-primary-*, x-codex-secondary-*), Claude's anthropic-ratelimit-unified-*
  * headers and Devin's daily and weekly quota.
  */
-export function signalWindows(p: string, quota: Data | undefined): Window[] {
-  const sig: Data = {};
+export function signalWindows(p: string, quota: QuotaObservation | undefined): Window[] {
+  const sig: Record<string, string> = {};
   for (const [k, v] of Object.entries<string>(quota?.signals || {})) sig[k.toLowerCase()] = v;
-  const at = Date.parse(quota?.observed_at) || 0;
+  const at = Date.parse(quota?.observed_at as string) || 0;
   const out: Window[] = [];
   if (p === "codex")
     for (const w of ["primary", "secondary"]) {
@@ -234,7 +276,10 @@ export function signalWindows(p: string, quota: Data | undefined): Window[] {
 }
 
 /** Signals no window was read from (code-review limits, credits, retry-after), to show as they are. */
-export const otherSignals = (quota: Data | undefined, windows: Window[]): [string, string][] =>
+export const otherSignals = (
+  quota: QuotaObservation | undefined,
+  windows: Window[],
+): [string, string][] =>
   Object.entries<string>(quota?.signals || {}).filter(
     ([k]) => !windows.some((w) => w.source && k.toLowerCase().startsWith(w.source)),
   );

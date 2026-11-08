@@ -1,5 +1,5 @@
 import { equal } from "../compare.ts";
-import { fieldPath } from "../config-path.ts";
+import { fieldPath } from "../configPath.ts";
 import { ApiError, request } from "./client.ts";
 import { routes } from "./routes.ts";
 

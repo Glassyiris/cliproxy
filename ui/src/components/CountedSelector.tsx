@@ -12,10 +12,8 @@ const styles = stylex.create({
   chosen: { backgroundColor: colorVars["--color-overlay-pressed"] },
 });
 
-/** A row: its label, bold when chosen, and how many rows it keeps at the end. */
 function Row({ label, count, isChosen }: { label: string; count: number; isChosen: boolean }) {
   return (
-    // A step of inner padding on each side, so the text does not touch the row's shade.
     <HStack gap={6} paddingInline={1} vAlign="center" wrap="nowrap">
       <StackItem size="fill">
         <Text type="inherit" weight={isChosen ? roles.textWeight.emphasis : roles.textWeight.plain}>
@@ -34,10 +32,8 @@ function Row({ label, count, isChosen }: { label: string; count: number; isChose
  * closed trigger reads the field alone, or "field: value" once a value is chosen. The menu's first
  * row keeps every row; each value then says how many rows it keeps, and the rows split between the
  * values, so the first row's count is their sum (Accounts' Ready leaves out Low). The chosen row is
- * shaded and bold, with no check or radio column (owner, 2026-11-09: 「自己品」, then the shaded
- * row over a check). A DropdownMenu, not a Selector: Selector's list stops at 300 px in Astryx
- * 0.7.11, which scrolled an eight-status menu on a tall screen (owner, 2026-11-08:
- * 「夠長的話其實不用那麼限高。」). Values that keep no rows are left out unless chosen. `value` and
+ * shaded and bold, with no check or radio column. DropdownMenu avoids Selector's 300 px list
+ * cap in Astryx 0.7.11, so an eight-status menu fits on a tall screen. Values that keep no rows are left out unless chosen. `value` and
  * `onChange` use "" for the first row.
  */
 export function CountedSelector({

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { tools } from "../../lib/tool-setup.ts";
+import { tools } from "../../lib/toolSetup.ts";
 import { toolFromParam, toolParam } from "./tool.ts";
 
 test("every tool survives the round trip through the hash", () => {

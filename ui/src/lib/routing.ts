@@ -28,7 +28,6 @@ const words: Record<Strategy, { name: () => string; help?: () => string }> = {
   },
 };
 
-/** A strategy's name in the current language. */
 export const strategyName = (s: Strategy) => words[s].name();
 /** A strategy's one-line explanation in the current language, where its name is not enough. */
 export const strategyHelp = (s: Strategy) => words[s].help?.();

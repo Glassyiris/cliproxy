@@ -1,7 +1,8 @@
 // The open key group in the detail panel (a bottom sheet on phones), in the account panel's
 // anatomy: the title with its family, the facts, one row of actions at the end, then the sections
 // (each key with its weight, traffic, reveal and copy; the models, when the group restricts them).
-import { useState, type ReactNode } from "react";
+import { PanelBlock } from "../../components/PanelBlock.tsx";
+import { useState } from "react";
 import { Eye, Trash2, X } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Divider } from "@astryxdesign/core/Divider";
@@ -17,7 +18,7 @@ import { Identifier } from "../../components/Identifier.tsx";
 import { familyName } from "../../components/keyFamilies.ts";
 import { RequestSparkline } from "../../components/RequestSparkline.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
-import { mask } from "../../lib/client-keys.ts";
+import { mask } from "../../lib/clientKeys.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
 import { roles } from "../../themes/site/roles.ts";
@@ -26,20 +27,9 @@ import { MiddleText } from "./MiddleText.tsx";
 import type { GroupAction } from "./useGroupWrites.ts";
 import { statusOf } from "./words.ts";
 
-/** A block of the panel: an h3 over its content. */
-function Block({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <VStack gap={2}>
-      <Heading level={3}>{title}</Heading>
-      {children}
-    </VStack>
-  );
-}
-
 // The characters a revealed key keeps at its end when the line is too short for all of it.
 const KEY_TAIL = 4;
 
-/** The key on one line: masked, or revealed and cut in the middle, never wrapping. */
 function KeyText({ value, revealed }: { value: string; revealed: boolean }) {
   if (!revealed)
     return (
@@ -50,7 +40,6 @@ function KeyText({ value, revealed }: { value: string; revealed: boolean }) {
   return <MiddleText head={value.slice(0, -KEY_TAIL)} tail={value.slice(-KEY_TAIL)} />;
 }
 
-/** The row's end: the shared requests slot, then reveal and copy, as Clients draws a key. */
 function KeyEnd({
   value,
   traffic,
@@ -100,7 +89,6 @@ function KeyEnd({
   );
 }
 
-/** One key per row: the key with its weight (and whether it fails) under it, then its end. */
 function KeyRow({
   keyEntry: { key, traffic },
   revealed,
@@ -140,7 +128,7 @@ function Keys({ entry }: { entry: Entry }) {
       return next;
     });
   return (
-    <Block title={t("providers.panel.keys")}>
+    <PanelBlock title={t("providers.panel.keys")}>
       {entry.keys.length ? (
         <List density="compact" hasDividers>
           {entry.keys.map((k, i) => (
@@ -152,7 +140,7 @@ function Keys({ entry }: { entry: Entry }) {
           {t("providers.table.noKeys")}
         </Text>
       )}
-    </Block>
+    </PanelBlock>
   );
 }
 
@@ -161,17 +149,16 @@ function Models({ entry }: { entry: Entry }) {
   const models = entry.group.models?.filter((m) => m.name) ?? [];
   if (!models.length) return null;
   return (
-    <Block title={t("providers.panel.models")}>
+    <PanelBlock title={t("providers.panel.models")}>
       <List density="compact" hasDividers>
         {models.map((m, i) => (
           <ListItem key={i} label={<Identifier breakAt="name">{modelText(m)}</Identifier>} />
         ))}
       </List>
-    </Block>
+    </PanelBlock>
   );
 }
 
-/** Disable or Enable as a button, then the menu with Delete, at the row's end as on Accounts. */
 function Actions({
   entry,
   busy,

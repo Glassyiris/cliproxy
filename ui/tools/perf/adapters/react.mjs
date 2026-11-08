@@ -3,7 +3,6 @@
 //
 // Astryx AppShell renders the page area as <div role="main">, not <main>.
 
-/** A page is ready when its heading is shown and no loading placeholder remains. */
 const pageReady =
   "(() => { const m = document.querySelector('[role=main]'); const h = m && m.querySelector('h1'); return !!h && h.textContent.trim().startsWith(ctx.title) && !m.querySelector('[aria-busy=\"true\"]') && !m.querySelector('.astryx-skeleton'); })()";
 

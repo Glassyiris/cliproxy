@@ -5,7 +5,7 @@
 // Template: the DialogFormDialog block: Dialog `purpose="form"`, a Layout with the DialogHeader,
 // the content, and Cancel beside the primary action at the end of a LayoutFooter; only the content
 // scrolls. Deviation: the preferences dialog's size (layout.settingsDialog), not the block's 480,
-// for every editor, since code lines are long (owner, 2026-11-08: 「編輯器默認大小和設置的差不多把？」).
+// for every editor, since code lines are long.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
@@ -99,7 +99,6 @@ export function ConfigEditor({
   );
 }
 
-/** The copy the editor opened, the draft over it, and saving it. */
 function useEditor(source: ConfigSource, action: Action, hashKey: string, onSaved: () => void) {
   // Read when the editor opens, and again after a save or when one is refused: this copy is what
   // Save compares the server against.
@@ -367,7 +366,6 @@ function EditorBody({
   );
 }
 
-/** Cancel and Review while editing, Keep editing and Save in review; the primary one last. */
 function EditorFooter({
   isReviewing,
   isSaving,

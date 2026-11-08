@@ -33,7 +33,6 @@ export function ColorModeToggle({ iconSize = "md" }: { iconSize?: "sm" | "md" })
   );
 }
 
-/** The palette choices, as menu rows. Moon, the default, comes first. */
 function PaletteOptions() {
   const { palette, setPalette } = usePreferences();
   return (
@@ -48,7 +47,6 @@ function PaletteOptions() {
   );
 }
 
-/** The language choices, as menu rows. */
 function LanguageOptions() {
   const { locale, setLocale } = usePreferences();
   return (
@@ -72,7 +70,6 @@ const trigger = (label: string, icon: IconProps["icon"]) => ({
   variant: "ghost" as const,
 });
 
-/** The colour-mode, palette and language switches of the sign-in page, at the page's top end. */
 export function PreferenceMenus() {
   return (
     <HStack gap={1} vAlign="center">

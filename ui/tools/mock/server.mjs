@@ -503,7 +503,7 @@ on("POST", "/credentials", (ctx) => {
       failed.push({ name: file, error: "file must end with .json" });
       continue;
     }
-    let meta = {};
+    let meta;
     try {
       meta = JSON.parse(content);
     } catch {

@@ -1,8 +1,8 @@
 // The signed-in app's chunks, kept out of the entry: the sign-in page loads none of them. A stored
 // key starts the shell and the current page while it is checked, and a typed one as it is entered,
-// so neither waits for the other or for the check (owner, 2026-11-08: Overview was the slowest
-// page to load). A chunk already in renders at once: React.lazy suspends once even then, and React
-// holds a revealed Suspense boundary back for up to 300 ms.
+// so neither waits for the other or for the check. A chunk already in renders at once:
+// React.lazy suspends once even then, and React holds a revealed Suspense boundary back for up
+// to 300 ms.
 import type { ComponentType } from "react";
 import { redirect } from "../lib/hash.ts";
 

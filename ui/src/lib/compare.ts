@@ -1,11 +1,15 @@
-export function equal(a: any, b: any): boolean {
+export function equal(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   const keys = Object.keys(a);
   return (
     keys.length === Object.keys(b).length &&
-    keys.every((k) => Object.hasOwn(b, k) && equal(a[k], b[k]))
+    keys.every(
+      (k) =>
+        Object.hasOwn(b, k) &&
+        equal((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
+    )
   );
 }
 

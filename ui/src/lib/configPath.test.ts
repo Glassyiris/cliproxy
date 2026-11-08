@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { equal } from "./compare.ts";
-import { fieldPath } from "./config-path.ts";
+import { fieldPath } from "./configPath.ts";
 
 test("v8 paths, URL boundaries, and structural equality", () => {
   assert.throws(() => fieldPath("oauth/../key"));

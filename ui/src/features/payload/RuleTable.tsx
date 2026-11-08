@@ -1,5 +1,6 @@
 // The table-grouped body: one group per model name, its header a full-width row that folds the
 // group, then one row per rule (model pattern, action, number of fields, remove).
+import { rowStyles } from "../../components/rowStyles.ts";
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import * as stylex from "@stylexjs/stylex";
 import { Trash2 } from "lucide-react";
@@ -30,11 +31,6 @@ export type RuleGroup = { name: string; rows: RuleRow[] };
 const styles = stylex.create({
   // table-grouped:66-70: the group header fills the row with the muted background.
   groupHeader: { cursor: "pointer", backgroundColor: colorVars["--color-background-muted"] },
-  clickableRow: { cursor: "pointer" },
-  activeRow: {
-    backgroundColor: colorVars["--color-overlay-pressed"],
-    "--table-row-overlay": colorVars["--color-overlay-pressed"],
-  },
 });
 
 export const groupName = (name: string) => {
@@ -104,7 +100,7 @@ function RuleRowView({ row, isMobile, isOpen, focused, onOpen, onRemove }: RowPr
     <TableRow
       tabIndex={0}
       aria-current={isOpen ? true : undefined}
-      xstyle={[styles.clickableRow, isOpen && styles.activeRow]}
+      xstyle={[rowStyles.clickableRow, isOpen && rowStyles.activeRow]}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest("button, a")) return;
         onOpen();

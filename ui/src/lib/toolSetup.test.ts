@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { snippet } from "./tool-setup.ts";
+import { snippet } from "./toolSetup.ts";
 
 test("tool setup points at this server with the chosen key", () => {
   const base = "https://proxy.example.test/cpa";
