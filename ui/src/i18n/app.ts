@@ -20,8 +20,6 @@ export default {
     "app.signIn.connect": "Connect",
     "app.signIn.connecting": "Connecting…",
     "app.signIn.remember": "Remember on this device",
-    "app.signIn.rememberHint":
-      "Stays signed in after the browser closes. Anyone using this browser profile can open the dashboard.",
     "app.signIn.apiOff":
       "The management API is off on this server. Set management.secret-key in the server's config.yaml (or start it with MANAGEMENT_PASSWORD), then restart it.",
     "app.signIn.remoteDisabled":
@@ -191,7 +189,6 @@ export default {
     "app.signIn.connect": "连接",
     "app.signIn.connecting": "正在连接…",
     "app.signIn.remember": "在这台设备上记住我",
-    "app.signIn.rememberHint": "关闭浏览器后仍保持登录。使用此浏览器配置文件的人都能打开管理面板。",
     "app.signIn.apiOff":
       "此服务器未开启管理 API。请在服务器的 config.yaml 中设置 management.secret-key（或以 MANAGEMENT_PASSWORD 启动），然后重启服务器。",
     "app.signIn.remoteDisabled":
@@ -354,7 +351,6 @@ export default {
     "app.signIn.connect": "連線",
     "app.signIn.connecting": "正在連線…",
     "app.signIn.remember": "在這台裝置記住我",
-    "app.signIn.rememberHint": "關閉瀏覽器後仍保持登入。使用這個瀏覽器設定檔的人都能開啟管理面板。",
     "app.signIn.apiOff":
       "此伺服器未開啟管理 API。請在伺服器的 config.yaml 中設定 management.secret-key（或以 MANAGEMENT_PASSWORD 啟動），然後重新啟動伺服器。",
     "app.signIn.remoteDisabled":

@@ -174,7 +174,6 @@ export function SignIn() {
               />
               <CheckboxInput
                 label={t("app.signIn.remember")}
-                description={t("app.signIn.rememberHint")}
                 value={persist}
                 onChange={setPersist}
               />
