@@ -10,8 +10,8 @@
 //   and :root (with attribute selectors) and has no transition, animation or @keyframes.
 // - transition/animation/keyframes and animation libraries: only under src/components/motion/.
 // - Raw <div> and <span>: Astryx has Stack, HStack, Grid, Center, Layout and Text (0.7.11).
-// - Raw <svg> and <path>: icons are Astryx's semantic names or lucide components passed to Icon; the
-//   brand mark in src/components/BrandMark.tsx is the one drawn glyph.
+// - Raw <svg> and <path>: icons are Astryx's semantic names or lucide components passed to Icon,
+//   the brand mark included.
 // - registerIcons: no app icon registry; the theme's registry is the only one (Astryx default).
 // - A `components` block in a theme source under src/themes/: the theme sets tokens only, and
 //   component styles come from Astryx and the neutral theme it extends.
@@ -30,7 +30,6 @@ const srcDir = join(ui, "src");
 const ENTRY = "src/main.tsx";
 const THEMES = "src/themes/";
 const MOTION = "src/components/motion/";
-const ICONS = "src/components/BrandMark.tsx";
 
 const RAW_COLOR =
   /#(?:[\da-f]{8}|[\da-f]{6}|[\da-f]{3,4})\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\s*\(|(?:^|[\s,(])(?:white|black)(?=$|[\s,)])/i;
@@ -156,11 +155,7 @@ function checkGlyph(node, fail) {
   if (!ts.isJsxOpeningElement(node) && !ts.isJsxSelfClosingElement(node)) return;
   const name = node.tagName.getText();
   if (name === "svg" || name === "path")
-    fail(
-      "icons",
-      node,
-      `<${name}> is drawn only in ${ICONS}; use a semantic name or a lucide component`,
-    );
+    fail("icons", node, `<${name}>: use a semantic name or a lucide component`);
 }
 
 function checkRegistry(node, fail) {
@@ -223,7 +218,7 @@ function checkFile(file, errors) {
   const themeSource = inThemes && !file.endsWith(".d.ts") && /\.tsx?$/.test(file);
   const visit = (node) => {
     checkImport(node, fail, { relativePath, inMotion });
-    if (relativePath !== ICONS) checkGlyph(node, fail);
+    checkGlyph(node, fail);
     checkRegistry(node, fail);
     if (themeSource) checkThemeSource(node, fail);
     if (!inMotion) checkMotion(node, fail);

@@ -4,7 +4,7 @@
 // footer icon row beside the collapse button. On phones AppShell turns the nav into its drawer
 // behind its own bar. There is no top bar.
 
-import { LogOut, Plug } from "lucide-react";
+import { LogOut, Plug, Route } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState, type AnchorHTMLAttributes } from "react";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { AppShell } from "@astryxdesign/core/AppShell";
@@ -24,7 +24,6 @@ import { createStaticSource } from "@astryxdesign/core/Typeahead";
 import { lampVariant, StatusLamp } from "../components/StatusLamp.tsx";
 import { t } from "../lib/i18n.ts";
 import { repository } from "../lib/repository.ts";
-import { BrandMark } from "../components/BrandMark.tsx";
 import { layout } from "../themes/site/layout.ts";
 import { PageWarning } from "./Notices.tsx";
 import { FooterPreferences } from "./PreferenceMenus.tsx";
@@ -136,7 +135,7 @@ function PageNav({ current }: { current: PageRoute }) {
         <SideNavHeading
           heading={t("app.brand.name")}
           // The mark itself, as BoothDex's heading: NavIcon would paint an accent disc behind it.
-          icon={<Icon icon={BrandMark} />}
+          icon={<Icon icon={Route} />}
           headingHref={`#${routes[0].id}`}
         />
       }

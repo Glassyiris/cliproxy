@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Route } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
@@ -7,7 +8,6 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
 import { Heading, Text } from "@astryxdesign/core/Text";
-import { BrandMark } from "../components/BrandMark.tsx";
 import { KeyField } from "../components/KeyField.tsx";
 import { StatusLamp } from "../components/StatusLamp.tsx";
 import { healthz } from "../lib/api/system.ts";
@@ -45,7 +45,7 @@ function CardTop() {
   return (
     <VStack gap={6}>
       <HStack gap={2} vAlign="center" hAlign="center">
-        <Icon icon={BrandMark} size="lg" />
+        <Icon icon={Route} size="lg" />
         <Text type="body" weight="semibold" size="lg">
           {t("app.brand.name")}
         </Text>
@@ -96,7 +96,7 @@ export function SignIn() {
       {/* Two growing spacers centre the card in the space below the controls and let it scroll. */}
       <StackItem size="fill" />
       <VStack hAlign="center" gap={4}>
-        <Card padding={8} width="100%" maxWidth={layout.signInWidth} elevation="med">
+        <Card padding={8} width="100%" maxWidth={layout.signInWidth}>
           {/* Enter is handled by the field's IME-safe onEnter; the form's own submit is dropped. */}
           <VStack as="form" gap={6} onSubmit={(event) => event.preventDefault()}>
             <CardTop />

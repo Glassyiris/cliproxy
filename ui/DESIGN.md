@@ -125,7 +125,7 @@ built from the same template.
 
 ### Sign-in (`login-card`)
 
-- One elevated card, centred; theme and language as one pair of icon menus at the page's top end,
+- One flat card, centred (the template's: no `elevation`); theme and language as one pair of icon menus at the page's top end,
   on the page gutter. Under the card, one link to the repository.
 - Inside the card, top to bottom: brand mark and name; h1 "Connect to this server"; a status line
   (lamp, host, and whether `GET /healthz` answers, rechecked every 10 s while the tab is shown);
@@ -203,6 +203,6 @@ waiting, live usage). No page transitions, no row entrance stagger: a list that 
   where one fits the meaning (`calendar`, `wrench`, `search`, `copy`, `check`, `eyeSlash` ...; the
   list is `npx astryx docs icons available-names`), otherwise a lucide component passed straight to
   `Icon` or an `icon` prop and typed with Astryx's `IconProps["icon"]`. No `registerIcons`, no second
-  icon set. The brand mark (`src/components/BrandMark.tsx`) is the one drawn glyph (gate: `check:ui`,
-  an `<svg>` or `<path>` elsewhere and any `registerIcons` fail).
+  icon set. The brand mark is lucide `Route`, in the side nav, on the sign-in card and in
+  `public/favicon.svg` (gate: `check:ui`, any `<svg>`, `<path>` or `registerIcons` fails).
 - No per-page colours, spacings or font sizes.
