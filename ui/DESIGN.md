@@ -178,9 +178,13 @@ built from the same template.
 
 ### Pages
 
-- Every page is the templates' shared frame: `Layout height="fill"` with `LayoutHeader`,
-  `LayoutContent` and, for a detail or a rail, `LayoutPanel` at the end. There is no app-level
-  page frame component; the values come from the roles table below.
+- Every page renders in one frame component, `src/app/PageFrame.tsx`, built from the templates'
+  shared frame: `Layout height="fill"` with `LayoutHeader`, `LayoutContent` and, for a detail or
+  a rail, `LayoutPanel` at the end, on the roles table's values. A page puts its template's body
+  inside it and never draws its own header (owner, 2026-11-08: 「每個頁面一個骨架有病」, after the
+  h1 jumped between pages). The header spans the full width on every page, so the h1 sits at the
+  same place everywhere; a reading-width page caps only its content, aligned to the header's
+  start, never centred.
 - The header holds the h1, one supporting line, the page's controls and at most one primary
   action. A list's search and filters sit in the `LayoutHeader` (as `table-filter` does), so they
   stay while the content scrolls; on phones they fold as the template's narrow layout folds them

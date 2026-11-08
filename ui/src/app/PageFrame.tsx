@@ -1,13 +1,13 @@
-// The frame of every page, as the owner's BoothDex console has it (admin/page-frame.tsx) from the
-// header of the Astryx page template detail-page: a LayoutHeader with a divider and the template's
-// padding, the h1 with its meta line beside it, the page's primary action at the header's end, and
-// the content on the same padding, so it starts on the header's left edge. On a phone the meta
-// takes its own line under the title and the action drops below both (detail-page, mobile).
+// The one frame every page renders in (DESIGN.md "Roles": page frame and header). The header is
+// the dashboard-alert-rail template's, as the Overview draws it: a LayoutHeader with a divider on
+// the roles padding, the h1 with its meta line under it, the page's one primary action at the end,
+// and a long list's filter row (`toolbar`) under them, which stays in view while the content
+// scrolls. The header always spans the full width, so the h1 sits at the same place on every page;
+// a reading-width page caps only its content, aligned to the header's start, never centred.
 // A detail panel sits at the end behind a resize handle on desktop and is a bottom sheet on phones,
-// as the table-filter template docks its job details, so the list beside it does not reflow. A
-// panel with no `onClose` is a permanent rail (the dashboard-alert-rail template's): its sections
-// bring their own padding, so the panel adds none. A long list's filter row goes in `toolbar`,
-// which stays in the header while the content scrolls, as the table-filter template keeps it.
+// as the table-filter template docks its job details. A panel with no `onClose` is a permanent rail
+// (the dashboard-alert-rail template's): its sections bring their own padding, so the panel adds
+// none.
 
 import type { ReactNode } from "react";
 import { useAppShellMobile } from "@astryxdesign/core/AppShell";
@@ -18,13 +18,13 @@ import {
   LayoutContent,
   LayoutHeader,
   LayoutPanel,
-  StackItem,
   VStack,
 } from "@astryxdesign/core/Layout";
 import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { Heading } from "@astryxdesign/core/Text";
 import { t } from "../lib/i18n.ts";
 import { layout } from "../themes/site/layout.ts";
+import { roles } from "../themes/site/roles.ts";
 
 /**
  * The open detail of a row; the page closes it by no longer passing it. Without `onClose` it is a
@@ -67,7 +67,7 @@ export function PageFrame({
   meta?: ReactNode;
   /** The page's one primary action. */
   actions?: ReactNode;
-  /** DESIGN.md "Content width": 960 for forms, settings and System; full for list + panel screens. */
+  /** DESIGN.md "Roles", content width: a reading page caps its content, a list or dashboard is full. */
   width?: "reading" | "full";
   panel?: DetailPanel;
   /** The filter row of a long list; it stays in view while the list scrolls. */
@@ -75,42 +75,33 @@ export function PageFrame({
   children: ReactNode;
 }) {
   const isMobile = useAppShellMobile().isMobile;
-  const heading = <Heading level={1}>{title}</Heading>;
   return (
     <>
       <Layout
         height="fill"
-        contentWidth={width === "reading" ? layout.pageWidth : undefined}
         end={panel && !isMobile ? <EndPanel panel={panel} /> : undefined}
         header={
-          <LayoutHeader hasDivider padding={4}>
+          <LayoutHeader hasDivider padding={roles.header.padding}>
             <VStack gap={4}>
-              {isMobile ? (
-                <VStack gap={3}>
-                  <VStack gap={1}>
-                    {heading}
-                    {meta}
-                  </VStack>
-                  {actions}
+              <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
+                <VStack gap={0} vAlign="center">
+                  <Heading level={roles.heading.page}>{title}</Heading>
+                  {meta}
                 </VStack>
-              ) : (
-                <HStack gap={4} vAlign="center">
-                  <StackItem size="fill">
-                    <HStack gap={3} vAlign="center" wrap="wrap">
-                      {heading}
-                      {meta}
-                    </HStack>
-                  </StackItem>
-                  {actions}
-                </HStack>
-              )}
+                {actions}
+              </HStack>
               {toolbar}
             </VStack>
           </LayoutHeader>
         }
         content={
-          <LayoutContent padding={4}>
-            <VStack gap={6}>{children}</VStack>
+          <LayoutContent padding={roles.content.padding}>
+            <VStack
+              gap={6}
+              maxWidth={width === "reading" ? roles.content.settingsWidth : undefined}
+            >
+              {children}
+            </VStack>
           </LayoutContent>
         }
       />
