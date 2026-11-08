@@ -15,7 +15,8 @@ const styles = stylex.create({
 /** A row: its label, bold when chosen, and how many rows it keeps at the end. */
 function Row({ label, count, isChosen }: { label: string; count: number; isChosen: boolean }) {
   return (
-    <HStack gap={4} vAlign="center" wrap="nowrap">
+    // A step of inner padding on each side, so the text does not touch the row's shade.
+    <HStack gap={6} paddingInline={1} vAlign="center" wrap="nowrap">
       <StackItem size="fill">
         <Text type="inherit" weight={isChosen ? roles.textWeight.emphasis : roles.textWeight.plain}>
           {label}
@@ -61,7 +62,7 @@ export function CountedSelector({
     <DropdownMenu
       button={{ label: trigger }}
       menuMaxHeight={layout.menuMaxHeight}
-      menuWidth={layout.filterMenuWidth}
+      menuWidth="max-content"
     >
       {rows.map((o) => (
         <DropdownMenuItem

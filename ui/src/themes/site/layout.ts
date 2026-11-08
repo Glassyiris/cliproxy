@@ -24,8 +24,6 @@ export const layout = {
   // them. Astryx caps at 300, which scrolled an eight-row menu on a tall screen (owner,
   // 2026-11-08: 「夠長的話其實不用那麼限高。」).
   menuMaxHeight: 640,
-  // A list filter menu: wide enough for 需重新登入 or "Sign in again" and a three-digit count apart.
-  filterMenuWidth: 240,
   // Icon size="sm" (Astryx 0.7.11): the empty slot that keeps a menu's counts in line with a check.
   smallIcon: 16,
   valueSkeleton: { width: "8rem", height: "1em" },
