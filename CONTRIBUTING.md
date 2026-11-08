@@ -25,8 +25,8 @@ Tests use local mock upstreams only. Never point a test at a real provider or us
 
 CI holds the binary to the numbers in [`bench/budgets.txt`](bench/budgets.txt), and it counts events and bytes, never elapsed time:
 
-- Size, on every pull request: the Linux release binary, its `.text` and `.rodata`, the release archive, and the number of crates linked in more than one version.
-- Idle, on every pull request: [`bench/idle.sh`](bench/idle.sh) with 1 and with 2,000 auth files: wakeups, CPU ticks, threads and RSS over 30 seconds without requests.
+- Size, on every push to master and on pull requests that can change the binary (see `.github/scripts/ci-lanes.py`): the Linux release binary, its `.text` and `.rodata`, the release archive, and the number of crates linked in more than one version.
+- Idle, on the same changes: [`bench/idle.sh`](bench/idle.sh) with 1 and with 2,000 auth files: wakeups, CPU ticks, threads and RSS over 30 seconds without requests.
 - Heap per request: `crates/cpa-server/tests/alloc_budget.rs`, part of `cargo test`, sends one 306 KB and one 1.9 MB request through the Claude route, the same sizes through Claude count_tokens (counted locally) and through the Codex Responses route, and the Claude bodies cloaked and signed through a Claude OAuth login with request capture, one at a time and eight at once, under a counting allocator.
 - macOS and Windows idle, in the release builds and weekly ([`idle.yml`](.github/workflows/idle.yml)). Memory soaks ([`soak.yml`](.github/workflows/soak.yml), [`bench/soak.sh`](bench/soak.sh)): one hour of the Claude load and one hour of the field mix (Claude, Codex and count_tokens requests of 200 KB to 2 MB) on every release tag, 300 minutes of the field mix every week, and up to 330 minutes by hand before a release. The resting RSS must stay flat, and the field mix's peak (`VmHWM`) within its budget.
 
@@ -54,7 +54,7 @@ A pull request that touches shipped code needs a new fragment: `crates/`, `ui/sr
 - Request bodies are forwarded byte for byte unless a ported rule rewrites them; do not re-serialize JSON just to pass it through.
 - Never log or forward credentials or client keys to the wrong side.
 - Mark a deliberate simplification with a `ponytail:` comment that names its limit and how to lift it.
-- CI must pass: format, clippy, tests, the harness check, clippy on Windows (all targets, warnings as errors), the Linux size and idle gates and the changelog fragment check.
+- CI must pass: the `ci-ok` check, which requires every lane the change selects (format, clippy, tests, the harness check, clippy on Windows with all targets and warnings as errors, the Linux size and idle gates, the dashboard checks and actionlint), and the changelog fragment check. Add the `ci:full` label to run every lane.
 
 ## Issues
 
