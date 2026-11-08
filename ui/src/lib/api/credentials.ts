@@ -60,6 +60,8 @@ export type Credential = {
   last_refresh?: string;
   next_retry_after?: string;
   path?: string;
+  /** Codex: the ChatGPT account the token belongs to, when the file records it. */
+  account_id?: string;
   id_token?: { chatgpt_account_id?: string; plan_type?: string };
   priority?: number;
   note?: string;

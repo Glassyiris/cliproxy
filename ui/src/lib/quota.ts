@@ -123,7 +123,9 @@ export function createQuotaChecker(sources: QuotaSources) {
           });
         if (p === "codex") {
           header["User-Agent"] = "codex-tui/0.149.1";
-          const account = a.id_token?.chatgpt_account_id;
+          // The file's own account_id first, as the Svelte dashboard sent it; the token's claim
+          // is the fallback.
+          const account = a.account_id || a.id_token?.chatgpt_account_id;
           if (account) header["Chatgpt-Account-Id"] = account;
         }
         const r = await callProvider({
