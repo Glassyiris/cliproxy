@@ -7,7 +7,7 @@ exclude = ["vendor"]
 [workspace.package]
 version = "0.4.1"
 edition = "2024"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 rust-version = "1.88"
 repository = "https://github.com/Glassyiris/cliproxy"
 homepage = "https://github.com/Glassyiris/cliproxy"

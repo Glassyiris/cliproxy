@@ -42,4 +42,4 @@ The dashboard lives in `ui/` (React 19 and Astryx). `npm ci`, `npm run check`, `
 - Mark a deliberate simplification with a `ponytail:` comment that names its limit and how to lift it.
 - CI must pass: format, clippy, tests, the harness check, clippy on Windows (all targets, warnings as errors) and the Linux size and idle gates.
 
-By contributing you agree that your work is released under the [MIT license](LICENSE).
+By contributing you agree that your work is released under the [GNU Affero General Public License, version 3 or later](LICENSE).

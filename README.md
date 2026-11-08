@@ -231,9 +231,9 @@ cargo test --workspace --locked
 
 ## License and credits
 
-MIT. See [LICENSE](LICENSE).
+GNU Affero General Public License, version 3 or later. See [LICENSE](LICENSE). If you run a modified cliproxy as a network service, the license requires you to offer its source to the people who use it.
 
-cliproxy-rs is a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) by Luis Pater and Router-For.ME, which is also MIT licensed. [NOTICE](NOTICE) records the portions derived from it.
+cliproxy grew from [cliproxy-rs](https://github.com/vayungodara/cliproxy-rs), a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) by Luis Pater and Router-For.ME. Both are MIT licensed; [NOTICE](NOTICE) keeps their copyright notices and [LICENSE-MIT](LICENSE-MIT) the MIT text that covers the portions derived from them.
 
 ## Thanks
 

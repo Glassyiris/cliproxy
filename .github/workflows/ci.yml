@@ -298,7 +298,7 @@ jobs:
         if: matrix.auth-files == 1
         run: |
           name=cliproxy-ci-x86_64-unknown-linux-gnu
-          mkdir -p "$name" && cp target/release/cliproxy README.md LICENSE "$name/"
+          mkdir -p "$name" && cp target/release/cliproxy README.md LICENSE LICENSE-MIT NOTICE "$name/"
           tar -czf "$name.tar.gz" "$name"
           bench/gate.sh size x86_64-unknown-linux-gnu target/release/cliproxy "$name.tar.gz"
       - name: Idle
