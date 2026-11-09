@@ -1,9 +1,9 @@
 # cliproxy-rs
 
-[![CI](https://github.com/Glassyiris/cliproxy/actions/workflows/ci.yml/badge.svg)](https://github.com/Glassyiris/cliproxy/actions/workflows/ci.yml)
+[![CI](https://github.com/prep-cook/cliproxy/actions/workflows/ci.yml/badge.svg)](https://github.com/prep-cook/cliproxy/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/vayungodara/cliproxy-rs)](https://github.com/vayungodara/cliproxy-rs/releases/latest)
 [![Homebrew](https://img.shields.io/badge/brew-vayungodara%2Ftap%2Fcliproxy--rs-orange)](https://github.com/vayungodara/homebrew-tap)
-[![Stars](https://img.shields.io/github/stars/Glassyiris/cliproxy)](https://github.com/Glassyiris/cliproxy/stargazers)
+[![Stars](https://img.shields.io/github/stars/prep-cook/cliproxy)](https://github.com/prep-cook/cliproxy/stargazers)
 
 Use DeepSeek, GLM, Kimi, OpenRouter and more in Codex CLI and Claude Code: one local endpoint, API translation, failover. Single Rust binary, CLIProxyAPI-compatible.
 
@@ -26,7 +26,7 @@ On Windows, or with Homebrew or Scoop, see [Quick start](#quick-start).
 > **Set it up with your coding agent.** Paste this into Claude Code, Codex or Amp on the machine where the proxy should run:
 >
 > ```text
-> Install cliproxy-rs on this machine by following https://github.com/Glassyiris/cliproxy/blob/master/docs/AI-SETUP.md
+> Install cliproxy-rs on this machine by following https://github.com/prep-cook/cliproxy/blob/master/docs/AI-SETUP.md
 > ```
 
 ## Quick start

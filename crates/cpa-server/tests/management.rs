@@ -2032,9 +2032,9 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
                 async move {
                     record.lock().unwrap().push((method, headers));
                     let location = match case.as_str() {
-                        "tag" => "https://github.com/Glassyiris/cliproxy/releases/tag/v1.2.3",
+                        "tag" => "https://github.com/prep-cook/cliproxy/releases/tag/v1.2.3",
                         "other" => "https://example.invalid/releases/tag/v9",
-                        "empty" => "https://github.com/Glassyiris/cliproxy/releases/tag/",
+                        "empty" => "https://github.com/prep-cook/cliproxy/releases/tag/",
                         _ => "",
                     };
                     (
@@ -2285,7 +2285,7 @@ async fn latest_version_uses_configured_and_environment_proxies() {
             async {
                 (
                     axum::http::StatusCode::FOUND,
-                    [("location", "https://github.com/Glassyiris/cliproxy/releases/tag/v4.5.6")],
+                    [("location", "https://github.com/prep-cook/cliproxy/releases/tag/v4.5.6")],
                 )
             }
         });
@@ -2406,7 +2406,7 @@ async fn latest_version_keeps_tls_verification_through_proxy() {
         axum::Router::new().fallback(|| async {
             (
                 axum::http::StatusCode::FOUND,
-                [("location", "https://github.com/Glassyiris/cliproxy/releases/tag/v4.5.6")],
+                [("location", "https://github.com/prep-cook/cliproxy/releases/tag/v4.5.6")],
             )
         }),
         Some(Arc::new(tls.build())),

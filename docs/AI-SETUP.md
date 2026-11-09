@@ -67,7 +67,7 @@ CLIPROXY_MANAGEMENT_KEY=...
 If there is no release binary for the system, build from source. That needs `git`, a Rust toolchain (`cargo`), `cmake`, `clang` and `perl`; ask the user before installing any of them. Then follow [the first run without the install script](INSTALL.md#first-run-without-the-install-script), writing the two keys into `~/.cliproxy-rs/keys.env` in the format above with `chmod 600`.
 
 ```sh
-git clone https://github.com/Glassyiris/cliproxy.git ~/cliproxy-rs-src
+git clone https://github.com/prep-cook/cliproxy.git ~/cliproxy-rs-src
 cd ~/cliproxy-rs-src && cargo build --release -p cliproxy
 mkdir -p ~/.local/bin && install -m 0755 target/release/cliproxy ~/.local/bin/cliproxy
 ```

@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security problems privately through GitHub's [private vulnerability reporting](https://github.com/Glassyiris/cliproxy/security/advisories/new), not in a public issue. Include the version (`cliproxy --version`), what an attacker can do, and the steps to reproduce. Leave real keys, tokens and account files out of the report.
+Please report security problems privately through GitHub's [private vulnerability reporting](https://github.com/prep-cook/cliproxy/security/advisories/new), not in a public issue. Include the version (`cliproxy --version`), what an attacker can do, and the steps to reproduce. Leave real keys, tokens and account files out of the report.
 
 You should get an answer within a week. Fixes go into a new release, and the advisory is published once users can update.
 
