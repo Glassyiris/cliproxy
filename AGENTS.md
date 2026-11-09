@@ -2,13 +2,12 @@
 
 If you are an agent installing cook-router for a user rather than developing it, stop here and follow [docs/AI-SETUP.md](docs/AI-SETUP.md).
 
-A Rust rewrite of CLIProxyAPI (https://github.com/router-for-me/CLIProxyAPI) targeting full parity and drop-in compatibility: same `config.yaml`, same auth JSON files in `auth-dir`, same HTTP routes and response shapes, same v8 Management API.
+cook-router started as a Rust rewrite of CLIProxyAPI (https://github.com/router-for-me/CLIProxyAPI) and no longer tracks it. Go behaviour is not a target: change routes, config, response shapes and the Management API when a better design calls for it, and migrate every caller (dashboard, TUI, tests, docs) in the same change.
 
-## Reference
+## History
 
-- The reference is frozen at CLIProxyAPI **v8.0.35**, commit `ae3ee3be303fb07fb8173279923413005bf32177`: clone https://github.com/router-for-me/CLIProxyAPI, check out that commit and treat the clone as read-only. Cite Go file paths in comments only where behaviour is non-obvious. Existing goldens keep their recorded versions; they do not prove later Go changes. `docs/parity-audit/checklist.md` tracks the target contracts; `docs/parity-audit/upstream-v8.0.35.md` lists the commits since the previous reference, `6fecc6e`.
-- When Go behaviour and documentation disagree, the Go code wins. Port behaviour, not structure: idiomatic Rust over transliterated Go.
-- A deliberate difference from Go is listed in `docs/DIFFERENCES-FROM-GO.md`, and tests that compare against Go goldens encode it explicitly.
+- The port was frozen at CLIProxyAPI **v8.0.35**, commit `ae3ee3be303fb07fb8173279923413005bf32177`. Comments citing Go file paths explain where existing behaviour came from; they do not oblige new code to follow Go.
+- Existing Go goldens and comparison tests pin behaviour that has not changed since the port. A change that moves away from a golden updates or deletes that test in the same change; it does not need an entry in `docs/DIFFERENCES-FROM-GO.md`, which records only the differences that predate the split.
 
 ## Layout
 
@@ -25,7 +24,7 @@ A Rust rewrite of CLIProxyAPI (https://github.com/router-for-me/CLIProxyAPI) tar
 
 - The full test suite is slow and memory-heavy (the BoringSSL build and the release link). While iterating, run the affected crate or a filter, for example `cargo test -p cpa-exec kimi`; CI runs fmt, `clippy -D warnings` and the whole suite. On a shared or small machine, add `CARGO_BUILD_JOBS=2 nice -n 19`.
 - The Go and PostgreSQL comparison tests in `cargo test` run fully only in CI, inside a network-denied namespace. For a local Go/Rust differential run on Linux, use `./harness/run` (see `harness/README.md`).
-- Port Go's `strings.ToLower`, `strings.ToUpper` and `strings.EqualFold` with `cpa_core::gostr::GoStr` (`go_lower`, `go_upper`, `go_eq_fold`). Rust's full case mappings differ on non-ASCII input, so `clippy.toml` disallows `str::to_lowercase` and `str::to_uppercase`; keep `eq_ignore_ascii_case` only where the input is ASCII by definition (header names, protocol tokens) or the comparison is explicitly ASCII. An ASCII literal alone is not enough: Go's `EqualFold` also matches `ſ` to `s` and the Kelvin sign `K` to `k`.
+- Case mapping and case-insensitive comparison use `cpa_core::gostr::GoStr` (`go_lower`, `go_upper`, `go_eq_fold`, equal to Go's `strings.ToLower`, `strings.ToUpper` and `strings.EqualFold`). Rust's full case mappings differ on non-ASCII input, so `clippy.toml` disallows `str::to_lowercase` and `str::to_uppercase`; keep `eq_ignore_ascii_case` only where the input is ASCII by definition (header names, protocol tokens) or the comparison is explicitly ASCII. An ASCII literal alone is not enough: `go_eq_fold` also matches `ſ` to `s` and the Kelvin sign `K` to `k`.
 - Request bodies are forwarded byte for byte unless a ported rule rewrites them. Never re-serialize JSON just to pass it through.
 - Upstream credentials and client keys must never be logged or forwarded to the wrong side.
 - Upstream request and response capture goes through the shared sink in `crates/cpa-server/src/request_logging.rs`. It redacts `Cookie` and `Set-Cookie` values, credentials in URLs and short keys, and spools large sections to disk. Don't format or log captured bytes anywhere else.
@@ -37,7 +36,7 @@ A Rust rewrite of CLIProxyAPI (https://github.com/router-for-me/CLIProxyAPI) tar
 
 ## Review guidelines
 
-Flag, in order: behaviour that differs from Go v8.0.35 (`ae3ee3be`) without an entry in `docs/DIFFERENCES-FROM-GO.md` or an explicit partial/missing audit item; request or response bytes changed on passthrough; credentials or client keys reaching logs or the wrong side; tests that can touch the network or a real `auth-dir`; work on a request body that grows faster than linearly with its size. Skip style nits that `cargo fmt` and clippy already cover.
+Flag, in order: request or response bytes changed on passthrough; credentials or client keys reaching logs or the wrong side; tests that can touch the network or a real `auth-dir`; work on a request body that grows faster than linearly with its size; a behaviour change that leaves a caller (dashboard, TUI, tests, docs) on the old contract. Skip style nits that `cargo fmt` and clippy already cover.
 
 ## Claude cache telemetry deployment check
 
