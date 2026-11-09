@@ -151,6 +151,22 @@ class Events(unittest.TestCase):
         git, _ = self.fake_git("README.md\0")
         self.assertEqual(set(ci_lanes.select("pull_request", event, git)[0]), ALL)
 
+    def test_labels_come_from_the_api_with_the_payload_as_fallback(self):
+        event = {"pull_request": {"number": 7, "labels": [{"name": "rust"}]}}
+        env = {"GITHUB_REPOSITORY": "o/r", "GH_TOKEN": "t"}
+        urls = []
+
+        def fetch(url):
+            urls.append(url)
+            return [{"name": "ci:full"}]
+        self.assertEqual(ci_lanes.current_labels(event, env, fetch), ["ci:full", "rust"])
+        self.assertEqual(urls, ["https://api.github.com/repos/o/r/issues/7/labels"])
+
+        def broken(url):
+            raise OSError("offline")
+        self.assertEqual(ci_lanes.current_labels(event, env, broken), ["rust"])
+        self.assertEqual(ci_lanes.current_labels(event, {}, fetch), ["rust"])
+
     def test_pull_request_diffs_the_merge_commit_against_its_base(self):
         git, calls = self.fake_git("README.md\0docs/a b\nc.md\0")
         self.assertEqual(set(ci_lanes.select("pull_request", {"pull_request": {}}, git)[0]), set())
