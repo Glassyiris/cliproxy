@@ -1,4 +1,4 @@
-**Size report** for `776f2f0`: every measurement within its ceiling. Compared with `master` at `346e667`. ([run](https://github.com/Glassyiris/cliproxy/actions/runs/123456789))
+**Size report** for `776f2f0`: every measurement within its ceiling. Compared with `master` at `346e667`. ([run](https://github.com/prep-cook/cliproxy/actions/runs/123456789))
 
 #### Dashboard bundle, gzip
 
