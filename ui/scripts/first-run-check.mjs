@@ -45,7 +45,7 @@ async function api(method, path, body) {
 // A real server signs in and stores accounts: its auth-dir must be private, not the ~/.cli-proxy-api
 // fallback. The mock keeps accounts in memory and says so in X-CPA-VERSION.
 const probe = await api("GET", "config");
-if (probe.headers.get("x-cpa-version") !== "cliproxy-rs-mock") await assertPrivateAuthDir(root, secret);
+if (probe.headers.get("x-cpa-version") !== "cook-router-mock") await assertPrivateAuthDir(root, secret);
 const present = (await api("GET", "credentials")).json.files.length;
 assert.equal(present, 0, `not an empty server: it already has ${present} accounts (restart the mock with --accounts 0)`);
 

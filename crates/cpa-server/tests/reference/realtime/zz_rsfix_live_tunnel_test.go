@@ -1,6 +1,6 @@
 package live
 
-// Golden vectors for cliproxy-rs's port of tcp_proxy.go and proxyutil.BuildDialer.
+// Golden vectors for cook-router's port of tcp_proxy.go and proxyutil.BuildDialer.
 // Runs only with RSFIX_OUT set; every expected value comes from the real Go code.
 
 import (

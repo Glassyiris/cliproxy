@@ -12,7 +12,7 @@ Record with Go 1.26.4 from a v8.0.35 checkout (`ae3ee3be`), network denied:
 ```sh
 cp zz_rsfix_payload_media_test.go <CLIProxyAPI>/internal/runtime/executor/helps/
 cd <CLIProxyAPI>
-RSFIX_OUT=<cliproxy-rs>/crates/cpa-exec/tests/fixtures/payload_media_go.json \
+RSFIX_OUT=<cook-router>/crates/cpa-exec/tests/fixtures/payload_media_go.json \
   go test -count=1 -run '^TestRSFixPayloadMedia$' ./internal/runtime/executor/helps/
 rm internal/runtime/executor/helps/zz_rsfix_payload_media_test.go
 ```

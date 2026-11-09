@@ -10,7 +10,7 @@
 // No files and no network: each case is parsed from memory.
 //
 // A !!binary mapping key is left out: Go's layout code matches keys by their
-// written text, and cliproxy-rs refuses such a key.
+// written text, and cook-router refuses such a key.
 package main
 
 import (

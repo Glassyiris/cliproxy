@@ -1,4 +1,4 @@
-//! cliproxy's main() with one difference: Options.login_base points every provider's
+//! cook-router's main() with one difference: Options.login_base points every provider's
 //! login endpoints (Claude, Codex, Kimi, Meta) at a local fake. Test tool, never shipped.
 //! Build: cp ../../../Cargo.lock . && CARGO_TARGET_DIR=../../../target cargo build
 //! Run:   login-harness <config.yaml> http://127.0.0.1:9102   (see scripts/fake-logins.mjs)

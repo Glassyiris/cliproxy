@@ -71,7 +71,7 @@ Of the existing items, 96 change from covered to partial:
   explicit notes preserving their previous-reference evidence. Of the other 139,
   138 were already partial or missing, and `M5-0283` stays covered: its Go diff
   (+17/-2) only changes GitHub-token assertions in the panel downloader that
-  cliproxy-rs deliberately lacks (owner-approved embedded dashboard). Current declarations replace old case lists;
+  cook-router deliberately lacks (owner-approved embedded dashboard). Current declarations replace old case lists;
   historical evidence can still contain its original case counts.
 - Sixteen previously covered settings move to `upstream.*`. Two other moved
   settings were already partial. Existing alias tests do not prove canonical
@@ -328,7 +328,7 @@ and plugin-defined routes.
 ```sh
 python3 docs/parity-audit/verify_reference.py /path/to/CLIProxyAPI
 python3 -m unittest discover -s docs/parity-audit -p 'test_*.py'
-unshare -Urn sh -c 'ip link set lo up; python3 docs/parity-audit/probe.py "$PWD/target/debug/cliproxy"'
+unshare -Urn sh -c 'ip link set lo up; python3 docs/parity-audit/probe.py "$PWD/target/debug/cook-router"'
 python3 docs/parity-audit/audit.py
 sha256sum README.md docs/PARITY.md docs/parity-audit/status.md > /tmp/parity-summary.sha256
 python3 docs/parity-audit/audit.py

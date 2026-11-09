@@ -60,7 +60,7 @@ export async function openSession(secret: string, hooks: SessionHooks, signal?: 
 
 export const closeSession = disconnect;
 
-/** What to do about a failed sign-in, and why it failed, for each answer cliproxy-rs and Go give. */
+/** What to do about a failed sign-in, and why it failed, for each answer cook-router and Go give. */
 function signInHelp(e: unknown): [string, SignInReason] {
   if (e instanceof ConnectionError)
     return [

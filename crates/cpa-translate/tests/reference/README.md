@@ -94,7 +94,7 @@ internal-package boundary. The reference checkout stays unchanged:
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI
-crate=/absolute/path/to/cliproxy-rs/crates/cpa-translate
+crate=/absolute/path/to/cook-router/crates/cpa-translate
 tmp=$(mktemp -d)
 cp "$crate"/tests/reference/*.go "$tmp/"
 (

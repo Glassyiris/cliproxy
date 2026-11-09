@@ -1,27 +1,31 @@
 #!/bin/sh
-# Installs cliproxy-rs on macOS or Linux, sets it up and starts it.
+# Installs cook-router on macOS or Linux, sets it up and starts it.
 #
-#   curl -fsSL https://raw.githubusercontent.com/vayungodara/cliproxy-rs/master/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/prep-cook/cook-router/master/install.sh | sh
 #
 # The first run downloads the release for this machine, checks it against the release's
-# SHA256SUMS and installs ~/.local/bin/cliproxy. It writes ~/.cliproxy-rs/config.yaml with
+# SHA256SUMS and installs ~/.local/bin/cook-router. It writes ~/.cook-router/config.yaml with
 # a free port (8317, or the next free one) and new keys, which it saves in
-# ~/.cliproxy-rs/keys.env (mode 600) and never prints. Then it starts the server in the
+# ~/.cook-router/keys.env (mode 600) and never prints. Then it starts the server in the
 # background and checks that it answers. Running it again upgrades the binary and
 # restarts the server; an existing config.yaml or keys.env is never changed.
 #
+# An install from before the rename to cook-router keeps working: without ~/.cook-router, an
+# existing ~/.cliproxy-rs is used as it is, and a cliproxy service or background server
+# gives way to the cook-router one. The old cliproxy binary is left in place.
+#
 # Options (when piping, pass them as: sh -s -- --service):
-#   --service      also start cliproxy-rs at login, with a systemd user unit or a launchd agent
+#   --service      also start cook-router at login, with a systemd user unit or a launchd agent
 #   --binary-only  only install or upgrade the binary
 #   --check        report installed and available versions without changing anything
 #
-# Environment:
-#   CLIPROXY_VERSION      release tag to install, such as v0.1.0 (default: the latest)
-#   CLIPROXY_INSTALL_DIR  where the binary goes (default: $HOME/.local/bin)
-#   CLIPROXY_HOME         config, keys, credentials and log (default: $HOME/.cliproxy-rs)
-#   CLIPROXY_NO_OPEN=1    never open a browser
-#   CLIPROXY_RELEASES     release page base URL, for mirrors and tests
-#                         (default: https://github.com/vayungodara/cliproxy-rs/releases)
+# Environment (each COOK_ROUTER_* name falls back to its CLIPROXY_* name from before the rename):
+#   COOK_ROUTER_VERSION      release tag to install, such as v0.1.0 (default: the latest)
+#   COOK_ROUTER_INSTALL_DIR  where the binary goes (default: $HOME/.local/bin)
+#   COOK_ROUTER_HOME         config, keys, credentials and log (default: $HOME/.cook-router)
+#   COOK_ROUTER_NO_OPEN=1    never open a browser
+#   COOK_ROUTER_RELEASES     release page base URL, for mirrors and tests
+#                        (default: https://github.com/prep-cook/cook-router/releases)
 set -eu
 
 fail() {
@@ -31,17 +35,28 @@ fail() {
 
 # Everything runs from main, so a download cut short cannot run half a script.
 main() {
-  releases="${CLIPROXY_RELEASES:-https://github.com/vayungodara/cliproxy-rs/releases}"
-  dir="${CLIPROXY_INSTALL_DIR:-$HOME/.local/bin}"
-  home="${CLIPROXY_HOME:-$HOME/.cliproxy-rs}"
-  bin="$dir/cliproxy"
-  config="$home/config.yaml" keys="$home/keys.env" log="$home/cliproxy.log" pidfile="$home/cliproxy.pid"
-  label=io.github.vayungodara.cliproxy-rs
+  releases="${COOK_ROUTER_RELEASES:-${CLIPROXY_RELEASES:-https://github.com/prep-cook/cook-router/releases}}"
+  dir="${COOK_ROUTER_INSTALL_DIR:-${CLIPROXY_INSTALL_DIR:-$HOME/.local/bin}}"
+  home="${COOK_ROUTER_HOME:-${CLIPROXY_HOME:-}}"
+  if [ -z "$home" ]; then
+    home="$HOME/.cook-router"
+    if [ ! -e "$home" ] && [ -d "$HOME/.cliproxy-rs" ]; then
+      home="$HOME/.cliproxy-rs"
+      printf 'Using %s from before the rename; new installs use %s.\n' "$home" "$HOME/.cook-router"
+    fi
+  fi
+  bin="$dir/cook-router"
+  config="$home/config.yaml" keys="$home/keys.env" log="$home/cook-router.log" pidfile="$home/cook-router.pid"
+  # The server and service an install from before the rename started.
+  old_pidfile="$home/cliproxy.pid"
+  label=io.github.prep-cook.cook-router old_label=io.github.vayungodara.cliproxy-rs
   os=$(uname -s)
   if [ "$os" = Darwin ]; then
     unit="$HOME/Library/LaunchAgents/$label.plist"
+    old_unit="$HOME/Library/LaunchAgents/$old_label.plist"
   else
-    unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/cliproxy.service"
+    unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/cook-router.service"
+    old_unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/cliproxy.service"
   fi
 
   setup=1 service='' check='' requested_service=''
@@ -54,8 +69,8 @@ main() {
     esac
   done
   [ -n "$setup" ] || [ -z "$service" ] || fail "--service and --binary-only do not go together"
-  # A service installed by an earlier run keeps being used.
-  [ ! -f "$unit" ] || service=1
+  # A service installed by an earlier run keeps being used, also one from before the rename.
+  { [ ! -f "$unit" ] && [ ! -f "$old_unit" ]; } || service=1
 
   case "$os-$(uname -m)" in
     Linux-x86_64 | Linux-amd64) target=x86_64-unknown-linux-gnu ;;
@@ -65,28 +80,28 @@ main() {
     *) fail "there is no release binary for $os $(uname -m); build from source (docs/INSTALL.md)" ;;
   esac
 
-  tag="${CLIPROXY_VERSION:-}"
+  tag="${COOK_ROUTER_VERSION:-${CLIPROXY_VERSION:-}}"
   if [ -z "$tag" ]; then
     # /releases/latest redirects to /releases/tag/<tag> once a release exists.
     latest=$(curl -fsSLI --retry 3 -o /dev/null -w '%{url_effective}' "$releases/latest") || fail "cannot reach $releases"
     tag=${latest##*/tag/}
     [ "$tag" != "$latest" ] || fail "no release is published yet; build from source (docs/INSTALL.md)"
   fi
-  name="cliproxy-${tag#v}-$target"
+  name="cook-router-${tag#v}-$target"
 
   installed=$([ ! -x "$bin" ] || "$bin" --version 2>/dev/null | tail -n 1)
   current=
-  [ "$installed" != "cliproxy ${tag#v}" ] || current=1
+  [ "$installed" != "cook-router ${tag#v}" ] || current=1
   if [ -n "$current" ]; then
-    printf 'cliproxy %s is already current.\n' "${tag#v}"
+    printf 'cook-router %s is already current.\n' "${tag#v}"
   else
-    printf 'Installed: %s; available: cliproxy %s\n' "${installed:-not installed}" "${tag#v}"
+    printf 'Installed: %s; available: cook-router %s\n' "${installed:-not installed}" "${tag#v}"
   fi
   [ -z "$check" ] || return 0
   # A current file is not enough after --binary-only or an interrupted upgrade.
   if [ -n "$current" ]; then
     [ -n "$setup" ] || return 0
-    if [ -z "$requested_service" ] && [ -f "$config" ]; then
+    if [ -z "$requested_service" ] && [ -f "$config" ] && [ ! -f "$old_unit" ]; then
       # -nt is supported by both Linux /bin/sh and macOS /bin/sh.
       # shellcheck disable=SC3013
       if [ -z "$service" ]; then
@@ -94,7 +109,7 @@ main() {
       elif [ ! "$bin" -nt "$unit" ]; then
         if [ "$os" = Darwin ]; then
           if launchctl print "gui/$(id -u)/$label" 2>/dev/null | grep -q 'state = running'; then return 0; fi
-        elif systemctl --user is-active --quiet cliproxy.service; then
+        elif systemctl --user is-active --quiet cook-router.service; then
           return 0
         fi
       fi
@@ -105,7 +120,7 @@ main() {
       fail "systemd user services are not available here; run this without --service"
   fi
   backup=
-  [ ! -f "$dir/cliproxy.prev" ] || backup=1
+  [ ! -f "$dir/cook-router.prev" ] || backup=1
   staged=
   if [ -z "$current" ]; then
     tmp=$(mktemp -d)
@@ -124,15 +139,16 @@ main() {
     tar -xzf "$tmp/$name.tar.gz" -C "$tmp"
     mkdir -p "$dir"
     # Renamed into place, so a running server keeps its old binary until it restarts.
-    install -m 0755 "$tmp/$name/cliproxy" "$dir/.cliproxy.new"
+    install -m 0755 "$tmp/$name/cook-router" "$dir/.cook-router.new"
     staged=1
   fi
   case ":$PATH:" in
     *":$dir:"*) ;;
-    *) printf 'Add %s to your PATH to run cliproxy by name.\n' "$dir" ;;
+    *) printf 'Add %s to your PATH to run cook-router by name.\n' "$dir" ;;
   esac
   if [ -z "$setup" ]; then
     swap_binary || fail "could not replace $bin"
+    old_binary_note
     return 0
   fi
 
@@ -147,11 +163,11 @@ main() {
     done
     client="sk-$(random_hex)" management=$(random_hex)
     cat >"$keys" <<EOF
-# cliproxy-rs keys. Sign in to the dashboard with CLIPROXY_MANAGEMENT_KEY;
-# your tools send CLIPROXY_CLIENT_KEY. Keep this file private.
-CLIPROXY_PORT=$port
-CLIPROXY_CLIENT_KEY=$client
-CLIPROXY_MANAGEMENT_KEY=$management
+# cook-router keys. Sign in to the dashboard with COOK_ROUTER_MANAGEMENT_KEY;
+# your tools send COOK_ROUTER_CLIENT_KEY. Keep this file private.
+COOK_ROUTER_PORT=$port
+COOK_ROUTER_CLIENT_KEY=$client
+COOK_ROUTER_MANAGEMENT_KEY=$management
 EOF
     cat >"$config" <<EOF
 # Written by install.sh. The plain keys are in keys.env next to this file.
@@ -175,6 +191,8 @@ EOF
 
   start_server() {
     stop_pidfile || return 1
+    stop_pidfile "$old_pidfile" || return 1
+    stop_old_service
     if [ -z "$service" ]; then
       (cd "$home" && exec nohup "$bin" --config "$config" </dev/null >>"$log" 2>&1) &
       echo $! >"$pidfile" || return 1
@@ -207,7 +225,7 @@ EOF
       mkdir -p "$(dirname "$unit")" || return 1
       cat >"$unit" <<EOF || return 1
 [Unit]
-Description=cliproxy-rs
+Description=cook-router
 
 [Service]
 ExecStart="$bin" --config "$config"
@@ -220,25 +238,27 @@ Restart=on-failure
 WantedBy=default.target
 EOF
       systemctl --user daemon-reload || return 1
-      systemctl --user enable --quiet cliproxy.service || return 1
-      systemctl --user restart cliproxy.service || return 1
-      how="systemctl --user disable --now cliproxy"
+      systemctl --user enable --quiet cook-router.service || return 1
+      systemctl --user restart cook-router.service || return 1
+      how="systemctl --user disable --now cook-router"
     fi
     return 0
   }
   swap_binary || upgrade_failed "could not replace $bin"
-  start_server || upgrade_failed "could not stop or start cliproxy-rs; see $log"
-  wait_healthy || upgrade_failed "cliproxy-rs did not start and answer at $base; see $log"
+  start_server || upgrade_failed "could not stop or start cook-router; see $log"
+  wait_healthy || upgrade_failed "cook-router did not start and answer at $base; see $log"
+  remove_old_service
+  old_binary_note
 
   url="$base/management.html"
-  printf '\ncliproxy-rs is running at %s\n' "$base"
+  printf '\ncook-router is running at %s\n' "$base"
   printf '  Dashboard  %s\n' "$url"
   [ ! -f "$keys" ] || printf '  Keys       %s (show them with: cat %s)\n' "$keys" "$keys"
   printf '  Config     %s\n  Log        %s\n  Stop       %s\n' "$config" "$log" "$how"
   [ -n "$service" ] || printf 'It runs until this computer restarts. Run this again with --service to start it at login.\n'
 
   opened=
-  if [ -t 1 ] && [ -z "${CLIPROXY_NO_OPEN:-}" ]; then
+  if [ -t 1 ] && [ -z "${COOK_ROUTER_NO_OPEN:-${CLIPROXY_NO_OPEN:-}}" ]; then
     if [ "$os" = Darwin ]; then
       open "$url" && opened=1
     elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
@@ -252,17 +272,44 @@ EOF
     printf 'Tailscale works too; see docs/MULTI-ACCOUNT.md.\n'
   fi
   if [ -f "$keys" ]; then
-    printf '\nNext: open the dashboard, sign in with CLIPROXY_MANAGEMENT_KEY from keys.env, and choose Connect account.\n'
+    # keys.env from before the rename names the key CLIPROXY_MANAGEMENT_KEY.
+    key_name=COOK_ROUTER_MANAGEMENT_KEY
+    if ! grep -q '^COOK_ROUTER_MANAGEMENT_KEY=' "$keys" && grep -q '^CLIPROXY_MANAGEMENT_KEY=' "$keys"; then
+      key_name=CLIPROXY_MANAGEMENT_KEY
+    fi
+    printf '\nNext: open the dashboard, sign in with %s from keys.env, and choose Connect account.\n' "$key_name"
   else
     printf '\nNext: open the dashboard, sign in with your management key, and choose Connect account.\n'
   fi
-  printf '\nIf cliproxy-rs helps, a star helps others find it: https://github.com/vayungodara/cliproxy-rs\n'
+  printf '\nIf cook-router helps, a star helps others find it: https://github.com/prep-cook/cook-router\n'
+}
+
+# Stops the service from before the rename, so it does not hold the port the new server needs.
+# Its unit stays until the new server answers, so a failed upgrade still starts it at login.
+stop_old_service() {
+  [ -f "$old_unit" ] || return 0
+  if [ "$os" = Darwin ]; then
+    launchctl bootout "gui/$(id -u)/$old_label" 2>/dev/null || true
+  else
+    systemctl --user stop cliproxy.service 2>/dev/null || true
+  fi
+}
+
+remove_old_service() {
+  [ -f "$old_unit" ] || return 0
+  [ "$os" = Darwin ] || systemctl --user disable --quiet cliproxy.service 2>/dev/null || true
+  rm -f "$old_unit" && printf 'Removed %s; %s replaces it.\n' "$old_unit" "$unit"
+  [ "$os" = Darwin ] || systemctl --user daemon-reload 2>/dev/null || true
+}
+
+old_binary_note() {
+  [ ! -e "$dir/cliproxy" ] || printf '%s from before the rename is no longer used; you can delete it.\n' "$dir/cliproxy"
 }
 
 # Restore the same inode the old server used, then restart using its unchanged config.
 upgrade_failed() {
   if [ -n "$backup" ]; then
-    if mv -f "$dir/cliproxy.prev" "$bin" && start_server && wait_healthy; then
+    if mv -f "$dir/cook-router.prev" "$bin" && start_server && wait_healthy; then
       printf 'Upgrade failed; restored the previous binary and verified it is healthy.\n' >&2
     else
       printf 'Upgrade failed; rollback failed too. The server may not be running; see %s.\n' "$log" >&2
@@ -274,11 +321,11 @@ upgrade_failed() {
 swap_binary() {
   [ -n "$staged" ] || return 0
   if [ -f "$bin" ]; then
-    rm -f "$dir/cliproxy.prev" || return 1
-    ln "$bin" "$dir/cliproxy.prev" || return 1
+    rm -f "$dir/cook-router.prev" || return 1
+    ln "$bin" "$dir/cook-router.prev" || return 1
     backup=1
   fi
-  mv -f "$dir/.cliproxy.new" "$bin" || return 1
+  mv -f "$dir/.cook-router.new" "$bin" || return 1
   [ "$os" != Darwin ] || xattr -d com.apple.quarantine "$bin" 2>/dev/null || true
   printf 'Installed %s at %s\n' "$("$bin" --version 2>/dev/null | tail -n 1)" "$bin"
 }
@@ -327,7 +374,7 @@ wait_healthy() {
         managed_pid && pid_running "$pid" || return 1
       elif [ "$os" = Darwin ]; then
         launchctl print "gui/$(id -u)/$label" 2>/dev/null | grep -q 'state = running' || return 1
-      else systemctl --user is-active --quiet cliproxy.service || return 1; fi
+      else systemctl --user is-active --quiet cook-router.service || return 1; fi
       return 0
     fi
     tries=$((tries + 1))
@@ -346,9 +393,11 @@ random_hex() {
   od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
 }
 
-# Stops the server an earlier run started in the background, if it is still running.
+# Stops the server an earlier run started in the background, if it is still running; $1 is
+# its pid file, by default this install's.
 stop_pidfile() {
-  if managed_pid && pid_running "$pid"; then
+  file=${1:-$pidfile}
+  if managed_pid "$file" && pid_running "$pid"; then
     kill "$pid" || { ! pid_running "$pid" || return 1; }
     i=0
     while pid_running "$pid" && [ "$i" -lt 10 ]; do
@@ -366,11 +415,13 @@ stop_pidfile() {
       if pid_running "$pid"; then return 1; fi
     fi
   fi
-  rm -f "$pidfile" || return 1
+  rm -f "$file" || return 1
 }
 
+# Reads a pid file, by default this install's, and checks that the process is a cook-router or a
+# cliproxy (before the rename) server.
 managed_pid() {
-  pid=$(cat "$pidfile" 2>/dev/null) || return 1
+  pid=$(cat "${1:-$pidfile}" 2>/dev/null) || return 1
   case "$pid" in '' | *[!0-9]*) return 1 ;; esac
   [ "$pid" -gt 0 ] || return 1
   if [ "$os" = Linux ]; then
@@ -380,7 +431,7 @@ managed_pid() {
     # Seatbelt refuses setuid ps; bash 3.2's substitution status is not reliable.
     if ! ps -p $$ -o pid= >/dev/null 2>&1; then
       # pgrep is not setuid. Never trust liveness alone for a stale pid file.
-      pgrep -x 'cliproxy([.]prev)?' 2>/dev/null | grep -qx "$pid"
+      pgrep -x '(cook-router|cliproxy)([.]prev)?' 2>/dev/null | grep -qx "$pid"
       return $?
     fi
     command=$(ps -p "$pid" -o ucomm= 2>/dev/null) || return 1
@@ -389,7 +440,7 @@ managed_pid() {
     command=$(ps -p "$pid" -o comm= 2>/dev/null) || return 1
     command=$(printf '%s\n' "$command" | sed 's/^[ ]*//;s/[ ]*$//')
   fi
-  case "$command" in cliproxy | cliproxy.prev) return 0 ;; *) return 1 ;; esac
+  case "$command" in cook-router | cook-router.prev | cliproxy | cliproxy.prev) return 0 ;; *) return 1 ;; esac
 }
 
 pid_running() {
@@ -400,7 +451,7 @@ pid_running() {
     case "$state" in '' | Z\ *) return 1 ;; esac
   else
     if [ "$os" = Darwin ] && ! ps -p $$ -o pid= >/dev/null 2>&1; then
-      pgrep -x 'cliproxy([.]prev)?' 2>/dev/null | grep -qx "$1"
+      pgrep -x '(cook-router|cliproxy)([.]prev)?' 2>/dev/null | grep -qx "$1"
       return $?
     fi
     state=$(ps -p "$1" -o stat= 2>/dev/null) || return 1

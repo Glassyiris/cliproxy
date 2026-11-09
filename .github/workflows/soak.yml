@@ -108,18 +108,18 @@ jobs:
       - name: Build
         if: matrix.binary == 'build'
         run: |
-          cargo build --release --locked -p cliproxy
-          echo "BIN=target/release/cliproxy" >> "$GITHUB_ENV"
+          cargo build --release --locked -p cook-router
+          echo "BIN=target/release/cook-router" >> "$GITHUB_ENV"
       - name: Release binary
         if: matrix.binary != 'build' && !startsWith(matrix.binary, 'go-')
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ matrix.binary }}
         run: |
-          name=cliproxy-$VERSION-x86_64-unknown-linux-gnu
+          name=cook-router-$VERSION-x86_64-unknown-linux-gnu
           gh release download "v$VERSION" -p "$name.tar.gz" -p SHA256SUMS -D release
           (cd release && grep " $name.tar.gz\$" SHA256SUMS | sha256sum -c - && tar xzf "$name.tar.gz")
-          echo "BIN=release/$name/cliproxy" >> "$GITHUB_ENV"
+          echo "BIN=release/$name/cook-router" >> "$GITHUB_ENV"
       - name: Go release binary
         if: startsWith(matrix.binary, 'go-')
         env:

@@ -27,7 +27,7 @@ body:
     id: version
     attributes:
       label: 版本
-      description: 填写 `cliproxy --version` 输出的最后一行。
+      description: 填写 `cook-router --version` 输出的最后一行。
     validations:
       required: true
   - type: input

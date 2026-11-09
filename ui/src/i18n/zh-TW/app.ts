@@ -1,8 +1,8 @@
 export default {
   "zh-TW": {
-    "app.brand.name": "cliproxy-rs",
-    "app.document.pageTitle": "{title} · cliproxy-rs",
-    "app.document.signInTitle": "登入 · cliproxy-rs",
+    "app.brand.name": "cook-router",
+    "app.document.pageTitle": "{title} · cook-router",
+    "app.document.signInTitle": "登入 · cook-router",
 
     "app.signIn.managementKey": "管理金鑰",
     "app.signIn.help":

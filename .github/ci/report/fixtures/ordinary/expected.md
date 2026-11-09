@@ -1,4 +1,4 @@
-**Size report** for `776f2f0`: every measurement within its ceiling. Compared with `master` at `346e667`. ([run](https://github.com/prep-cook/cliproxy/actions/runs/123456789))
+**Size report** for `776f2f0`: every measurement within its ceiling. Compared with `master` at `346e667`. ([run](https://github.com/prep-cook/cook-router/actions/runs/123456789))
 
 #### Release binary, Linux x86_64
 
@@ -39,4 +39,4 @@
 | RSS | 77,420 kB | 77,388 kB | -32 kB (-0.04%) | 85,241 kB | 9.2% |
 
 <sub>Ceilings: `bench/budgets.txt` and `ui/tools/size-budget.json`; raising one needs a maintainer's approval. Baseline: the latest successful CI run of a push to `master` before this run.</sub>
-<!-- cliproxy-size-report -->
+<!-- cook-router-size-report -->

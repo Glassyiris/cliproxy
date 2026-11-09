@@ -65,7 +65,7 @@ Names in comments are search hints, not proof that every assertion was ported.
 | M4-0250, M4-0307; M3-0221 | `request_logging.rs` captures inbound and upstream bytes, buffered and streaming responses, WebSockets and Home delivery. Go middleware and upstream goldens run. Concurrent filename collisions and the exact Go metadata suite remain partial. |
 | M3-0246; M4-0268, M4-0269 | `codex_response.rs` converts Grok keepalives. The specific Go executor and handler cases are not reproduced, so these become partial, not covered. |
 | M6-0070, M6-0071, M6-0074, M6-0084..0087, M6-0091, M6-0093, M6-0103, M6-0104, M6-0106, M6-0107, M6-0109, M6-0117..0119, M6-0123, M6-0124, M6-0129, M6-0130, M6-0133..0142, M6-0147..0154 | Plugin frontend authentication, routing, request/response interceptors, CLI, quota, HTTP, stream and auth callbacks have integration or Go-host fixtures. `plugin_wiring.rs`, `plugin_cli.rs`, `plugin_routes.rs`, `host_http.rs`, `go_host.rs` and `plugin_host_auth.rs` check them. M6-0149 (`host.log`) covers only success/error RPC envelopes, not logged fields or request-ID restoration. |
-| M4-0282, M4-0283, M4-0480..0482; M5-0284..0290; M6-0210 | Old manual overrides hid complete Go-case matches for Home limits/registry and duplex execution. Home model-info binding is also tested in `cliproxy/src/home.rs`. |
+| M4-0282, M4-0283, M4-0480..0482; M5-0284..0290; M6-0210 | Old manual overrides hid complete Go-case matches for Home limits/registry and duplex execution. Home model-info binding is also tested in `cook-router/src/home.rs`. |
 | M3-0209, M3-0227, M3-0229, M3-0232, M3-0240, M3-0241, M3-0342, M3-0344 | WebRTC media relay and Antigravity compaction, refresh, connection reuse and dispatch behavior exist. Their full Go suites are not reproduced. The relay requires the optional `media-relay` feature and still differs from Pion. |
 | M6-0155, M6-0162, M6-0173, M6-0188, M6-0194, M6-0195, M6-0214..0216, M6-0225, M6-0230, M6-0231, M6-0237, M6-0247, M6-0248 | Plugin OAuth persistence, config edits, Home logs/dispatch, plugin termination/errors and store validation have implementations and other tests. Their named Go suites remain incomplete. |
 
@@ -81,10 +81,10 @@ The byte-only translator goldens do not prove buffer reuse, so those suites stay
 
 The following checks run without provider credentials or live provider traffic:
 
-- `CARGO_BUILD_JOBS=2 nice -n 19 cargo build -p cliproxy`: passed.
-- `unshare -Urn sh -c 'ip link set lo up; python3 docs/parity-audit/probe.py "$PWD/target/debug/cliproxy"'`: 237/237 routed. Each server has a private temporary auth directory.
+- `CARGO_BUILD_JOBS=2 nice -n 19 cargo build -p cook-router`: passed.
+- `unshare -Urn sh -c 'ip link set lo up; python3 docs/parity-audit/probe.py "$PWD/target/debug/cook-router"'`: 237/237 routed. Each server has a private temporary auth directory.
 - `python3 -m unittest discover -s docs/parity-audit -p 'test_*.py'`: three tests pass, covering shared README/PARITY counts, method-specific fixture evidence, and unchanged pages when the README summary is missing or duplicated.
-- Targeted Rust tests pass in a network-denied namespace: `cpa-home --lib` (120), `cliproxy tui::` (24), standalone startup/address tests (2), plugin wiring (1), plugin CLI (1), `cpa-plugin` host HTTP (7) and store (1), `cpa-server` AI Studio (2), media Go replay (4), duplex dispatch (1), plugin host auth (2), plugin routes (1), request logging (17), steering (25), and `cpa-exec` Claude Go-unit replay (22 passed, one pre-existing cancellation test ignored) and Codex images (1).
+- Targeted Rust tests pass in a network-denied namespace: `cpa-home --lib` (120), `cook-router tui::` (24), standalone startup/address tests (2), plugin wiring (1), plugin CLI (1), `cpa-plugin` host HTTP (7) and store (1), `cpa-server` AI Studio (2), media Go replay (4), duplex dispatch (1), plugin host auth (2), plugin routes (1), request logging (17), steering (25), and `cpa-exec` Claude Go-unit replay (22 passed, one pre-existing cancellation test ignored) and Codex images (1).
 - `audit.py` is rerun in full. A second run must leave the generated pages unchanged; a milestone-filtered run must not overwrite their full totals.
 - The upstream table has exactly the 288 unique commits in `6fecc6e..v8.0.35`: 19 ported, 205 to port, zero not applicable, 61 nothing to port, and three deliberate differences. Of the 19 formerly excluded Antigravity commits, seven are ported and 12 remain to port.
 

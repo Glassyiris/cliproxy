@@ -1,5 +1,5 @@
 //! Bounded trust for quota resets (`routing.cooldown.max-trusted-cooldown`, a
-//! cliproxy-rs addition): one Claude credential answers 429 with a weekly reset six
+//! cook-router addition): one Claude credential answers 429 with a weekly reset six
 //! days away, then recovers early. The stated reset is trusted only up to the bound,
 //! so the next ordinary request after the bound reaches the upstream and succeeds.
 //! Run with and without `save-cooldown-status`; with it, a restart restores the bounded
@@ -248,7 +248,7 @@ async fn early_reset_is_noticed_after_the_bound_with_save_cooldown_status() {
     early_reset_is_noticed_after_the_bound(true).await;
 }
 
-/// A bounded `.cds` record cliproxy-rs wrote in its third window (count 2, 4 h)
+/// A bounded `.cds` record cook-router wrote in its third window (count 2, 4 h)
 /// restores as it is: 4 h left, the six-day stated reset kept.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_saved_trust_count_restores_its_window() {

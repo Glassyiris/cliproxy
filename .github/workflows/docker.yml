@@ -50,8 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build
-        run: docker build -t cliproxy-rs:ci .
+        run: docker build -t cook-router:ci .
       - name: Smoke test
-        run: docker run --rm cliproxy-rs:ci --version
+        run: docker run --rm cook-router:ci --version
       - name: Size gate
-        run: bench/gate.sh image cliproxy-rs:ci
+        run: bench/gate.sh image cook-router:ci

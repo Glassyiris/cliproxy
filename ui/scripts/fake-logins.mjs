@@ -1,5 +1,5 @@
 // Fake provider login endpoints for end-to-end OAuth checks. Never a real provider.
-// Answers the token, profile, device-code, key-mint and Claude usage routes that cliproxy-rs and Go call
+// Answers the token, profile, device-code, key-mint and Claude usage routes that cook-router and Go call
 // during Claude, Codex, Kimi, Meta, xAI and Devin logins, with fake tokens and @example.invalid emails.
 // Device flows answer "authorization_pending" on the first poll, then succeed.
 // Usage: node scripts/fake-logins.mjs [port]   (default 9102)

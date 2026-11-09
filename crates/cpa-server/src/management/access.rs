@@ -29,7 +29,7 @@ const BAN: Duration = Duration::from_secs(30 * 60);
 pub(super) const PURGE_EVERY: Duration = Duration::from_secs(3600);
 const MAX_IDLE: Duration = Duration::from_secs(2 * 3600);
 
-pub const VERSION: &str = concat!("cliproxy-rs-", env!("CARGO_PKG_VERSION"));
+pub const VERSION: &str = concat!("cook-router-", env!("CARGO_PKG_VERSION"));
 const COMMIT: &str = match option_env!("CPA_COMMIT") {
     Some(v) => v,
     None => "none",

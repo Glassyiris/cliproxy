@@ -1,6 +1,6 @@
 # Benchmarks
 
-Binary size, memory and throughput of cliproxy-rs and CLIProxyAPI on the same configuration, with a local fake upstream. The numbers come from one small machine and a synthetic load, so use them to compare the two servers with each other. They say little about how much traffic either one can carry on bigger hardware.
+Binary size, memory and throughput of cook-router and CLIProxyAPI on the same configuration, with a local fake upstream. The numbers come from one small machine and a synthetic load, so use them to compare the two servers with each other. They say little about how much traffic either one can carry on bigger hardware.
 
 ## Field memory
 
@@ -18,7 +18,7 @@ On 2026-10-23, the 0.3.0 release binary on the maintainer's Linux server was rea
 
 Measured on 2026-10-03.
 
-- cliproxy-rs 0.1.0, the launch build, release profile (thin LTO, one codegen unit, stripped), built with rustc 1.99.0.
+- cook-router 0.1.0, the launch build, release profile (thin LTO, one codegen unit, stripped), built with rustc 1.99.0.
 - CLIProxyAPI v8.0.10 (commit `6fecc6e`), the official `linux_amd64` release binary, built with Go 1.26.4.
 - A virtual machine with 2 vCPUs (Intel Xeon at 2.60 GHz) and 3.9 GB of memory, running Debian 12 with Linux 6.1. It is a shared machine, and the same binary measures differently from run to run, by up to about 15%; compare the two servers within one run.
 - Both servers run with the same `config.yaml`: one OpenAI-compatible provider that points at the fake upstream, one client key and an empty credential folder, started with `--local-model`. Each scenario starts a fresh server process.
@@ -29,7 +29,7 @@ Measured on 2026-10-03.
 The scripts are in [`bench/`](../bench): `upstream/` is the fake OpenAI-compatible upstream, `load/` the load generator, `run.sh` runs every scenario three times and `summary.sh` prints the median of the three rounds. Both helpers use only the Go standard library. The raw results are in [`bench/results/`](../bench/results), one file per run.
 
 ```sh
-bench/run.sh target/release/cliproxy /path/to/cli-proxy-api /tmp/bench 3
+bench/run.sh target/release/cook-router /path/to/cli-proxy-api /tmp/bench 3
 bench/summary.sh /tmp/bench/results.jsonl
 ```
 
@@ -45,62 +45,62 @@ A response counts only if its status is 200 and the body has the expected end ma
 
 ## Results
 
-Median of three rounds, 2026-10-03, cliproxy-rs 0.1.0.
+Median of three rounds, 2026-10-03, cook-router 0.1.0.
 
 ### Idle
 
 | Server | Startup (ms) | RSS after 15 s (MB) |
 | --- | --- | --- |
-| cliproxy-rs | 17 | 17.3 |
+| cook-router | 17 | 17.3 |
 | Go | 204 | 44.7 |
 
 ### chat
 
 | Server | Requests/s | p50 (ms) | p99 (ms) | CPU ms per request | Peak RSS (MB) | RSS 10 s later (MB) | Failed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| cliproxy-rs | 1168 | 25.3 | 51.9 | 0.85 | 25.2 | 25.2 | 0 |
+| cook-router | 1168 | 25.3 | 51.9 | 0.85 | 25.2 | 25.2 | 0 |
 | Go | 1568 | 18.9 | 50.1 | 0.62 | 57.8 | 56.9 | 0 |
 
 ### chat-stream
 
 | Server | Requests/s | p50 (ms) | p99 (ms) | CPU ms per request | Peak RSS (MB) | RSS 10 s later (MB) | Failed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| cliproxy-rs | 833 | 34.9 | 75.1 | 1.19 | 26.2 | 26.2 | 0 |
+| cook-router | 833 | 34.9 | 75.1 | 1.19 | 26.2 | 26.2 | 0 |
 | Go | 916 | 34.4 | 69.6 | 1.08 | 57.8 | 56.7 | 0 |
 
 ### chat-stream-slow
 
 | Server | Requests/s | p50 (ms) | p99 (ms) | CPU ms per request | Peak RSS (MB) | RSS 10 s later (MB) | Failed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| cliproxy-rs | 238 | 1021.4 | 1414.5 | 1.95 | 49.7 | 49.2 | 0 |
+| cook-router | 238 | 1021.4 | 1414.5 | 1.95 | 49.7 | 49.2 | 0 |
 | Go | 235 | 1039.7 | 1272.2 | 2.9 | 103.8 | 103.8 | 0 |
 
 ### messages-stream
 
 | Server | Requests/s | p50 (ms) | p99 (ms) | CPU ms per request | Peak RSS (MB) | RSS 10 s later (MB) | Failed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| cliproxy-rs | 793 | 37.5 | 68.2 | 1.25 | 26.9 | 26.6 | 0 |
+| cook-router | 793 | 37.5 | 68.2 | 1.25 | 26.9 | 26.6 | 0 |
 | Go | 564 | 54.5 | 115.4 | 1.75 | 79.3 | 77.5 | 0 |
 
-Startup varies a lot on this machine, mostly in the first round after a binary is copied in. cliproxy-rs took 15, 17 and 46 ms; Go took 104, 204 and 453 ms in this run, and 45 to 98 ms in quieter runs earlier the same day.
+Startup varies a lot on this machine, mostly in the first round after a binary is copied in. cook-router took 15, 17 and 46 ms; Go took 104, 204 and 453 ms in this run, and 45 to 98 ms in quieter runs earlier the same day.
 
 ## Binary size
 
-Linux x86_64. The cliproxy-rs binary includes its dashboard; the Go binary does not, because Go downloads its panel separately.
+Linux x86_64. The cook-router binary includes its dashboard; the Go binary does not, because Go downloads its panel separately.
 
-| | cliproxy-rs 0.1.0 | CLIProxyAPI v8.0.10 release |
+| | cook-router 0.1.0 | CLIProxyAPI v8.0.10 release |
 | --- | --- | --- |
 | Binary | 35.9 MB | 69.1 MB |
 | Binary, gzip -9 | 15.1 MB | 22.6 MB |
 | Release archive | 15.2 MB | 22.9 MB |
 
-The cliproxy-rs binary links glibc and libstdc++ dynamically; BoringSSL is linked in. The Go binary is the official release build (stripped), and its archive also holds two READMEs and the example config.
+The cook-router binary links glibc and libstdc++ dynamically; BoringSSL is linked in. The Go binary is the official release build (stripped), and its archive also holds two READMEs and the example config.
 
 ## Size and idle memory: 0.4.0 against v8.0.35
 
-Measured on 2026-10-31 with the Linux x86_64 release archives of cliproxy-rs 0.4.0 (`cliproxy-0.4.0-x86_64-unknown-linux-gnu.tar.gz`) and CLIProxyAPI v8.0.35 (`CLIProxyAPI_8.0.35_linux_amd64.tar.gz`, checked against the release's `checksums.txt`). Idle memory comes from `bench/run.sh`'s idle scenario with `SCENARIOS=idle` and five rounds, each a fresh process with the [Setup](#setup) config and network isolation. The machine was the maintainer's Linux server (AMD Ryzen 7 5700U, Linux Mint 22.3), not the virtual machine above, so compare these two columns with each other rather than with the 0.1.0 tables.
+Measured on 2026-10-31 with the Linux x86_64 release archives of cook-router 0.4.0 (`cook-router-0.4.0-x86_64-unknown-linux-gnu.tar.gz`) and CLIProxyAPI v8.0.35 (`CLIProxyAPI_8.0.35_linux_amd64.tar.gz`, checked against the release's `checksums.txt`). Idle memory comes from `bench/run.sh`'s idle scenario with `SCENARIOS=idle` and five rounds, each a fresh process with the [Setup](#setup) config and network isolation. The machine was the maintainer's Linux server (AMD Ryzen 7 5700U, Linux Mint 22.3), not the virtual machine above, so compare these two columns with each other rather than with the 0.1.0 tables.
 
-| | cliproxy-rs 0.4.0 | CLIProxyAPI v8.0.35 |
+| | cook-router 0.4.0 | CLIProxyAPI v8.0.35 |
 | --- | --- | --- |
 | Release archive | 19.0 MB | 23.6 MB |
 | Binary | 44.6 MB, dashboard included | 71.1 MB; Go downloads its panel separately |
@@ -112,23 +112,23 @@ Measured on 2026-10-31 with the Linux x86_64 release archives of cliproxy-rs 0.4
 
 ## What the numbers say
 
-- Non-streaming requests: Go is faster. It handled 1,568 requests per second against cliproxy-rs's 1,168, about 34% more, and used less CPU per request (0.62 ms against 0.85 ms). Both servers were CPU-bound in this test.
+- Non-streaming requests: Go is faster. It handled 1,568 requests per second against cook-router's 1,168, about 34% more, and used less CPU per request (0.62 ms against 0.85 ms). Both servers were CPU-bound in this test.
 - Plain streams: Go was ahead too, 916 against 833 streams per second.
-- Translated streams: in messages-stream, where both servers translate between the Anthropic and OpenAI formats, cliproxy-rs served 793 streams per second against Go's 564, about 41% more, with less CPU per request (1.25 ms against 1.75 ms) and a lower p99 latency (68 ms against 115 ms).
-- Slow streams: with 256 streams that each last about a second, throughput is set by the upstream and both kept up; cliproxy-rs used 1.95 ms of CPU per stream against 2.9 ms.
-- Memory: cliproxy-rs used about 40% of Go's memory at idle (17.3 MB against 44.7 MB) and under load (25 to 27 MB against 58 to 79 MB). With 256 slow streams open it peaked at 50 MB and Go at 104 MB.
-- Startup and size: cliproxy-rs answered its first request in 17 ms (median) and its binary is half the size of Go's.
+- Translated streams: in messages-stream, where both servers translate between the Anthropic and OpenAI formats, cook-router served 793 streams per second against Go's 564, about 41% more, with less CPU per request (1.25 ms against 1.75 ms) and a lower p99 latency (68 ms against 115 ms).
+- Slow streams: with 256 streams that each last about a second, throughput is set by the upstream and both kept up; cook-router used 1.95 ms of CPU per stream against 2.9 ms.
+- Memory: cook-router used about 40% of Go's memory at idle (17.3 MB against 44.7 MB) and under load (25 to 27 MB against 58 to 79 MB). With 256 slow streams open it peaked at 50 MB and Go at 104 MB.
+- Startup and size: cook-router answered its first request in 17 ms (median) and its binary is half the size of Go's.
 
 No response failed in any run.
 
 ## Claude soak: large prompts and memory
 
-Measured on 2026-10-04, after a field report from a Linux machine (glibc, systemd user service) that had served large-prompt Claude traffic for 10 hours: about 2,400 streamed `/v1/messages` requests with a few concurrent sessions left cliproxy-rs 0.1.1 at 647 MB resident (`VmRSS`) after a peak (`VmHWM`) of 840 MB, almost all of it anonymous memory. The scenarios above use 1.7 KB requests and did not show it.
+Measured on 2026-10-04, after a field report from a Linux machine (glibc, systemd user service) that had served large-prompt Claude traffic for 10 hours: about 2,400 streamed `/v1/messages` requests with a few concurrent sessions left cook-router 0.1.1 at 647 MB resident (`VmRSS`) after a peak (`VmHWM`) of 840 MB, almost all of it anonymous memory. The scenarios above use 1.7 KB requests and did not show it.
 
 ### Setup
 
 - A virtual machine with 8 vCPUs (Intel Xeon at 2.60 GHz) and 16 GB of memory, running Debian 12 (glibc 2.36) with Linux 6.1. It is a shared machine: the same binary measured from 25 to 37 ms of CPU per request across runs, so compare servers within one session.
-- cliproxy-rs master at `afe356b` (the 0.1.1 code) and the change described below, release profile, rustc 1.99.0. CLIProxyAPI at `6fecc6e`, built from source with Go 1.26.4.
+- cook-router master at `afe356b` (the 0.1.1 code) and the change described below, release profile, rustc 1.99.0. CLIProxyAPI at `6fecc6e`, built from source with Go 1.26.4.
 - [`bench/messages.sh`](../bench/messages.sh) runs in a loopback-only network namespace. [`bench/messages/`](../bench/messages) is both the fake Claude upstream and the load generator (Go standard library only). Both servers get one Claude API key whose `base-url` is the fake upstream. An OAuth login would make both servers fetch the account profile from `api.anthropic.com`, which this setup cannot reach, so the Claude Code OAuth path (cloaking, tool-name remapping, the native TLS client) is not covered.
 - The server runs on CPUs 0 to 3; the fake upstream and the load generator on CPUs 4 to 7. Each run starts a fresh server.
 - Load: 8 concurrent sessions. Each session is a growing coding-agent conversation: an 18 KB system prompt, 24 tools, then pairs of an assistant turn (signed thinking, text, `tool_use`) and a user `tool_result`, growing from 100 KB to 500 KB in 25 KB steps before a new session starts. 3,000 streamed requests, 306 KB on average. The upstream reads the whole request and streams 150 delta events 2 ms apart (thinking with a signature, text, then a `tool_use` block), about 43 KB of SSE over 0.37 s.
@@ -138,9 +138,9 @@ Measured on 2026-10-04, after a field report from a Linux machine (glibc, system
 
 ```sh
 bench/messages.sh /tmp/soak go /path/to/cli-proxy-api
-bench/messages.sh /tmp/soak rust target/release/cliproxy
-bench/messages.sh /tmp/soak rust-arena2 target/release/cliproxy MALLOC_ARENA_MAX=2
-MIN=1000000 MAX=3000000 STEP=100000 N=600 bench/messages.sh /tmp/soak large target/release/cliproxy
+bench/messages.sh /tmp/soak rust target/release/cook-router
+bench/messages.sh /tmp/soak rust-arena2 target/release/cook-router MALLOC_ARENA_MAX=2
+MIN=1000000 MAX=3000000 STEP=100000 N=600 bench/messages.sh /tmp/soak large target/release/cook-router
 ```
 
 ### What was found
@@ -176,18 +176,18 @@ Default load (306 KB requests), two rounds per server in one session, run in the
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Go | 1 | 115.1 | 80.4 | 63 | 18.9 | 43.7 / 94.8 | 416 / 558 |
 | Go | 2 | 107.6 | 81.6 | 58 | 19.5 | 39.2 / 85.7 | 406 / 459 |
-| cliproxy-rs master | 1 | 65.7 | 49.9 | 110 | 16.4 | 100.6 / 234.0 | 482 / 615 |
-| cliproxy-rs master | 2 | 66.7 | 45.3 | 90 | 17.6 | 82.5 / 192.0 | 449 / 561 |
-| cliproxy-rs, this change | 1 | 64.2 | 29.0 | 32 | 19.9 | 24.9 / 53.0 | 399 / 447 |
-| cliproxy-rs, this change | 2 | 63.4 | 29.0 | 31 | 20.0 | 22.7 / 55.8 | 393 / 522 |
+| cook-router master | 1 | 65.7 | 49.9 | 110 | 16.4 | 100.6 / 234.0 | 482 / 615 |
+| cook-router master | 2 | 66.7 | 45.3 | 90 | 17.6 | 82.5 / 192.0 | 449 / 561 |
+| cook-router, this change | 1 | 64.2 | 29.0 | 32 | 19.9 | 24.9 / 53.0 | 399 / 447 |
+| cook-router, this change | 2 | 63.4 | 29.0 | 31 | 20.0 | 22.7 / 55.8 | 393 / 522 |
 
 Large prompts (1.9 MB requests), one round.
 
 | Server | Peak RSS (MB) | RSS 30 s later (MB) | CPU ms per request | Requests/s | TTFB p50 / p99 (ms) | Total p50 / p99 (ms) |
 | --- | --- | --- | --- | --- | --- | --- |
 | Go | 263.9 | 183.5 | 225 | 13.2 | 241 / 418 | 593 / 773 |
-| cliproxy-rs master | 232.1 | 157.7 | 551 | 7.1 | 732 / 1,841 | 1,057 / 2,062 |
-| cliproxy-rs, this change | 176.9 | 42.7 | 129 | 15.4 | 144 / 292 | 509 / 633 |
+| cook-router master | 232.1 | 157.7 | 551 | 7.1 | 732 / 1,841 | 1,057 / 2,062 |
+| cook-router, this change | 176.9 | 42.7 | 129 | 15.4 | 144 / 292 | 509 / 633 |
 
 - On 306 KB requests this change uses about a third of master's CPU per request and half of Go's, and adds about 20 ms to the time to first byte against Go's 36 to 40 ms and master's 79 to 97 ms. Its throughput (20 requests per second) is close to the 21.4 the fake upstream allows on its own.
 - 30 seconds after the load it holds 29 MB against master's 45 to 50 MB and Go's 80 to 82 MB. Peak RSS barely moved (63 to 64 MB against 66 to 67 MB): the peak is the requests in flight, and trimming only returns what they leave behind.
@@ -216,11 +216,11 @@ The floor (each hour's lowest sample) rose from 26 to 89 MB and the peaks reache
 - [`bench/soak.sh`](../bench/soak.sh) with `MIX=field`, in a loopback-only network namespace. [`bench/messages/`](../bench/messages) is the fake upstream for both providers and the load generator. The server has one Claude API key and one Codex API key whose `base-url` is the fake upstream; a Claude API key on another origin has its count_tokens counted locally, as an OAuth login does.
 - Load: 4 concurrent sessions, 2 Claude (streamed `/v1/messages`, shaped as in the Claude soak) and 2 Codex (streamed `/v1/responses` for `gpt-5.5` through the Codex executor: 18 KB of instructions, 24 function tools, then reasoning items with encrypted content, function calls and their outputs). Each conversation grows from 200 KB to 2 MB in 100 KB steps, then a new one starts; requests averaged 1,019 to 1,028 KB. Before every 4th Claude turn the same body goes to `/v1/messages/count_tokens`, alternately for the Claude model and for `gpt-5.5` (a Claude client counting tokens for a Codex model). The fake upstream reads the whole request and streams 150 events 2 ms apart for either provider, ending in a tool call.
 - Batches of 160 turns (about 178 requests with the count_tokens calls). After each batch the server rests 20 seconds and its `VmRSS` is read: the resting floor. `VmRSS`, `VmHWM`, threads, CPU ticks and context switches are also sampled every 10 seconds. After 60 minutes of load the server idles for 300 seconds, then its context switches are counted over 30 more seconds, as `bench/idle.sh` counts them.
-- Builds: the 0.1.2 and 0.2.0 release binaries (`cliproxy-<version>-x86_64-unknown-linux-gnu.tar.gz`, checked against each release's `SHA256SUMS`) and this change, built on the runner with rustc 1.99.0. Each ran on its own GitHub-hosted Ubuntu 22.04 runner (4 vCPUs, so 0.1.2 starts 4 request threads and the others 2), all three at the same time, through `soak.yml`'s `releases` input. MB here is 1,024 kB as `/proc` reports it.
+- Builds: the 0.1.2 and 0.2.0 release binaries (`cook-router-<version>-x86_64-unknown-linux-gnu.tar.gz`, checked against each release's `SHA256SUMS`) and this change, built on the runner with rustc 1.99.0. Each ran on its own GitHub-hosted Ubuntu 22.04 runner (4 vCPUs, so 0.1.2 starts 4 request threads and the others 2), all three at the same time, through `soak.yml`'s `releases` input. MB here is 1,024 kB as `/proc` reports it.
 - The runs in this section used an earlier version of the fake upstreams, whose tool-call fragments did not join into JSON (and, for Codex, did not join into the completed arguments); the load generator did not check them then. It does now. With the corrected fake upstreams the same binary measured the same: on the 2-vCPU machine described under Results, alternating the two versions (10 minutes each, two runs each, `vm2-mock-check-10min`), peak RSS was 159.5 and 155.4 MB against 159.2 and 163.8 MB, resting `RssAnon` 53.0 to 67.1 and 52.8 to 66.9 MB against 52.1 to 66.4 and 53.6 to 66.8 MB, and CPU 42.2 and 41.7 ms per request against 41.9 and 41.2. All four runs passed the soak's gates. The numbers below stand as measured.
 
 ```sh
-MIX=field bench/soak.sh target/release/cliproxy 60 /tmp/soak-field
+MIX=field bench/soak.sh target/release/cook-router 60 /tmp/soak-field
 ```
 
 ### Results
@@ -253,7 +253,7 @@ CPU per request depends on the machine, and each build had a runner of its own, 
 
 ### Against Go v8.0.35
 
-Measured on 2026-10-28 with the same load, through `soak.yml`'s `go` input ([run 40708214096](https://github.com/vayungodara/cliproxy-rs/actions/runs/40708214096)): the CLIProxyAPI v8.0.35 release binary (`CLIProxyAPI_8.0.35_linux_amd64.tar.gz`, checked against the release's `checksums.txt`, its tag checked to resolve to `ae3ee3be`; upstream builds it with Go 1.26.4, cgo on and `-ldflags "-s -w"`), run as shipped with no `GOGC` or `GOMEMLIMIT`; the cliproxy-rs 0.4.0 release binary; and a build of 0.4.0's source on the runner. Each ran on its own GitHub-hosted Ubuntu 22.04 runner with 4 vCPUs, all three at the same time. Go and 0.4.0 got the same CPU model (AMD EPYC 7763), the build another (AMD EPYC 9V74). Go reads the same config and served the same load: its only complaints were four startup warnings for the downloads that the network namespace blocks (the Antigravity version, the management panel release and its fallback page, the Grok CLI version from npm), and it kept serving from its fallbacks.
+Measured on 2026-10-28 with the same load, through `soak.yml`'s `go` input ([run 40708214096](https://github.com/vayungodara/cliproxy-rs/actions/runs/40708214096)): the CLIProxyAPI v8.0.35 release binary (`CLIProxyAPI_8.0.35_linux_amd64.tar.gz`, checked against the release's `checksums.txt`, its tag checked to resolve to `ae3ee3be`; upstream builds it with Go 1.26.4, cgo on and `-ldflags "-s -w"`), run as shipped with no `GOGC` or `GOMEMLIMIT`; the cook-router 0.4.0 release binary; and a build of 0.4.0's source on the runner. Each ran on its own GitHub-hosted Ubuntu 22.04 runner with 4 vCPUs, all three at the same time. Go and 0.4.0 got the same CPU model (AMD EPYC 7763), the build another (AMD EPYC 9V74). Go reads the same config and served the same load: its only complaints were four startup warnings for the downloads that the network namespace blocks (the Antigravity version, the management panel release and its fallback page, the Grok CLI version from npm), and it kept serving from its fallbacks.
 
 60 minutes each; no request failed, and all three passed the soak's climb checks (the peak is measured, not gated, for both release binaries).
 
@@ -271,7 +271,7 @@ Measured on 2026-10-28 with the same load, through `soak.yml`'s `go` input ([run
 | After 300 s idle: RSS / `RssAnon` (MB), wakeups in 30 s, threads | 75.8 / 29.4, 32, 12 | 97.8 / 66.2, 4, 3 | 88.0 / 56.6, 4, 3 |
 
 - The README chart draws the peak and the RSS after 300 s idle for Go and 0.4.0. The idle reading is one reading per server in the same state, like the Claude soak's RSS 30 s after the load; the resting readings between batches are a range, given above and in the README text next to the chart.
-- Between batches Go's resting RSS swung over 61 MB and cliproxy-rs's over 16 MB. Five minutes after the load Go was down to 75.8 MB, 29.4 MB of it anonymous: its runtime returns freed heap to the kernel over minutes rather than at once. cliproxy-rs trims its heap after the load and then stays put; its 66.2 MB of anonymous memory includes the o200k_base tokenizer that count_tokens builds and keeps (46.8 MB, [above](#what-the-heap-held)).
+- Between batches Go's resting RSS swung over 61 MB and cook-router's over 16 MB. Five minutes after the load Go was down to 75.8 MB, 29.4 MB of it anonymous: its runtime returns freed heap to the kernel over minutes rather than at once. cook-router trims its heap after the load and then stays put; its 66.2 MB of anonymous memory includes the o200k_base tokenizer that count_tokens builds and keeps (46.8 MB, [above](#what-the-heap-held)).
 - 0.4.0 and the build are the same source. Their idle readings differ by 9.8 MB and their peaks by 2.6 MB, a measure of how much one run varies. Go and 0.4.0 had the same CPU model, so their CPU per request compares; the build's runner had a faster one.
 - Raw results: [`bench/results/2026-10-28-field-go.jsonl`](../bench/results/2026-10-28-field-go.jsonl), one `bench/soak.sh` summary per runner (labels `go-8.0.35`, `0.4.0` and `build`) in the format of the 2026-10-06 file.
 
@@ -300,7 +300,7 @@ Measured on 2026-10-28 with the same load, through `soak.yml`'s `go` input ([run
 
 ### Gates
 
-- `soak.yml` runs the field mix for an hour on every release tag, next to an hour of the Claude soak's load, and for 300 minutes every week. Either fails if any request fails or if the resting RSS climbs: the highest resting reading of the last third of the run more than 10% plus 2 MB above the highest of the first third, or the lowest of the last third that far above the lowest of the first third (a rising floor under peaks that do not rise). The field mix also fails if `VmHWM` ends above `soak.field.peak_hwm_kb` in [`bench/budgets.txt`](../bench/budgets.txt) (this change's 169.0 MB plus 20%, which 0.2.0 exceeds). By hand, `releases` soaks published cliproxy-rs releases and `go` the CLIProxyAPI release at the parity reference next to the build, measured but not gated.
+- `soak.yml` runs the field mix for an hour on every release tag, next to an hour of the Claude soak's load, and for 300 minutes every week. Either fails if any request fails or if the resting RSS climbs: the highest resting reading of the last third of the run more than 10% plus 2 MB above the highest of the first third, or the lowest of the last third that far above the lowest of the first third (a rising floor under peaks that do not rise). The field mix also fails if `VmHWM` ends above `soak.field.peak_hwm_kb` in [`bench/budgets.txt`](../bench/budgets.txt) (this change's 169.0 MB plus 20%, which 0.2.0 exceeds). By hand, `releases` soaks published cook-router releases and `go` the CLIProxyAPI release at the parity reference next to the build, measured but not gated.
 - Raw results: [`bench/results/2026-10-06-field.jsonl`](../bench/results/2026-10-06-field.jsonl) holds one `bench/soak.sh` summary per run, with the resting readings' lowest and highest over the run and in its first and last thirds, and the requests by kind. Every resting reading behind them is in [`bench/results/2026-10-06-field-batches.tsv`](../bench/results/2026-10-06-field-batches.tsv). The `session` field groups the runs: `ci-runners-60min` (the three runners), `vm2-releases-10min`, `vm2-allocator-10min` and `vm2-mock-check-10min` (the 2-vCPU machine; the allocator runs name their setting in `env`, and the two without one are this change's same-machine runs), `tokenizer-steps` (`RssAnon` in kB after each request on a fresh server), `heaptrack` (bytes still allocated at exit, by site), `malloc-info`, and `lcp-matcher` (live heap by hour, in MB of 10^6 bytes as measured).
 
 ## Large prompts through cloaking: bursts and peaks
@@ -316,7 +316,7 @@ Measured on 2026-10-11, after a field report from a Linux server (glibc, systemd
 - Attribution: heaptrack on builds with line tables (`[profile.release]` with `debug = "line-tables-only"` and `strip = false`), with the same load in 100-request runs (heaptrack slows the server, so its peaks are lower than without it), and the counting allocator of `crates/cpa-server/tests/alloc_budget.rs`.
 
 ```sh
-MIX=cloak IDLE=60 bench/soak.sh target/release/cliproxy 8 /tmp/soak-cloak
+MIX=cloak IDLE=60 bench/soak.sh target/release/cook-router 8 /tmp/soak-cloak
 ```
 
 ### What drove the peak
@@ -388,7 +388,7 @@ Snapshots after a burst of 100 requests and 60 seconds idle, with the load gener
 
 ## Claude latency: time added before the first byte
 
-Measured on 2026-10-05: how long cliproxy-rs holds a streamed `/v1/messages` request before its first byte reaches the upstream, and before the first response byte reaches the client, for the Claude Code OAuth path (cloaking and the native TLS client) and the Claude API-key path, with the process's peak memory alongside.
+Measured on 2026-10-05: how long cook-router holds a streamed `/v1/messages` request before its first byte reaches the upstream, and before the first response byte reaches the client, for the Claude Code OAuth path (cloaking and the native TLS client) and the Claude API-key path, with the process's peak memory alongside.
 
 ### Setup
 
@@ -560,13 +560,13 @@ Measured on 2026-10-06 on Linux, to see what a server costs while nobody uses it
 ### Setup
 
 - A virtual machine with 4 vCPUs (Intel Xeon at 2.60 GHz) and 7.8 GB of memory, running Debian 12 (glibc 2.36) with Linux 6.1.
-- cliproxy-rs master at `1849512`, and the change that replaces the polling loops with file change notifications and deadline timers and starts two request threads by default. Both are release builds made with rustc 1.99.0 on that machine.
+- cook-router master at `1849512`, and the change that replaces the polling loops with file change notifications and deadline timers and starts two request threads by default. Both are release builds made with rustc 1.99.0 on that machine.
 - [`bench/idle.sh`](../bench/idle.sh) runs each server in a loopback-only network namespace with one OpenAI-compatible API key, one client key and 1 or 2,000 Claude credential files whose tokens are valid for 30 days, so none is due for refresh. Without `-local-model`, so the catalog downloads at start are attempted (and fail at once, with no network).
 - After a 30-second warm-up without requests, which outlasts the startup heap trim (5 to 10 seconds after start, on the blocking pool) and the pool's 10-second keep-alive, it sums the context switches of every thread alive across the next 30 seconds from `/proc/<pid>/task/*/status` (each one is a thread waking up), and reads the CPU ticks (1/100 s), the thread count at both ends and `VmRSS`. A thread that exits inside the window makes the run fail, since its wakeups would go uncounted.
 
 ```sh
-bench/idle.sh target/release/cliproxy 1 30
-bench/idle.sh target/release/cliproxy 2000 30
+bench/idle.sh target/release/cook-router 1 30
+bench/idle.sh target/release/cook-router 2000 30
 ```
 
 ### Results
@@ -589,12 +589,12 @@ Median of three rounds.
 
 ### Against Go, idle
 
-The `go-comparison` job in [`idle.yml`](../.github/workflows/idle.yml) runs `bench/idle.sh` on a GitHub-hosted Ubuntu 22.04 runner for CLIProxyAPI v8.0.10 (the release binary) and for cliproxy-rs, on the same config: one OpenAI-compatible API key and no credential files. Each gets 30 seconds of warm-up and then 300 seconds of samples. Two runs on 2026-10-05, cliproxy-rs with the changes above:
+The `go-comparison` job in [`idle.yml`](../.github/workflows/idle.yml) runs `bench/idle.sh` on a GitHub-hosted Ubuntu 22.04 runner for CLIProxyAPI v8.0.10 (the release binary) and for cook-router, on the same config: one OpenAI-compatible API key and no credential files. Each gets 30 seconds of warm-up and then 300 seconds of samples. Two runs on 2026-10-05, cook-router with the changes above:
 
 | Server | Wakeups per minute | CPU ms per hour | Threads | RSS (MB) |
 | --- | --- | --- | --- | --- |
 | CLIProxyAPI v8.0.10 | 7.6 and 7.2 | 120 and 120 | 9 | 46.1 and 46.0 |
-| cliproxy-rs | 0 and 0 | 0 and 0 | 3 | 21.9 and 21.5 |
+| cook-router | 0 and 0 | 0 and 0 | 3 | 21.9 and 21.5 |
 
 CPU time is read in clock ticks of 10 ms, so Go's figure is one tick in five minutes in each run. The weekly job publishes these numbers in its summary.
 
@@ -603,7 +603,7 @@ CPU time is read in clock ticks of 10 ms, so Go's figure is one tick in five min
 The same machine and builds, with `bench/messages.sh` (the Claude soak load: 8 sessions of 100 to 500 KB streamed requests, 1,200 requests per run). The server and the load share all 4 vCPUs, so master starts 4 request threads and this change 2. Two runs each, alternating.
 
 ```sh
-N=1200 C=8 SERVER_CPUS=0-3 LOAD_CPUS=0-3 bench/messages.sh /tmp/soak rust target/release/cliproxy
+N=1200 C=8 SERVER_CPUS=0-3 LOAD_CPUS=0-3 bench/messages.sh /tmp/soak rust target/release/cook-router
 ```
 
 | Server | Run | Peak RSS (MB) | RSS 30 s later (MB) | CPU s | Requests/s | TTFB p50 / p99 (ms) |
@@ -630,8 +630,8 @@ Four runs on 2026-10-03 with the same method and machine. The Go column gives th
 | Idle memory | 13.8 MB | 14.8 MB | 17.4 MB | 17.3 MB | 44.6 / 45.1 / 44.1 / 44.7 MB |
 | Binary | 29.6 MB | 33.0 MB | 35.9 MB | 35.9 MB | 69.1 MB |
 
-- Run 1: cliproxy-rs did not yet set `TCP_NODELAY` on client connections (Go sets it on every connection), so each small SSE write waited for the client's acknowledgement and the fast streaming tests were latency-bound rather than CPU-bound.
-- Run 2: `TCP_NODELAY` set; cliproxy-rs wrote no access log yet.
-- Run 3 and 0.1.0: cliproxy-rs writes Go's access log, request-log capture is wired in (off in this config), and usage reporting follows Go's contract. Since run 2, Go's lead on non-streaming requests grew from about 20% to 34 to 42%.
+- Run 1: cook-router did not yet set `TCP_NODELAY` on client connections (Go sets it on every connection), so each small SSE write waited for the client's acknowledgement and the fast streaming tests were latency-bound rather than CPU-bound.
+- Run 2: `TCP_NODELAY` set; cook-router wrote no access log yet.
+- Run 3 and 0.1.0: cook-router writes Go's access log, request-log capture is wired in (off in this config), and usage reporting follows Go's contract. Since run 2, Go's lead on non-streaming requests grew from about 20% to 34 to 42%.
 
 Raw results: [`bench/results/`](../bench/results).

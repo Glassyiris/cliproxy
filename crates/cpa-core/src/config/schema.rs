@@ -504,7 +504,7 @@ mod tests {
         crate::config::Config::parse(text).unwrap();
     }
 
-    /// `oauth.providers.codex.chatgpt-keep-alive` is a cliproxy-rs addition in the schema:
+    /// `oauth.providers.codex.chatgpt-keep-alive` is a cook-router addition in the schema:
     /// strict management writes accept it as a bool, still reject other keys Go does not
     /// know, and the v8 migration keeps it instead of commenting it out.
     #[test]

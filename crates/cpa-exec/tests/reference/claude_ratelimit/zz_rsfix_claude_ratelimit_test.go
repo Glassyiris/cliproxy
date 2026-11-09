@@ -1,6 +1,6 @@
 package executor
 
-// Recorder for cliproxy-rs (see README.md). Copied into a scratch copy of CLIProxyAPI
+// Recorder for cook-router (see README.md). Copied into a scratch copy of CLIProxyAPI
 // v8.0.35 under internal/runtime/executor, it runs Go's Claude 429 helpers on fixed
 // inputs and writes their results to $RSFIX_OUT.
 
@@ -142,7 +142,7 @@ func TestRSFixClaudeRateLimit(t *testing.T) {
 		{"substring message", short, perMinute("This request would exceed the requests per minute rate limit. Please try again later. Your weekly quota is exhausted.")},
 		{"negated message", short, perMinute("This request would not exceed the requests per minute rate limit. Please try again later.")},
 		{"uppercase json keys", short, `{"ERROR":{"Type":"rate_limit_error","MESSAGE":"This request would exceed the requests per minute rate limit. Please try again later."}}`},
-		// cliproxy-rs keeps only the last of two byte-identical keys (DIFFERENCES-FROM-GO.md).
+		// cook-router keeps only the last of two byte-identical keys (DIFFERENCES-FROM-GO.md).
 		{"later null keeps the error", short, `{"error":{"type":"rate_limit_error","message":"This request would exceed the requests per minute rate limit. Please try again later."},"error":null}`},
 		{"long s and kelvin fold", short, `{"error":{"type":"rate_limit_error","meſſage":"This request would exceed the requests per minute rate limit. Please try again later."}}`},
 		{"duplicate error objects merge", short, `{"error":{"type":"rate_limit_error"},"Error":{"message":"This request would exceed the requests per minute rate limit. Please try again later."}}`},

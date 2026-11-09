@@ -2,7 +2,7 @@
 fn main() {
     let arg = std::env::args().nth(1).unwrap_or_default();
     if arg == "--version" {
-        println!("cliproxy 999.2.0");
+        println!("cook-router 999.2.0");
     } else if arg == "--help" {
         #[cfg(legacy)]
         println!("--config PATH");

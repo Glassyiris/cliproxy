@@ -16,8 +16,8 @@ Build the UI somewhere other than `ui/dist`, then run the harness from `ui/`:
 
 ```sh
 cd ui
-node_modules/.bin/vite build --outDir "${TMPDIR:-/tmp}/cliproxy-perf/dist" --emptyOutDir
-node tools/perf/run.mjs --accounts 1000 --minutes 5 --dist "${TMPDIR:-/tmp}/cliproxy-perf/dist"
+node_modules/.bin/vite build --outDir "${TMPDIR:-/tmp}/cook-router-perf/dist" --emptyOutDir
+node tools/perf/run.mjs --accounts 1000 --minutes 5 --dist "${TMPDIR:-/tmp}/cook-router-perf/dist"
 ```
 
 The harness starts the mock on a free port, starts `vite preview` of `--dist` (its `/v8` proxy
@@ -30,7 +30,7 @@ form and measures. It stops both servers on exit. Nothing is built or written in
 | `--minutes M` | 5 | how long to keep polling for M2 and M3 |
 | `--ui NAME` | react | adapter in `adapters/` |
 | `--dist DIR` | `ui/dist` | built UI to serve |
-| `--out DIR` | `<os tmpdir>/cliproxy-perf/<timestamp>/` | where `report.json`, `report.md`, `mock.log`, `preview.log` go |
+| `--out DIR` | `<os tmpdir>/cook-router-perf/<timestamp>/` | where `report.json`, `report.md`, `mock.log`, `preview.log` go |
 | `--seed N` | 1 | mock seed; the same seed gives the same accounts |
 | `--idle S` | 60 | seconds of M4 idle |
 | `--polls N` | 6 | polls M2 takes its median over |
@@ -51,8 +51,8 @@ The mock alone: `node tools/mock/server.mjs --port 8317 --accounts 1000 --seed 1
 ## What the mock serves
 
 Every route the dashboard calls, with response shapes taken from `crates/cpa-server/src/management/`
-and the fields the dashboard's `src/lib/` modules read. `X-CPA-VERSION: cliproxy-rs-mock` makes the UI
-treat it as cliproxy-rs. Accounts spread over claude, codex, gemini, kimi, antigravity, xai, devin
+and the fields the dashboard's `src/lib/` modules read. `X-CPA-VERSION: cook-router-mock` makes the UI
+treat it as cook-router. Accounts spread over claude, codex, gemini, kimi, antigravity, xai, devin
 and vertex, with twenty `recent_requests` buckets each, about 5% disabled, 5% cooling, 2% signed
 out, 3% with a model cooldown, and passive quota signals on most Claude, Codex and Devin accounts.
 Each `GET /credentials` gives about 5% of the accounts new request counts; the rest serialise to the

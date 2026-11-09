@@ -30,7 +30,7 @@ pub(crate) fn builder(hosts: &[String]) -> (Vec<u8>, btls::ssl::SslAcceptorBuild
         n.build()
     };
     let (ca_key, leaf_key) = (key(()), key(()));
-    let ca_name = name("cliproxy-rs Go replay CA");
+    let ca_name = name("cook-router Go replay CA");
     let mut ca = X509::builder().unwrap();
     ca.set_version(2).unwrap();
     ca.set_serial_number(&BigNum::from_u32(1).unwrap().to_asn1_integer().unwrap())

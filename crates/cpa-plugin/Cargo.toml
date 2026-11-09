@@ -1,6 +1,6 @@
 [package]
 name = "cpa-plugin"
-description = "Part of cliproxy: the native plugin host (CLIProxyAPI C ABI 1, registration schema 6) and plugin store"
+description = "Part of cook-router: the native plugin host (CLIProxyAPI C ABI 1, registration schema 6) and plugin store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 exclude.workspace = true
-keywords = ["llm", "proxy", "cliproxy", "plugin"]
+keywords = ["llm", "proxy", "cook-router", "plugin"]
 categories.workspace = true
 
 [dependencies]

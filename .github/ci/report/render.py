@@ -16,7 +16,7 @@ import re
 import sys
 
 SCHEMA_VERSION = 1
-MARKER = "<!-- cliproxy-size-report -->"
+MARKER = "<!-- cook-router-size-report -->"
 MAX_FILE_BYTES = 256 * 1024
 MAX_METRICS = 64
 LANE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")

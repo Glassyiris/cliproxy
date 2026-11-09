@@ -49,7 +49,7 @@ def main():
         ("Darwin", "x86_64"): "x86_64-apple-darwin",
         ("Windows", "AMD64"): "x86_64-pc-windows-msvc",
     }[(platform.system(), platform.machine())]
-    exe = "cliproxy.exe" if windows else "cliproxy"
+    exe = "cook-router.exe" if windows else "cook-router"
     requests = []
 
     with tempfile.TemporaryDirectory(prefix="installer-test-") as tmp:
@@ -58,7 +58,7 @@ def main():
         releases.mkdir()
 
         def package(tag, source):
-            name = f"cliproxy-{tag.removeprefix('v')}-{target}"
+            name = f"cook-router-{tag.removeprefix('v')}-{target}"
             directory = root / name
             directory.mkdir()
             shutil.copy2(source, directory / exe)
@@ -79,7 +79,7 @@ def main():
             package("v999.1.0", binary)
         else:
             wrapper = root / "version-wrapper"
-            wrapper.write_text(f'#!/bin/sh\nif [ "$1" = --version ]; then echo "cliproxy 999.1.0"; else exec {shlex.quote(str(binary))} "$@"; fi\n')
+            wrapper.write_text(f'#!/bin/sh\nif [ "$1" = --version ]; then echo "cook-router 999.1.0"; else exec {shlex.quote(str(binary))} "$@"; fi\n')
             wrapper.chmod(0o755)
             package("v999.1.0", wrapper)
         fixtures = repo / "target/installer-fixtures"
@@ -91,7 +91,7 @@ def main():
             package("v999.4.0", fixtures / "plain-health.exe")
         if not windows:
             bad = root / "broken"
-            bad.write_text("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cliproxy 999.2.0'; else exit 1; fi\n")
+            bad.write_text("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cook-router 999.2.0'; else exit 1; fi\n")
             bad.chmod(0o755)
             package("v999.2.0", bad)
 
@@ -130,9 +130,9 @@ def main():
             "PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432", "PSMODULEANALYSISCACHEPATH",
         }}
         env.update({"HOME": str(root), "USERPROFILE": str(root), "LOCALAPPDATA": str(root),
-               "CLIPROXY_RELEASES": f"http://127.0.0.1:{server.server_port}/releases",
-               "CLIPROXY_HOME": str(home), "CLIPROXY_INSTALL_DIR": str(bindir),
-               "CLIPROXY_NO_OPEN": "1", "CLIPROXY_NO_UPDATE_CHECK": "1"})
+               "COOK_ROUTER_RELEASES": f"http://127.0.0.1:{server.server_port}/releases",
+               "COOK_ROUTER_HOME": str(home), "COOK_ROUTER_INSTALL_DIR": str(bindir),
+               "COOK_ROUTER_NO_OPEN": "1", "COOK_ROUTER_NO_UPDATE_CHECK": "1"})
         # Catalog fetches cannot leave loopback even on native runners without namespaces.
         env.update(HTTP_PROXY="http://127.0.0.1:9", HTTPS_PROXY="http://127.0.0.1:9",
                    ALL_PROXY="http://127.0.0.1:9", NO_PROXY="127.0.0.1,localhost,::1")
@@ -185,7 +185,109 @@ def main():
             raise AssertionError("server not healthy")
 
         def pid():
-            return int((home / "cliproxy.pid").read_text().strip())
+            return int((home / "cook-router.pid").read_text().strip())
+
+        def migrate(tag):
+            """An install from before the rename: ~/.cliproxy-rs, CLIPROXY_* settings, a cliproxy
+            binary and its server, once in the background and once as a login service."""
+            darwin = platform.system() == "Darwin"
+            for port, as_service in ((8320, False), (8321, True)):
+                user = root / f"legacy-{port}"
+                old_home, local = user / ".cliproxy-rs", user / ".local/bin"
+                (old_home / "auth").mkdir(parents=True)
+                local.mkdir(parents=True)
+                (old_home / "config.yaml").write_text(
+                    f'config-version: 8\nserver:\n  host: "127.0.0.1"\n  port: {port}\naccess:\n  api-keys:\n'
+                    f'    - "sk-legacy"\nmanagement:\n  secret-key: "legacy"\noauth:\n  auth-dir: "{old_home / "auth"}"\n')
+                (old_home / "keys.env").write_text(f"CLIPROXY_PORT={port}\nCLIPROXY_CLIENT_KEY=sk-legacy\nCLIPROXY_MANAGEMENT_KEY=legacy\n")
+                old_bin = local / "cliproxy"
+                shutil.copy2(binary, old_bin)
+                legacy = {k: v for k, v in env.items() if not k.startswith(("COOK_ROUTER_", "CLIPROXY_"))}
+                legacy.update(HOME=str(user), CLIPROXY_RELEASES=env["COOK_ROUTER_RELEASES"], CLIPROXY_VERSION=tag,
+                              CLIPROXY_NO_OPEN="1", COOK_ROUTER_NO_UPDATE_CHECK="1")
+                with (old_home / "cliproxy.log").open("ab") as out:
+                    old = subprocess.Popen([old_bin, "--config", old_home / "config.yaml"], cwd=old_home, env=legacy,
+                                           stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
+                # Reap the old server as soon as it exits, as init would: the service shims wait on
+                # `kill -0`, and macOS runners refuse `ps`, so a zombie would never look gone.
+                threading.Thread(target=old.wait, daemon=True).start()
+                new_pid = None
+                try:
+                    if as_service:
+                        old_unit = (user / "Library/LaunchAgents/io.github.vayungodara.cliproxy-rs.plist" if darwin
+                                    else user / ".config/systemd/user/cliproxy.service")
+                        new_unit = (user / "Library/LaunchAgents/io.github.prep-cook.cook-router.plist" if darwin
+                                    else user / ".config/systemd/user/cook-router.service")
+                        old_unit.parent.mkdir(parents=True)
+                        old_unit.write_text("old unit\n")
+                        (user / "old-service.pid").write_text(str(old.pid))
+                        mocks = user / "service-mocks"
+                        mocks.mkdir()
+                        shim = mocks / ("launchctl" if darwin else "systemctl")
+                        shim.write_text('''#!/bin/sh
+echo "$*" >> "$HOME/calls.log"
+case "$*" in
+  *cliproxy.service*|*vayungodara.cliproxy-rs*)
+    case "$*" in *stop*|bootout*)
+      # As systemd and launchd do, return once the old server has exited (a zombie has).
+      old=$(cat "$HOME/old-service.pid"); kill "$old"
+      while kill -0 "$old" 2>/dev/null && ! ps -p "$old" -o stat= | grep -q Z; do sleep 0.2; done ;;
+    esac
+    exit 0 ;;
+  *show-environment*|*daemon-reload*|*enable*) exit 0 ;;
+  print*|*is-active*)
+    if [ -f "$HOME/service.pid" ] && kill -0 "$(cat "$HOME/service.pid")" 2>/dev/null; then
+      echo 'state = running'; exit 0
+    fi
+    exit 1 ;;
+  bootstrap*|kickstart*|*restart*)
+    (cd "$HOME/.cliproxy-rs" && exec nohup "$HOME/.local/bin/cook-router" --config "$HOME/.cliproxy-rs/config.yaml" </dev/null >>"$HOME/.cliproxy-rs/cook-router.log" 2>&1) &
+    echo $! > "$HOME/service.pid" ;;
+  *) exit 1 ;;
+esac
+''')
+                        shim.chmod(0o755)
+                        legacy["PATH"] = str(mocks) + os.pathsep + env["PATH"]
+                    else:
+                        (old_home / "cliproxy.pid").write_text(str(old.pid))
+                    for _ in range(40):
+                        try:
+                            with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=2):
+                                break
+                        except OSError:
+                            time.sleep(0.25)
+                    # The running server hashes the plain secret-key in config.yaml at start-up; the
+                    # installer must leave what it finds as it is.
+                    before = [(old_home / f).read_bytes() for f in ("config.yaml", "keys.env")]
+                    result = capture(["sh", str(repo / "install.sh")], env=legacy)
+                    output = result.stdout
+                    marker = user / "service.pid" if as_service else old_home / "cook-router.pid"
+                    if marker.exists():
+                        new_pid = int(marker.read_text().strip())
+                    assert result.returncode == 0, output
+                    assert f"Using {old_home} from before the rename" in output, output
+                    assert f"{old_bin} from before the rename is no longer used" in output, output
+                    assert "sign in with CLIPROXY_MANAGEMENT_KEY" in output, output
+                    old.wait(timeout=20)
+                    assert not (user / ".cook-router").exists() and old_bin.exists() and (local / "cook-router").exists()
+                    assert [(old_home / f).read_bytes() for f in ("config.yaml", "keys.env")] == before
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=5) as response:
+                        assert response.status == 200
+                    if as_service:
+                        calls = (user / "calls.log").read_text()
+                        stopped = "bootout gui/" if darwin else "--user stop cliproxy.service"
+                        assert stopped in calls, calls
+                        assert darwin or "--user disable --quiet cliproxy.service" in calls, calls
+                        assert not old_unit.exists() and str(local / "cook-router") in new_unit.read_text()
+                        assert f"Removed {old_unit}" in output, output
+                    else:
+                        assert not (old_home / "cliproxy.pid").exists()
+                finally:
+                    if old.poll() is None:
+                        old.terminate()
+                        old.wait(timeout=10)
+                    if new_pid:
+                        subprocess.run(["kill", str(new_pid)], check=False, timeout=10)
 
         try:
             process_log = root / "process.log"
@@ -197,13 +299,13 @@ def main():
             logged = process_log.read_text()
             assert logged.startswith("keep existing log\n") and "config" in logged[len("keep existing log\n"):], logged
             if windows:
-                original_run = ps("$e=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).'cliproxy-rs'; if($e){$e}")
+                original_run = ps("$e=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).'cook-router'; if($e){$e}")
                 # Explicit OWNER RIGHTS must not survive on a pre-existing home;
                 # removing inherited ACEs alone does not remove explicit grants.
-                print(ps("$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path $env:CLIPROXY_HOME | Out-Null; "
-                         "$acl=Get-Acl $env:CLIPROXY_HOME; $sid=New-Object Security.Principal.SecurityIdentifier('S-1-3-4'); "
+                print(ps("$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path $env:COOK_ROUTER_HOME | Out-Null; "
+                         "$acl=Get-Acl $env:COOK_ROUTER_HOME; $sid=New-Object Security.Principal.SecurityIdentifier('S-1-3-4'); "
                          "$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))); "
-                         "Set-Acl $env:CLIPROXY_HOME $acl; Write-Output \"Before install: $((Get-Acl $env:CLIPROXY_HOME).Sddl)\""))
+                         "Set-Acl $env:COOK_ROUTER_HOME $acl; Write-Output \"Before install: $((Get-Acl $env:COOK_ROUTER_HOME).Sddl)\""))
             else:
                 # A process can exit between a liveness check and either signal.
                 # An actual signal failure against a live PID must still fail.
@@ -235,15 +337,15 @@ if stop_pidfile; then exit 0; else exit 1; fi
             if windows:
                 script = str(repo / "install.ps1").replace("'", "''")
                 test_config = str(probe_config).replace("'", "''")
-                base = ps(f"$code=(Get-Content -Raw '{script}') -replace '(?m)^Install-CliproxyRs -Service.*$', ''; . ([scriptblock]::Create($code)); (Get-CliproxyProbe '{test_config}').Base; " + '''
+                base = ps(f"$code=(Get-Content -Raw '{script}') -replace '(?m)^Install-CookRouter -Service.*$', ''; . ([scriptblock]::Create($code)); (Get-CookRouterProbe '{test_config}').Base; " + '''
 $script:removed=@()
 function Get-ChildItem {
-  [pscustomobject]@{Name='cliproxy.prev-keep.exe'; FullName='/long/path/cliproxy.prev-keep.exe'}
-  [pscustomobject]@{Name='cliproxy.prev-old.exe'; FullName='/long/path/cliproxy.prev-old.exe'}
+  [pscustomobject]@{Name='cook-router.prev-keep.exe'; FullName='/long/path/cook-router.prev-keep.exe'}
+  [pscustomobject]@{Name='cook-router.prev-old.exe'; FullName='/long/path/cook-router.prev-old.exe'}
 }
 function Remove-Item { param($LiteralPath,[switch]$Force,$ErrorAction); $script:removed += $LiteralPath }
-Remove-CliproxyImages '/short/path' '/short/path/cliproxy.prev-keep.exe'
-if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.prev-old.exe'){
+Remove-CookRouterImages '/short/path' '/short/path/cook-router.prev-keep.exe'
+if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cook-router.prev-old.exe'){
   throw "cleanup removed the rollback image through a directory alias: $script:removed"
 }
 ''')
@@ -253,7 +355,7 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
             assert base.strip() == "https://[::1]:8317", base
             install(pipe=windows)
             health()
-            keys = dict(line.split("=", 1) for line in (home / "keys.env").read_text().splitlines() if line.startswith("CLIPROXY_"))
+            keys = dict(line.split("=", 1) for line in (home / "keys.env").read_text().splitlines() if line.startswith("COOK_ROUTER_"))
             # The dashboard page alone is not enough: on Windows its nested scripts,
             # styles and fonts once returned 404, leaving the page blank.
             with urllib.request.urlopen("http://127.0.0.1:8317/management.html", timeout=5) as response:
@@ -276,8 +378,8 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
             assert not failures, failures
             for path, key, expected in [
                 ("/v1/models", None, 401),
-                ("/v1/models", keys["CLIPROXY_CLIENT_KEY"], 200),
-                ("/v8/management/config", keys["CLIPROXY_MANAGEMENT_KEY"], 200),
+                ("/v1/models", keys["COOK_ROUTER_CLIENT_KEY"], 200),
+                ("/v8/management/config", keys["COOK_ROUTER_MANAGEMENT_KEY"], 200),
                 ("/assets/missing.js", None, 404),
             ]:
                 request = urllib.request.Request("http://127.0.0.1:8317" + path)
@@ -291,10 +393,10 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
                 assert code == expected, (path, code)
             if windows:
                 print(ps("$ErrorActionPreference='Stop'; $me=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
-                   "foreach($p in @($env:USERPROFILE, $env:CLIPROXY_HOME, \"$env:CLIPROXY_HOME\\keys.env\")){ "
+                   "foreach($p in @($env:USERPROFILE, $env:COOK_ROUTER_HOME, \"$env:COOK_ROUTER_HOME\\keys.env\")){ "
                    "$acl=Get-Acl -LiteralPath $p; Write-Output \"ACL $p $($acl.Sddl)\"; "
                    "$acl.Access | Format-Table IdentityReference,AccessControlType,IsInherited | Out-String | Write-Output }; "
-                   "$who=(Get-Acl \"$env:CLIPROXY_HOME\\keys.env\").GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]).IdentityReference.Value; "
+                   "$who=(Get-Acl \"$env:COOK_ROUTER_HOME\\keys.env\").GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]).IdentityReference.Value; "
                    "if($who | Where-Object { $_ -notin $me, 'S-1-5-18', 'S-1-5-32-544' }){throw \"keys readable by others: $who\"}"))
             else:
                 assert (home / "keys.env").stat().st_mode & 0o777 == 0o600
@@ -302,8 +404,8 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
                 # An oldest rotation opened without delete sharing cannot be
                 # removed on Windows, even if Rust ignores its read-only bit.
                 # Startup must keep its budget and prune other eligible files.
-                locked = home / "cliproxy-2001-09-09T01-46-40.000.log"
-                removable = home / "cliproxy-2001-09-09T01-46-41.000.log"
+                locked = home / "cook-router-2001-09-09T01-46-40.000.log"
+                removable = home / "cook-router-2001-09-09T01-46-41.000.log"
                 for rotation, seconds in ((locked, 1_000_000_000), (removable, 1_000_000_001)):
                     with rotation.open("wb") as output:
                         output.truncate(33 * 1024 * 1024)
@@ -314,7 +416,7 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
                     install()
                     health()
                     assert locked.exists() and not removable.exists(), "a locked rotation must not block cleanup of other logs"
-                    assert (home / "cliproxy.log").stat().st_size > 0, "pruning must preserve the active process log"
+                    assert (home / "cook-router.log").stat().st_size > 0, "pruning must preserve the active process log"
                     print("PASS Windows: locked process rotation skipped; remaining rotations pruned")
                 finally:
                     reader.close()
@@ -335,12 +437,12 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
                 assert pid() == old_pid
                 assert (bindir / exe).stat().st_ino == old_inode
                 assert not any("/download/" in r for r in requests)
-            env["CLIPROXY_VERSION"] = "v999.1.0"
+            env["COOK_ROUTER_VERSION"] = "v999.1.0"
             install("-BinaryOnly" if windows else "--binary-only")
             health()
             assert pid() == old_pid, "binary-only must leave the old server running"
             if not windows:
-                assert (bindir / "cliproxy.prev").stat().st_ino == old_inode
+                assert (bindir / "cook-router.prev").stat().st_ino == old_inode
                 requests.clear()
             install()
             health()
@@ -375,7 +477,7 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
                         time.sleep(2)
                         unrelated = subprocess.Popen(["sleep", "120"], env=env)
                         try:
-                            (home / "cliproxy.pid").write_text(str(unrelated.pid))
+                            (home / "cook-router.pid").write_text(str(unrelated.pid))
                             os.utime(bindir / exe, None)
                             install()
                             health()
@@ -386,18 +488,18 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
                 finally:
                     env["PATH"] = original_path
             second = root / "second"
-            env.update(CLIPROXY_HOME=str(second))
+            env.update(COOK_ROUTER_HOME=str(second))
             try:
                 install()
-                assert "CLIPROXY_PORT=8318" in (second / "keys.env").read_text()
+                assert "COOK_ROUTER_PORT=8318" in (second / "keys.env").read_text()
                 with urllib.request.urlopen("http://127.0.0.1:8318/healthz", timeout=5) as response:
                     assert response.status == 200
-                second_pid = int((second / "cliproxy.pid").read_text().strip())
-                env.update(CLIPROXY_HOME=str(home))
+                second_pid = int((second / "cook-router.pid").read_text().strip())
+                env.update(COOK_ROUTER_HOME=str(home))
                 if windows:
                     # Simulate a stale PID reused by another config sharing the
                     # binary; the command-line match must still protect it.
-                    (home / "cliproxy.pid").write_text(str(second_pid))
+                    (home / "cook-router.pid").write_text(str(second_pid))
                 install()
                 health()
                 with urllib.request.urlopen("http://127.0.0.1:8318/healthz", timeout=5) as response:
@@ -405,15 +507,15 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
                 health()
             finally:
                 try:
-                    if (second / "cliproxy.pid").exists():
-                        second_pid = int((second / "cliproxy.pid").read_text().strip())
+                    if (second / "cook-router.pid").exists():
+                        second_pid = int((second / "cook-router.pid").read_text().strip())
                         if windows:
                             ps(f"Stop-Process -Id {second_pid} -ErrorAction SilentlyContinue", check=False)
                         else:
                             subprocess.run(["kill", str(second_pid)], check=False, timeout=10)
                 except (OSError, ValueError, subprocess.SubprocessError) as error:
                     print(f"Best-effort cleanup: {error}", file=sys.stderr)
-                env.update(CLIPROXY_HOME=str(home))
+                env.update(COOK_ROUTER_HOME=str(home))
             if not windows:
                 # A service command fails once after the swap; rollback must restart and
                 # verify the previous image rather than losing it through `set -e`.
@@ -424,16 +526,16 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cliproxy.p
 case "$*" in
   *show-environment*|*daemon-reload*|*enable*) exit 0 ;;
   print*|*is-active*)
-    if [ -f "$CLIPROXY_HOME/service.pid" ] && kill -0 "$(cat "$CLIPROXY_HOME/service.pid")" 2>/dev/null; then
+    if [ -f "$COOK_ROUTER_HOME/service.pid" ] && kill -0 "$(cat "$COOK_ROUTER_HOME/service.pid")" 2>/dev/null; then
       echo 'state = running'; exit 0
     fi
     exit 1 ;;
   bootstrap*|kickstart*|*restart*)
-    if [ -f "$CLIPROXY_HOME/fail-service-once" ]; then
-      rm "$CLIPROXY_HOME/fail-service-once"; echo 'injected service failure' >&2; exit 1
+    if [ -f "$COOK_ROUTER_HOME/fail-service-once" ]; then
+      rm "$COOK_ROUTER_HOME/fail-service-once"; echo 'injected service failure' >&2; exit 1
     fi
-    (cd "$CLIPROXY_HOME" && exec nohup "$CLIPROXY_INSTALL_DIR/cliproxy" --config "$CLIPROXY_HOME/config.yaml" </dev/null >>"$CLIPROXY_HOME/cliproxy.log" 2>&1) &
-    echo $! > "$CLIPROXY_HOME/service.pid" ;;
+    (cd "$COOK_ROUTER_HOME" && exec nohup "$COOK_ROUTER_INSTALL_DIR/cook-router" --config "$COOK_ROUTER_HOME/config.yaml" </dev/null >>"$COOK_ROUTER_HOME/cook-router.log" 2>&1) &
+    echo $! > "$COOK_ROUTER_HOME/service.pid" ;;
   *) exit 1 ;;
 esac
 ''')
@@ -441,7 +543,7 @@ esac
                 (home / "fail-service-once").touch()
                 original_path = env["PATH"]
                 env["PATH"] = str(mockbin) + os.pathsep + original_path
-                env["CLIPROXY_VERSION"] = f"v{version}"
+                env["COOK_ROUTER_VERSION"] = f"v{version}"
                 image = (bindir / exe).read_bytes()
                 try:
                     output = install("--service", success=False)
@@ -451,12 +553,12 @@ esac
                 finally:
                     marker = home / "service.pid"
                     if marker.exists():
-                        (home / "cliproxy.pid").write_text(marker.read_text())
-                    unit = (root / "Library/LaunchAgents/io.github.vayungodara.cliproxy-rs.plist" if platform.system() == "Darwin"
-                            else root / ".config/systemd/user/cliproxy.service")
+                        (home / "cook-router.pid").write_text(marker.read_text())
+                    unit = (root / "Library/LaunchAgents/io.github.prep-cook.cook-router.plist" if platform.system() == "Darwin"
+                            else root / ".config/systemd/user/cook-router.service")
                     unit.unlink(missing_ok=True)
                     env["PATH"] = original_path
-            env["CLIPROXY_VERSION"] = "v999.3.0"
+            env["COOK_ROUTER_VERSION"] = "v999.3.0"
             image = (bindir / exe).read_bytes()
             if windows:
                 running = pid()
@@ -464,11 +566,11 @@ esac
                 assert pid() == running
                 health()
                 script = str(repo / "install.ps1").replace("'", "''")
-                selected = ps(f"$code=(Get-Content -Raw '{script}') -replace '(?m)^Install-CliproxyRs -Service.*$', ''; . ([scriptblock]::Create($code)); "
-                              "$dir=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:CLIPROXY_INSTALL_DIR); "
-                              "$data=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:CLIPROXY_HOME); "
-                              "Get-CliproxyServers $dir (Join-Path $data 'config.yaml') | ForEach-Object { [IO.Path]::GetFileName((Get-CliproxyImage $_.ProcessId $dir)) }")
-                assert selected.startswith("cliproxy.prev-") and selected.endswith(".exe"), selected
+                selected = ps(f"$code=(Get-Content -Raw '{script}') -replace '(?m)^Install-CookRouter -Service.*$', ''; . ([scriptblock]::Create($code)); "
+                              "$dir=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:COOK_ROUTER_INSTALL_DIR); "
+                              "$data=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:COOK_ROUTER_HOME); "
+                              "Get-CookRouterServers $dir (Join-Path $data 'config.yaml') | ForEach-Object { [IO.Path]::GetFileName((Get-CookRouterImage $_.ProcessId $dir)) }")
+                assert selected.startswith("cook-router.prev-") and selected.endswith(".exe"), selected
             output = install(success=False)
             assert ("Rolled back" if windows else "verified it is healthy") in output, output
             if not windows:
@@ -476,13 +578,13 @@ esac
             assert (bindir / exe).read_bytes() == image, "unhealthy live upgrade must restore the old image"
             health()
             if not windows:
-                env["CLIPROXY_VERSION"] = "v999.2.0"
+                env["COOK_ROUTER_VERSION"] = "v999.2.0"
                 inode = (bindir / exe).stat().st_ino
                 assert "restored the previous binary" in install(success=False)
                 assert (bindir / exe).stat().st_ino == inode
                 health()
                 # A checksum failure must not replace a healthy image or restart it.
-                env["CLIPROXY_VERSION"] = f"v{version}"
+                env["COOK_ROUTER_VERSION"] = f"v{version}"
                 sums = releases / f"download/v{version}/SHA256SUMS"
                 sums.write_text(sums.read_text().replace(sums.read_text()[:64], "0" * 64))
                 old_pid = pid()
@@ -490,41 +592,48 @@ esac
                 assert pid() == old_pid and (bindir / exe).stat().st_ino == inode
                 health()
             else:
-                env["CLIPROXY_VERSION"] = "v999.1.0"
+                env["COOK_ROUTER_VERSION"] = "v999.1.0"
                 install("-Service")
-                entry = ps("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cliproxy-rs'")
+                entry = ps("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cook-router'")
                 assert entry.startswith(f'"{bindir / exe}" --config '), entry
                 assert "--log-file" in entry and "--working-dir" in entry and not any(x in entry.lower() for x in ("powershell", "cmd.exe", "start.ps1"))
                 existing_image = (bindir / exe).read_bytes()
                 existing_pid = pid()
-                env["CLIPROXY_VERSION"] = "v999.0.0"
+                env["COOK_ROUTER_VERSION"] = "v999.0.0"
                 assert "too old for this installer" in install(success=False)
                 assert (bindir / exe).read_bytes() == existing_image and pid() == existing_pid
-                assert ps("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cliproxy-rs'") == entry
+                assert ps("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cook-router'") == entry
                 health()
-                env["CLIPROXY_VERSION"] = "v999.1.0"
+                env["COOK_ROUTER_VERSION"] = "v999.1.0"
                 ps(f"Stop-Process -Id {pid()}")
                 # Execute the exact Run entry, not an installer-generated launcher.
                 (home / ".env").write_text("WRITABLE_PATH=./relative-state\n")
                 config = home / "config.yaml"
                 config.write_text(config.read_text() + "\nobservability:\n  logs:\n    logging-to-file: true\n")
-                launched = int(ps(f"$e=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cliproxy-rs'; $e -match '^\"([^\"]+)\" (.*)$' | Out-Null; (Start-Process -FilePath $Matches[1] -ArgumentList $Matches[2] -PassThru).Id", cwd=root))
-                (home / "cliproxy.pid").write_text(str(launched))
+                launched = int(ps(f"$e=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cook-router'; $e -match '^\"([^\"]+)\" (.*)$' | Out-Null; (Start-Process -FilePath $Matches[1] -ArgumentList $Matches[2] -PassThru).Id", cwd=root))
+                (home / "cook-router.pid").write_text(str(launched))
                 health()
-                assert (home / "cliproxy.log").stat().st_size > 0
+                assert (home / "cook-router.log").stat().st_size > 0
                 assert (home / "relative-state/logs/main.log").is_file(), "Run entry must read its home .env and resolve relative paths there"
                 # A later installer must find the direct Run process with a stale pid file.
-                (home / "cliproxy.pid").write_text("0")
+                (home / "cook-router.pid").write_text("0")
                 install()
                 health()
                 assert pid() != launched
+                # A sign-in entry from before the rename makes the run a service run and gives
+                # way to the cook-router entry once the new server answers.
+                ps("Set-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name cliproxy-rs -Value 'legacy'")
+                assert "Replaced the cliproxy-rs sign-in entry" in install()
+                health()
+                assert ps("$e=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).'cliproxy-rs'; if($e){$e}") == ""
+                assert ps("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cook-router'").startswith(f'"{bindir / exe}" --config ')
             # Non-default bind host: derive both the health probe and dashboard URL.
             config = home / "config.yaml"
             config.write_text(config.read_text().replace('host: "127.0.0.1"', 'host: "::1"'))
-            env["CLIPROXY_VERSION"] = f"v{version}" if not windows else "v999.1.0"
+            env["COOK_ROUTER_VERSION"] = f"v{version}" if not windows else "v999.1.0"
             if not windows:
                 # Make the on-disk current file newer than its last-start marker.
-                env["CLIPROXY_VERSION"] = "v999.1.0"
+                env["COOK_ROUTER_VERSION"] = "v999.1.0"
                 os.utime(bindir / exe, None)
             assert "http://[::1]:8317/management.html" in install()
             connection = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -565,12 +674,12 @@ esac
                 threading.Thread(target=unhealthy.serve_forever, daemon=True).start()
                 script = str(repo / "install.ps1").replace("'", "''")
                 try:
-                    print(ps(f"$ErrorActionPreference='Stop'; $code=(Get-Content -Raw '{script}') -replace '(?m)^Install-CliproxyRs -Service.*$', ''; . ([scriptblock]::Create($code)); " + f'''
+                    print(ps(f"$ErrorActionPreference='Stop'; $code=(Get-Content -Raw '{script}') -replace '(?m)^Install-CookRouter -Service.*$', ''; . ([scriptblock]::Create($code)); " + f'''
 $before = [Net.ServicePointManager]::ServerCertificateValidationCallback
 $good = [pscustomobject]@{{Tls=$true; Base='https://[::1]:8317'}}
 $bad = [pscustomobject]@{{Tls=$true; Base='https://127.0.0.1:{unhealthy.server_port}'}}
-if(-not (Test-CliproxyUp $good)){{throw 'self-signed HTTPS health probe failed'}}
-if(Test-CliproxyUp $bad){{throw 'HTTPS 503 must fail the health probe'}}
+if(-not (Test-CookRouterUp $good)){{throw 'self-signed HTTPS health probe failed'}}
+if(Test-CookRouterUp $bad){{throw 'HTTPS 503 must fail the health probe'}}
 if([Net.ServicePointManager]::ServerCertificateValidationCallback -ne $before){{throw 'health probe changed global certificate validation'}}
 $accepted = $false
 try {{ Invoke-WebRequest "$($good.Base)/healthz" -UseBasicParsing -TimeoutSec 2 | Out-Null; $accepted = $true }} catch {{}}
@@ -583,14 +692,17 @@ Write-Output 'PASS Windows PowerShell 5.1: HTTPS status and scoped certificate v
                 # Accepting a TCP connection is insufficient: this candidate
                 # speaks plaintext on the TLS port and must restore the healthy image.
                 image = (bindir / exe).read_bytes()
-                env["CLIPROXY_VERSION"] = "v999.4.0"
+                env["COOK_ROUTER_VERSION"] = "v999.4.0"
                 output = install(success=False)
                 assert "Rolled back" in output and "ROLLBACK FAILED" not in output, output
                 assert (bindir / exe).read_bytes() == image
                 with connection.open("https://[::1]:8317/healthz", timeout=5) as response:
                     assert response.status == 200, "TLS rollback must restore the original healthy server"
+            if not windows:
+                migrate("v999.1.0")
             print(f"PASS {platform.system()}: install, upgrade, binary-only, unchanged keys" +
-                  (", direct Run entry, process log and HTTPS rollback" if windows else ", check, current no-op, hard link, rollback, checksum rejection"))
+                  (", direct Run entry, old sign-in entry, process log and HTTPS rollback" if windows else
+                   ", check, current no-op, hard link, rollback, checksum rejection, install from before the rename"))
         except BaseException:
             def diagnostic(action):
                 try:
@@ -601,12 +713,12 @@ Write-Output 'PASS Windows PowerShell 5.1: HTTPS status and scoped certificate v
             for folder in (home, root / "second"):
                 def logs():
                     print(f"Diagnostics: {folder}", file=sys.stderr)
-                    logfile = folder / "cliproxy.log"
+                    logfile = folder / "cook-router.log"
                     if logfile.exists():
                         print("\n".join(logfile.read_text(errors="replace").splitlines()[-40:]), file=sys.stderr)
                 diagnostic(logs)
                 def process():
-                    marker = folder / "cliproxy.pid"
+                    marker = folder / "cook-router.pid"
                     if marker.exists() and not windows:
                         recorded_pid = marker.read_text().strip()
                         print(f"pid file: {recorded_pid}", file=sys.stderr)
@@ -638,7 +750,7 @@ fi
             raise
         finally:
             try:
-                if (home / "cliproxy.pid").exists():
+                if (home / "cook-router.pid").exists():
                     if windows:
                         ps(f"Stop-Process -Id {pid()} -ErrorAction SilentlyContinue", check=False)
                     else:
@@ -648,9 +760,10 @@ fi
             if windows:
                 try:
                     if original_run:
-                        ps("Set-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name cliproxy-rs -Value '" + original_run.replace("'", "''") + "'", check=False)
+                        ps("Set-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name cook-router -Value '" + original_run.replace("'", "''") + "'", check=False)
                     else:
-                        ps("Remove-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name cliproxy-rs -ErrorAction SilentlyContinue", check=False)
+                        ps("Remove-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name cook-router -ErrorAction SilentlyContinue", check=False)
+                    ps("Remove-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name cliproxy-rs -ErrorAction SilentlyContinue", check=False)
                 except (OSError, subprocess.SubprocessError) as error:
                     print(f"Best-effort cleanup: {error}", file=sys.stderr)
             server.shutdown()

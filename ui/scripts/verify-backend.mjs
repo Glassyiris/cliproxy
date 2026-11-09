@@ -34,7 +34,7 @@ async function call(path, method = "GET", body, expected = 200, text = false) {
 const config = await call("/config");
 assert.equal(
   config.oauth?.["auth-dir"],
-  "/tmp/cliproxy-backend/auth",
+  "/tmp/cook-router-backend/auth",
   "Not the disposable backend. Refusing mutations.",
 );
 const yaml = await call("/config.yaml", "GET", undefined, 200, true);

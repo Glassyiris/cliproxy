@@ -1321,7 +1321,7 @@ pub struct Selection {
     /// What a plugin scheduler learns about the request (Go `SchedulerPickRequest`'s
     /// `Stream` and `Options`); without it the scheduler sees no headers or metadata.
     pub scheduler: Option<Arc<crate::plugins::SchedulerContext>>,
-    /// A model router's provider scope and order (cliproxy-rs only); `None` follows
+    /// A model router's provider scope and order (cook-router only); `None` follows
     /// `routing.providers`.
     pub scope: Option<Arc<crate::provider_policy::Providers>>,
 }

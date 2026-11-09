@@ -1382,7 +1382,7 @@ pub struct Record {
 }
 
 /// Where an attempt's time went, in milliseconds from when the server accepted the
-/// client request, and the bytes it moved. Not in Go's record: cliproxy-rs adds these
+/// client request, and the bytes it moved. Not in Go's record: cook-router adds these
 /// fields (docs/DIFFERENCES-FROM-GO.md), and leaves out each one it did not see. The
 /// upstream stages come from the shared HTTP client ([`cpa_core::exec::UpstreamStage`]),
 /// which the Claude executor times; other executors leave them out.

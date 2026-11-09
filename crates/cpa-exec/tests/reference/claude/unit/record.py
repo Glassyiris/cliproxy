@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Records Go's own Claude unit cases for cliproxy-rs (see zz_rsfix_claude_test.go).
+"""Records Go's own Claude unit cases for cook-router (see zz_rsfix_claude_test.go).
 
 Usage: record.py <CLIProxyAPI checkout at 6fecc6e> <output.json>
 

@@ -1,4 +1,4 @@
-//! End-to-end: client -> cliproxy-rs -> mock Anthropic upstream.
+//! End-to-end: client -> cook-router -> mock Anthropic upstream.
 //!
 //! Expectations come from CLIProxyAPI's handlers (sdk/api/handlers/claude/code_handlers.go),
 //! not from this implementation.

@@ -1,5 +1,7 @@
-// X-CPA-VERSION reads "cliproxy-rs-1.2.3"; a release tag reads "v1.2.3".
-const bare = (version: string) => version.replace(/^cliproxy-rs[/-]/, "").replace(/^v/, "");
+// X-CPA-VERSION reads "cook-router-1.2.3", or "cliproxy-rs-1.2.3" from a server older than the rename;
+// a release tag reads "v1.2.3".
+const bare = (version: string) =>
+  version.replace(/^(?:cook-router|cliproxy-rs)[/-]/, "").replace(/^v/, "");
 
 const parts = (version: string) => {
   const value = bare(version);

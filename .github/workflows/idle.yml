@@ -90,18 +90,18 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Build
-        run: cargo build --release --locked -p cliproxy --target ${{ matrix.target }}
+        run: cargo build --release --locked -p cook-router --target ${{ matrix.target }}
       # kqueue on macOS and ReadDirectoryChangesW on Windows are only exercised here.
       - name: File-watch tests
         run: cargo test --release --locked -p cpa-server --lib --target ${{ matrix.target }} -- fs_events watching
       - name: Idle gate
         run: |
-          exe=cliproxy; os=macos
-          [[ "$RUNNER_OS" == Windows ]] && { exe=cliproxy.exe; os=windows; }
+          exe=cook-router; os=macos
+          [[ "$RUNNER_OS" == Windows ]] && { exe=cook-router.exe; os=windows; }
           bench/gate.sh idle "$os" "target/${{ matrix.target }}/release/$exe" 1
 
   go-comparison:
-    name: idle, Go vs cliproxy-rs (Linux)
+    name: idle, Go vs cook-router (Linux)
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     env:
@@ -118,7 +118,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Build
-        run: cargo build --release --locked -p cliproxy
+        run: cargo build --release --locked -p cook-router
       - name: CLIProxyAPI release binary
         run: |
           curl -sSfL -o go.tar.gz "https://github.com/router-for-me/CLIProxyAPI/releases/download/$GO_RELEASE/$GO_ARCHIVE"
@@ -127,11 +127,11 @@ jobs:
       - name: Compare
         run: |
           for server in go rust; do
-            bin=target/release/cliproxy; [[ $server == go ]] && bin=go-bin/cli-proxy-api
+            bin=target/release/cook-router; [[ $server == go ]] && bin=go-bin/cli-proxy-api
             WARMUP=30 bench/idle.sh "$bin" 0 300 2> "idle-$server.threads" | jq -c --arg s "$server" '. + {server: $s}' | tee -a idle-compare.jsonl
           done
           {
-            echo "### Idle, Go $GO_RELEASE vs cliproxy-rs, 300 s after 30 s of warm-up"
+            echo "### Idle, Go $GO_RELEASE vs cook-router, 300 s after 30 s of warm-up"
             echo
             echo "| Server | Wakeups per minute | CPU ms per hour | Threads | RSS (MB) |"
             echo "| --- | --- | --- | --- | --- |"

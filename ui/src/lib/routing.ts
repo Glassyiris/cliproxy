@@ -32,7 +32,7 @@ export const strategyName = (s: Strategy) => words[s].name();
 /** A strategy's one-line explanation in the current language, where its name is not enough. */
 export const strategyHelp = (s: Strategy) => words[s].help?.();
 
-/** The strategy a configured value selects, aliases included, as cliproxy-rs reads it: unset is soonest reset; anything else unknown is round robin. */
+/** The strategy a configured value selects, aliases included, as cook-router reads it: unset is soonest reset; anything else unknown is round robin. */
 export function strategy(value: unknown): Strategy {
   const v =
     String(value ?? "")

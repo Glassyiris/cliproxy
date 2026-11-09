@@ -27,7 +27,7 @@ and response bodies are Connect frames, recorded as base64 (`body_b64`).
 ```sh
 git clone https://github.com/router-for-me/CLIProxyAPI && cd CLIProxyAPI
 git checkout 6fecc6e
-G=<cliproxy-rs>/crates/cpa-exec/tests/device_fixtures/go
+G=<cook-router>/crates/cpa-exec/tests/device_fixtures/go
 cp $G/zz_rsfix_frames_test.go sdk/api/handlers/openai/
 cp $G/zz_rsfix_devin_paste_test.go sdk/auth/
 for f in $G/zz_rsfix_*_test.go; do case $(basename $f) in zz_rsfix_frames_test.go|zz_rsfix_devin_paste_test.go|zz_rsfix_devin_view_test.go) ;; *) cp $f internal/runtime/executor/ ;; esac; done
@@ -39,7 +39,7 @@ RSFIX_OUT=/tmp/rsfix go test -count=1 -run 'TestRSFix' ./internal/runtime/execut
 RSFIX_OUT=/tmp/rsfix go test -count=1 -run 'TestRSFixDevinPaste' ./sdk/auth/
 # Adds downstream.frames: Responses-route joining of the recorded stream chunks.
 RSFIX_OUT=/tmp/rsfix go test -count=1 -run 'TestRSFixResponsesFrames' ./sdk/api/handlers/openai/
-cp -r /tmp/rsfix/* <cliproxy-rs>/crates/cpa-exec/tests/device_fixtures/
+cp -r /tmp/rsfix/* <cook-router>/crates/cpa-exec/tests/device_fixtures/
 ```
 
 These files come from v8.0.35 (`ae3ee3be`) instead, after Go moved the payload rules
@@ -69,7 +69,7 @@ the protobuf (`FinalizeDevinPayload`) instead of its readable request summary:
 
   ```sh
   cp $G/zz_rsfix_devin_view_test.go internal/runtime/executor/helps/
-  RSFIX_IN=<cliproxy-rs>/crates/cpa-exec/tests/device_fixtures/devin RSFIX_OUT=/tmp/views.json \
+  RSFIX_IN=<cook-router>/crates/cpa-exec/tests/device_fixtures/devin RSFIX_OUT=/tmp/views.json \
     go test -count=1 -run '^TestRSFixDevinView$' ./internal/runtime/executor/helps/
   ```
 

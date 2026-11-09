@@ -1,4 +1,4 @@
-# Test tool, not shipped: cliproxy-rs with every provider login endpoint pointed at a local fake.
+# Test tool, not shipped: cook-router with every provider login endpoint pointed at a local fake.
 [package]
 name = "login-harness"
 version = "0.0.0"

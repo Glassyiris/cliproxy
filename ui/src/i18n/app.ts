@@ -1,8 +1,8 @@
 export default {
   en: {
-    "app.brand.name": "cliproxy-rs",
-    "app.document.pageTitle": "{title} · cliproxy-rs",
-    "app.document.signInTitle": "Sign in · cliproxy-rs",
+    "app.brand.name": "cook-router",
+    "app.document.pageTitle": "{title} · cook-router",
+    "app.document.signInTitle": "Sign in · cook-router",
 
     "app.signIn.managementKey": "Management key",
     "app.signIn.help":

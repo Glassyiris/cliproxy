@@ -1,8 +1,8 @@
 export default {
   "zh-CN": {
-    "app.brand.name": "cliproxy-rs",
-    "app.document.pageTitle": "{title} · cliproxy-rs",
-    "app.document.signInTitle": "登录 · cliproxy-rs",
+    "app.brand.name": "cook-router",
+    "app.document.pageTitle": "{title} · cook-router",
+    "app.document.signInTitle": "登录 · cook-router",
 
     "app.signIn.managementKey": "管理密钥",
     "app.signIn.help":

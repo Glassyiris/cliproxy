@@ -17,7 +17,7 @@ temporary-path auth indexes change, and the replay normalizes all of them:
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # at ae3ee3be (v8.0.35)
-crate=/absolute/path/to/cliproxy-rs/crates/cpa-server
+crate=/absolute/path/to/cook-router/crates/cpa-server
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/manage/main.go" "$tmp/main.go"
 (
@@ -37,4 +37,4 @@ recomputed for that path, so the fixture does not depend on the temp directory.
 `httptest` requests can carry header values a real HTTP parser would trim (for
 example `Authorization: "Bearer "`); the Rust replay skips those steps and covers
 the parsing rule with a unit test. Go reports `X-CPA-SUPPORT-PLUGIN: 1` because the
-reference is a cgo build; cliproxy-rs cannot load native plugins and reports `0`.
+reference is a cgo build; cook-router cannot load native plugins and reports `0`.

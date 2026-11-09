@@ -347,7 +347,7 @@ go_file_v8_0_27!(
 );
 go_file_v8_0_27!(
     /// The test of this file whose answer changed in v8.0.27 for API keys (5d89040),
-    /// replayed with the caller system text where cliproxy-rs keeps it
+    /// replayed with the caller system text where cook-router keeps it
     /// (`go_exec::RELOCATES_API_KEY_SYSTEM`); 6fecc6e's recording passes as recorded.
     v8_0_27_executor,
     "claude_executor_test.go"

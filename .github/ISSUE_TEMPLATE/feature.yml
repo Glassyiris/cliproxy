@@ -18,7 +18,7 @@ body:
     attributes:
       label: Does CLIProxyAPI have it?
       options:
-        - "Yes, it is a CLIProxyAPI feature cliproxy-rs lacks"
+        - "Yes, it is a CLIProxyAPI feature cook-router lacks"
         - No, it is new
         - I don't know
   - type: textarea

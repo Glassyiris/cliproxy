@@ -2,14 +2,14 @@
 
 ## Ask a question or report a problem
 
-Start with [Getting started](../docs/GETTING-STARTED.md), [Configuration](../docs/CONFIGURATION.md) and [Clients](../docs/CLIENTS.md). Search existing issues before opening a report, then use the [GitHub issue templates](https://github.com/prep-cook/cliproxy/issues/new/choose) for problems and feature requests.
+Start with [Getting started](../docs/GETTING-STARTED.md), [Configuration](../docs/CONFIGURATION.md) and [Clients](../docs/CLIENTS.md). Search existing issues before opening a report, then use the [GitHub issue templates](https://github.com/prep-cook/cook-router/issues/new/choose) for problems and feature requests.
 
-For behaviour of the original Go server, ask in [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). State whether the problem also occurs there; [docs/DIFFERENCES-FROM-GO.md](../docs/DIFFERENCES-FROM-GO.md) lists the differences cliproxy-rs keeps on purpose.
+For behaviour of the original Go server, ask in [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). State whether the problem also occurs there; [docs/DIFFERENCES-FROM-GO.md](../docs/DIFFERENCES-FROM-GO.md) lists the differences cook-router keeps on purpose.
 
 ## Include diagnostic information
 
-- The version, from `cliproxy --version`, or the commit if you built from source.
-- The operating system and how you installed cliproxy: `install.sh`, `install.ps1`, a release binary, Docker or source.
+- The version, from `cook-router --version`, or the commit if you built from source.
+- The operating system and how you installed cook-router: `install.sh`, `install.ps1`, a release binary, Docker or source.
 - The tool or client that sends the request, and the relevant part of `config.yaml` with keys removed.
 - Reproduction steps, expected behaviour and actual behaviour.
 - The server log lines around the problem and, for dashboard problems, the browser name, version and console errors.
