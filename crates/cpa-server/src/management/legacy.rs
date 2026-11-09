@@ -918,7 +918,7 @@ mod tests {
             "config-version: 8\noauth: {{auth-dir: {}}}\naccess: {{api-keys: [a, b]}}\n",
             dir.display()
         );
-        std::fs::write(&path, config).unwrap();
+        std::fs::write(&path, &config).unwrap();
         let rt = Arc::new(crate::testing::runtime(
             cpa_core::config::Config::load(&path).unwrap(),
             Vec::new(),
@@ -967,7 +967,8 @@ mod tests {
             StatusCode::OK
         );
         assert_eq!(current(&state)["api-keys"], json!(["a", "b", "c"]));
-        assert!(std::fs::read_to_string(&path).unwrap().contains("- c"));
+        let saved = cpa_core::config::Config::load(&path).unwrap();
+        assert_eq!(view::config(&saved.document)["api-keys"], json!(["a", "b", "c"]));
 
         // The other order: a writer holds the lock and publishes [a, b, c, d]; a v0 PATCH
         // queued behind it reads after the publish (a read before taking the lock would
@@ -976,11 +977,11 @@ mod tests {
         let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
         let writer = {
             let (state, path) = (state.clone(), path.clone());
+            let text = config.replace("[a, b]", "[a, b, c, d]");
             std::thread::spawn(move || {
                 let _disk = state.disk.lock().unwrap();
                 held_tx.send(()).unwrap();
                 go_rx.recv().unwrap();
-                let text = std::fs::read_to_string(&path).unwrap().replace("- c", "- c\n    - d");
                 std::fs::write(&path, text).unwrap();
                 state.publish(cpa_core::config::Config::load(&path).unwrap(), None);
             })
