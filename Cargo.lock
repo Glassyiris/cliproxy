@@ -831,7 +831,7 @@ checksum = "7704b5fdd17b18ae31c4c1da5a2e0305a2bf17b5249300a9ee9ed7b72114c636"
 name = "cpa-common"
 version = "0.4.1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "cpa-core",
  "flate2",
  "http",
@@ -848,7 +848,7 @@ name = "cpa-core"
 version = "0.4.1"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bcrypt",
  "bytes",
  "futures-util",
@@ -868,7 +868,7 @@ version = "0.4.1"
 dependencies = [
  "async-compression",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "brotli-decompressor",
  "btls",
  "bytes",
@@ -910,7 +910,7 @@ name = "cpa-home"
 version = "0.4.1"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "btls",
  "chrono",
  "cpa-common",
@@ -932,7 +932,7 @@ name = "cpa-plugin"
 version = "0.4.1"
 dependencies = [
  "async-compression",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "cpa-common",
@@ -963,7 +963,7 @@ dependencies = [
  "async-trait",
  "axum",
  "backtrace",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bcrypt",
  "btls",
  "bytes",
@@ -1012,7 +1012,7 @@ version = "0.4.1"
 dependencies = [
  "anyhow",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bcrypt",
  "btls",
  "bytes",
@@ -1035,7 +1035,7 @@ dependencies = [
 name = "cpa-translate"
 version = "0.4.1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "cpa-common",
  "cpa-core",

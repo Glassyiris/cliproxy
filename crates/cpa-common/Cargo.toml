@@ -16,7 +16,7 @@ cpa-core.workspace = true
 http.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
-base64 = "0.22"
+base64 = "0.23"
 sha2 = "0.10"
 memchr = "2"
 # Go's shortest float digits: Ryū's half-to-even tie rule (json.rs `shortest`).
