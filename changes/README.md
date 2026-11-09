@@ -2,7 +2,7 @@
 
 For each pull request, add one Markdown file named after the branch slug: replace `/` and other non-alphanumeric characters with `-`, use lowercase, and collapse repeated hyphens. For example, `fix/relay-timeout` becomes `changes/fix-relay-timeout.md`.
 
-The first line is one of `Added`, `Changed`, `Fixed`, `Removed`, `Security`, or `Internal`. Follow it with one or more `- ` bullet lines, each describing a change. Blank lines are allowed. Do not add a PR number: the renderer looks up the commit that added the fragment.
+The first line is one of `Added`, `Changed`, `Fixed`, `Removed`, `Security`, or `Internal`. Follow it with one or more `- ` bullet lines, each describing a change. Blank lines are allowed. Do not add a PR number: the renderer looks up the commit that added the fragment. A fragment written after its PR merged (a backfill) ends each bullet with `(#N)` naming that PR, and the renderer keeps it.
 
 ```markdown
 Fixed
