@@ -10,6 +10,7 @@ mod claude;
 mod codex_alpha;
 mod codex_models;
 mod config_diff;
+pub mod config_store;
 pub mod cooldown_store;
 pub mod dispatch;
 mod error_events;
