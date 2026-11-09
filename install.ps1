@@ -1,50 +1,71 @@
-# Installs cliproxy-rs on Windows, sets it up and starts it. In PowerShell:
+# Installs gnocchi on Windows, sets it up and starts it. In PowerShell:
 #
-#   irm https://raw.githubusercontent.com/vayungodara/cliproxy-rs/master/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.ps1 | iex
 #
 # The first run downloads the Windows release, checks it against the release's SHA256SUMS
-# and installs %LOCALAPPDATA%\Programs\cliproxy-rs\cliproxy.exe. It writes
-# %USERPROFILE%\.cliproxy-rs\config.yaml with a free port (8317, or the next free one) and
+# and installs %LOCALAPPDATA%\Programs\gnocchi\gnocchi.exe. It writes
+# %USERPROFILE%\.gnocchi\config.yaml with a free port (8317, or the next free one) and
 # new keys, which it saves in keys.env next to it and never prints. Then it starts the
 # server in the background and checks that it answers. Running it again upgrades the
 # binary and restarts the server; if the new version does not answer, the previous binary
 # is put back and restarted. An existing config.yaml or keys.env is never changed.
 #
+# An install from before the rename to gnocchi keeps working: without %USERPROFILE%\.gnocchi,
+# an existing %USERPROFILE%\.cliproxy-rs is used as it is, its cliproxy server is stopped, and
+# a healthy gnocchi server replaces its cliproxy-rs sign-in entry. The old cliproxy.exe is
+# left in place.
+#
 # Options, passed like this:
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/vayungodara/cliproxy-rs/master/install.ps1))) -Service
-#   -Service     also start cliproxy-rs when you sign in to Windows
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.ps1))) -Service
+#   -Service     also start gnocchi when you sign in to Windows
 #   -BinaryOnly  only install or upgrade the binary; a running server keeps running
 #
-# Environment: CLIPROXY_VERSION (a tag such as v0.1.0; default the latest),
-# CLIPROXY_INSTALL_DIR, CLIPROXY_HOME, CLIPROXY_NO_OPEN=1 (never open a browser) and
-# CLIPROXY_RELEASES (release page base URL, for mirrors and tests).
+# Environment: GNOCCHI_VERSION (a tag such as v0.1.0; default the latest),
+# GNOCCHI_INSTALL_DIR, GNOCCHI_HOME, GNOCCHI_NO_OPEN=1 (never open a browser) and
+# GNOCCHI_RELEASES (release page base URL, for mirrors and tests). Each falls back to its
+# CLIPROXY_* name from before the rename.
 param([switch]$Service, [switch]$BinaryOnly)
 
 # Everything runs in this function, so a download cut short cannot run half a script, and
 # `throw` reports a failure without closing the window that ran `irm | iex`.
-function Install-CliproxyRs([bool]$Service, [bool]$BinaryOnly) {
+function Install-Gnocchi([bool]$Service, [bool]$BinaryOnly) {
   $ErrorActionPreference = 'Stop'
   $ProgressPreference = 'SilentlyContinue'
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-  $releases = if ($env:CLIPROXY_RELEASES) { $env:CLIPROXY_RELEASES } else { 'https://github.com/vayungodara/cliproxy-rs/releases' }
-  $dir = if ($env:CLIPROXY_INSTALL_DIR) { $env:CLIPROXY_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\cliproxy-rs' }
-  $data = if ($env:CLIPROXY_HOME) { $env:CLIPROXY_HOME } else { Join-Path $env:USERPROFILE '.cliproxy-rs' }
+  $releases = Get-InstallSetting 'RELEASES'
+  if (-not $releases) { $releases = 'https://github.com/prep-cook/gnocchi/releases' }
+  $dir = Get-InstallSetting 'INSTALL_DIR'
+  if (-not $dir) { $dir = Join-Path $env:LOCALAPPDATA 'Programs\gnocchi' }
+  $data = Get-InstallSetting 'HOME'
+  if (-not $data) {
+    $data = Join-Path $env:USERPROFILE '.gnocchi'
+    $oldData = Join-Path $env:USERPROFILE '.cliproxy-rs'
+    if (-not (Test-Path -LiteralPath $data) -and (Test-Path -LiteralPath $oldData -PathType Container)) {
+      Write-Host "Using $oldData from before the rename; new installs use $data."
+      $data = $oldData
+    }
+  }
   # Absolute paths: they go into the Run entry and identify this install's server process.
   $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir)
   $data = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($data)
-  $exe = Join-Path $dir 'cliproxy.exe'
-  $staged = Join-Path $dir 'cliproxy.new.exe'
+  # Where an install from before the rename put cliproxy.exe: this directory when it was set
+  # explicitly, otherwise the old default.
+  $oldDirs = @($dir, (Join-Path $env:LOCALAPPDATA 'Programs\cliproxy-rs')) | Select-Object -Unique
+  $exe = Join-Path $dir 'gnocchi.exe'
+  $staged = Join-Path $dir 'gnocchi.new.exe'
   $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+  $oldRunName = 'cliproxy-rs'
   if ($Service -and $BinaryOnly) { throw 'install.ps1: -Service and -BinaryOnly do not go together' }
-  # A start-at-sign-in entry from an earlier run keeps being used.
-  if (Get-ItemProperty -Path $runKey -Name 'cliproxy-rs' -ErrorAction SilentlyContinue) { $Service = -not $BinaryOnly }
+  # A start-at-sign-in entry from an earlier run keeps being used, also one from before the rename.
+  $oldRun = Get-ItemProperty -Path $runKey -Name $oldRunName -ErrorAction SilentlyContinue
+  if ($oldRun -or (Get-ItemProperty -Path $runKey -Name 'gnocchi' -ErrorAction SilentlyContinue)) { $Service = -not $BinaryOnly }
 
   $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
   # ARM64 Windows runs the x86_64 build through its emulation.
   if ($arch -notin 'AMD64', 'ARM64') { throw "install.ps1: there is no release binary for $arch Windows" }
 
-  $tag = $env:CLIPROXY_VERSION
+  $tag = Get-InstallSetting 'VERSION'
   if (-not $tag) {
     # /releases/latest redirects to /releases/tag/<tag> once a release exists.
     try { $r = Invoke-Retry { Invoke-WebRequest -Uri "$releases/latest" -Method Head -UseBasicParsing } }
@@ -53,10 +74,10 @@ function Install-CliproxyRs([bool]$Service, [bool]$BinaryOnly) {
     if ($final -notmatch '/tag/([^/]+)$') { throw 'install.ps1: no release is published yet' }
     $tag = $Matches[1]
   }
-  $name = "cliproxy-$($tag.TrimStart('v'))-x86_64-pc-windows-msvc"
+  $name = "gnocchi-$($tag.TrimStart('v'))-x86_64-pc-windows-msvc"
 
   # Stage the new image next to the old one and check it before anything existing changes.
-  $tmp = Join-Path ([IO.Path]::GetTempPath()) ("cliproxy-" + [guid]::NewGuid())
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) ("gnocchi-" + [guid]::NewGuid())
   New-Item -ItemType Directory -Path $tmp | Out-Null
   try {
     $zip = Join-Path $tmp "$name.zip"
@@ -72,34 +93,34 @@ function Install-CliproxyRs([bool]$Service, [bool]$BinaryOnly) {
     if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $expected) { throw "install.ps1: checksum mismatch for $name.zip; nothing was installed" }
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    Copy-Item -LiteralPath (Join-Path $tmp "$name\cliproxy.exe") -Destination $staged -Force
+    Copy-Item -LiteralPath (Join-Path $tmp "$name\gnocchi.exe") -Destination $staged -Force
   } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
   }
 
-  $pidfile = Join-Path $data 'cliproxy.pid'
+  $pidfile = Join-Path $data 'gnocchi.pid'
   $config = Join-Path $data 'config.yaml'
   $keys = Join-Path $data 'keys.env'
-  $log = Join-Path $data 'cliproxy.log'
+  $log = Join-Path $data 'gnocchi.log'
   try {
-    $help = Get-CliproxyHelp $staged
+    $help = Get-GnocchiHelp $staged
     if ($help -notmatch '--log-file' -or $help -notmatch '--working-dir') {
-      throw "install.ps1: release $tag is too old for this installer (its cliproxy.exe has no --log-file or --working-dir option); install a newer release, or unset CLIPROXY_VERSION for the latest. Nothing was changed."
+      throw "install.ps1: release $tag is too old for this installer (its gnocchi.exe has no --log-file or --working-dir option); install a newer release, or unset GNOCCHI_VERSION for the latest. Nothing was changed."
     }
     $version = & $staged --version | Select-Object -Last 1
-    if (-not $BinaryOnly) { $probe = Initialize-CliproxyHome $data $config $keys }
+    if (-not $BinaryOnly) { $probe = Initialize-GnocchiHome $data $config $keys }
   } catch {
     Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
     throw
   }
 
   # A binary-only upgrade can leave the healthy server running from an older image.
-  # Use that image for rollback, not the untested cliproxy.exe already on disk.
+  # Use that image for rollback, not the untested gnocchi.exe already on disk.
   $runningPrevious = $null
   if (-not $BinaryOnly) {
-    $runningPrevious = Get-CliproxyServers $dir $config | ForEach-Object {
-      $image = Get-CliproxyImage $_.ProcessId $dir
-      if ($image -and [IO.Path]::GetFileName($image) -like 'cliproxy.prev-*.exe') { $image }
+    $runningPrevious = Get-GnocchiServers $dir $config | ForEach-Object {
+      $image = Get-GnocchiImage $_.ProcessId $dir
+      if ($image -and [IO.Path]::GetFileName($image) -like 'gnocchi.prev-*.exe') { $image }
     } | Select-Object -First 1
   }
   # The previous image's flags decide how a rollback restarts it.
@@ -108,65 +129,65 @@ function Install-CliproxyRs([bool]$Service, [bool]$BinaryOnly) {
   if (Test-Path -LiteralPath $previous) {
     $previousHelp = ''
     # An image that cannot print its help is restarted, if needed, with --config only.
-    try { $previousHelp = Get-CliproxyHelp $previous } catch { $previousHelp = '' }
-    $previousArguments = New-CliproxyArguments $previousHelp $config $log $data
+    try { $previousHelp = Get-GnocchiHelp $previous } catch { $previousHelp = '' }
+    $previousArguments = New-GnocchiArguments $previousHelp $config $log $data
   } else { $previous = $null }
   # Windows permits renaming a running image, so a running server keeps serving from
-  # this run's cliproxy.prev-<guid>.exe until it is stopped.
+  # this run's gnocchi.prev-<guid>.exe until it is stopped.
   $displaced = $null
   if (Test-Path -LiteralPath $exe) {
-    $displaced = Join-Path $dir ("cliproxy.prev-" + [guid]::NewGuid() + '.exe')
+    $displaced = Join-Path $dir ("gnocchi.prev-" + [guid]::NewGuid() + '.exe')
     Invoke-Retry { [IO.File]::Move($exe, $displaced) }
     if (-not $runningPrevious) { $previous = $displaced }
   }
   try { Invoke-Retry { [IO.File]::Move($staged, $exe) } } catch {
     $why = $_.Exception.Message
     if ($displaced) { [IO.File]::Move($displaced, $exe) }
-    throw "install.ps1: could not put the new cliproxy.exe in place ($why); the previous one is unchanged"
+    throw "install.ps1: could not put the new gnocchi.exe in place ($why); the previous one is unchanged"
   }
   # Older images from earlier runs, unless a server still runs from them (then they are locked).
   # -BinaryOnly is done here, and its running server keeps its image locked.
-  Remove-CliproxyImages $dir $(if ($BinaryOnly) { $null } else { $previous })
+  Remove-GnocchiImages $dir $(if ($BinaryOnly) { $null } else { $previous })
   Write-Host "Installed $version at $exe"
-  if (($env:Path -split ';') -notcontains $dir) { Write-Host "Add $dir to your PATH to run cliproxy by name." }
-  if ($BinaryOnly) { return }
+  if (($env:Path -split ';') -notcontains $dir) { Write-Host "Add $dir to your PATH to run gnocchi by name." }
+  if ($BinaryOnly) { Write-OldBinaryNote $oldDirs; return }
 
   # Direct process launch and in-process logging; no persistent shell or WMI host.
-  $arguments = New-CliproxyArguments $help $config $log $data
-  try { Stop-Cliproxy $pidfile $dir $config } catch {
+  $arguments = New-GnocchiArguments $help $config $log $data
+  try { Stop-Gnocchi $pidfile $dir $config $oldDirs } catch {
     $why = $_.Exception.Message
-    if ($previous) { Restore-CliproxyImage $exe $previous }
-    throw "install.ps1: could not stop the running cliproxy-rs ($why); the previous binary is back in place"
+    if ($previous) { Restore-GnocchiImage $exe $previous }
+    throw "install.ps1: could not stop the running gnocchi ($why); the previous binary is back in place"
   }
   $proc = $null
   $problem = $null
   try {
-    $proc = Start-Cliproxy $exe $arguments $data $pidfile
-    $problem = Wait-Cliproxy $proc $probe
-  } catch { $problem = "cliproxy-rs could not be started ($($_.Exception.Message))" }
+    $proc = Start-Gnocchi $exe $arguments $data $pidfile
+    $problem = Wait-Gnocchi $proc $probe
+  } catch { $problem = "gnocchi could not be started ($($_.Exception.Message))" }
   if ($problem) {
     $tail = Get-Content -LiteralPath $log -Tail 20 -ErrorAction SilentlyContinue | Out-String
     $stopped = $true
-    if ($proc) { try { Stop-CliproxyId $proc.Id } catch { $stopped = $false } }
+    if ($proc) { try { Stop-GnocchiId $proc.Id } catch { $stopped = $false } }
     Remove-Item -LiteralPath $pidfile -Force -ErrorAction SilentlyContinue
     if (-not $previous) { throw "install.ps1: $problem. The end of $log says:`n$tail" }
     $rollback = $null
     try {
       if (-not $stopped) { throw "the new process $($proc.Id) did not stop" }
-      Restore-CliproxyImage $exe $previous
+      Restore-GnocchiImage $exe $previous
       $old = $null
       try {
-        $old = Start-Cliproxy $exe $previousArguments $data $pidfile
-        $oldProblem = Wait-Cliproxy $old $probe
+        $old = Start-Gnocchi $exe $previousArguments $data $pidfile
+        $oldProblem = Wait-Gnocchi $old $probe
       } catch { $oldProblem = "it could not be started ($($_.Exception.Message))" }
       if ($oldProblem) {
-        if ($old) { Stop-CliproxyId $old.Id }
+        if ($old) { Stop-GnocchiId $old.Id }
         Remove-Item -LiteralPath $pidfile -Force -ErrorAction SilentlyContinue
         throw "the restored previous version failed too: $oldProblem"
       }
     } catch { $rollback = $_.Exception.Message }
     if ($rollback) {
-      throw "install.ps1: the upgrade failed: $problem. ROLLBACK FAILED: $rollback. cliproxy-rs may not be running; see $log. The end of $log said:`n$tail"
+      throw "install.ps1: the upgrade failed: $problem. ROLLBACK FAILED: $rollback. gnocchi may not be running; see $log. The end of $log said:`n$tail"
     }
     throw "install.ps1: the upgrade failed: $problem. Rolled back: the previous binary is in place and answers again at $($probe.Base). The end of $log said:`n$tail"
   }
@@ -176,23 +197,28 @@ function Install-CliproxyRs([bool]$Service, [bool]$BinaryOnly) {
     # A new profile may have no Run key yet. Only create it then: New-Item -Force on an existing key
     # would replace it and drop the other programs' entries.
     if (-not (Test-Path $runKey)) { New-Item -Path $runKey | Out-Null }
-    Set-ItemProperty -Path $runKey -Name 'cliproxy-rs' -Value "`"$exe`" $arguments"
+    Set-ItemProperty -Path $runKey -Name 'gnocchi' -Value "`"$exe`" $arguments"
     Remove-Item (Join-Path $data 'start.ps1') -Force -ErrorAction SilentlyContinue
+    if ($oldRun) {
+      Remove-ItemProperty -Path $runKey -Name $oldRunName
+      Write-Host "Replaced the $oldRunName sign-in entry from before the rename with gnocchi."
+    }
   }
-  Remove-CliproxyImages $dir $null
+  Remove-GnocchiImages $dir $null
+  Write-OldBinaryNote $oldDirs
 
   $base = $probe.Base
   $url = "$base/management.html"
   $configText = $config -replace "'", "''"
   Write-Host ''
-  Write-Host "cliproxy-rs is running at $base"
+  Write-Host "gnocchi is running at $base"
   Write-Host "  Dashboard  $url"
   if (Test-Path $keys) { Write-Host "  Keys       $keys (show them with: Get-Content `"$keys`")" }
   Write-Host "  Config     $config"
   Write-Host "  Log        $log"
-  Write-Host "  Stop       Get-CimInstance Win32_Process -Filter `"Name LIKE 'cliproxy%.exe'`" | Where-Object { `$_.CommandLine -and `$_.CommandLine.Contains('$configText') } | ForEach-Object { Stop-Process -Id `$_.ProcessId }"
+  Write-Host "  Stop       Get-CimInstance Win32_Process -Filter `"Name LIKE 'gnocchi%.exe'`" | Where-Object { `$_.CommandLine -and `$_.CommandLine.Contains('$configText') } | ForEach-Object { Stop-Process -Id `$_.ProcessId }"
   if ($Service) {
-    Write-Host "It starts when you sign in to Windows. To stop that: Remove-ItemProperty $runKey -Name cliproxy-rs"
+    Write-Host "It starts when you sign in to Windows. To stop that: Remove-ItemProperty $runKey -Name gnocchi"
   } else {
     Write-Host 'It runs until you sign out or restart. Run this again with -Service to start it when you sign in.'
   }
@@ -203,17 +229,34 @@ function Install-CliproxyRs([bool]$Service, [bool]$BinaryOnly) {
     Write-Host 'through an SSH tunnel, then open the dashboard address there:'
     Write-Host "  ssh -L ${port}:127.0.0.1:${port} $env:USERNAME@$env:COMPUTERNAME"
     Write-Host 'Tailscale works too; see docs/MULTI-ACCOUNT.md.'
-  } elseif (-not $env:CLIPROXY_NO_OPEN -and [Environment]::UserInteractive) {
+  } elseif (-not (Get-InstallSetting 'NO_OPEN') -and [Environment]::UserInteractive) {
     Start-Process $url
   }
   Write-Host ''
   if (Test-Path $keys) {
-    Write-Host 'Next: open the dashboard, sign in with CLIPROXY_MANAGEMENT_KEY from keys.env, and choose Connect account.'
+    # keys.env from before the rename names the key CLIPROXY_MANAGEMENT_KEY.
+    $keyName = 'GNOCCHI_MANAGEMENT_KEY'
+    $keyLines = Get-Content -LiteralPath $keys
+    if (-not ($keyLines -match '^GNOCCHI_MANAGEMENT_KEY=') -and ($keyLines -match '^CLIPROXY_MANAGEMENT_KEY=')) { $keyName = 'CLIPROXY_MANAGEMENT_KEY' }
+    Write-Host "Next: open the dashboard, sign in with $keyName from keys.env, and choose Connect account."
   } else {
     Write-Host 'Next: open the dashboard, sign in with your management key, and choose Connect account.'
   }
   Write-Host ''
-  Write-Host 'If cliproxy-rs helps, a star helps others find it: https://github.com/vayungodara/cliproxy-rs'
+  Write-Host 'If gnocchi helps, a star helps others find it: https://github.com/prep-cook/gnocchi'
+}
+
+# A GNOCCHI_* setting, or its CLIPROXY_* name from before the rename while the new one is unset.
+function Get-InstallSetting([string]$name) {
+  $value = [Environment]::GetEnvironmentVariable("GNOCCHI_$name")
+  if ($value) { $value } else { [Environment]::GetEnvironmentVariable("CLIPROXY_$name") }
+}
+
+function Write-OldBinaryNote($oldDirs) {
+  foreach ($old in $oldDirs) {
+    $image = Join-Path $old 'cliproxy.exe'
+    if (Test-Path -LiteralPath $image) { Write-Host "$image from before the rename is no longer used; you can delete it." }
+  }
 }
 
 # Runs an action up to three times: a download, for a brief network or server error, or
@@ -233,11 +276,11 @@ function New-Hex {
 }
 
 # Writes config.yaml and keys.env on a first run, then returns where the server answers.
-function Initialize-CliproxyHome($data, $config, $keys) {
+function Initialize-GnocchiHome($data, $config, $keys) {
   if (-not (Test-Path -LiteralPath $config)) {
     if (Test-Path -LiteralPath $keys) { throw "install.ps1: $keys exists but $config does not; restore config.yaml, or move keys.env away to make new keys" }
     New-Item -ItemType Directory -Force -Path (Join-Path $data 'auth') | Out-Null
-    # Only you, SYSTEM and Administrators can read the folder, wherever CLIPROXY_HOME points.
+    # Only you, SYSTEM and Administrators can read the folder, wherever GNOCCHI_HOME points.
     # Replace the DACL, including explicit grants on an existing folder, rather than
     # only removing inherited grants. keys.env inherits exactly these three trustees.
     $acl = New-Object Security.AccessControl.DirectorySecurity
@@ -255,11 +298,11 @@ function Initialize-CliproxyHome($data, $config, $keys) {
     $management = New-Hex
     $authDir = (Join-Path $data 'auth') -replace "'", "''"
     [IO.File]::WriteAllText($keys, (@(
-          '# cliproxy-rs keys. Sign in to the dashboard with CLIPROXY_MANAGEMENT_KEY;'
-          '# your tools send CLIPROXY_CLIENT_KEY. Keep this file private.'
-          "CLIPROXY_PORT=$port"
-          "CLIPROXY_CLIENT_KEY=$client"
-          "CLIPROXY_MANAGEMENT_KEY=$management"
+          '# gnocchi keys. Sign in to the dashboard with GNOCCHI_MANAGEMENT_KEY;'
+          '# your tools send GNOCCHI_CLIENT_KEY. Keep this file private.'
+          "GNOCCHI_PORT=$port"
+          "GNOCCHI_CLIENT_KEY=$client"
+          "GNOCCHI_MANAGEMENT_KEY=$management"
         ) -join "`n") + "`n")
     [IO.File]::WriteAllText($config, (@(
           '# Written by install.ps1. The plain keys are in keys.env next to this file.'
@@ -279,10 +322,10 @@ function Initialize-CliproxyHome($data, $config, $keys) {
         ) -join "`n") + "`n")
     Write-Host "Wrote $config, with new keys in $keys"
   }
-  Get-CliproxyProbe $config
+  Get-GnocchiProbe $config
 }
 
-function Get-CliproxyHelp($image) {
+function Get-GnocchiHelp($image) {
   try { $text = & $image --help | Out-String } catch { throw "install.ps1: $image does not run ($($_.Exception.Message)); nothing was changed" }
   if ($LASTEXITCODE -ne 0) { throw "install.ps1: $image --help failed with exit code $LASTEXITCODE; nothing was changed" }
   $text
@@ -293,14 +336,14 @@ function ConvertTo-Argument([string]$value) { '"' + ($value -replace '(\\+)$', '
 
 # The same options for the direct start and the Run entry. An older previous image restarted
 # by a rollback gets only the options its --help lists.
-function New-CliproxyArguments($help, $config, $log, $data) {
+function New-GnocchiArguments($help, $config, $log, $data) {
   $arguments = "--config $(ConvertTo-Argument $config)"
   if ($help -match '--log-file') { $arguments += " --log-file $(ConvertTo-Argument $log)" }
   if ($help -match '--working-dir') { $arguments += " --working-dir $(ConvertTo-Argument $data)" }
   $arguments
 }
 
-function Start-Cliproxy($image, $arguments, $data, $pidfile) {
+function Start-Gnocchi($image, $arguments, $data, $pidfile) {
   $proc = Start-Process -FilePath $image -ArgumentList $arguments -WorkingDirectory $data -WindowStyle Hidden -PassThru
   $null = $proc.Handle # keeps ExitCode readable after the process ends
   Set-Content -LiteralPath $pidfile -Value $proc.Id
@@ -311,7 +354,7 @@ function Start-Cliproxy($image, $arguments, $data, $pidfile) {
 # host/port/tls keys. Wildcards are probed on their family's loopback address.
 # ponytail: block-style YAML only; a flow mapping such as `server: {port: 9000}` falls back to
 # the defaults. Parse with the binary itself if configs start using that form.
-function Get-CliproxyProbe($config) {
+function Get-GnocchiProbe($config) {
   $values = @{}
   $stack = New-Object System.Collections.ArrayList
   foreach ($line in Get-Content -LiteralPath $config) {
@@ -340,16 +383,16 @@ function Get-CliproxyProbe($config) {
 
 # Both schemes must answer GET /healthz. The certificate exception is confined
 # to this local HTTPS request, including on Windows PowerShell 5.1.
-function Test-CliproxyUp($probe) {
+function Test-GnocchiUp($probe) {
   if (-not $probe.Tls) {
     try { return (Invoke-WebRequest -Uri "$($probe.Base)/healthz" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200 } catch { return $false }
   }
-  if (-not ('CliproxyInstallerLocalCertificate' -as [type])) {
+  if (-not ('GnocchiInstallerLocalCertificate' -as [type])) {
     # A PowerShell scriptblock delegate needs a runspace on the TLS callback
     # thread. A managed delegate works on both Windows PowerShell and pwsh.
     Add-Type @'
 using System.Net.Security;
-public static class CliproxyInstallerLocalCertificate {
+public static class GnocchiInstallerLocalCertificate {
   public static readonly RemoteCertificateValidationCallback Accept = (sender, certificate, chain, errors) => true;
 }
 '@
@@ -358,7 +401,7 @@ public static class CliproxyInstallerLocalCertificate {
   $callback = $request.ServerCertificateValidationCallback
   $response = $null
   try {
-    $request.ServerCertificateValidationCallback = [CliproxyInstallerLocalCertificate]::Accept
+    $request.ServerCertificateValidationCallback = [GnocchiInstallerLocalCertificate]::Accept
     $request.Timeout = 2000
     $request.ReadWriteTimeout = 2000
     $request.AllowAutoRedirect = $false
@@ -373,64 +416,64 @@ public static class CliproxyInstallerLocalCertificate {
 }
 
 # $null once the process answers and is still alive after about 20 s at most; otherwise why not.
-function Wait-Cliproxy($proc, $probe) {
+function Wait-Gnocchi($proc, $probe) {
   Start-Sleep -Seconds 1
   for ($i = 0; $i -lt 20; $i++) {
-    if (Test-CliproxyUp $probe) {
+    if (Test-GnocchiUp $probe) {
       # A server that lost the port to another program exits right after binding fails.
       Start-Sleep -Seconds 1
-      if ($proc.HasExited) { return "another program already answers at $($probe.Base), so cliproxy-rs could not start there" }
+      if ($proc.HasExited) { return "another program already answers at $($probe.Base), so gnocchi could not start there" }
       return $null
     }
-    if ($proc.HasExited) { return "cliproxy-rs stopped right after starting (exit code $($proc.ExitCode))" }
+    if ($proc.HasExited) { return "gnocchi stopped right after starting (exit code $($proc.ExitCode))" }
     Start-Sleep -Seconds 1
   }
-  "cliproxy-rs did not answer at $($probe.Base)"
+  "gnocchi did not answer at $($probe.Base)"
 }
 
-function Stop-CliproxyId([int]$id) {
+function Stop-GnocchiId([int]$id) {
   $p = Get-Process -Id $id -ErrorAction SilentlyContinue
   if (-not $p) { return }
   try { Stop-Process -Id $id -Force } catch { if (Get-Process -Id $id -ErrorAction SilentlyContinue) { throw } }
-  if (-not $p.WaitForExit(10000)) { throw "install.ps1: cliproxy-rs process $id did not stop" }
+  if (-not $p.WaitForExit(10000)) { throw "install.ps1: gnocchi process $id did not stop" }
 }
 
-# Puts this run's previous image back as cliproxy.exe; the failed one is removed when unlocked.
-function Restore-CliproxyImage($exe, $previous) {
-  $failed = Join-Path ([IO.Path]::GetDirectoryName($exe)) ("cliproxy.prev-" + [guid]::NewGuid() + '.exe')
+# Puts this run's previous image back as gnocchi.exe; the failed one is removed when unlocked.
+function Restore-GnocchiImage($exe, $previous) {
+  $failed = Join-Path ([IO.Path]::GetDirectoryName($exe)) ("gnocchi.prev-" + [guid]::NewGuid() + '.exe')
   [IO.File]::Move($exe, $failed)
   [IO.File]::Move($previous, $exe)
   Remove-Item -LiteralPath $failed -Force -ErrorAction SilentlyContinue
 }
 
 # Removes previous images no process holds open, except $keep.
-function Remove-CliproxyImages($dir, $keep) {
+function Remove-GnocchiImages($dir, $keep) {
   # Enumeration can expand an 8.3 directory alias while $keep retains it. All
   # candidates are in this directory, so compare their unique image filenames.
   $keepName = if ($keep) { [IO.Path]::GetFileName($keep) } else { $null }
-  Get-ChildItem -LiteralPath $dir -Filter 'cliproxy.prev-*.exe' | Where-Object { $_.Name -ne $keepName } |
+  Get-ChildItem -LiteralPath $dir -Filter 'gnocchi.prev-*.exe' | Where-Object { $_.Name -ne $keepName } |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
 }
 
 # WMI retains the launch path after a running image is renamed. Query the actual
 # mapped file; only installer processes use this API.
-function Get-CliproxyImage([int]$id, $dir) {
+function Get-GnocchiImage([int]$id, $dir) {
   $p = Get-Process -Id $id -ErrorAction SilentlyContinue
   if (-not $p) { return $null }
   try {
-    if (-not ('CliproxyInstallerMappedImage' -as [type])) {
+    if (-not ('GnocchiInstallerMappedImage' -as [type])) {
       Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
-public static class CliproxyInstallerMappedImage {
+public static class GnocchiInstallerMappedImage {
   [DllImport("psapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   public static extern uint GetMappedFileName(IntPtr process, IntPtr address, StringBuilder name, uint size);
 }
 '@
     }
     $name = New-Object Text.StringBuilder 32768
-    if ([CliproxyInstallerMappedImage]::GetMappedFileName($p.Handle, $p.MainModule.BaseAddress, $name, $name.Capacity) -eq 0) {
+    if ([GnocchiInstallerMappedImage]::GetMappedFileName($p.Handle, $p.MainModule.BaseAddress, $name, $name.Capacity) -eq 0) {
       throw "install.ps1: could not read the running image for process $id (Windows error $([Runtime.InteropServices.Marshal]::GetLastWin32Error())); nothing was replaced"
     }
     # The API returns a device path. Process selection already checked the
@@ -441,23 +484,27 @@ public static class CliproxyInstallerMappedImage {
   } finally { $p.Dispose() }
 }
 
-# Finds this install's server: a cliproxy image from the install directory started with this
+# Finds this install's server: a gnocchi image from the install directory started with this
 # config, including Run-entry launches without a pid file. A reused pid must not
-# select a server for another config sharing the binary.
-function Get-CliproxyServers($dir, $config) {
-  $directory = $dir.TrimEnd('\')
-  try { $all = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'cliproxy%.exe'" -OperationTimeoutSec 10) }
+# select a server for another config sharing the binary. With $prefix 'cliproxy' and the
+# directories an install from before the rename used, it finds that install's server.
+function Get-GnocchiServers($dir, $config, $prefix = 'gnocchi') {
+  $directories = @($dir) | ForEach-Object { $_.TrimEnd('\') }
+  try { $all = @(Get-CimInstance Win32_Process -Filter "Name LIKE '$prefix%.exe'" -OperationTimeoutSec 10) }
   catch { throw "install.ps1: could not list running processes ($($_.Exception.Message))" }
   $all | Where-Object {
-    ($_.Name -eq 'cliproxy.exe' -or $_.Name -like 'cliproxy.prev-*.exe') -and
-      $_.ExecutablePath -and [IO.Path]::GetDirectoryName($_.ExecutablePath) -eq $directory -and
+    ($_.Name -eq "$prefix.exe" -or $_.Name -like "$prefix.prev-*.exe") -and
+      $_.ExecutablePath -and [IO.Path]::GetDirectoryName($_.ExecutablePath) -in $directories -and
       $_.CommandLine -and $_.CommandLine.IndexOf($config, [StringComparison]::OrdinalIgnoreCase) -ge 0
   }
 }
 
-function Stop-Cliproxy($pidfile, $dir, $config) {
-  foreach ($p in (Get-CliproxyServers $dir $config)) { Stop-CliproxyId $p.ProcessId }
+# Stops this install's server, and the cliproxy server of the same config from before the rename,
+# which would otherwise keep the port.
+function Stop-Gnocchi($pidfile, $dir, $config, $oldDirs) {
+  foreach ($p in (Get-GnocchiServers $dir $config)) { Stop-GnocchiId $p.ProcessId }
+  foreach ($p in (Get-GnocchiServers $oldDirs $config 'cliproxy')) { Stop-GnocchiId $p.ProcessId }
   Remove-Item -LiteralPath $pidfile -Force -ErrorAction SilentlyContinue
 }
 
-Install-CliproxyRs -Service $Service.IsPresent -BinaryOnly $BinaryOnly.IsPresent
+Install-Gnocchi -Service $Service.IsPresent -BinaryOnly $BinaryOnly.IsPresent
