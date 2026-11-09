@@ -110,7 +110,7 @@ jobs:
         id: profile
         run: echo "hash=$(awk '/^\[/ { p = /^\[profile/ } p' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       # Both shards build the same tests, so they share one cache and shard 1 saves it.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ steps.profile.outputs.hash }}
           save-if: ${{ github.ref == 'refs/heads/master' && matrix.shard == 1 }}
@@ -233,7 +233,7 @@ jobs:
       - name: Profile key
         id: profile
         run: echo "hash=$(awk '/^\[/ { p = /^\[profile/ } p' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ steps.profile.outputs.hash }}
           save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -350,7 +350,7 @@ jobs:
       - name: Rust
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal && rustup default "$RUST_TOOLCHAIN"
       # Both entries share one cache; one of them saves it.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/master' && matrix.auth-files == 1 }}
       - name: Build
@@ -425,7 +425,7 @@ jobs:
       - name: Profile key
         id: profile
         run: echo "hash=$(awk '/^\[/ { p = /^\[profile/ } p' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ steps.profile.outputs.hash }}
           save-if: ${{ github.ref == 'refs/heads/master' }}
