@@ -1,5 +1,5 @@
 // A section heading outside a card: an h2 with an optional icon, hint and controls at the end of
-// the row. After card-v2 `web/src/ui/SectionHeading.tsx` (MIT); card titles use CardHeading, whose
+// the row. After card-v2's `SectionHeading` (MIT); card titles use CardHeading, whose
 // icon this one's matches.
 import type { ReactNode } from "react";
 import { Icon, type IconProps } from "@astryxdesign/core/Icon";

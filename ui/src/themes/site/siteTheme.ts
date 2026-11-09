@@ -29,8 +29,8 @@ const chromeTokens = ({ mode }: Roles, dark: RosePineVariant) => ({
   "--color-background-muted": mode("overlay"),
   "--color-background-inverted": mode("text"),
 
-  // The primary action is ink (text on base). Links are body text, as the nbcards admin draws
-  // them (card-v2 siteTheme.ts sets the text accent to its ink); a chevron, the hover and the
+  // The primary action is ink (text on base). Links are body text, as the card-v2 admin draws
+  // them (card-v2 sets the text accent to its ink); a chevron, the hover and the
   // button shape show what is clickable. Iris is the focus ring only.
   "--color-accent": mode("text"),
   "--color-accent-muted": mode("overlay"),
@@ -175,10 +175,9 @@ export const siteAdaptations: ThemeConfig["adaptations"] = {
 };
 
 /**
- * Sizes from the nbcards admin (card-v2 `web/src/themes/shared/index.ts` `panelShared`, and the
- * radii of `web/src/themes/site/siteTheme.ts`; MIT): controls one 4 px step up
- * (sm 32 row actions and icon buttons, md 36 buttons and inputs, lg 40), supporting text 13 on a
- * 20 px line, and radius 8 / 12 / 16 (inner, element, card). The metric value (display-3, 31 px)
+ * Sizes from the card-v2 admin (card-v2's `panelShared` and the radii of its site theme; MIT):
+ * controls one 4 px step up (sm 32 row actions and icon buttons, md 36 buttons and inputs, lg 40),
+ * supporting text 13 on a 20 px line, and radius 8 / 12 / 16 (inner, element, card). The metric value (display-3, 31 px)
  * is semibold, as card-v2's MetricCard draws it.
  */
 export const siteSizes = {

@@ -2,7 +2,7 @@ import { request } from "./client.ts";
 import { routes } from "./routes.ts";
 
 /** A browser sign-in, or a device flow (kimi, kimi-ai, meta, xai) with a code to enter. */
-export type OAuthStart = {
+type OAuthStart = {
   status: "ok";
   url: string;
   state: string;
@@ -22,7 +22,7 @@ export const startOAuth = (provider: string, forward: boolean, signal?: AbortSig
   });
 
 /** HTTP 200 in every case; an unknown or expired state is `{status: "error"}`. */
-export type OAuthStatus = { status: "ok" | "wait" } | { status: "error"; error: string };
+type OAuthStatus = { status: "ok" | "wait" } | { status: "error"; error: string };
 
 export const oauthStatus = (state: string, signal?: AbortSignal) =>
   request<OAuthStatus>(routes.oauthStatus, { query: { state }, signal });
@@ -45,19 +45,6 @@ export function importVertex(file: File, location: string) {
   if (location) form.append("location", location);
   return request<VertexImport>(routes.importOAuth, { query: { provider: "vertex" }, body: form });
 }
-
-/**
- * Start binding Sign in with ChatGPT to a file-backed Codex credential.
- * @public ponytail: no caller until Connect gets a way to bind a ChatGPT sign-in
- * (OPEN-QUESTIONS 7); drop the tag when it does, or this function if that is dropped.
- */
-export const bindSiwc = (name: string) =>
-  request<{ status: "ok"; url: string; state: string; flow: "siwc_bind"; expires_in: number }>(
-    routes.bindSiwc,
-    {
-      body: { name },
-    },
-  );
 
 /** Finish a sign-in from the browser's final URL when the redirect page did not load. */
 export const submitOAuthCallback = (provider: string, redirectUrl: string) =>

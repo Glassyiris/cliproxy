@@ -4,10 +4,10 @@ import { siteAdaptations, siteSizes, siteTypography } from "./siteTheme.ts";
 
 /**
  * "Neutral": Astryx's neutral theme with its own colours, light and dark, for anyone who finds
- * Rosé Pine too colourful (owner, 2026-11-09). The site's sizes, type scale and motion rule are
- * added, and a few colours from neutral's own values (one from core): the grey for bars and chart
- * volume, and warning in neutral's orange instead of its bright yellow (owner, 2026-11-09:
- * 「不太中性感覺」「難看的配色」). Every other colour token is neutral's theme.css or core's
+ * Rosé Pine too colourful. The site's sizes, type scale and motion rule are added, and a few
+ * colours so it reads monochrome, from neutral's own values (one from core): the grey for bars,
+ * Astryx's categorical blue for chart volume, and warning in neutral's orange instead of its bright
+ * yellow. Every other colour token is neutral's theme.css or core's
  * astryx.css default. Built to site-neutral.*, loaded on demand.
  */
 export const siteNeutralTheme = defineTheme({
@@ -17,14 +17,14 @@ export const siteNeutralTheme = defineTheme({
   adaptations: siteAdaptations,
   tokens: {
     ...siteSizes,
-    // The one colour changed (owner, 2026-11-09): in neutral's dark mode a ProgressBar's fill
+    // Bar fill: in neutral's dark mode a ProgressBar's fill
     // (--color-text-disabled) and track (--color-border-emphasized) are both #525252, so a quota
     // bar showed no value. The fill takes neutral's seed grey, #777777; the track stays, since it
     // is also every input's outline. Light keeps neutral's #919191.
     "--color-text-disabled": ["#919191", "#777777"],
     // Chart volume (charts.ts reads this token for the requests series) is Astryx's
-    // categorical blue, as BoothDex's trend charts draw it: grey read as dead (owner,
-    // 2026-11-09, chose 「Astryx 藍」). 4.7:1 on the light card, 3.7:1 on the dark one.
+    // categorical blue, as BoothDex's trend charts draw it: grey reads as dead. 4.7:1 on the light
+    // card, 3.7:1 on the dark one.
     "--color-data-neutral": ["#0171E3", "#0171E3"],
     // Warning is neutral's orange family, soft fill and dark ink like a muted badge, so a waiting
     // badge, cooling dot or warning banner is quiet beside the greys. Source values in comments.

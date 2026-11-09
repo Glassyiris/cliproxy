@@ -65,7 +65,7 @@ export function useVertexImport(action: Action, onGone: () => void) {
   };
 }
 
-export type VertexImportState = ReturnType<typeof useVertexImport>;
+type VertexImportState = ReturnType<typeof useVertexImport>;
 
 /** Step 2 for Vertex: the region and the service-account file. */
 export function VertexFields({ vertex }: { vertex: VertexImportState }) {

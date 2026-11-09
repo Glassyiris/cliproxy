@@ -60,11 +60,11 @@ function failure(e: unknown): QuotaError | null {
   if (e instanceof ApiError) return { reason: "failed", detail: e.message };
   return { reason: "malformed" };
 }
-export type QuotaPending = "queued" | "checking";
+type QuotaPending = "queued" | "checking";
 const quotaKey = (a: Credential) => a.auth_index || a.name;
 
 /** Where the checker reads the current plugins and credentials from. */
-export type QuotaSources = { plugins(): Plugin[]; credentials(): Credential[] };
+type QuotaSources = { plugins(): Plugin[]; credentials(): Credential[] };
 
 /**
  * Checks run one at a time, and each account at most once every 2 minutes counted from when its
@@ -123,8 +123,7 @@ export function createQuotaChecker(sources: QuotaSources) {
           });
         if (p === "codex") {
           header["User-Agent"] = "codex-tui/0.149.1";
-          // The file's own account_id first, as the Svelte dashboard sent it; the token's claim
-          // is the fallback.
+          // The file's own account_id first; the token's claim is the fallback.
           const account = a.account_id || a.id_token?.chatgpt_account_id;
           if (account) header["Chatgpt-Account-Id"] = account;
         }

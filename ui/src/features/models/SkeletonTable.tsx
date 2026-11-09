@@ -7,7 +7,7 @@ import { roles } from "../../themes/site/roles.ts";
 type Row = { id: string };
 const rows: Row[] = ["a", "b", "c", "d", "e"].map((id) => ({ id }));
 
-/** Placeholder rows under the real headers while the table loads (table-filter:1882-1945). */
+/** Placeholder rows under the real headers while the table loads (table-filter). */
 export function SkeletonTable({ headers }: { headers: string[] }) {
   const columns: TableColumn<Row>[] = headers.map((header) => ({
     key: header,

@@ -98,8 +98,8 @@ export const routes: readonly PageRoute[] = [
 export type NavRef = { route: string; view?: string };
 
 /**
- * The side nav, as the nbcards console draws it: a small heading per section over its items,
- * never collapsed. Owner, 2026-11-09: Monitor first with Overview in it, and Logs under Server.
+ * The side nav, as the card-v2 console draws it: a small heading per section over its items,
+ * never collapsed: Monitor first with Overview in it, and Logs under Server.
  */
 export const navSections: readonly { id: string; title(): string; items: readonly NavRef[] }[] = [
   {

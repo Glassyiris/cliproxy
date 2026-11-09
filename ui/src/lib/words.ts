@@ -1,5 +1,5 @@
 /** One unit of a line that must not break inside, and whether a space comes before it. */
-export type WordUnit = { text: string; spaced: boolean };
+type WordUnit = { text: string; spaced: boolean };
 
 // A Chinese run breaks before a number ("20小时21分钟" before "21"), never after a Latin letter or
 // inside a number ("HTTP2", "14:20", "1.5").

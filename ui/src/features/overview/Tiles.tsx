@@ -38,7 +38,7 @@ const word = (j: Judgement) =>
 type TileData = { judgement: Judgement; value: string; basis: string };
 
 /**
- * One KPI tile as the nbcards admin's MetricCard: the tile's glyph in the judgement's colour beside
+ * One KPI tile as the card-v2 admin's MetricCard: the tile's glyph in the judgement's colour beside
  * the label, the value at the metric size, and one line of basis. `data` is undefined while
  * loading; every line keeps its height then.
  */

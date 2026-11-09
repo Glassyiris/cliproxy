@@ -6,7 +6,7 @@ import type { ComponentType, ReactNode } from "react";
 import { PageHostContext } from "../pageHost.ts";
 import { useHashParams } from "../useHashRoute.ts";
 
-export type HostedTab = { id: string; label: () => string; page: ComponentType };
+type HostedTab = { id: string; label: () => string; page: ComponentType };
 
 export function TabbedPage({
   tabs,

@@ -31,7 +31,7 @@ export const chartGeometry = {
 // focus outline around the SVG is cut off and only the Astryx ring around the box shows (recharts
 // sets the SVG's style itself, so the outline cannot be turned off on the SVG).
 export const chartPlot = stylex.create({
-  // The nbcards admin's fixed plot height (card-v2 TrendChart.tsx): 14rem, 12rem on a phone (the
+  // The card-v2 admin's fixed plot height (its trend chart): 14rem, 12rem on a phone (the
   // media query is layout.phone; StyleX takes only a literal key). Both overview charts take it,
   // so the two cards beside each other end level.
   plot: {

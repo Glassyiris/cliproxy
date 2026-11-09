@@ -29,7 +29,7 @@ export const rowKey = (a: Credential) => `${a.name}\u0000${a.auth_index}`;
 const rowId = (a: Credential) => String(a.id || a.name);
 
 /** What the tab's quota checker knows about an account, as accountRow reads it. */
-export type QuotaView = {
+type QuotaView = {
   limits: (a: Credential) => Limits;
   isLive: (a: Credential) => boolean;
   hasSource: (a: Credential) => boolean;

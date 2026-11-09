@@ -13,7 +13,7 @@ import type { Palette } from "../themes/site/index.ts";
 import { layout } from "../themes/site/layout.ts";
 import { dawn, main, moon, type RosePineVariant } from "../themes/site/rosePine.ts";
 
-export type CodeLanguage = "yaml" | "json";
+type CodeLanguage = "yaml" | "json";
 
 // Rosé Pine's own syntax roles (rose-pine/neovim `groups` and highlights): keywords pine, strings
 // and numbers gold, booleans and functions rose, types, keys and tags foam, attributes iris,

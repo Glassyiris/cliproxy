@@ -1,7 +1,6 @@
-// One value for each role that repeats across pages. Sizes and spacing come from the nbcards admin
-// (card-v2, MIT; measured in p3/r/ref/nbcards/REPORT.md): its `web/src/ui/
-// layout.ts` spacing constants, `PageFrame.tsx` page frame and `UI-RULES.md` heading levels, cards
-// and buttons. The Astryx templates the pages are built from settle the rest. DESIGN.md "Roles"
+// One value for each role that repeats across pages. Sizes and spacing come from the card-v2 admin
+// (MIT): its layout spacing constants, its page frame and its rules for heading levels, cards and
+// buttons. The Astryx templates the pages are built from settle the rest. DESIGN.md "Roles"
 // lists every role with its source. Spacing inside one template's own composition (a toolbar's
 // `size="sm"`) stays as that template writes it and is not a role.
 import { layout } from "./layout.ts";
@@ -15,17 +14,17 @@ export const roles = {
   // blocks inside one card, CARD_PADDING the one Card padding.
   gap: { section: 6, card: 4 },
   card: { padding: 5 },
-  // Reading pages (settings, forms) cap their content: settings-sidebar:303, form-wizard-inline:610.
+  // Reading pages (settings, forms) cap their content: settings-sidebar, form-wizard-inline.
   content: { settingsWidth: 1200, formWidth: 800 },
-  // table-inbox:2628, table-grouped:953, table-page:933, dashboard-comparison:879.
+  // Balanced, as table-inbox, table-grouped, table-page and dashboard-comparison draw tables.
   table: { density: "balanced" },
-  // card-v2 UI-RULES.md "Page": h1 the page, h2 SectionHeading outside cards, h3 CardHeading inside,
+  // card-v2's page rules: h1 the page, h2 SectionHeading outside cards, h3 CardHeading inside,
   // h4 a sub-block. Never two headings stacked.
   heading: { page: 1, section: 2, card: 3, inCard: 4 },
   // The level sets a heading's scale, so no Heading takes `type`. Text types by use:
-  // table-grouped:777 (content, cells), dashboard-alert-rail:1461 (the line under a title, hints),
-  // dashboard-alert-rail:863 (field and metric labels), card-v2 MetricCard.tsx (metric values,
-  // display-3: 31/600), dashboard-comparison:389 (text inside another text); `code` is the Text
+  // table-grouped (content, cells), dashboard-alert-rail (the line under a title, hints),
+  // dashboard-alert-rail (field and metric labels), card-v2's MetricCard (metric values,
+  // display-3: 31/600), dashboard-comparison (text inside another text); `code` is the Text
   // docs' type for identifiers (model IDs, keys, paths, versions).
   textType: {
     body: "body",
@@ -35,18 +34,18 @@ export const roles = {
     identifier: "code",
     nested: "inherit",
   },
-  // The only Text size: the brand name on the sign-in card (login-card:94).
+  // The only Text size: the brand name on the sign-in card (login-card).
   textSize: { brand: "lg" },
-  // dashboard-alert-rail:1098 (emphasis), login-card:94 and table-grouped:1001 (brand, group name),
-  // table-inbox:1059 (the plain branch of a conditional emphasis). Headings take no weight.
+  // dashboard-alert-rail (emphasis), login-card and table-grouped (brand, group name),
+  // table-inbox (the plain branch of a conditional emphasis). Headings take no weight.
   textWeight: { emphasis: "semibold", strong: "bold", plain: "normal" },
-  // card-v2 UI-RULES.md "Buttons": one primary per view, default size (36 px with the theme's
+  // card-v2's button rules: one primary per view, default size (36 px with the theme's
   // control sizes), at the header's end; other header controls default size too.
   primaryAction: { variant: "primary", size: "md" },
-  // Row actions are ghost sm (32 px): table-inbox:1008, table-filter:2159, card-v2 UI-RULES.md.
+  // Row actions are ghost sm (32 px): table-inbox, table-filter, card-v2.
   rowAction: { variant: "ghost", size: "sm" },
-  // table-filter:2229 beside the list; below `compactSurface` the detail is a BottomSheet
-  // (table-filter:4313).
+  // Beside the list, as table-filter places it; below `compactSurface` the detail is a
+  // BottomSheet, as the same template does.
   detailPanel: layout.detailPanel,
   detailSheet: { height: "tall", padding: 0 },
   compactSurface: "(max-width: 768px), (max-width: 1024px) and (pointer: coarse) and (hover: none)",

@@ -40,7 +40,7 @@ export type StatusAnswer =
   | { status: "unknown" };
 
 /** The fields of a sign-in a status read needs. */
-export type Polled = { id: number; provider: string; state: string; seen: Seen | null };
+type Polled = { id: number; provider: string; state: string; seen: Seen | null };
 
 /** The message a failed request carries, worded as useAction words it. */
 export const reason = (e: unknown) =>

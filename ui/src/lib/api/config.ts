@@ -5,7 +5,7 @@ import { routes } from "./routes.ts";
 
 /** The saved config as JSON. Its tree follows config.yaml; only `config-version` is fixed. */
 export type Config = { "config-version"?: number; [section: string]: unknown };
-export type ConfigWrite = { "config-version": number; status: "ok" };
+type ConfigWrite = { "config-version": number; status: "ok" };
 
 export const readConfig = (signal?: AbortSignal) => request<Config>(routes.readConfig, { signal });
 

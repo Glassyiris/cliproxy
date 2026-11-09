@@ -81,7 +81,7 @@ export const listCredentials = (signal?: AbortSignal) =>
 
 type Failed = { name: string; error: string }[];
 /** One file answers `{status}` only; several add counts, and `partial` (HTTP 207) lists failures. */
-export type UploadResult = {
+type UploadResult = {
   status: "ok" | "partial";
   uploaded?: number;
   files?: string[];
@@ -94,7 +94,7 @@ export function uploadCredentials(files: File[]) {
   return request<UploadResult>(routes.uploadCredentials, { body: form });
 }
 
-export type DeleteResult = {
+type DeleteResult = {
   status: "ok" | "partial";
   deleted?: number;
   files?: string[];
@@ -104,7 +104,7 @@ export type DeleteResult = {
 export const deleteCredentials = (names: string[]) =>
   request<DeleteResult>(routes.deleteCredentials, { body: { names } });
 
-export type CredentialModel = {
+type CredentialModel = {
   id: string;
   display_name?: string;
   type?: string;
@@ -120,7 +120,7 @@ export const downloadCredential = (name: string, signal?: AbortSignal) =>
 
 type Target = { name: string; auth_index?: string };
 
-export type StatusResult = {
+type StatusResult = {
   status: "ok";
   disabled: boolean;
   via?: "config:excluded-models";
@@ -146,7 +146,7 @@ export const setCredentialFields = (name: string, fields: CredentialFields) =>
   request<{ status: "ok" }>(routes.setCredentialFields, { body: { ...fields, name } });
 
 /** The refreshed credential. The server also returns its metadata, tokens included; leave it unread. */
-export type RefreshResult = {
+type RefreshResult = {
   ok: true;
   auth: { id: string; provider: string; label: string; status: string; disabled: boolean };
 };

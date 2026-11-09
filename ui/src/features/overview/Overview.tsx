@@ -1,4 +1,4 @@
-// Overview, from the Astryx template dashboard-alert-rail, on the shared PageFrame with the nbcards
+// Overview, from the Astryx template dashboard-alert-rail, on the shared PageFrame with the card-v2
 // admin's sizes (DESIGN.md "Roles"). Deviations from the template, one per line with its reason:
 // - The header and content padding are the page roles (24, 16 on a phone), not the template's own,
 //   so the h1 sits where every other page has it.
@@ -10,7 +10,7 @@
 // - The primary action is default size, not lg: roles.primaryAction.
 // - Tiles: three judgements with one basis line each, no delta and no sparkline (the chart below
 //   has the series); at least layout.summaryTileMin wide, not 240, so a phone shows two per row.
-// - No alert rail: the reasons are a fixed, small set, so they are the nbcards admin's "Open work"
+// - No alert rail: the reasons are a fixed, small set, so they are the card-v2 admin's "Open work"
 //   cards under the tiles, one per reason with accounts, each linking to where it is fixed. The content takes the full width.
 // - Two chart cards as the template has, bar charts instead of line charts: requests per ten
 //   minutes with failures on top, and requests per source; the API reports no latency. Each card

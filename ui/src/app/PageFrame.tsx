@@ -1,5 +1,5 @@
-// The one frame every page renders in (DESIGN.md "Pages"), after the nbcards admin's PageFrame
-// (card-v2 `web/src/ui/PageFrame.tsx`, MIT): Astryx Layout with the padding set once on it, so the
+// The one frame every page renders in (DESIGN.md "Pages"), after the card-v2 admin's PageFrame
+// (card-v2's `PageFrame`, MIT): Astryx Layout with the padding set once on it, so the
 // header and the content share one line and the h1 sits at the same place on every page; the
 // header holds the h1, one supporting line, the page's controls at the end, a long list's filter
 // row and the route's tabs, which sit on the header's divider; the body is a column of sections

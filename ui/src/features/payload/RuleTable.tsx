@@ -31,7 +31,7 @@ import { fieldCount, NO_MODEL, UNREADABLE, type RuleRow } from "./rules.ts";
 export type RuleGroup = { name: string; rows: RuleRow[] };
 
 const styles = stylex.create({
-  // table-grouped:66-70: the group header fills the row with the muted background.
+  // table-grouped: the group header fills the row with the muted background.
   groupHeader: { cursor: "pointer", backgroundColor: colorVars["--color-background-muted"] },
 });
 
@@ -43,7 +43,7 @@ export const groupName = (name: string) => {
 
 export const fieldsOf = (row: RuleRow) => fieldCount(row.rule ? row.rule.params : row.entry);
 
-/** Activates on Enter or Space when the row itself has focus (table-filter:2754-2762). */
+/** Activates on Enter or Space when the row itself has focus (table-filter). */
 const onActivate = (run: () => void) => (event: KeyboardEvent<HTMLTableRowElement>) => {
   if (event.target !== event.currentTarget) return;
   if (event.key !== "Enter" && event.key !== " ") return;
