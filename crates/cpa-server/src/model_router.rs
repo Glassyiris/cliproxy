@@ -1,4 +1,4 @@
-//! Model routers (gnocchi only, see docs/DIFFERENCES-FROM-GO.md): a client names a
+//! Model routers (cook-router only, see docs/DIFFERENCES-FROM-GO.md): a client names a
 //! router from `model-routers` as its model, and the router picks the model and effort
 //! that serve the request. A judge model (or, without one, request signals) grades the
 //! request's difficulty from 0 to 4; the difficulty maps linearly onto the intelligence
@@ -268,7 +268,7 @@ pub(crate) fn listed(cfg: &Config) -> Vec<Spec> {
         .map(|r| Spec {
             id: r.name.clone(),
             object: "model".into(),
-            owned_by: "gnocchi".into(),
+            owned_by: "cook-router".into(),
             display_name: r.name.clone(),
             ..Default::default()
         })

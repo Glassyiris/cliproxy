@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "bench/results/2026-10-28-field-go.jsonl"
 SESSION = "ci-runners-60min"
-TITLE = "Memory in the field-mix soak: CLIProxyAPI v8.0.35 (Go) and gnocchi 0.4.0"
+TITLE = "Memory in the field-mix soak: CLIProxyAPI v8.0.35 (Go) and cook-router 0.4.0"
 SUBTITLE = ["28 Oct 2026: both release binaries, 60 minutes of Claude, Codex and count_tokens requests,",
             "on two GitHub-hosted Ubuntu 22.04 runners (4 vCPUs each) at the same time."]
 # (panel title, [(server, run label, round label)])
@@ -31,7 +31,7 @@ RUNS = [
      [("go", "go-8.0.35", ""), ("rs", "0.4.0", "")]),
 ]
 METRICS = [("hwm_kb", "Peak RSS", "peak RSS"), ("idle_rss_kb", "RSS after 300 s idle", "RSS after 300 s idle")]
-NAMES = {"go": "CLIProxyAPI v8.0.35 (Go)", "rs": "gnocchi 0.4.0"}
+NAMES = {"go": "CLIProxyAPI v8.0.35 (Go)", "rs": "cook-router 0.4.0"}
 THEMES = {
     "light": {"text": "#1f2328", "muted": "#59636e", "grid": "#d1d9e0", "go": "#818b98", "rs": "#0969da"},
     "dark": {"text": "#f0f6fc", "muted": "#9198a1", "grid": "#3d444d", "go": "#656c76", "rs": "#4493f8"},
@@ -72,7 +72,7 @@ def alt_text(panels):
                 if name == metric_name:
                     values.setdefault(server, []).append(mb(value))
             groups.append(f"{alt_name}: Go {' and '.join(values['go'])} MB, "
-                          f"gnocchi {' and '.join(values['rs'])} MB")
+                          f"cook-router {' and '.join(values['rs'])} MB")
         parts.append(f"{title}, {'; '.join(groups)}")
     return ("Bar chart of the field-mix soak on 28 October 2026, 60 minutes on two runners at the same time. "
             + ". ".join(parts) + ".")

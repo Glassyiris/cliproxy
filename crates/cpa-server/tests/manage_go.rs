@@ -265,7 +265,7 @@ fn trusted_proxy_validation_errors_match_go_text() {
     }
 }
 
-/// Go records OAuth-only fields by legacy name; gnocchi by v8 path. Go's prefix
+/// Go records OAuth-only fields by legacy name; cook-router by v8 path. Go's prefix
 /// table for `oauth.providers` (internal/config/config_v8.go buildV8Paths) maps them.
 /// Since Go 52d5507d, the shared Codex, Claude and xAI settings live under
 /// `upstream.*`, and Go records only fields whose current path stays under
@@ -642,7 +642,7 @@ mod config_writes {
 
     /// The management key, the one bcrypt value in these configs, differs per run; its
     /// presence is compared, not its bytes. Go v8.0.35 saves a plaintext key written
-    /// through the v8 API until its post-save reload hashes it, while gnocchi stores
+    /// through the v8 API until its post-save reload hashes it, while cook-router stores
     /// the hash at once (docs/DIFFERENCES-FROM-GO.md), so in Go's recording (`go`) a
     /// plaintext `fake-*` key stands for the hash Rust writes; [`same_key`] checks that
     /// hash against it. A plaintext key on the Rust side is never normalized.
@@ -693,7 +693,7 @@ mod config_writes {
             .fold(v.clone(), |doc, part| json!({ part: doc }))
     }
 
-    /// gnocchi writes only what the request changed (untouched text stays
+    /// cook-router writes only what the request changed (untouched text stays
     /// byte-stable); since v8.0.35 Go's v8 saver also adds no default-valued keys, so
     /// the values compare exactly.
     fn same(go: &Value, rust: &Value, at: &str) -> Result<(), String> {
@@ -714,7 +714,7 @@ mod config_writes {
         }
     }
 
-    /// Scenarios whose file gnocchi refuses to load where Go loads it
+    /// Scenarios whose file cook-router refuses to load where Go loads it
     /// (docs/DIFFERENCES-FROM-GO.md), with the refusal.
     const REFUSED_LOADS: &[(&str, &str)] = &[(
         "binary_plugin_pin",
@@ -722,7 +722,7 @@ mod config_writes {
     )];
 
     /// Steps where Go reports yaml.v3's typed-decode error (`line N: cannot unmarshal ...`
-    /// or `field X not found in type ...`), with the message gnocchi gives instead.
+    /// or `field X not found in type ...`), with the message cook-router gives instead.
     const DECODE_MESSAGES: &[(&str, &str)] = &[
         (
             "malformed_oauth_maps_are_rejected_before_sanitizing[0]",
@@ -883,7 +883,7 @@ mod config_writes {
                             "{at}: {got}"
                         );
                         // Go's text, except where it is yaml.v3's typed-decode error, which
-                        // gnocchi words by setting (docs/DIFFERENCES-FROM-GO.md).
+                        // cook-router words by setting (docs/DIFFERENCES-FROM-GO.md).
                         if let Some(go) = want.get("message").and_then(Value::as_str) {
                             let step = format!("{name}[{i}]");
                             let rust = match DECODE_MESSAGES.iter().find(|(s, _)| *s == step) {
@@ -1231,7 +1231,7 @@ mod creds {
                     }
                     // Go's harness registers models only for runtime credentials (as its
                     // service does on connect), so the cooldown-reset fallback list of a
-                    // file credential is empty there; gnocchi reports the credential's
+                    // file credential is empty there; cook-router reports the credential's
                     // registrations (none here: the credential is disabled by this step).
                     if step["path"] == "/routing/cooldown/reset" && status == 200 && scenario["runtime_auths"].is_null()
                     {
@@ -1299,7 +1299,7 @@ mod creds {
     }
 
     /// Pending v8.0.35 drift outside the config saver. Each pin names its scenario and
-    /// steps, asserts Go's recorded value there, then expects gnocchi's current
+    /// steps, asserts Go's recorded value there, then expects cook-router's current
     /// (6fecc6e) value in just the differing fields, so porting the change, or losing
     /// the old behaviour some other way, fails here until the pin is removed.
     fn pin_pending_steps(mut step: Value, name: &str, i: usize, at: &str) -> Value {
@@ -1332,7 +1332,7 @@ mod creds {
             _ => {}
         }
         // Go 7b0319fb (Sign in with ChatGPT): a codex auth file's save leaves an empty
-        // `<name>.lock` side file, its credential lock, as gnocchi's does. This pins
+        // `<name>.lock` side file, its credential lock, as cook-router's does. This pins
         // which steps Go recorded them at.
         if let Some(files) = step["files"].as_object_mut() {
             let mut locks: Vec<&str> = Vec::new();

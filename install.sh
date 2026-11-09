@@ -1,31 +1,31 @@
 #!/bin/sh
-# Installs gnocchi on macOS or Linux, sets it up and starts it.
+# Installs cook-router on macOS or Linux, sets it up and starts it.
 #
-#   curl -fsSL https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/prep-cook/cook-router/master/install.sh | sh
 #
 # The first run downloads the release for this machine, checks it against the release's
-# SHA256SUMS and installs ~/.local/bin/gnocchi. It writes ~/.gnocchi/config.yaml with
+# SHA256SUMS and installs ~/.local/bin/cook-router. It writes ~/.cook-router/config.yaml with
 # a free port (8317, or the next free one) and new keys, which it saves in
-# ~/.gnocchi/keys.env (mode 600) and never prints. Then it starts the server in the
+# ~/.cook-router/keys.env (mode 600) and never prints. Then it starts the server in the
 # background and checks that it answers. Running it again upgrades the binary and
 # restarts the server; an existing config.yaml or keys.env is never changed.
 #
-# An install from before the rename to gnocchi keeps working: without ~/.gnocchi, an
+# An install from before the rename to cook-router keeps working: without ~/.cook-router, an
 # existing ~/.cliproxy-rs is used as it is, and a cliproxy service or background server
-# gives way to the gnocchi one. The old cliproxy binary is left in place.
+# gives way to the cook-router one. The old cliproxy binary is left in place.
 #
 # Options (when piping, pass them as: sh -s -- --service):
-#   --service      also start gnocchi at login, with a systemd user unit or a launchd agent
+#   --service      also start cook-router at login, with a systemd user unit or a launchd agent
 #   --binary-only  only install or upgrade the binary
 #   --check        report installed and available versions without changing anything
 #
-# Environment (each GNOCCHI_* name falls back to its CLIPROXY_* name from before the rename):
-#   GNOCCHI_VERSION      release tag to install, such as v0.1.0 (default: the latest)
-#   GNOCCHI_INSTALL_DIR  where the binary goes (default: $HOME/.local/bin)
-#   GNOCCHI_HOME         config, keys, credentials and log (default: $HOME/.gnocchi)
-#   GNOCCHI_NO_OPEN=1    never open a browser
-#   GNOCCHI_RELEASES     release page base URL, for mirrors and tests
-#                        (default: https://github.com/prep-cook/gnocchi/releases)
+# Environment (each COOK_ROUTER_* name falls back to its CLIPROXY_* name from before the rename):
+#   COOK_ROUTER_VERSION      release tag to install, such as v0.1.0 (default: the latest)
+#   COOK_ROUTER_INSTALL_DIR  where the binary goes (default: $HOME/.local/bin)
+#   COOK_ROUTER_HOME         config, keys, credentials and log (default: $HOME/.cook-router)
+#   COOK_ROUTER_NO_OPEN=1    never open a browser
+#   COOK_ROUTER_RELEASES     release page base URL, for mirrors and tests
+#                        (default: https://github.com/prep-cook/cook-router/releases)
 set -eu
 
 fail() {
@@ -35,27 +35,27 @@ fail() {
 
 # Everything runs from main, so a download cut short cannot run half a script.
 main() {
-  releases="${GNOCCHI_RELEASES:-${CLIPROXY_RELEASES:-https://github.com/prep-cook/gnocchi/releases}}"
-  dir="${GNOCCHI_INSTALL_DIR:-${CLIPROXY_INSTALL_DIR:-$HOME/.local/bin}}"
-  home="${GNOCCHI_HOME:-${CLIPROXY_HOME:-}}"
+  releases="${COOK_ROUTER_RELEASES:-${CLIPROXY_RELEASES:-https://github.com/prep-cook/cook-router/releases}}"
+  dir="${COOK_ROUTER_INSTALL_DIR:-${CLIPROXY_INSTALL_DIR:-$HOME/.local/bin}}"
+  home="${COOK_ROUTER_HOME:-${CLIPROXY_HOME:-}}"
   if [ -z "$home" ]; then
-    home="$HOME/.gnocchi"
+    home="$HOME/.cook-router"
     if [ ! -e "$home" ] && [ -d "$HOME/.cliproxy-rs" ]; then
       home="$HOME/.cliproxy-rs"
-      printf 'Using %s from before the rename; new installs use %s.\n' "$home" "$HOME/.gnocchi"
+      printf 'Using %s from before the rename; new installs use %s.\n' "$home" "$HOME/.cook-router"
     fi
   fi
-  bin="$dir/gnocchi"
-  config="$home/config.yaml" keys="$home/keys.env" log="$home/gnocchi.log" pidfile="$home/gnocchi.pid"
+  bin="$dir/cook-router"
+  config="$home/config.yaml" keys="$home/keys.env" log="$home/cook-router.log" pidfile="$home/cook-router.pid"
   # The server and service an install from before the rename started.
   old_pidfile="$home/cliproxy.pid"
-  label=io.github.prep-cook.gnocchi old_label=io.github.vayungodara.cliproxy-rs
+  label=io.github.prep-cook.cook-router old_label=io.github.vayungodara.cliproxy-rs
   os=$(uname -s)
   if [ "$os" = Darwin ]; then
     unit="$HOME/Library/LaunchAgents/$label.plist"
     old_unit="$HOME/Library/LaunchAgents/$old_label.plist"
   else
-    unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/gnocchi.service"
+    unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/cook-router.service"
     old_unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/cliproxy.service"
   fi
 
@@ -80,22 +80,22 @@ main() {
     *) fail "there is no release binary for $os $(uname -m); build from source (docs/INSTALL.md)" ;;
   esac
 
-  tag="${GNOCCHI_VERSION:-${CLIPROXY_VERSION:-}}"
+  tag="${COOK_ROUTER_VERSION:-${CLIPROXY_VERSION:-}}"
   if [ -z "$tag" ]; then
     # /releases/latest redirects to /releases/tag/<tag> once a release exists.
     latest=$(curl -fsSLI --retry 3 -o /dev/null -w '%{url_effective}' "$releases/latest") || fail "cannot reach $releases"
     tag=${latest##*/tag/}
     [ "$tag" != "$latest" ] || fail "no release is published yet; build from source (docs/INSTALL.md)"
   fi
-  name="gnocchi-${tag#v}-$target"
+  name="cook-router-${tag#v}-$target"
 
   installed=$([ ! -x "$bin" ] || "$bin" --version 2>/dev/null | tail -n 1)
   current=
-  [ "$installed" != "gnocchi ${tag#v}" ] || current=1
+  [ "$installed" != "cook-router ${tag#v}" ] || current=1
   if [ -n "$current" ]; then
-    printf 'gnocchi %s is already current.\n' "${tag#v}"
+    printf 'cook-router %s is already current.\n' "${tag#v}"
   else
-    printf 'Installed: %s; available: gnocchi %s\n' "${installed:-not installed}" "${tag#v}"
+    printf 'Installed: %s; available: cook-router %s\n' "${installed:-not installed}" "${tag#v}"
   fi
   [ -z "$check" ] || return 0
   # A current file is not enough after --binary-only or an interrupted upgrade.
@@ -109,7 +109,7 @@ main() {
       elif [ ! "$bin" -nt "$unit" ]; then
         if [ "$os" = Darwin ]; then
           if launchctl print "gui/$(id -u)/$label" 2>/dev/null | grep -q 'state = running'; then return 0; fi
-        elif systemctl --user is-active --quiet gnocchi.service; then
+        elif systemctl --user is-active --quiet cook-router.service; then
           return 0
         fi
       fi
@@ -120,7 +120,7 @@ main() {
       fail "systemd user services are not available here; run this without --service"
   fi
   backup=
-  [ ! -f "$dir/gnocchi.prev" ] || backup=1
+  [ ! -f "$dir/cook-router.prev" ] || backup=1
   staged=
   if [ -z "$current" ]; then
     tmp=$(mktemp -d)
@@ -139,12 +139,12 @@ main() {
     tar -xzf "$tmp/$name.tar.gz" -C "$tmp"
     mkdir -p "$dir"
     # Renamed into place, so a running server keeps its old binary until it restarts.
-    install -m 0755 "$tmp/$name/gnocchi" "$dir/.gnocchi.new"
+    install -m 0755 "$tmp/$name/cook-router" "$dir/.cook-router.new"
     staged=1
   fi
   case ":$PATH:" in
     *":$dir:"*) ;;
-    *) printf 'Add %s to your PATH to run gnocchi by name.\n' "$dir" ;;
+    *) printf 'Add %s to your PATH to run cook-router by name.\n' "$dir" ;;
   esac
   if [ -z "$setup" ]; then
     swap_binary || fail "could not replace $bin"
@@ -163,11 +163,11 @@ main() {
     done
     client="sk-$(random_hex)" management=$(random_hex)
     cat >"$keys" <<EOF
-# gnocchi keys. Sign in to the dashboard with GNOCCHI_MANAGEMENT_KEY;
-# your tools send GNOCCHI_CLIENT_KEY. Keep this file private.
-GNOCCHI_PORT=$port
-GNOCCHI_CLIENT_KEY=$client
-GNOCCHI_MANAGEMENT_KEY=$management
+# cook-router keys. Sign in to the dashboard with COOK_ROUTER_MANAGEMENT_KEY;
+# your tools send COOK_ROUTER_CLIENT_KEY. Keep this file private.
+COOK_ROUTER_PORT=$port
+COOK_ROUTER_CLIENT_KEY=$client
+COOK_ROUTER_MANAGEMENT_KEY=$management
 EOF
     cat >"$config" <<EOF
 # Written by install.sh. The plain keys are in keys.env next to this file.
@@ -225,7 +225,7 @@ EOF
       mkdir -p "$(dirname "$unit")" || return 1
       cat >"$unit" <<EOF || return 1
 [Unit]
-Description=gnocchi
+Description=cook-router
 
 [Service]
 ExecStart="$bin" --config "$config"
@@ -238,27 +238,27 @@ Restart=on-failure
 WantedBy=default.target
 EOF
       systemctl --user daemon-reload || return 1
-      systemctl --user enable --quiet gnocchi.service || return 1
-      systemctl --user restart gnocchi.service || return 1
-      how="systemctl --user disable --now gnocchi"
+      systemctl --user enable --quiet cook-router.service || return 1
+      systemctl --user restart cook-router.service || return 1
+      how="systemctl --user disable --now cook-router"
     fi
     return 0
   }
   swap_binary || upgrade_failed "could not replace $bin"
-  start_server || upgrade_failed "could not stop or start gnocchi; see $log"
-  wait_healthy || upgrade_failed "gnocchi did not start and answer at $base; see $log"
+  start_server || upgrade_failed "could not stop or start cook-router; see $log"
+  wait_healthy || upgrade_failed "cook-router did not start and answer at $base; see $log"
   remove_old_service
   old_binary_note
 
   url="$base/management.html"
-  printf '\ngnocchi is running at %s\n' "$base"
+  printf '\ncook-router is running at %s\n' "$base"
   printf '  Dashboard  %s\n' "$url"
   [ ! -f "$keys" ] || printf '  Keys       %s (show them with: cat %s)\n' "$keys" "$keys"
   printf '  Config     %s\n  Log        %s\n  Stop       %s\n' "$config" "$log" "$how"
   [ -n "$service" ] || printf 'It runs until this computer restarts. Run this again with --service to start it at login.\n'
 
   opened=
-  if [ -t 1 ] && [ -z "${GNOCCHI_NO_OPEN:-${CLIPROXY_NO_OPEN:-}}" ]; then
+  if [ -t 1 ] && [ -z "${COOK_ROUTER_NO_OPEN:-${CLIPROXY_NO_OPEN:-}}" ]; then
     if [ "$os" = Darwin ]; then
       open "$url" && opened=1
     elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
@@ -273,15 +273,15 @@ EOF
   fi
   if [ -f "$keys" ]; then
     # keys.env from before the rename names the key CLIPROXY_MANAGEMENT_KEY.
-    key_name=GNOCCHI_MANAGEMENT_KEY
-    if ! grep -q '^GNOCCHI_MANAGEMENT_KEY=' "$keys" && grep -q '^CLIPROXY_MANAGEMENT_KEY=' "$keys"; then
+    key_name=COOK_ROUTER_MANAGEMENT_KEY
+    if ! grep -q '^COOK_ROUTER_MANAGEMENT_KEY=' "$keys" && grep -q '^CLIPROXY_MANAGEMENT_KEY=' "$keys"; then
       key_name=CLIPROXY_MANAGEMENT_KEY
     fi
     printf '\nNext: open the dashboard, sign in with %s from keys.env, and choose Connect account.\n' "$key_name"
   else
     printf '\nNext: open the dashboard, sign in with your management key, and choose Connect account.\n'
   fi
-  printf '\nIf gnocchi helps, a star helps others find it: https://github.com/prep-cook/gnocchi\n'
+  printf '\nIf cook-router helps, a star helps others find it: https://github.com/prep-cook/cook-router\n'
 }
 
 # Stops the service from before the rename, so it does not hold the port the new server needs.
@@ -309,7 +309,7 @@ old_binary_note() {
 # Restore the same inode the old server used, then restart using its unchanged config.
 upgrade_failed() {
   if [ -n "$backup" ]; then
-    if mv -f "$dir/gnocchi.prev" "$bin" && start_server && wait_healthy; then
+    if mv -f "$dir/cook-router.prev" "$bin" && start_server && wait_healthy; then
       printf 'Upgrade failed; restored the previous binary and verified it is healthy.\n' >&2
     else
       printf 'Upgrade failed; rollback failed too. The server may not be running; see %s.\n' "$log" >&2
@@ -321,11 +321,11 @@ upgrade_failed() {
 swap_binary() {
   [ -n "$staged" ] || return 0
   if [ -f "$bin" ]; then
-    rm -f "$dir/gnocchi.prev" || return 1
-    ln "$bin" "$dir/gnocchi.prev" || return 1
+    rm -f "$dir/cook-router.prev" || return 1
+    ln "$bin" "$dir/cook-router.prev" || return 1
     backup=1
   fi
-  mv -f "$dir/.gnocchi.new" "$bin" || return 1
+  mv -f "$dir/.cook-router.new" "$bin" || return 1
   [ "$os" != Darwin ] || xattr -d com.apple.quarantine "$bin" 2>/dev/null || true
   printf 'Installed %s at %s\n' "$("$bin" --version 2>/dev/null | tail -n 1)" "$bin"
 }
@@ -374,7 +374,7 @@ wait_healthy() {
         managed_pid && pid_running "$pid" || return 1
       elif [ "$os" = Darwin ]; then
         launchctl print "gui/$(id -u)/$label" 2>/dev/null | grep -q 'state = running' || return 1
-      else systemctl --user is-active --quiet gnocchi.service || return 1; fi
+      else systemctl --user is-active --quiet cook-router.service || return 1; fi
       return 0
     fi
     tries=$((tries + 1))
@@ -418,7 +418,7 @@ stop_pidfile() {
   rm -f "$file" || return 1
 }
 
-# Reads a pid file, by default this install's, and checks that the process is a gnocchi or a
+# Reads a pid file, by default this install's, and checks that the process is a cook-router or a
 # cliproxy (before the rename) server.
 managed_pid() {
   pid=$(cat "${1:-$pidfile}" 2>/dev/null) || return 1
@@ -431,7 +431,7 @@ managed_pid() {
     # Seatbelt refuses setuid ps; bash 3.2's substitution status is not reliable.
     if ! ps -p $$ -o pid= >/dev/null 2>&1; then
       # pgrep is not setuid. Never trust liveness alone for a stale pid file.
-      pgrep -x '(gnocchi|cliproxy)([.]prev)?' 2>/dev/null | grep -qx "$pid"
+      pgrep -x '(cook-router|cliproxy)([.]prev)?' 2>/dev/null | grep -qx "$pid"
       return $?
     fi
     command=$(ps -p "$pid" -o ucomm= 2>/dev/null) || return 1
@@ -440,7 +440,7 @@ managed_pid() {
     command=$(ps -p "$pid" -o comm= 2>/dev/null) || return 1
     command=$(printf '%s\n' "$command" | sed 's/^[ ]*//;s/[ ]*$//')
   fi
-  case "$command" in gnocchi | gnocchi.prev | cliproxy | cliproxy.prev) return 0 ;; *) return 1 ;; esac
+  case "$command" in cook-router | cook-router.prev | cliproxy | cliproxy.prev) return 0 ;; *) return 1 ;; esac
 }
 
 pid_running() {
@@ -451,7 +451,7 @@ pid_running() {
     case "$state" in '' | Z\ *) return 1 ;; esac
   else
     if [ "$os" = Darwin ] && ! ps -p $$ -o pid= >/dev/null 2>&1; then
-      pgrep -x '(gnocchi|cliproxy)([.]prev)?' 2>/dev/null | grep -qx "$1"
+      pgrep -x '(cook-router|cliproxy)([.]prev)?' 2>/dev/null | grep -qx "$1"
       return $?
     fi
     state=$(ps -p "$1" -o stat= 2>/dev/null) || return 1

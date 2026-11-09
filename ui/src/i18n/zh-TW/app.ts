@@ -1,8 +1,8 @@
 export default {
   "zh-TW": {
-    "app.brand.name": "gnocchi",
-    "app.document.pageTitle": "{title} · gnocchi",
-    "app.document.signInTitle": "登入 · gnocchi",
+    "app.brand.name": "cook-router",
+    "app.document.pageTitle": "{title} · cook-router",
+    "app.document.signInTitle": "登入 · cook-router",
 
     "app.signIn.managementKey": "管理金鑰",
     "app.signIn.help":

@@ -17,7 +17,7 @@ Internal
 - Contributors write changelog fragments instead of editing the shared Unreleased section.
 ```
 
-Write each bullet for the person who runs gnocchi: say what they see change. Use `Internal` for contributor-facing changes. Fragments are grouped as Added, Changed, Fixed, Removed, Security, then Internal, with filenames sorted within each group. `README.md` is not a fragment.
+Write each bullet for the person who runs cook-router: say what they see change. Use `Internal` for contributor-facing changes. Fragments are grouped as Added, Changed, Fixed, Removed, Security, then Internal, with filenames sorted within each group. `README.md` is not a fragment.
 
 ## When a fragment is required
 

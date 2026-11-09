@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestRecordSignatureMatrix exists only to feed the gnocchi recorder.
+// TestRecordSignatureMatrix exists only to feed the cook-router recorder.
 func TestRecordSignatureMatrix(t *testing.T) {
 	raw, err := os.ReadFile(os.Getenv("CPA_SIG_CORPUS"))
 	if err != nil {

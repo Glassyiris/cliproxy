@@ -1,8 +1,8 @@
 export default {
   en: {
-    "app.brand.name": "gnocchi",
-    "app.document.pageTitle": "{title} · gnocchi",
-    "app.document.signInTitle": "Sign in · gnocchi",
+    "app.brand.name": "cook-router",
+    "app.document.pageTitle": "{title} · cook-router",
+    "app.document.signInTitle": "Sign in · cook-router",
 
     "app.signIn.managementKey": "Management key",
     "app.signIn.help":

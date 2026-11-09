@@ -6,7 +6,7 @@
 //!   ALPS, brotli certificate compression, ECH GREASE and no session resumption. Dialled
 //!   directly or through the configured proxy, never an environment proxy. By default
 //!   one connection per request, closed with the body, like Go's dedicated uTLS
-//!   connections. With `oauth.providers.codex.chatgpt-keep-alive` (a gnocchi
+//!   connections. With `oauth.providers.codex.chatgpt-keep-alive` (a cook-router
 //!   addition, off by default) the client keeps up to [`CHROME_IDLE_PER_HOST`] idle
 //!   connections per host and proxy for 90 seconds (docs/DIFFERENCES-FROM-GO.md).
 //! - Every other origin (API-key base URLs, local mocks) and the Responses WebSocket:

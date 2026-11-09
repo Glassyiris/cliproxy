@@ -18,7 +18,7 @@ body:
     attributes:
       label: CLIProxyAPI 是否已有此功能？
       options:
-        - 是，这是 gnocchi 缺少的 CLIProxyAPI 功能
+        - 是，这是 cook-router 缺少的 CLIProxyAPI 功能
         - 否，这是新功能
         - 不清楚
   - type: textarea

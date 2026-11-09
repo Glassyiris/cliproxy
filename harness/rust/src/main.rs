@@ -1,4 +1,4 @@
-//! Only test wiring. Mirrors crates/gnocchi/src/main.rs (config, credential synthesis,
+//! Only test wiring. Mirrors crates/cook-router/src/main.rs (config, credential synthesis,
 //! auto-refresh, routes, management, CORS and the access log) except the listener and
 //! two hooks: the ephemeral test CA replaces the trust store, and the logical
 //! first-party hosts are dialed at 127.0.0.3. The executor still builds its production
@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
     let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()))
         .layer(axum::middleware::from_fn(cpa_server::management::cors));
     let app = cpa_server::observability::router(&rt, app);
-    // The production listener (crates/gnocchi uses the same call), plain HTTP.
+    // The production listener (crates/cook-router uses the same call), plain HTTP.
     cpa_server::listener::serve_with_resp(listener, app, None, Some(management)).await?;
     Ok(())
 }

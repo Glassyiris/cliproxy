@@ -29,7 +29,7 @@ def offline(program, args, cwd=None):
 
 class Repo(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory(prefix="gnocchi-changelog-")
+        self._tmp = tempfile.TemporaryDirectory(prefix="cook-router-changelog-")
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         (self.root / "changes").mkdir()
@@ -234,7 +234,7 @@ class NeedsFragment(unittest.TestCase):
         for path in [
             "crates/cpa-server/src/lib.rs", "ui/src/app/App.tsx", "ui/dist/assets/a.js", "ui/index.html",
             "ui/public/favicon.svg", "install.sh", "install.ps1", "Dockerfile", "vendor/gjson/a.go",
-            "Cargo.toml", "Cargo.lock", "crates/gnocchi/Cargo.toml",
+            "Cargo.toml", "Cargo.lock", "crates/cook-router/Cargo.toml",
         ]:
             with self.subTest(path=path):
                 self.assertTrue(changelog.needs_fragment([path]))
@@ -242,8 +242,8 @@ class NeedsFragment(unittest.TestCase):
     def test_tests_docs_and_tooling_are_exempt(self):
         for path in [
             "crates/cpa-server/tests/alloc_budget.rs", "crates/cpa-server/tests/ws_fixtures/a.json",
-            "crates/gnocchi/examples/x.rs", "ui/src/app/useAction.test.ts", "ui/src/a/B.test.tsx",
-            "ui/src/a/README.md", "crates/gnocchi/README.md", "docs/INSTALL.md", "README.md", "CONTRIBUTING.md",
+            "crates/cook-router/examples/x.rs", "ui/src/app/useAction.test.ts", "ui/src/a/B.test.tsx",
+            "ui/src/a/README.md", "crates/cook-router/README.md", "docs/INSTALL.md", "README.md", "CONTRIBUTING.md",
             "bench/budgets.txt", "harness/run", ".github/workflows/ci.yml", "ui/scripts/x.mjs",
             "ui/package.json", "tools/changelog.py", "changes/fix.md", "packaging/aur/PKGBUILD",
         ]:

@@ -1,7 +1,7 @@
 // End-to-end account sign-in through the dashboard. Disposable servers only.
 //
 // --mode fake: the server's login endpoints point at scripts/fake-logins.mjs (the
-//   login-harness build of gnocchi). Claude and Codex finish through a pasted callback
+//   login-harness build of cook-router). Claude and Codex finish through a pasted callback
 //   URL, Devin through a pasted callback to the server's /callback, Kimi, Meta and xAI
 //   through the device-code flow; each new credential must appear in the
 //   list. Providers the server lacks must turn into an honest "not available" message.

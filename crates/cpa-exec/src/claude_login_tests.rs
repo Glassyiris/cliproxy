@@ -336,7 +336,7 @@ async fn an_empty_paste_keeps_waiting_for_the_browser() {
 
 #[tokio::test]
 async fn a_busy_port_is_go_port_in_use() {
-    // The realistic holder: another Go or gnocchi login's dual-stack listener.
+    // The realistic holder: another Go or cook-router login's dual-stack listener.
     let holder = listen_any(0).unwrap();
     let port = holder.local_addr().unwrap().port();
     let error = bind(port).await.unwrap_err();

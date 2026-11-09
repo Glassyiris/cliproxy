@@ -2,7 +2,7 @@
 
 package session
 
-// Golden trace for gnocchi: every outermost call of the LCP public surface, with
+// Golden trace for cook-router: every outermost call of the LCP public surface, with
 // its inputs, the matcher clock relative to the matcher's creation, and its result.
 
 import (

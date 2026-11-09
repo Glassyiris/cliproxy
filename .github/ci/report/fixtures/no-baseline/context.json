@@ -1,7 +1,7 @@
 {
   "head_sha": "776f2f0f3a9b1c2d4e5f60718293a4b5c6d7e8f9",
   "base": "master",
-  "run_url": "https://github.com/prep-cook/gnocchi/actions/runs/123456789",
+  "run_url": "https://github.com/prep-cook/cook-router/actions/runs/123456789",
   "baseline": {
     "reason": "no successful CI run of a push to master before this run"
   },

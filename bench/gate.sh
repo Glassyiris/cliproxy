@@ -79,7 +79,7 @@ size_gate() { # target binary [archive]
     # Crates linked into the binary in more than one version (proc macros and build
     # scripts excluded).
     local dups
-    dups=$(cargo tree -d -e normal,no-proc-macro --prefix depth --target "$target" --locked -p gnocchi |
+    dups=$(cargo tree -d -e normal,no-proc-macro --prefix depth --target "$target" --locked -p cook-router |
       awk '/^0/ {sub(/^0/, ""); print $1, $2}' | sort -u |
       awk '{n[$1]++; v[$1] = v[$1] " " $2} END {for (k in n) if (n[k] > 1) print k v[k]}' | sort)
     echo "$dups" | sed 's/^/  duplicate: /'

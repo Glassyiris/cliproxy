@@ -1,0 +1,1 @@
+var e={url:`https://github.com/prep-cook/cook-router`,name:`prep-cook/cook-router`};export{e as t};

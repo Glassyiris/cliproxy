@@ -23,5 +23,5 @@ Regenerate with Go 1.26.4 (no network beyond module download):
 cp zz_rsfix_codex_siwc_test.go <CLIProxyAPI>/internal/runtime/executor/
 cd <CLIProxyAPI>
 RSFIX_OUT=/tmp/rsfix-siwc go test -count=1 -run TestRSFixCodexSIWC ./internal/runtime/executor/
-cp /tmp/rsfix-siwc/codex_siwc_go.json <gnocchi>/crates/cpa-exec/tests/fixtures/
+cp /tmp/rsfix-siwc/codex_siwc_go.json <cook-router>/crates/cpa-exec/tests/fixtures/
 ```

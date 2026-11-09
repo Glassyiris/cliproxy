@@ -1,6 +1,6 @@
 [package]
 name = "cpa-common"
-description = "Part of gnocchi: provider-neutral request helpers shared by translators and executors"
+description = "Part of cook-router: provider-neutral request helpers shared by translators and executors"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 exclude.workspace = true
-keywords = ["llm", "proxy", "gnocchi"]
+keywords = ["llm", "proxy", "cook-router"]
 categories.workspace = true
 
 [dependencies]

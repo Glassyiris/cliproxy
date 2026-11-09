@@ -11,7 +11,7 @@ import (
 
 // Records the string settings Go v8.0.35 loads from plain YAML scalars that are not
 // strings (numbers, booleans): yaml.v3 decodes each into the Go string as its text.
-// Each check names a field by its Go YAML path and by its v8 path in gnocchi.
+// Each check names a field by its Go YAML path and by its v8 path in cook-router.
 func TestZZScalarSettings(t *testing.T) {
 	type check struct {
 		Go    string `json:"go"`

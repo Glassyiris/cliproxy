@@ -24,7 +24,7 @@ fn header_map(pairs: &Value) -> HeaderMap {
 }
 
 /// Rules whose paths use gjson syntax the port does not read (subselectors, modifiers):
-/// gnocchi ignores them. Go leaves `subselector_override` as it is too, marks
+/// cook-router ignores them. Go leaves `subselector_override` as it is too, marks
 /// `@reverse` in `modifier_override` without an edit, and applies the rule behind the
 /// `{a}` condition in `subselector_condition`. `subselector_not_exist` is compared with
 /// Go: the subselector exists there, so the rule does not apply on either side.

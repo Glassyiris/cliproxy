@@ -90,7 +90,7 @@ class Paths(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), RUST)
         # The dependency set also decides THIRD-PARTY-NOTICES.
-        for path in ("crates/gnocchi/Cargo.toml", "Cargo.toml", "Cargo.lock",
+        for path in ("crates/cook-router/Cargo.toml", "Cargo.toml", "Cargo.lock",
                      "vendor/gjson.patch", "vendor/gjson/src/lib.rs"):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), DEPS)

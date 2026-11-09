@@ -1,4 +1,4 @@
-//! Artificial Analysis benchmarks for the model routers (gnocchi only, see
+//! Artificial Analysis benchmarks for the model routers (cook-router only, see
 //! docs/DIFFERENCES-FROM-GO.md): each model's intelligence index, the cost of running
 //! the index's benchmark tasks, and its list prices. Fetched with the configured
 //! `artificial-analysis.api-key`, kept in memory (and in `cache-file` when set) and

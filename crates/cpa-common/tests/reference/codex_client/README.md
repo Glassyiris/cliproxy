@@ -10,7 +10,7 @@ Regenerate (Go 1.26, no network beyond module download):
 cp zz_rsfix_codex_client_test.go <CLIProxyAPI>/internal/client/codex/optimize-multi-agent-v2/
 cd <CLIProxyAPI>
 RSFIX_OUT=/tmp/rsfix-cc go test -count=1 -run TestRSFixCodexClient ./internal/client/codex/optimize-multi-agent-v2/
-cp /tmp/rsfix-cc/codex_client_go.json <gnocchi>/crates/cpa-common/tests/fixtures/
+cp /tmp/rsfix-cc/codex_client_go.json <cook-router>/crates/cpa-common/tests/fixtures/
 ```
 
 The `spawn_models` vector looks models up in Go's static catalog, so the Rust replay runs
@@ -29,5 +29,5 @@ cp zz_rsfix_codex_catalog_test.go <scratch CLIProxyAPI>/internal/client/codex/mo
 cd <scratch CLIProxyAPI>
 RSFIX_OUT=/tmp/rsfix-cat go test -count=1 -run TestRSFixCodexCatalog ./internal/client/codex/models/
 python3 -c 'import gzip,sys; sys.stdout.buffer.write(gzip.compress(open("/tmp/rsfix-cat/codex_catalog_go.json","rb").read(), 9, mtime=0))' \
-  > <gnocchi>/crates/cpa-common/tests/fixtures/codex_catalog_go.json.gz
+  > <cook-router>/crates/cpa-common/tests/fixtures/codex_catalog_go.json.gz
 ```

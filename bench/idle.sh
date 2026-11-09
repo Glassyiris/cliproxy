@@ -45,9 +45,9 @@ SECONDS_=${3:-30}
 WARMUP=${WARMUP:-30}
 PORT=${PORT:-8341}
 KEY=sk-bench-client-key
-DIR=$(mktemp -d /tmp/gnocchi-idle.XXXXXX)
+DIR=$(mktemp -d /tmp/cook-router-idle.XXXXXX)
 # Samples live outside DIR: a write next to config.yaml is a file event the server sees.
-TMP=$(mktemp -d /tmp/gnocchi-idle-samples.XXXXXX)
+TMP=$(mktemp -d /tmp/cook-router-idle-samples.XXXXXX)
 trap 'kill "$PID" 2>/dev/null; wait "$PID" 2>/dev/null; rm -rf "$DIR" "$TMP"' EXIT
 
 mkdir -p "$DIR/auth"

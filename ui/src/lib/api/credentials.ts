@@ -14,7 +14,7 @@ export type Cooldown = {
     | "unknown";
   retry_at: string;
   remaining_seconds: number;
-  /** gnocchi only: the upstream's stated reset when the trusted cooldown bound cut it. */
+  /** cook-router only: the upstream's stated reset when the trusted cooldown bound cut it. */
   recover_at?: string;
   backoff_level?: number;
   http_status?: number;

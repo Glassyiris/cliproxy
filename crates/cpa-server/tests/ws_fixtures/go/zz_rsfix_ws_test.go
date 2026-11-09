@@ -1,6 +1,6 @@
 package openai
 
-// Fixture generator for the gnocchi Responses WebSocket (GET /v1/responses).
+// Fixture generator for the cook-router Responses WebSocket (GET /v1/responses).
 // Copy into sdk/api/handlers/openai/ of CLIProxyAPI 6fecc6e and run with
 // RSFIX_OUT=<dir>; without it every generator test is skipped. Nothing leaves the
 // machine: the upstream is a loopback mock and every credential is fake.

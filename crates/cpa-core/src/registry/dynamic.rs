@@ -2014,7 +2014,7 @@ mod tests {
     fn compat_provider_key_follows_go() {
         // DIFFERENCES-FROM-GO.md "Plugins, models of credentials with another provider":
         // Go registers these under the `provider_key` (or nothing without a plugin model),
-        // gnocchi under the provider.
+        // cook-router under the provider.
         const OTHER_PROVIDER: [&str; 2] = ["unnamed-provider-provider-key", "unmatched-provider-provider-key"];
         let go: Value = serde_json::from_str(include_str!("../../tests/fixtures/provider_key_go.json")).unwrap();
         for case in go["cases"].as_array().unwrap() {

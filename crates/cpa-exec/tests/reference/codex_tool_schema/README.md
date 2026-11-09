@@ -18,5 +18,5 @@ Regenerate (Go 1.26, no network beyond module download):
 cp zz_rsfix_codex_tool_schema_test.go <CLIProxyAPI>/internal/runtime/executor/helps/
 cd <CLIProxyAPI>
 RSFIX_OUT=/tmp/rsfix-ts go test -count=1 -run TestRSFixCodexToolSchema ./internal/runtime/executor/helps/
-cp /tmp/rsfix-ts/codex_tool_schema_go.json <gnocchi>/crates/cpa-exec/tests/fixtures/
+cp /tmp/rsfix-ts/codex_tool_schema_go.json <cook-router>/crates/cpa-exec/tests/fixtures/
 ```

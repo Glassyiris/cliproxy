@@ -1,6 +1,6 @@
 package auth
 
-// gnocchi fixture generator: parseDevinManualPaste vectors (RSFIX_OUT=<dir>).
+// cook-router fixture generator: parseDevinManualPaste vectors (RSFIX_OUT=<dir>).
 
 import (
 	"encoding/json"

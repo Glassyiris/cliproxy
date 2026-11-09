@@ -1,12 +1,12 @@
-# Setting up gnocchi with a coding agent
+# Setting up cook-router with a coding agent
 
-These are exact steps for a coding agent (Claude Code, Codex, Amp, Cursor's agent or similar) that is installing gnocchi on a user's computer. A person can follow them too. Run every command on the user's machine, in order, and stop to ask the user wherever a step says so.
+These are exact steps for a coding agent (Claude Code, Codex, Amp, Cursor's agent or similar) that is installing cook-router on a user's computer. A person can follow them too. Run every command on the user's machine, in order, and stop to ask the user wherever a step says so.
 
 ## Rules for the agent
 
 - Never sign in to a provider account for the user, and never type, paste or read the user's passwords. Signing in is the user's step (step 7).
-- Never print, log or repeat the management key or the client key. They live in `~/.gnocchi/keys.env`; refer to that file instead.
-- Do not stop, change or reconfigure an existing CLIProxyAPI (Go) or gnocchi install unless the user asks you to migrate it (see the end of this page).
+- Never print, log or repeat the management key or the client key. They live in `~/.cook-router/keys.env`; refer to that file instead.
+- Do not stop, change or reconfigure an existing CLIProxyAPI (Go) or cook-router install unless the user asks you to migrate it (see the end of this page).
 - Do not open the proxy to the internet. Keep `server.host` at `127.0.0.1`.
 - Ask before setting up start at login (step 5).
 
@@ -26,68 +26,68 @@ uname -s; uname -m
 ## 2. Look for an existing install
 
 ```sh
-command -v gnocchi cli-proxy-api CLIProxyAPI 2>/dev/null
-ls -d ~/.gnocchi ~/.cli-proxy-api 2>/dev/null
+command -v cook-router cli-proxy-api CLIProxyAPI 2>/dev/null
+ls -d ~/.cook-router ~/.cli-proxy-api 2>/dev/null
 curl -s -m 2 http://127.0.0.1:8317/healthz; echo " exit=$?"
 ```
 
-- If `~/.gnocchi/config.yaml` exists, gnocchi is already set up. Ask the user before going on. Running the installer again only upgrades the binary and restarts the server; it never changes the config or the keys.
-- If `cli-proxy-api` or `CLIProxyAPI` exists, or `~/.cli-proxy-api` exists, or something answers on port 8317, the user probably runs CLIProxyAPI. Tell the user and ask: migrate it (see [Migrating from CLIProxyAPI](#migrating-from-cliproxyapi)) or install gnocchi next to it. The installer installs next to it without touching it: it takes the next free port and its own auth folder.
+- If `~/.cook-router/config.yaml` exists, cook-router is already set up. Ask the user before going on. Running the installer again only upgrades the binary and restarts the server; it never changes the config or the keys.
+- If `cli-proxy-api` or `CLIProxyAPI` exists, or `~/.cli-proxy-api` exists, or something answers on port 8317, the user probably runs CLIProxyAPI. Tell the user and ask: migrate it (see [Migrating from CLIProxyAPI](#migrating-from-cliproxyapi)) or install cook-router next to it. The installer installs next to it without touching it: it takes the next free port and its own auth folder.
 
 ## 3. Install, configure and start
 
 On macOS and Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/prep-cook/cook-router/master/install.sh | sh
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/prep-cook/cook-router/master/install.ps1 | iex
 ```
 
 The installer:
 
-1. Downloads the release binary, checks it against the release's checksums and installs it as `~/.local/bin/gnocchi` (`%LOCALAPPDATA%\Programs\gnocchi\gnocchi.exe` on Windows).
-2. Writes `~/.gnocchi/config.yaml` (`%USERPROFILE%\.gnocchi` on Windows) with a free port, starting at 8317, and session affinity on. It creates a client key and a management key and saves them in `~/.gnocchi/keys.env`, readable only by the user.
-3. Starts the server in the background, logging to `~/.gnocchi/gnocchi.log`, and waits for `/healthz`.
+1. Downloads the release binary, checks it against the release's checksums and installs it as `~/.local/bin/cook-router` (`%LOCALAPPDATA%\Programs\cook-router\cook-router.exe` on Windows).
+2. Writes `~/.cook-router/config.yaml` (`%USERPROFILE%\.cook-router` on Windows) with a free port, starting at 8317, and session affinity on. It creates a client key and a management key and saves them in `~/.cook-router/keys.env`, readable only by the user.
+3. Starts the server in the background, logging to `~/.cook-router/cook-router.log`, and waits for `/healthz`.
 
-It prints the dashboard address and file locations, never the keys. If it fails, it says why in one line; read the last lines of `gnocchi.log` (they contain no keys) and fix what they report.
+It prints the dashboard address and file locations, never the keys. If it fails, it says why in one line; read the last lines of `cook-router.log` (they contain no keys) and fix what they report.
 
 `keys.env` looks like this, with real values:
 
 ```sh
-GNOCCHI_PORT=8317
-GNOCCHI_CLIENT_KEY=sk-...
-GNOCCHI_MANAGEMENT_KEY=...
+COOK_ROUTER_PORT=8317
+COOK_ROUTER_CLIENT_KEY=sk-...
+COOK_ROUTER_MANAGEMENT_KEY=...
 ```
 
-If there is no release binary for the system, build from source. That needs `git`, a Rust toolchain (`cargo`), `cmake`, `clang` and `perl`; ask the user before installing any of them. Then follow [the first run without the install script](INSTALL.md#first-run-without-the-install-script), writing the two keys into `~/.gnocchi/keys.env` in the format above with `chmod 600`.
+If there is no release binary for the system, build from source. That needs `git`, a Rust toolchain (`cargo`), `cmake`, `clang` and `perl`; ask the user before installing any of them. Then follow [the first run without the install script](INSTALL.md#first-run-without-the-install-script), writing the two keys into `~/.cook-router/keys.env` in the format above with `chmod 600`.
 
 ```sh
-git clone https://github.com/prep-cook/gnocchi.git ~/gnocchi-src
-cd ~/gnocchi-src && cargo build --release -p gnocchi
-mkdir -p ~/.local/bin && install -m 0755 target/release/gnocchi ~/.local/bin/gnocchi
+git clone https://github.com/prep-cook/cook-router.git ~/cook-router-src
+cd ~/cook-router-src && cargo build --release -p cook-router
+mkdir -p ~/.local/bin && install -m 0755 target/release/cook-router ~/.local/bin/cook-router
 ```
 
-The installer starts the server with `nohup`, which keeps it running until the computer restarts. In a container or sandbox that has its own service or process manager, use that manager instead: stop the background server with `kill $(cat ~/.gnocchi/gnocchi.pid)` and run `~/.local/bin/gnocchi --config ~/.gnocchi/config.yaml` under the manager.
+The installer starts the server with `nohup`, which keeps it running until the computer restarts. In a container or sandbox that has its own service or process manager, use that manager instead: stop the background server with `kill $(cat ~/.cook-router/cook-router.pid)` and run `~/.local/bin/cook-router --config ~/.cook-router/config.yaml` under the manager.
 
 ## 4. Verify
 
 ```sh
-. ~/.gnocchi/keys.env
-curl -fsS "http://127.0.0.1:$GNOCCHI_PORT/healthz"; echo
-curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $GNOCCHI_CLIENT_KEY" "http://127.0.0.1:$GNOCCHI_PORT/v1/models"
+. ~/.cook-router/keys.env
+curl -fsS "http://127.0.0.1:$COOK_ROUTER_PORT/healthz"; echo
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $COOK_ROUTER_CLIENT_KEY" "http://127.0.0.1:$COOK_ROUTER_PORT/v1/models"
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-$k = @{}; Get-Content ~\.gnocchi\keys.env | Where-Object { $_ -match '^(\w+)=(.*)$' } | ForEach-Object { $k[$Matches[1]] = $Matches[2] }
-Invoke-RestMethod "http://127.0.0.1:$($k.GNOCCHI_PORT)/healthz"
-(Invoke-WebRequest "http://127.0.0.1:$($k.GNOCCHI_PORT)/v1/models" -Headers @{ Authorization = "Bearer $($k.GNOCCHI_CLIENT_KEY)" } -UseBasicParsing).StatusCode
+$k = @{}; Get-Content ~\.cook-router\keys.env | Where-Object { $_ -match '^(\w+)=(.*)$' } | ForEach-Object { $k[$Matches[1]] = $Matches[2] }
+Invoke-RestMethod "http://127.0.0.1:$($k.COOK_ROUTER_PORT)/healthz"
+(Invoke-WebRequest "http://127.0.0.1:$($k.COOK_ROUTER_PORT)/v1/models" -Headers @{ Authorization = "Bearer $($k.COOK_ROUTER_CLIENT_KEY)" } -UseBasicParsing).StatusCode
 ```
 
 Expect `{"status":"ok"}` (PowerShell shows `status: ok`) and then `200`. A `401` means the key in `keys.env` and the one in `config.yaml` differ.
@@ -97,18 +97,18 @@ Expect `{"status":"ok"}` (PowerShell shows `status: ok`) and then `200`. A `401`
 Ask the user first. If they agree, run the installer again with `--service`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.sh | sh -s -- --service
+curl -fsSL https://raw.githubusercontent.com/prep-cook/cook-router/master/install.sh | sh -s -- --service
 ```
 
-On Windows: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.ps1))) -Service`. This adds a systemd user unit on Linux, a launchd agent on macOS or a sign-in entry on Windows; [INSTALL.md](INSTALL.md#start-at-login) has the details and how to undo it.
+On Windows: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/prep-cook/cook-router/master/install.ps1))) -Service`. This adds a systemd user unit on Linux, a launchd agent on macOS or a sign-in entry on Windows; [INSTALL.md](INSTALL.md#start-at-login) has the details and how to undo it.
 
 ## 6. Open the dashboard
 
 If the user sits at this computer and it has a desktop:
 
 ```sh
-. ~/.gnocchi/keys.env
-URL="http://127.0.0.1:$GNOCCHI_PORT/management.html"
+. ~/.cook-router/keys.env
+URL="http://127.0.0.1:$COOK_ROUTER_PORT/management.html"
 (open "$URL" || xdg-open "$URL") >/dev/null 2>&1 || echo "Open $URL in a browser"
 ```
 
@@ -119,14 +119,14 @@ If no browser can open here (a server over SSH, a container, a remote sandbox), 
 
 Keep `server.host` on `127.0.0.1` for the tunnel. Never set it to `0.0.0.0` or `""` while `access.api-keys` is empty.
 
-Tell the user: the management key to sign in with is the `GNOCCHI_MANAGEMENT_KEY` line in `~/.gnocchi/keys.env`, which they can show with `cat ~/.gnocchi/keys.env` in their own terminal.
+Tell the user: the management key to sign in with is the `COOK_ROUTER_MANAGEMENT_KEY` line in `~/.cook-router/keys.env`, which they can show with `cat ~/.cook-router/keys.env` in their own terminal.
 
 ## 7. Hand over the sign-in to the user
 
 Tell the user to connect their accounts themselves, in the dashboard (Connect account) or in their own terminal:
 
 ```sh
-gnocchi --config ~/.gnocchi/config.yaml --claude-login
+cook-router --config ~/.cook-router/config.yaml --claude-login
 ```
 
 (`--codex-login`, `--codex-device-login`, `--kimi-login`, `--meta-login`, `--xai-login` and `--devin-login` work the same way; add `--no-browser` on a machine without a browser.) Wait until the user says they are done. Point them to [Accounts and provider terms](../README.md#accounts-and-provider-terms). This setup is for one person using their own accounts on their own machines. Use provider-sanctioned integrations or API keys where available.
@@ -138,7 +138,7 @@ The dashboard's Use with tools dialog, on the Client keys page, has copy-paste s
 For Claude Code, this adds the proxy to the `env` block of `~/.claude/settings.json`, keeps a backup, and reads the key from `keys.env` so it never appears in the conversation:
 
 ```sh
-set -a; . ~/.gnocchi/keys.env; set +a
+set -a; . ~/.cook-router/keys.env; set +a
 python3 - <<'PY'
 import json, os, shutil
 path = os.path.expanduser("~/.claude/settings.json")
@@ -148,8 +148,8 @@ if os.path.exists(path):
     shutil.copy(path, path + ".bak")
     data = json.load(open(path))
 data.setdefault("env", {}).update({
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:" + os.environ["GNOCCHI_PORT"],
-    "ANTHROPIC_AUTH_TOKEN": os.environ["GNOCCHI_CLIENT_KEY"],
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:" + os.environ["COOK_ROUTER_PORT"],
+    "ANTHROPIC_AUTH_TOKEN": os.environ["COOK_ROUTER_CLIENT_KEY"],
 })
 json.dump(data, open(path, "w"), indent=2)
 print("updated", path)
@@ -161,7 +161,7 @@ After the user has signed in, confirm with the `/v1/models` request from step 4:
 ## Tips for heavier use
 
 - Several Claude or Codex accounts: see [MULTI-ACCOUNT.md](MULTI-ACCOUNT.md) for routing strategies and limits.
-- Codex accounts: set `"websockets": true` in each Codex account's file in `~/.gnocchi/auth` to use the faster WebSocket transport.
+- Codex accounts: set `"websockets": true` in each Codex account's file in `~/.cook-router/auth` to use the faster WebSocket transport.
 - Session affinity: keep `routing.session-affinity: true`, which the installer sets.
 - Other machines: use [Tailscale](https://tailscale.com/) instead of opening a port to the internet; see [Reach the proxy from other machines](MULTI-ACCOUNT.md#reach-the-proxy-from-other-machines). Never expose the proxy to the internet without client keys.
 
@@ -172,7 +172,7 @@ Only when the user asks for it:
 1. Find the Go server's config file (often `config.yaml` next to its binary, or the path in its service definition) and its `auth-dir` (`~/.cli-proxy-api` by default).
 2. Back them up: `cp -a <config.yaml> <config.yaml>.bak` and `cp -a <auth-dir> <auth-dir>.bak`.
 3. Stop the Go server (its service, or the process). Both servers must never run on the same auth folder at the same time, because each refreshes the sign-in tokens and can invalidate the other's.
-4. Start gnocchi on the same file: `gnocchi --config <config.yaml>`. It reads the same settings and account files, and the user's existing management key keeps working.
+4. Start cook-router on the same file: `cook-router --config <config.yaml>`. It reads the same settings and account files, and the user's existing management key keeps working.
 5. Verify as in step 4 with the port and a client key from that config.
 
 [MIGRATING-FROM-GO.md](MIGRATING-FROM-GO.md) lists what carries over and how to switch back.

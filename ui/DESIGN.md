@@ -1,5 +1,5 @@
 ---
-name: gnocchi Rosé Pine
+name: cook-router Rosé Pine
 description: A quiet operator console. Grey carries hierarchy; hue carries state.
 ---
 
@@ -170,7 +170,7 @@ The precedent is the BoothDex admin console, itself built from the same template
 
 - Astryx `AppShell` with the side nav only; there is no top bar. `SideNav` is `collapsible` and
   `resizable` (260 px default, 220 to 360).
-- Header: `SideNavHeading` with the brand mark and "gnocchi", linking to the first page.
+- Header: `SideNavHeading` with the brand mark and "cook-router", linking to the first page.
 - Body: one `SideNavSection` per entry of `navSections`, its title a small heading over its
   `SideNavItem`s, each with its lucide icon; no collapsible groups. The current page is Astryx's own
   selected item. `Network` is the brand mark and never a nav icon.
@@ -204,7 +204,7 @@ The precedent is the BoothDex admin console, itself built from the same template
 
 - One flat card, centred (the template's: no `elevation`); the preference controls above. Under
   the card, one link to the repository. The template's third-party sign-in, forgotten password,
-  sign-up and terms do not exist for gnocchi and are left out.
+  sign-up and terms do not exist for cook-router and are left out.
 - Inside the card, top to bottom: brand mark and name; h1 "Connect to this server"; a status line
   (lamp, host, and whether `GET /healthz` answers, rechecked every 10 s while the tab is shown);
   the key field with a show/hide button (`InputGroup`); the primary Connect button; the help as a

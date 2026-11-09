@@ -12,7 +12,7 @@ boundary, as for `../manage` (the reference checkout is not modified):
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # at ae3ee3be (v8.0.35)
-crate=/absolute/path/to/gnocchi/crates/cpa-server
+crate=/absolute/path/to/cook-router/crates/cpa-server
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/body_limit/main.go" "$tmp/main.go"
 (

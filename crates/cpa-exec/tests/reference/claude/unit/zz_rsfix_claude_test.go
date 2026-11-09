@@ -1,6 +1,6 @@
 package executor
 
-// Recorder for gnocchi. record.py copies Go's own Claude test files into a scratch
+// Recorder for cook-router. record.py copies Go's own Claude test files into a scratch
 // copy of CLIProxyAPI (6fecc6e, or v8.0.27 for the files it lists) and rewrites selected call sites to the rsfix* wrappers
 // below. Each wrapper calls the real function and records its inputs and outputs,
 // tagged with the Go test that made the call, so the Rust port can replay every case

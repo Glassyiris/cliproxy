@@ -144,7 +144,7 @@ pub trait UsageObserver: Send + Sync {
         let _ = (executor_type, model);
     }
     /// Go `ParsePluginExecutorResponseUsage`: a plugin executor's whole response in its
-    /// output `protocol`, which may be a format gnocchi does not know.
+    /// output `protocol`, which may be a format cook-router does not know.
     fn plugin_response_body(&self, protocol: &str, body: &[u8]) {
         let _ = (protocol, body);
     }
@@ -201,7 +201,7 @@ pub trait UsageObserver: Send + Sync {
     /// Go returned before creating its usage reporter (Claude's `responses/compact`
     /// 501): this attempt publishes no record at all, whatever its outcome.
     fn discard(&self) {}
-    /// The attempt's upstream exchange reached `stage` now. Not in Go: gnocchi adds
+    /// The attempt's upstream exchange reached `stage` now. Not in Go: cook-router adds
     /// these timings and sizes to the usage record.
     fn upstream_stage(&self, stage: UpstreamStage) {
         let _ = stage;

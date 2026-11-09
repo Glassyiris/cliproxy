@@ -294,7 +294,7 @@ async fn replay(tag: &str, fixture: &Fixture, expected: impl Fn(&Scenario) -> St
         .replace("UPSTREAM", &addr)
         .replace("PORT", "0")
         .replace("AUTHDIR", &auth_dir.to_string_lossy());
-    // Go reads the fixture's unset strategy as round-robin. gnocchi reads it as
+    // Go reads the fixture's unset strategy as round-robin. cook-router reads it as
     // soonest-reset, whose one probe per key reorders the two xAI keys across models
     // (docs/DIFFERENCES-FROM-GO.md "Default routing strategy"), so Go's is set.
     assert!(!config.contains("strategy:"), "the fixture leaves the strategy unset");

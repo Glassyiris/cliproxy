@@ -27,7 +27,7 @@ export function snippet(
     case "Claude Code":
       return `export ANTHROPIC_BASE_URL=${shw(base)}\nexport ANTHROPIC_AUTH_TOKEN=${shq(key)}\nclaude`;
     case "Codex CLI":
-      return `# ~/.codex/config.toml\nmodel_provider = "gnocchi"\n\n[model_providers.gnocchi]\nname = "gnocchi"\nbase_url = ${str(v1)}\nenv_key = "GNOCCHI_API_KEY"\nwire_api = "responses"\n\n# then, in your shell\nexport GNOCCHI_API_KEY=${shq(key)}`;
+      return `# ~/.codex/config.toml\nmodel_provider = "cook-router"\n\n[model_providers.cook-router]\nname = "cook-router"\nbase_url = ${str(v1)}\nenv_key = "COOK_ROUTER_API_KEY"\nwire_api = "responses"\n\n# then, in your shell\nexport COOK_ROUTER_API_KEY=${shq(key)}`;
     case "Cursor":
       return `OpenAI API key:            ${key}\nOverride OpenAI Base URL:  ${v1}`;
     case "OpenAI SDK":

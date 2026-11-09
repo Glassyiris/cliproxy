@@ -12,7 +12,7 @@ upstream through the Rust router and compares byte for byte.
 git -C <CLIProxyAPI> worktree add /tmp/cpa-trunc ae3ee3be
 cp zz_rsfix_stream_truncation_test.go /tmp/cpa-trunc/sdk/api/handlers/openai/
 (cd /tmp/cpa-trunc && RSFIX_OUT=/tmp/rsfix-trunc go test -count=1 -run TestRSFixStreamTruncation ./sdk/api/handlers/openai/)
-cp /tmp/rsfix-trunc/stream_truncation_go.json <gnocchi>/crates/cpa-server/tests/fixtures/
+cp /tmp/rsfix-trunc/stream_truncation_go.json <cook-router>/crates/cpa-server/tests/fixtures/
 ```
 
 Run it with external network denied; nothing is sent upstream.

@@ -1,42 +1,42 @@
 # Getting started
 
-This guide connects a coding tool to your own accounts or API keys through gnocchi. For Codex CLI with API keys and mixed providers, start with the [README recipe](../README.md#api-keys-codex-cli-and-mixed-providers).
+This guide connects a coding tool to your own accounts or API keys through cook-router. For Codex CLI with API keys and mixed providers, start with the [README recipe](../README.md#api-keys-codex-cli-and-mixed-providers).
 
 ## 1. Install and start it
 
 On macOS or Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/prep-cook/cook-router/master/install.sh | sh
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/prep-cook/cook-router/master/install.ps1 | iex
 ```
 
-The script downloads the release for your machine and checks it against the release's `SHA256SUMS`. It writes `~/.gnocchi/config.yaml` with two new keys, starts the server in the background and checks that it answers. It ends like this:
+The script downloads the release for your machine and checks it against the release's `SHA256SUMS`. It writes `~/.cook-router/config.yaml` with two new keys, starts the server in the background and checks that it answers. It ends like this:
 
 ```text
-gnocchi is running at http://127.0.0.1:8317
+cook-router is running at http://127.0.0.1:8317
   Dashboard  http://127.0.0.1:8317/management.html
-  Keys       /home/you/.gnocchi/keys.env (show them with: cat /home/you/.gnocchi/keys.env)
-  Config     /home/you/.gnocchi/config.yaml
-  Log        /home/you/.gnocchi/gnocchi.log
-  Stop       kill $(cat '/home/you/.gnocchi/gnocchi.pid')
+  Keys       /home/you/.cook-router/keys.env (show them with: cat /home/you/.cook-router/keys.env)
+  Config     /home/you/.cook-router/config.yaml
+  Log        /home/you/.cook-router/cook-router.log
+  Stop       kill $(cat '/home/you/.cook-router/cook-router.pid')
 ```
 
 The port is 8317 unless something already uses it, CLIProxyAPI for example; then the script takes the next free one. `keys.env` holds two keys:
 
-- `GNOCCHI_MANAGEMENT_KEY` is the dashboard password.
-- `GNOCCHI_CLIENT_KEY` is what your tools send to the proxy.
+- `COOK_ROUTER_MANAGEMENT_KEY` is the dashboard password.
+- `COOK_ROUTER_CLIENT_KEY` is what your tools send to the proxy.
 
 Only you can read the file, and the script never prints the keys. Run the same command again later to upgrade; it keeps your config and keys. [INSTALL.md](INSTALL.md) covers starting the proxy at login, Docker, building from source and writing the config yourself.
 
 ## 2. Open the dashboard
 
-The script opens <http://127.0.0.1:8317/management.html> in your browser (use your port if it picked another). Sign in with `GNOCCHI_MANAGEMENT_KEY`. On a server without a browser, open an SSH tunnel from your own computer first, as [INSTALL.md](INSTALL.md#with-the-install-script) shows.
+The script opens <http://127.0.0.1:8317/management.html> in your browser (use your port if it picked another). Sign in with `COOK_ROUTER_MANAGEMENT_KEY`. On a server without a browser, open an SSH tunnel from your own computer first, as [INSTALL.md](INSTALL.md#with-the-install-script) shows.
 
 On a new server, the Overview shows a short Get started card with three steps: connect an account, point a tool at the proxy, and send a test request. It goes away once all three are done, or when you dismiss it.
 
@@ -52,7 +52,7 @@ In the dashboard, choose Connect account and pick a provider. Claude and ChatGPT
 You can also sign in from a terminal, which helps on a server without a browser:
 
 ```sh
-gnocchi --config ~/.gnocchi/config.yaml --claude-login --no-browser
+cook-router --config ~/.cook-router/config.yaml --claude-login --no-browser
 ```
 
 The other sign-in flags are `--codex-login`, `--codex-device-login`, `--kimi-login`, `--meta-login`, `--xai-login` and `--devin-login`. API keys for Claude, Codex, Gemini, Vertex AI, xAI and OpenAI-compatible services go on the dashboard's Provider keys page.
@@ -83,7 +83,7 @@ claude
 - The management API is off until `management.secret-key` (or the `MANAGEMENT_PASSWORD` environment variable) is set. With `management.allow-remote: false`, the default, only requests from this computer are accepted. Five wrong keys from one address block that address for 30 minutes.
 - Behind a tunnel or reverse proxy on the same machine (cloudflared, `tailscale serve`, Caddy, nginx), every request arrives from `127.0.0.1`, so the server treats every internet client as local. Then `allow-remote: false` no longer keeps them out, a local-only `--password` is accepted from the internet, and five wrong keys from anyone block the tunnel for everyone. Set `server.trusted-proxies` to the proxy's address, for example `[127.0.0.1, "::1"]` for a local cloudflared, and restart. The server then takes the client address from `X-Forwarded-For` from that proxy only. CLIProxyAPI behaves the same way.
 - Do not send keys over plain HTTP across a network. Use a tunnel or reverse proxy with HTTPS, or serve HTTPS directly with `server.tls`.
-- The dashboard is built into the binary, and gnocchi never downloads code to run. (CLIProxyAPI downloads its dashboard from GitHub every three hours by default.) gnocchi does fetch model lists from the CLIProxyAPI project's mirrors at start and every three hours, as CLIProxyAPI does; they are JSON data, checked before use, and `--local-model` turns the fetch off.
+- The dashboard is built into the binary, and cook-router never downloads code to run. (CLIProxyAPI downloads its dashboard from GitHub every three hours by default.) cook-router does fetch model lists from the CLIProxyAPI project's mirrors at start and every three hours, as CLIProxyAPI does; they are JSON data, checked before use, and `--local-model` turns the fetch off.
 - The files in `auth-dir` hold sign-in tokens. Anyone who can read them can use your accounts. The server writes them with mode 0600; treat backups the same way.
 
 ## Next

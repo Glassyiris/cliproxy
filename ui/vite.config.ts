@@ -26,7 +26,7 @@ export default defineConfig({
       useCSSLayers: { before: ["reset", "astryx-base"], prefix: "app", after: ["astryx-theme"] },
     }),
     react(),
-    // Inert unless GNOCCHI_NOTICES_OUT is set (tools/third-party-notices.py).
+    // Inert unless COOK_ROUTER_NOTICES_OUT is set (tools/third-party-notices.py).
     noticesPlugin(),
   ],
   // cors: false lets OPTIONS capability probes reach the backend instead of Vite.

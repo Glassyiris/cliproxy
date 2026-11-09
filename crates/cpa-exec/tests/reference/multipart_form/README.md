@@ -16,7 +16,7 @@ the v8.0.35 release build, from which `textproto` quotes MIME header diagnostics
 `%q`:
 
 ```sh
-crate=/absolute/path/to/gnocchi/crates/cpa-exec
+crate=/absolute/path/to/cook-router/crates/cpa-exec
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/multipart_form/main.go" "$tmp/"
 (

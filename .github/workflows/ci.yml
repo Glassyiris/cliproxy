@@ -259,7 +259,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Profiler excluded from default normal dependencies
         run: |
-          cargo tree --locked -p gnocchi --edges normal --prefix none > default-dependencies.txt
+          cargo tree --locked -p cook-router --edges normal --prefix none > default-dependencies.txt
           if grep -qE '^(pprof|backtrace) v' default-dependencies.txt; then
             echo '::error::CPU profiler and symbol resolver must remain opt-in'
             exit 1
@@ -362,12 +362,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' && matrix.auth-files == 1 }}
       - name: Build
         run: |
-          cargo tree --locked -p gnocchi --edges normal --prefix none > size-dependencies.txt
+          cargo tree --locked -p cook-router --edges normal --prefix none > size-dependencies.txt
           if grep -qE '^(pprof|backtrace) v' size-dependencies.txt; then
             echo '::error::Size-gate binaries must exclude CPU profiling and symbol resolution'
             exit 1
           fi
-          cargo build --release --locked -p gnocchi
+          cargo build --release --locked -p cook-router
       # Bytes and counts against bench/budgets.txt, never elapsed time. GATE_REPORT collects
       # every measurement and its ceiling for the size report comment.
       - name: Size
@@ -375,15 +375,15 @@ jobs:
         env:
           GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
         run: |
-          name=gnocchi-ci-x86_64-unknown-linux-gnu
-          mkdir -p "$name" && cp target/release/gnocchi README.md LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES "$name/"
+          name=cook-router-ci-x86_64-unknown-linux-gnu
+          mkdir -p "$name" && cp target/release/cook-router README.md LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES "$name/"
           tar -czf "$name.tar.gz" "$name"
-          bench/gate.sh size x86_64-unknown-linux-gnu target/release/gnocchi "$name.tar.gz"
+          bench/gate.sh size x86_64-unknown-linux-gnu target/release/cook-router "$name.tar.gz"
       - name: Idle
         env:
           AUTH_FILES: ${{ matrix.auth-files }}
           GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
-        run: bench/gate.sh idle linux target/release/gnocchi "$AUTH_FILES"
+        run: bench/gate.sh idle linux target/release/cook-router "$AUTH_FILES"
       # Also after a failed gate; nothing when the build failed before any gate ran.
       - name: Size report
         if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}

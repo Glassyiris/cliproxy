@@ -1,6 +1,6 @@
 package executor
 
-// Devin fixture generator for gnocchi. Runs the real Go Devin executor, auth service
+// Devin fixture generator for cook-router. Runs the real Go Devin executor, auth service
 // and helpers against local capture servers; see zz_rsfix_util_test.go. Upstream bodies
 // are Connect frames, recorded as base64.
 

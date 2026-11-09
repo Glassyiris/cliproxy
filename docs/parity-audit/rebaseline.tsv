@@ -48,8 +48,8 @@ M6-0030	partial	partial	automatic	read in crates/cpa-plugin/src/config.rs, crate
 M6-0031	partial	partial	automatic	read in crates/cpa-plugin/src/config.rs; no test sets it	heuristic: key name match
 M6-0032	partial	partial	automatic	read in crates/cpa-plugin/src/config.rs, crates/cpa-plugin/src/store/auth.rs; no test sets it	heuristic: key name match
 M6-0033	partial	partial	automatic	read in crates/cpa-plugin/src/config.rs; no test sets it	heuristic: key name match
-M6-0044	partial	partial	automatic	read in crates/gnocchi/src/discovery/mod.rs; no test sets it	heuristic: key name match
-M5-0032	missing	covered	automatic	read in crates/gnocchi/src/home.rs, crates/gnocchi/src/tui/config.rs (+4); set in crates/cpa-server/tests/aistudio_relay.rs, crates/cpa-server/tests/fixtures/legacy_go.json (+2)	heuristic: key name match
+M6-0044	partial	partial	automatic	read in crates/cook-router/src/discovery/mod.rs; no test sets it	heuristic: key name match
+M5-0032	missing	covered	automatic	read in crates/cook-router/src/home.rs, crates/cook-router/src/tui/config.rs (+4); set in crates/cpa-server/tests/aistudio_relay.rs, crates/cpa-server/tests/fixtures/legacy_go.json (+2)	heuristic: key name match
 M3-0085	partial	partial	automatic	read in crates/cpa-core/src/registry.rs; no test sets it	heuristic: key name match
 M3-0086	partial	partial	automatic	read in crates/cpa-core/src/registry.rs; no test sets it	heuristic: key name match
 M4-0112	partial	partial	automatic	read in crates/cpa-core/src/config/credentials.rs, crates/cpa-core/src/config/sanitize.rs; no test sets it	heuristic: key name match
@@ -77,7 +77,7 @@ M3-0160	partial	partial	automatic	read in crates/cpa-core/src/registry.rs; no te
 M4-0165	partial	partial	automatic	read in crates/cpa-core/src/config/credentials.rs, crates/cpa-core/src/config/sanitize.rs; no test sets it	heuristic: key name match
 M6-0045	partial	partial	manual	crates/cpa-home/src/config.rs (HomeConfig, normalize_home_port test); cpa-core Config has no home field and no deny_unknown_fields, so a YAML home: block is ignored	No test parses a home: block (Go TestParseConfigBytesIgnoresHomeConfig).
 M4-0228	partial	partial	automatic	read in crates/cpa-core/src/config/credentials.rs, crates/cpa-core/src/config/sanitize.rs; no test sets it	heuristic: key name match
-M4-0231	partial	partial	manual	crates/gnocchi/src/main.rs cloud standby; crates/cpa-server/src/management (bcrypt keys); crates/cpa-core/src/config/trusted.rs	Clamps (queue retention, log sizes, caps) are not tested case by case.
+M4-0231	partial	partial	manual	crates/cook-router/src/main.rs cloud standby; crates/cpa-server/src/management (bcrypt keys); crates/cpa-core/src/config/trusted.rs	Clamps (queue retention, log sizes, caps) are not tested case by case.
 M4-0235	partial	partial	manual	crates/cpa-exec/src/claude/settings.rs fingerprint-profile	Normalization and validation are not tested by name.
 M4-0236	partial	partial	manual	cpa_common::payload disable-image-generation (payload_go.json)	Not tested by name.
 M4-0237	partial	partial	manual	crates/cpa-core/src/config/validate.rs; manage_go.json load_errors (38)	Not tested by name.
@@ -135,20 +135,20 @@ M5-0228	missing	covered	manual	crates/cpa-server/src/management/legacy.rs, manag
 M5-0229	partial	partial	manual	crates/cpa-server/tests/management.rs (writes_normalize_only_what_they_touch, config_key_* tests); manage_go.json config_writes	TURN credential and Home revision redaction are not tested.
 M5-0230	partial	partial	manual	crates/cpa-server/src/management/oauth.rs and plugin_oauth.rs; tests/management.rs *_login_* tests and tests/plugin_routes.rs plugin auth scenarios	Plugin provider IDs work; Antigravity login through the Management API remains absent.
 M5-0231	partial	partial	manual	crates/cpa-server/src/management/auth_files.rs, multipart.rs (hostile_bodies_never_panic); manage_go.json credentials; tests/manage_go.rs go_credential_management_replay	Not ported by name.
-M3-0178	partial	partial	manual	crates/gnocchi/src/main.rs runs -antigravity-login through crates/cpa-exec/src/antigravity_auth.rs	The flag is parsed in a test and the login steps are checked against Go; no end-to-end login test.
-M6-0050	partial	covered	manual	crates/gnocchi/src/main.rs invokes tui::run; tui/e2e.rs tui_drives_the_management_api; tui/golden.rs tabs_render_like_go	
-M4-0244	partial	covered	manual	crates/gnocchi/src/main.rs standalone_server_starts_without_any_secret, standalone_url_follows_the_listener; tui/e2e.rs tui_drives_the_management_api	
-M5-0234	partial	covered	manual	crates/gnocchi/src/main.rs passes management_base_url to tui::run; tui/client.rs Go client cases; tui/e2e.rs tui_drives_the_management_api	
-M6-0051	partial	covered	manual	crates/gnocchi/src/discovery/tests.rs discover_output_matches_go_byte_for_byte; tests/plugin_cli.rs plugin_command_line_matches_go checks plugin flags before main parsing	
+M3-0178	partial	partial	manual	crates/cook-router/src/main.rs runs -antigravity-login through crates/cpa-exec/src/antigravity_auth.rs	The flag is parsed in a test and the login steps are checked against Go; no end-to-end login test.
+M6-0050	partial	covered	manual	crates/cook-router/src/main.rs invokes tui::run; tui/e2e.rs tui_drives_the_management_api; tui/golden.rs tabs_render_like_go	
+M4-0244	partial	covered	manual	crates/cook-router/src/main.rs standalone_server_starts_without_any_secret, standalone_url_follows_the_listener; tui/e2e.rs tui_drives_the_management_api	
+M5-0234	partial	covered	manual	crates/cook-router/src/main.rs passes management_base_url to tui::run; tui/client.rs Go client cases; tui/e2e.rs tui_drives_the_management_api	
+M6-0051	partial	covered	manual	crates/cook-router/src/discovery/tests.rs discover_output_matches_go_byte_for_byte; tests/plugin_cli.rs plugin_command_line_matches_go checks plugin flags before main parsing	
 M4-0246	partial	partial	manual	crates/cpa-server/src/fs_events.rs and watching.rs; tests/management.rs watcher_keeps_last_good_config_and_reconciles_disabled_deleted_and_self_writes	Filesystem events and hash reconciliation exist; not every Go watcher case is reproduced.
 M4-0247	partial	partial	manual	runtime.rs config_routing_drives_policy_at_startup_and_on_publish, reconcile_keeps_unchanged_revisions_and_never_reuses_old_ones; management.rs watcher tests	Not tested for every reloadable subsystem.
 M4-0248	partial	partial	manual	runtime.rs reconcile and stale-lease tests; management.rs watcher tests	Not tested case by case.
 M4-0249	partial	partial	manual	crates/cpa-server/src/logging.rs formatter, rotation and cleaner tests; request_logging.rs commercial_mode_disables_only_request_capture_and_is_startup_only	Commercial mode exists; the complete Go logging contract is not reproduced case by case.
 M4-0250	partial	covered	manual	crates/cpa-server/src/request_logging.rs upstream_contract_matches_real_go, go_middleware_goldens, websocket_sink_stays_open_after_upgrade_and_matches_go, home_forwards_full_logs_but_forced_errors_remain_local	
 M4-0251	partial	partial	manual	crates/cpa-server/src/usage_record.rs queued_records_match_go; usage.rs subscribers_take_records_and_are_dropped_when_full_or_disabled; tests/resp_protocol.rs; plugin_wiring.rs usage scenarios	RESP and built-in executor usage hooks exist; plugin-executor usage publication remains incomplete.
-M6-0058	missing	covered	manual	crates/gnocchi/src/tui; tui/e2e.rs tui_drives_the_management_api; tui/golden.rs tabs_render_like_go (Go-recorded tab output)	
-M6-0059	missing	covered	manual	crates/gnocchi/src/tui/e2e.rs tui_drives_the_management_api exercises config, auth files, keys, OAuth, logs, locale and error recovery; client.rs Go client cases	
-M6-0062	partial	partial	manual	crates/cpa-home/src/client.rs, subscriber.rs (client_tests.rs against fake.rs); Home mode wired in crates/gnocchi/src/main.rs (Home 3)	Not every Go client case is ported (M6-0165).
+M6-0058	missing	covered	manual	crates/cook-router/src/tui; tui/e2e.rs tui_drives_the_management_api; tui/golden.rs tabs_render_like_go (Go-recorded tab output)	
+M6-0059	missing	covered	manual	crates/cook-router/src/tui/e2e.rs tui_drives_the_management_api exercises config, auth files, keys, OAuth, logs, locale and error recovery; client.rs Go client cases	
+M6-0062	partial	partial	manual	crates/cpa-home/src/client.rs, subscriber.rs (client_tests.rs against fake.rs); Home mode wired in crates/cook-router/src/main.rs (Home 3)	Not every Go client case is ported (M6-0165).
 M6-0063	partial	partial	manual	crates/cpa-home/src/dispatch.rs, client.rs rpop_auth and ambiguous-dispatch fencing; dispatch through Home (Home 3)	The sdk/cliproxy/auth home_* suites (M6-0221..0237) are mostly unported.
 M6-0064	partial	partial	manual	crates/cpa-home/src/release.rs, inflight.rs, config.rs (unit tests)	Not every concurrency-release and in-flight contract case is ported (M6-0166, M6-0167).
 M6-0065	partial	partial	manual	crates/cpa-server/src/plugins.rs; crates/cpa-plugin/src/host.rs, native.rs, store; tests/store_go.rs store_matches_go; cpa-server tests/plugin_routes.rs	Store installation and auth exist; model/auth/translation integration and Home plugin synchronization remain incomplete.
@@ -157,11 +157,11 @@ M5-0236	partial	partial	manual	crates/cpa-server/src/realtime/* (media.rs, relay
 M6-0067	partial	partial	manual	crates/cpa-plugin/src/models.rs; tests/go_host.rs register_models	No server catalog registration consumes the capability.
 M6-0068	partial	partial	manual	crates/cpa-plugin/src/models.rs; tests/go_host.rs models_for_auth	No server credential-model registration consumes the capability.
 M6-0069	partial	partial	manual	crates/cpa-plugin/src/auth.rs; tests/go_host.rs parse_auths, start_login, poll_login, refresh_auth	Management login exists; credential synthesis and refresh do not use plugin auth providers.
-M6-0070	partial	covered	manual	crates/cpa-server/src/plugins.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go (frontend auth)	
-M6-0071	partial	covered	manual	crates/cpa-server/src/plugins.rs; crates/gnocchi/tests/plugin_wiring.rs and fixtures/plugin_wiring_go.json include exclusive frontend auth cases	
+M6-0070	partial	covered	manual	crates/cpa-server/src/plugins.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go (frontend auth)	
+M6-0071	partial	covered	manual	crates/cpa-server/src/plugins.rs; crates/cook-router/tests/plugin_wiring.rs and fixtures/plugin_wiring_go.json include exclusive frontend auth cases	
 M6-0072	partial	partial	manual	crates/cpa-plugin/src/routing.rs; tests/go_host.rs pick_auth	The credential selector does not invoke plugin schedulers.
 M6-0073	partial	partial	manual	crates/cpa-plugin/src/routing.rs scheduler_across_priorities; tests/go_host.rs pick_auth	The credential selector does not invoke plugin schedulers.
-M6-0074	partial	covered	manual	crates/cpa-server/src/plugins/execution.rs route; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go (model routing)	
+M6-0074	partial	covered	manual	crates/cpa-server/src/plugins/execution.rs route; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go (model routing)	
 M6-0075	partial	partial	manual	crates/cpa-server/src/plugins/execution.rs; tests/plugin_wiring.rs plugin executor scenarios	Router-targeted execution exists; auth-bound registration, response translation and usage publication remain incomplete.
 M6-0076	partial	partial	manual	crates/cpa-plugin/src/executor.rs negotiation_follows_go; cpa-server/src/plugins/execution.rs	Negotiated on router-targeted calls; auth-bound executor registration remains absent.
 M6-0077	partial	partial	manual	crates/cpa-plugin/src/executor.rs negotiation_follows_go; cpa-server/src/plugins/execution.rs	Direct input negotiation works; plugin request translators are not wired.
@@ -171,14 +171,14 @@ M6-0080	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-pl
 M6-0081	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: translate_response)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
 M6-0082	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: normalize_response_before)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
 M6-0083	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: normalize_response_after)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
-M6-0084	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go checks before/after request hooks	
-M6-0085	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go checks completion hooks	
-M6-0086	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go checks buffered response hooks	
-M6-0087	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go checks streaming hooks	
+M6-0084	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go checks before/after request hooks	
+M6-0085	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go checks completion hooks	
+M6-0086	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go checks buffered response hooks	
+M6-0087	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go checks streaming hooks	
 M6-0088	partial	partial	manual	crates/cpa-plugin/src/interceptors.rs observe_websocket_response_event; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: ws_event)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
 M6-0089	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: thinking)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
-M6-0090	partial	partial	manual	crates/cpa-server/src/usage_record.rs publishes usage to plugins; crates/gnocchi/tests/plugin_wiring.rs usage scenarios	Built-in executor usage reaches hooks; plugin-executor usage is not published (plugins/execution.rs).
-M6-0091	partial	covered	manual	crates/gnocchi/tests/plugin_cli.rs plugin_command_line_matches_go; crates/cpa-plugin/src/cli.rs	
+M6-0090	partial	partial	manual	crates/cpa-server/src/usage_record.rs publishes usage to plugins; crates/cook-router/tests/plugin_wiring.rs usage scenarios	Built-in executor usage reaches hooks; plugin-executor usage is not published (plugins/execution.rs).
+M6-0091	partial	covered	manual	crates/cook-router/tests/plugin_cli.rs plugin_command_line_matches_go; crates/cpa-plugin/src/cli.rs	
 M6-0093	partial	covered	manual	crates/cpa-plugin/src/quota.rs; crates/cpa-server/tests/plugin_routes.rs plugin_routes_match_go exercises describe, fetch and reset against Go fixtures	
 M6-0098	partial	partial	manual	crates/cpa-plugin/src/models.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: model.register responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
 M6-0099	partial	partial	manual	crates/cpa-plugin/src/models.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: model.static responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
@@ -188,31 +188,31 @@ M6-0102	partial	partial	manual	crates/cpa-plugin/src/auth.rs; crates/cpa-plugin/
 M6-0103	partial	covered	manual	crates/cpa-server/src/management/plugin_oauth.rs; tests/plugin_routes.rs plugin_routes_match_go exercises auth.login.start (plugin_routes_go.json)	
 M6-0104	partial	covered	manual	crates/cpa-server/src/management/plugin_oauth.rs; tests/plugin_routes.rs plugin_routes_match_go exercises auth.login.poll (plugin_routes_go.json)	
 M6-0105	partial	partial	manual	crates/cpa-plugin/src/auth.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: auth.refresh responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
-M6-0106	partial	covered	manual	crates/cpa-server/src/plugins.rs registers frontend providers; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go	
-M6-0107	partial	covered	manual	crates/cpa-server/src/plugins.rs authenticate; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go	
+M6-0106	partial	covered	manual	crates/cpa-server/src/plugins.rs registers frontend providers; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go	
+M6-0107	partial	covered	manual	crates/cpa-server/src/plugins.rs authenticate; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go	
 M6-0108	partial	partial	manual	crates/cpa-plugin/src/routing.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: scheduler.pick responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
-M6-0109	partial	covered	manual	crates/cpa-server/src/plugins/execution.rs route; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go	
-M6-0110	partial	partial	manual	crates/cpa-server/src/plugins/execution.rs; crates/gnocchi/tests/plugin_wiring.rs	Router-targeted execution exists; auth-bound model registration remains absent.
-M6-0111	partial	partial	manual	crates/cpa-server/src/plugins/execution.rs; crates/gnocchi/tests/plugin_wiring.rs	Buffered calls work; response translation and usage publication remain incomplete.
-M6-0112	partial	partial	manual	crates/cpa-server/src/plugins/execution.rs; crates/gnocchi/tests/plugin_wiring.rs	Streaming calls work; response translation and usage publication remain incomplete.
-M6-0113	partial	partial	manual	crates/cpa-server/src/plugins/execution.rs; crates/gnocchi/tests/plugin_wiring.rs	Count calls work through routers; auth-bound registration remains absent.
+M6-0109	partial	covered	manual	crates/cpa-server/src/plugins/execution.rs route; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go	
+M6-0110	partial	partial	manual	crates/cpa-server/src/plugins/execution.rs; crates/cook-router/tests/plugin_wiring.rs	Router-targeted execution exists; auth-bound model registration remains absent.
+M6-0111	partial	partial	manual	crates/cpa-server/src/plugins/execution.rs; crates/cook-router/tests/plugin_wiring.rs	Buffered calls work; response translation and usage publication remain incomplete.
+M6-0112	partial	partial	manual	crates/cpa-server/src/plugins/execution.rs; crates/cook-router/tests/plugin_wiring.rs	Streaming calls work; response translation and usage publication remain incomplete.
+M6-0113	partial	partial	manual	crates/cpa-server/src/plugins/execution.rs; crates/cook-router/tests/plugin_wiring.rs	Count calls work through routers; auth-bound registration remains absent.
 M6-0114	partial	partial	manual	crates/cpa-plugin/src/executor.rs refresh	The refresh conductor does not invoke plugin executors.
 M6-0115	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: request.translate responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
 M6-0116	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: request.normalize responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
-M6-0117	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go (request before)	
-M6-0118	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go (request after)	
-M6-0119	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go (complete)	
+M6-0117	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go (request before)	
+M6-0118	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go (request after)	
+M6-0119	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go (complete)	
 M6-0120	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: response.translate responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
 M6-0121	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: response.normalize_before responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
 M6-0122	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: response.normalize_after responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
-M6-0123	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go (response)	
-M6-0124	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/gnocchi/tests/plugin_wiring.rs request_path_plugins_match_go (stream chunks)	
+M6-0123	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go (response)	
+M6-0124	partial	covered	manual	crates/cpa-server/src/plugins/interceptors.rs; crates/cook-router/tests/plugin_wiring.rs request_path_plugins_match_go (stream chunks)	
 M6-0125	partial	partial	manual	crates/cpa-plugin/src/interceptors.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: ws_event call)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
 M6-0126	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: thinking.identifier responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
 M6-0127	partial	partial	manual	crates/cpa-plugin/src/transform.rs; crates/cpa-plugin/tests/go_host.rs (pluginhost_go.json: thinking.apply responses)	Implemented and Go-golden tested in cpa-plugin; cpa-server loads plugins and serves their management routes (Plugins 3), but the request path never calls this capability.
-M6-0128	partial	partial	manual	crates/cpa-server/src/usage_record.rs publishes usage to plugins; crates/gnocchi/tests/plugin_wiring.rs usage scenarios	Plugin-executor usage remains unpublished.
-M6-0129	partial	covered	manual	crates/gnocchi/tests/plugin_cli.rs plugin_command_line_matches_go (register flags)	
-M6-0130	partial	covered	manual	crates/gnocchi/tests/plugin_cli.rs plugin_command_line_matches_go (execute)	
+M6-0128	partial	partial	manual	crates/cpa-server/src/usage_record.rs publishes usage to plugins; crates/cook-router/tests/plugin_wiring.rs usage scenarios	Plugin-executor usage remains unpublished.
+M6-0129	partial	covered	manual	crates/cook-router/tests/plugin_cli.rs plugin_command_line_matches_go (register flags)	
+M6-0130	partial	covered	manual	crates/cook-router/tests/plugin_cli.rs plugin_command_line_matches_go (execute)	
 M6-0133	partial	covered	manual	crates/cpa-server/tests/plugin_routes.rs plugin_routes_match_go; cpa-plugin/tests/go_host.rs quota.identifier	
 M6-0134	partial	covered	manual	crates/cpa-server/tests/plugin_routes.rs plugin_routes_match_go; cpa-plugin/tests/go_host.rs quota.describe	
 M6-0135	partial	covered	manual	crates/cpa-server/tests/plugin_routes.rs plugin_routes_match_go; cpa-plugin/tests/go_host.rs quota.fetch	
@@ -227,15 +227,15 @@ M6-0143	missing	missing	manual	"crates/cpa-plugin/src/callbacks.rs call_service 
 M6-0144	missing	missing	manual	"crates/cpa-plugin/src/callbacks.rs call_service answers ""unsupported host callback"""	HTTP and auth callbacks exist; model-execution callbacks still need a server service.
 M6-0145	missing	missing	manual	"crates/cpa-plugin/src/callbacks.rs call_service answers ""unsupported host callback"""	HTTP and auth callbacks exist; model-execution callbacks still need a server service.
 M6-0146	missing	missing	manual	"crates/cpa-plugin/src/callbacks.rs call_service answers ""unsupported host callback"""	HTTP and auth callbacks exist; model-execution callbacks still need a server service.
-M6-0147	partial	covered	manual	crates/cpa-plugin/src/callbacks.rs, streams.rs; tests/go_host.rs host.stream.emit; crates/gnocchi/tests/plugin_wiring.rs streams	
-M6-0148	partial	covered	manual	crates/cpa-plugin/src/callbacks.rs, streams.rs; tests/go_host.rs host.stream.close; crates/gnocchi/tests/plugin_wiring.rs streams	
+M6-0147	partial	covered	manual	crates/cpa-plugin/src/callbacks.rs, streams.rs; tests/go_host.rs host.stream.emit; crates/cook-router/tests/plugin_wiring.rs streams	
+M6-0148	partial	covered	manual	crates/cpa-plugin/src/callbacks.rs, streams.rs; tests/go_host.rs host.stream.close; crates/cook-router/tests/plugin_wiring.rs streams	
 M6-0149	partial	covered	manual	crates/cpa-plugin/src/callbacks.rs host_log; tests/go_host.rs host.log	Covered as an RPC envelope contract only: the fixture checks success/error envelopes, not logged fields or request-ID restoration.
 M6-0150	missing	covered	manual	crates/cpa-server/src/management/plugin_auth.rs; tests/plugin_host_auth.rs plugin_auth_callbacks_read_and_save_the_credential_store	
 M6-0151	missing	covered	manual	crates/cpa-server/src/management/plugin_auth.rs; tests/plugin_host_auth.rs plugin_auth_callbacks_read_and_save_the_credential_store	
 M6-0152	missing	covered	manual	crates/cpa-server/src/management/plugin_auth.rs; tests/plugin_host_auth.rs plugin_auth_callbacks_read_and_save_the_credential_store	
 M6-0153	missing	covered	manual	crates/cpa-server/src/management/plugin_auth.rs; tests/plugin_host_auth.rs plugin_auth_callbacks_read_and_save_the_credential_store	
 M6-0154	missing	covered	manual	crates/cpa-server/src/management/plugin_auth.rs; tests/plugin_host_auth.rs affinity_lookup_finds_custom_provider_bindings	
-M4-0252	partial	partial	manual	crates/gnocchi/src/main.rs argv_prescan_matches_go (TestArgvEnablesBoolFlag); model catalog plan in crates/cpa-server/src/model_updater.rs plan_matches_go	Example-API-key safe mode and management base URL cases are not ported.
+M4-0252	partial	partial	manual	crates/cook-router/src/main.rs argv_prescan_matches_go (TestArgvEnablesBoolFlag); model catalog plan in crates/cpa-server/src/model_updater.rs plan_matches_go	Example-API-key safe mode and management base URL cases are not ported.
 M5-0237	partial	partial	manual	crates/cpa-server/src/management*; tests/management.rs, tests/manage_go.rs (manage_go.json)	Not ported by name.
 M5-0238	partial	partial	manual	crates/cpa-server/src/management*; tests/management.rs, tests/manage_go.rs (manage_go.json)	Not ported by name.
 M5-0239	partial	partial	manual	crates/cpa-server/src/management*; tests/management.rs, tests/manage_go.rs (manage_go.json)	Not ported by name.
@@ -330,7 +330,7 @@ M3-0216	partial	partial	manual	cpa_common::payload normalize_codex_tool_integer_
 M4-0268	missing	partial	manual	crates/cpa-exec/src/codex_response.rs Processor::grok_keepalive	Grok streaming transformation exists; these Go handler cases are not ported by name.
 M4-0269	missing	partial	manual	crates/cpa-exec/src/codex_response.rs Processor::grok_keepalive	Keepalive conversion exists; these Go handler cases are not ported by name.
 M4-0270	partial	partial	automatic	1/4 cases: crates/cpa-server/src/classify.rs; not matched: TestHTTPStatusFromError, TestIsRequestFaultStructuredIdentifiers, TestIsClientCancellation	
-M4-0271	partial	partial	manual	crates/gnocchi/src/discovery (tests.rs, dns.rs, mdns.rs Go-derived cases)	Not ported by name.
+M4-0271	partial	partial	manual	crates/cook-router/src/discovery (tests.rs, dns.rs, mdns.rs Go-derived cases)	Not ported by name.
 M4-0272	partial	partial	manual	crates/cpa-core/src/config*; manage_go.json (materialized_defaults, config_writes, load_errors, synth)	Not ported by name.
 M4-0273	partial	partial	manual	crates/cpa-core/src/config*; manage_go.json (materialized_defaults, config_writes, load_errors, synth)	Not ported by name.
 M4-0274	partial	partial	manual	crates/cpa-core/src/config*; manage_go.json (materialized_defaults, config_writes, load_errors, synth)	Not ported by name.
@@ -348,7 +348,7 @@ M4-0282	partial	covered	manual	1/1 cases: crates/cpa-home/src/config.rs
 M4-0283	partial	covered	manual	5/5 cases: crates/cpa-home/src/config.rs	
 M4-0284	partial	partial	manual	crates/cpa-home/src/config.rs (limiter and in-flight defaults)	Not ported by name.
 M4-0285	partial	partial	manual	crates/cpa-core/src/config*; manage_go.json (materialized_defaults, config_writes, load_errors, synth)	Not ported by name.
-M6-0160	partial	partial	manual	crates/gnocchi/src/discovery/cli.rs load_scan_filters (discovery_cmd_go.json config_filters)	Not ported by name.
+M6-0160	partial	partial	manual	crates/cook-router/src/discovery/cli.rs load_scan_filters (discovery_cmd_go.json config_filters)	Not ported by name.
 M2-0037	partial	partial	manual	crates/cpa-core/src/config/credentials.rs sanitized() keeps empty keys with a base URL	Not ported by name.
 M4-0286	partial	partial	manual	crates/cpa-core/src/config*; manage_go.json (materialized_defaults, config_writes, load_errors, synth)	Not ported by name.
 M4-0287	partial	partial	manual	crates/cpa-core/src/config*; manage_go.json (materialized_defaults, config_writes, load_errors, synth)	Not ported by name.
@@ -368,7 +368,7 @@ M4-0297	partial	partial	manual	crates/cpa-core/src/config*; manage_go.json (mate
 M3-0219	partial	partial	manual	crates/cpa-core/src/config/credentials.rs (xAI alpha-search); xai_go.json	Not ported by name.
 M3-0220	partial	partial	manual	crates/cpa-core/src/config/credentials.rs (xAI keys); xai_go.json config_key_base_url_and_headers	Not ported by name.
 M4-0298	partial	partial	manual	scheduler.rs smooth weights	Not ported by name.
-M6-0164	partial	partial	manual	crates/gnocchi/src/discovery/tests.rs (Go-recorded outputs: instance ID, TXT build/parse, validation, interface filters, merge limits)	Advertiser idempotence/shutdown and the live browse integration are not ported.
+M6-0164	partial	partial	manual	crates/cook-router/src/discovery/tests.rs (Go-recorded outputs: instance ID, TXT build/parse, validation, interface filters, merge limits)	Advertiser idempotence/shutdown and the live browse integration are not ported.
 M6-0165	partial	partial	automatic	42/69 cases: crates/cpa-home/src/client_tests.rs; not matched: TestAuthDispatchRequestDefaultsCountToOne, TestAuthDispatchRequestIncludesCredentialPolicy, TestAuthDispatchRequestIncludesExcludedAuthIDs, TestAuthDispatchRequestIncludesEmptyExcludedAuthIDs …	
 M6-0169	missing	missing	automatic	0/4 cases matched; plugin_status.go not cited	
 M6-0170	missing	missing	automatic	0/1 cases matched; network_scope.go not cited	
@@ -406,7 +406,7 @@ M6-0190	partial	partial	automatic	implementation cites model_router.go (crates/c
 M6-0191	partial	partial	automatic	implementation cites platform.go (crates/cpa-plugin/src/platform.rs); no case matched by name	
 M6-0192	missing	missing	automatic	0/4 cases matched; plugin_refresh_compat_executor.go not cited	
 M6-0193	partial	partial	automatic	implementation cites quota_provider.go (crates/cpa-plugin/src/quota.rs); no case matched by name	
-M6-0194	missing	partial	automatic	crates/cpa-server/src/plugins/interceptors.rs termination_status and terminated; crates/gnocchi/tests/plugin_wiring.rs	Termination exists; all four Go lifecycle cases are not reproduced.
+M6-0194	missing	partial	automatic	crates/cpa-server/src/plugins/interceptors.rs termination_status and terminated; crates/cook-router/tests/plugin_wiring.rs	Termination exists; all four Go lifecycle cases are not reproduced.
 M6-0195	missing	partial	automatic	crates/cpa-plugin/src/abi.rs Envelope::parse; rpc.rs decode_envelope_result and tests	RPC errors retain HTTP status; the six Go error cases are not reproduced by name.
 M6-0196	partial	partial	automatic	implementation cites rpc_client_stream.go (crates/cpa-plugin/src/executor.rs); no case matched by name	
 M6-0197	partial	partial	automatic	implementation cites rpc_schema.go (crates/cpa-plugin/src/rpc.rs); no case matched by name	
@@ -440,7 +440,7 @@ M3-0229	missing	partial	automatic	crates/cpa-exec/src/antigravity.rs and antigra
 M3-0232	missing	partial	automatic	crates/cpa-exec/src/antigravity.rs; antigravity_tests.rs short_mode_never_reuses_or_announces_close, pooled_mode_scopes_connections_by_credential	Connection reuse exists; the six Go keepalive cases are not ported by name.
 M3-0233	partial	partial	automatic	22/24 cases: crates/cpa-exec/tests/fixtures/antigravity_helpers_go.json; not matched: TestAntigravitySensitiveWordsObfuscatesSystemInstructionOnly, TestClaudeExecutor_LogsSanitizedClaudeUpstreamSignatures	
 M3-0235	partial	partial	automatic	5/22 cases: crates/cpa-exec/src/antigravity_tests.rs; not matched: TestNewAntigravityHTTPClientSharesTransport, TestAntigravityPoolLimitsGuardsDefaultAndGFECutoff, TestNewAntigravityHTTPClientRejectsTypedNilContextTransport, TestNewAntigravityHTTPClientKeepsForeignRoundTripper …	
-M6-0210	partial	covered	manual	crates/cpa-exec/src/antigravity_tests.rs ports the Go capability case; crates/gnocchi/src/home.rs home_model_info_becomes_the_resolved_model verifies binding to dispatch	
+M6-0210	partial	covered	manual	crates/cpa-exec/src/antigravity_tests.rs ports the Go capability case; crates/cook-router/src/home.rs home_model_info_becomes_the_resolved_model verifies binding to dispatch	
 M3-0236	partial	partial	automatic	4/7 cases: crates/cpa-exec/tests/fixtures/antigravity_helpers_go.json; not matched: TestApplyAntigravityIndexedEditsFallsBackWhenOffsetsInvalid, TestApplyAntigravityContentEditsWithSJSONFallback, TestAntigravityProvenanceScansMatchLegacyArraySemantics	
 M3-0238	partial	partial	automatic	10/19 cases: crates/cpa-exec/tests/fixtures/antigravity_replay_go.json; not matched: TestAntigravityReplayContextFingerprintsMatchLegacy, TestAntigravityReasoningReplayItemsFromIndexMatchLegacy, TestAntigravityReasoningReplayItemsNilnessMatchesLegacy, TestFilterAntigravityReasoningReplayItemsWithIndexMatchesLegacy …	
 M3-0239	partial	partial	automatic	62/70 cases: crates/cpa-exec/tests/fixtures/antigravity_replay_go.json; not matched: TestAntigravityReasoningReplayContextFingerprintCanonicalizesJSON, TestAntigravityReasoningReplayLegacyAmbiguousIDLessCallFailsClosed, TestAntigravityReasoningReplayScopeUsesStableSessionWithoutSessionId, TestAntigravityReplayToolCallKeysUsesNativeFunctionCallID …	
@@ -563,15 +563,15 @@ M4-0350	partial	partial	manual	crates/cpa-exec executors; cpa_common::headers, p
 M4-0351	partial	partial	manual	crates/cpa-exec executors; cpa_common::headers, payload	Not ported by name.
 M4-0352	partial	partial	manual	crates/cpa-exec executors; cpa_common::headers, payload	Not ported by name.
 M5-0295	partial	partial	manual	crates/cpa-server/src/websocket*.rs	Not ported by name.
-M6-0214	missing	partial	automatic	crates/gnocchi/src/home.rs streamed lease accounting and dispatch; tests include terminal stream release	The exact Codex terminal-failure usage case is not reproduced.
+M6-0214	missing	partial	automatic	crates/cook-router/src/home.rs streamed lease accounting and dispatch; tests include terminal stream release	The exact Codex terminal-failure usage case is not reproduced.
 M3-0284	partial	partial	automatic	1/41 cases: crates/cpa-exec/src/kimi_tests.rs; not matched: TestNewKimiExecutorInitializesDelegatedClaudeConfig, TestKimiExecutorRequestToFormatMatchesWireProtocol, TestKimiExecutorResponsesPassthrough, TestKimiExecutorResponsesStreamPassthrough …	
-M6-0215	missing	partial	automatic	crates/gnocchi/src/home.rs home_model_info_becomes_the_resolved_model; Kimi executor reads bound model capabilities	The exact Kimi Home thinking case is not reproduced.
+M6-0215	missing	partial	automatic	crates/cook-router/src/home.rs home_model_info_becomes_the_resolved_model; Kimi executor reads bound model capabilities	The exact Kimi Home thinking case is not reproduced.
 M3-0285	partial	partial	manual	crates/cpa-exec/src/kimi_replay.rs; device fixtures (crates/cpa-exec/tests/device_fixtures/kimi)	Not ported by name.
 M3-0286	partial	partial	automatic	3/27 cases: crates/cpa-exec/src/meta_tests.rs; not matched: TestMetaExecutor_Identifier, TestMetaExecutor_ExecuteSuccessAndRateLimit, TestMetaExecutor_Refresh_RequiresManagerAcceptance, TestMetaExecutor_PrepareConcurrentAccounts …	
 M4-0353	partial	partial	manual	crates/cpa-exec executors; cpa_common::headers, payload	Not ported by name.
 M2-0045	partial	partial	manual	compat scenarios compact_*, chat_prompt_cache_key_*, chat_execution_session_*	21 Go cases; prompt-cache and compact equivalents exist; config-index scoping cases not ported.
 M2-0046	partial	partial	manual	compat scenarios images_*; crates/cpa-server/tests/media_go.rs media_routes_match_go exercises /v1/images through compat	Go executor suite is not ported case by case.
-M6-0216	missing	partial	automatic	crates/gnocchi/src/home.rs credential binding and session options; cpa-exec/src/openai_compat.rs	Home dispatch exists; all four Go executor-option cases are not reproduced.
+M6-0216	missing	partial	automatic	crates/cook-router/src/home.rs credential binding and session options; cpa-exec/src/openai_compat.rs	Home dispatch exists; all four Go executor-option cases are not reproduced.
 M2-0052	partial	partial	manual	crates/cpa-exec/src/codex_request.rs	Not ported by name.
 M4-0355	partial	partial	manual	crates/cpa-exec executors; cpa_common::headers, payload	Not ported by name.
 M5-0296	partial	partial	manual	crates/cpa-exec/src/codex_ws.rs (codex_ws_tests.rs, codex_ws_errors.json); crates/cpa-server/tests/ws_e2e.rs	Not ported by name.
@@ -614,8 +614,8 @@ M2-0105	partial	partial	automatic	7/10 cases: crates/cpa-translate/tests/fixture
 M2-0112	partial	partial	automatic	41/42 cases: crates/cpa-translate/tests/fixtures/pairs/claude-openai.json; not matched: TestExtractOpenAIUsage	
 M2-0127	partial	partial	automatic	2/3 cases: crates/cpa-translate/tests/fixtures/pairs/openai-response-openai.json; not matched: TestNamespaceRecoveryDoesNotGuessAmbiguousOrOverrideExactNames	
 M2-0128	partial	partial	automatic	59/64 cases: crates/cpa-translate/tests/fixtures/pairs/openai-response-openai.json; not matched: TestResponsesSingleCustomToolName_CountsDeduplicatedTools, TestSplitResponsesQualifiedFunctionCallFromRequest_FirstDeclarationWins, TestSplitResponsesQualifiedFunctionCallFromRequest_MatchesMergedToolIdentity, TestResponsesCustomToolNames_FollowsMergedDeclaration …	
-M6-0218	missing	covered	manual	crates/gnocchi/src/tui/client.rs ports all four named Go client cases (auth, errors and list extraction)	
-M6-0219	partial	partial	automatic	1/8 cases: crates/gnocchi/src/tui/oauth.rs; not matched: TestShouldAcceptOAuthPollFiltersStaleMessages, TestShouldAcceptOAuthStartFiltersStaleMessages, TestOAuthTabUpdateIgnoresStalePollMsg, TestOAuthTabUpdateAcceptsCurrentPollMsg …	
+M6-0218	missing	covered	manual	crates/cook-router/src/tui/client.rs ports all four named Go client cases (auth, errors and list extraction)	
+M6-0219	partial	partial	automatic	1/8 cases: crates/cook-router/src/tui/oauth.rs; not matched: TestShouldAcceptOAuthPollFiltersStaleMessages, TestShouldAcceptOAuthStartFiltersStaleMessages, TestOAuthTabUpdateIgnoresStalePollMsg, TestOAuthTabUpdateAcceptsCurrentPollMsg …	
 M1-0110	partial	partial	manual	crates/cpa-translate/src/common.rs is_claude_code_attribution_text; translator goldens	StripClaudeCodeAttributionSystem is ported in crates/cpa-exec/src/claude.rs (strip_attribution_system) without Go's case; IsClaudeCodeAttributionSystemText replays Go's calls (crates/cpa-translate/tests/fixtures/go_helpers.json).
 M1-0111	partial	partial	manual	inlined in crates/cpa-translate/src/antigravity_claude.rs; claude-antigravity goldens	Unit cases not ported.
 M1-0114	partial	partial	manual	crates/cpa-translate/src/gemini.rs; translator goldens	Unit cases not ported.
@@ -745,17 +745,17 @@ M4-0454	partial	partial	manual	crates/cpa-server/src/scheduler.rs tests; crates/
 M4-0455	partial	partial	manual	crates/cpa-server/src/scheduler.rs tests; crates/cpa-server/tests/scheduler_attempts.rs; server_go.json	Not ported by name.
 M4-0456	partial	partial	manual	crates/cpa-server/src/scheduler.rs tests; crates/cpa-server/tests/scheduler_attempts.rs; server_go.json	Not ported by name.
 M4-0457	partial	partial	manual	crates/cpa-server/src/scheduler.rs tests; crates/cpa-server/tests/scheduler_attempts.rs; server_go.json	Not ported by name.
-M6-0221	partial	partial	automatic	19/22 cases: crates/gnocchi/src/home.rs, crates/cpa-home/src/dispatch.rs; not matched: TestPickHomeDispatchSelectionReleasesAccountedScopeAfterPayloadDecodeFailure, TestPickHomeDispatchSelectionReleasesAccountedScopeAfterAuthDecodeFailure, TestRetryAfterFromWrappedHomeBusyError	
-M6-0224	partial	partial	automatic	9/28 cases: crates/gnocchi/src/home.rs; not matched: TestHomeModeNeverAuthorizesLocalAuthFallback, TestHomeSelectionEndsAfterExecute, TestHomeNonStreamingExecutionLogsSelectedOAuthAuth, TestHomeSelectionClosesAttemptAndWebSocketResources …	
-M6-0225	missing	partial	automatic	crates/gnocchi/src/home.rs session canonicalization and dispatch tests; prompt_cache_and_conversation_aliases_share_one_home_session	Canonical Home sessions exist; the two fallback-audit Go cases are not ported by name.
-M6-0226	partial	partial	automatic	3/9 cases: crates/gnocchi/src/home.rs; not matched: TestHomeNonForceAliasSessionReuseAndTargetChangeReleasesAccountedModel, TestHomeAuthSelectionRouteRetainsRequestedResponseAliasAcrossWebsocketReuse, TestHomeForceMappingAliasChangeEndsAndFlushesBeforeRedispatch, TestHomeRetainedRouteRewritesReasoningSuffixAndWaitsForReleaseACK …	
-M6-0228	partial	partial	automatic	33/34 cases: crates/gnocchi/src/home.rs, crates/cpa-server/src/dispatch.rs (+1); not matched: TestHomeExcludedCredentialEndsRetainedWebsocketSelection	
-M6-0230	missing	partial	automatic	crates/gnocchi/src/home.rs dispatch selection and credential binding tests	First-selected-auth callbacks are not tested by the corresponding Go case.
-M6-0231	missing	partial	automatic	crates/gnocchi/src/home.rs every_pick_releases_exactly_once and streamed_leases_release_when_the_stream_ends_or_the_client_leaves	Selection release exists; all three named Go cases are not reproduced.
-M6-0232	partial	partial	automatic	2/7 cases: crates/gnocchi/src/home.rs; not matched: TestHomeDispatchSelectionOwnsScopeOutsideAuth, TestHomeDispatchSelectionReplaceAuthPreservesRoutingAttributes, TestHomeDispatchSelectionReplaceAuthConcurrentClone, TestReplaceHomeSelectionAuthUpdatesRetainedRuntimeAuth …	
-M6-0233	partial	partial	automatic	15/18 cases: crates/gnocchi/src/home.rs, crates/cpa-home/src/session_alias.rs; not matched: TestHomeDispatchSessionIDsMatchesLCPCompaction, TestHomeDispatchSessionIDsMatchesLCPCompactionViaReportHomeResult, TestHomeDispatchSessionIDsWithoutPresetProviderMetadata	
-M6-0234	partial	partial	automatic	3/9 cases: crates/gnocchi/src/home.rs; not matched: TestHomeUnauthorizedDoesNotRefreshRetainedSelection, TestRefreshHomeSelectionReusesConcurrentNewerToken, TestHomeNoCandidatePreservesOriginalUpstreamError, TestHomeUnauthorizedStreamDoesNotRefreshOrReplay …	
-M6-0237	missing	partial	automatic	crates/gnocchi/src/home.rs Home dispatch/session and WebSocket binding	All eleven pinned-WebSocket reuse and invalidation cases are not reproduced.
+M6-0221	partial	partial	automatic	19/22 cases: crates/cook-router/src/home.rs, crates/cpa-home/src/dispatch.rs; not matched: TestPickHomeDispatchSelectionReleasesAccountedScopeAfterPayloadDecodeFailure, TestPickHomeDispatchSelectionReleasesAccountedScopeAfterAuthDecodeFailure, TestRetryAfterFromWrappedHomeBusyError	
+M6-0224	partial	partial	automatic	9/28 cases: crates/cook-router/src/home.rs; not matched: TestHomeModeNeverAuthorizesLocalAuthFallback, TestHomeSelectionEndsAfterExecute, TestHomeNonStreamingExecutionLogsSelectedOAuthAuth, TestHomeSelectionClosesAttemptAndWebSocketResources …	
+M6-0225	missing	partial	automatic	crates/cook-router/src/home.rs session canonicalization and dispatch tests; prompt_cache_and_conversation_aliases_share_one_home_session	Canonical Home sessions exist; the two fallback-audit Go cases are not ported by name.
+M6-0226	partial	partial	automatic	3/9 cases: crates/cook-router/src/home.rs; not matched: TestHomeNonForceAliasSessionReuseAndTargetChangeReleasesAccountedModel, TestHomeAuthSelectionRouteRetainsRequestedResponseAliasAcrossWebsocketReuse, TestHomeForceMappingAliasChangeEndsAndFlushesBeforeRedispatch, TestHomeRetainedRouteRewritesReasoningSuffixAndWaitsForReleaseACK …	
+M6-0228	partial	partial	automatic	33/34 cases: crates/cook-router/src/home.rs, crates/cpa-server/src/dispatch.rs (+1); not matched: TestHomeExcludedCredentialEndsRetainedWebsocketSelection	
+M6-0230	missing	partial	automatic	crates/cook-router/src/home.rs dispatch selection and credential binding tests	First-selected-auth callbacks are not tested by the corresponding Go case.
+M6-0231	missing	partial	automatic	crates/cook-router/src/home.rs every_pick_releases_exactly_once and streamed_leases_release_when_the_stream_ends_or_the_client_leaves	Selection release exists; all three named Go cases are not reproduced.
+M6-0232	partial	partial	automatic	2/7 cases: crates/cook-router/src/home.rs; not matched: TestHomeDispatchSelectionOwnsScopeOutsideAuth, TestHomeDispatchSelectionReplaceAuthPreservesRoutingAttributes, TestHomeDispatchSelectionReplaceAuthConcurrentClone, TestReplaceHomeSelectionAuthUpdatesRetainedRuntimeAuth …	
+M6-0233	partial	partial	automatic	15/18 cases: crates/cook-router/src/home.rs, crates/cpa-home/src/session_alias.rs; not matched: TestHomeDispatchSessionIDsMatchesLCPCompaction, TestHomeDispatchSessionIDsMatchesLCPCompactionViaReportHomeResult, TestHomeDispatchSessionIDsWithoutPresetProviderMetadata	
+M6-0234	partial	partial	automatic	3/9 cases: crates/cook-router/src/home.rs; not matched: TestHomeUnauthorizedDoesNotRefreshRetainedSelection, TestRefreshHomeSelectionReusesConcurrentNewerToken, TestHomeNoCandidatePreservesOriginalUpstreamError, TestHomeUnauthorizedStreamDoesNotRefreshOrReplay …	
+M6-0237	missing	partial	automatic	crates/cook-router/src/home.rs Home dispatch/session and WebSocket binding	All eleven pinned-WebSocket reuse and invalidation cases are not reproduced.
 M3-0340	partial	partial	manual	crates/cpa-core/src/credential.rs	Not ported by name.
 M3-0341	partial	partial	manual	crates/cpa-core/src/credential.rs MetadataPatch	Not ported by name.
 M4-0458	partial	partial	manual	crates/cpa-server/src/scheduler.rs tests; crates/cpa-server/tests/scheduler_attempts.rs; server_go.json	Not ported by name.
@@ -785,7 +785,7 @@ M4-0476	partial	partial	manual	crates/cpa-server/src/scheduler.rs tests; crates/
 M4-0477	partial	partial	manual	crates/cpa-server/src/runtime.rs, registry.rs	Not ported by name.
 M4-0478	partial	partial	manual	crates/cpa-server/src/runtime.rs, registry.rs	Not ported by name.
 M4-0479	partial	partial	manual	crates/cpa-server/src/runtime.rs, registry.rs	Not ported by name.
-M6-0238	partial	partial	automatic	implementation cites discovery_advertiser.go (crates/gnocchi/src/discovery/mod.rs); no case matched by name	
+M6-0238	partial	partial	automatic	implementation cites discovery_advertiser.go (crates/cook-router/src/discovery/mod.rs); no case matched by name	
 M4-0480	partial	covered	manual	3/3 cases: crates/cpa-home/src/registry.rs	
 M4-0481	partial	covered	manual	1/1 cases: crates/cpa-home/src/registry.rs	
 M4-0482	partial	covered	manual	10/10 cases: crates/cpa-home/src/registry.rs	

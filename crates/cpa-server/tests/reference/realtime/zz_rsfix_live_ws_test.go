@@ -1,6 +1,6 @@
 package live
 
-// WebSocket goldens for gnocchi: the real sideband and standard Realtime handlers
+// WebSocket goldens for cook-router: the real sideband and standard Realtime handlers
 // relaying to a local gorilla upstream. Copy into internal/client/codex/live/ of
 // CLIProxyAPI 6fecc6e and run with RSFIX_OUT=<dir>; it writes codex_live_ws_go.json.
 

@@ -1,4 +1,4 @@
-//! Contracts shared by every gnocchi crate.
+//! Contracts shared by every cook-router crate.
 //!
 //! - [`config`]: `config.yaml`, compatible with CLIProxyAPI.
 //! - [`credential`]: runtime credentials loaded from `auth-dir` or config.

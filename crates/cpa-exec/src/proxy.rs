@@ -1969,7 +1969,7 @@ mod tests {
         let cases = fixture["redirects"].as_array().unwrap();
         // Go's net/url builds every hop; Rust does with exact_target, and normalizes
         // otherwise, which only dot segments, escaping and malformed targets tell apart.
-        // gnocchi refuses a hop whose Host header wreq would write without Go's port
+        // cook-router refuses a hop whose Host header wreq would write without Go's port
         // (DIFFERENCES "Model catalog reads"): the hops before it go out, then the
         // request fails.
         const REFUSED: &[(&str, usize)] = &[

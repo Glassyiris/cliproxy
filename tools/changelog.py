@@ -20,7 +20,7 @@ from pathlib import Path
 
 TYPES = ["Added", "Changed", "Fixed", "Removed", "Security", "Internal"]
 FRAGMENT_NOTE = "Entries live in [changes/](changes/) until release."
-REPO_URL = "https://github.com/prep-cook/gnocchi"
+REPO_URL = "https://github.com/prep-cook/cook-router"
 SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.md")
 SHA = re.compile(r"[a-f0-9]{40,64}")
 NO_CHANGELOG = "no-changelog"

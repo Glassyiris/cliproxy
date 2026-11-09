@@ -19,7 +19,7 @@ boundary (the reference checkout is not modified):
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # at 6fecc6e
-crate=/absolute/path/to/gnocchi/crates/cpa-exec
+crate=/absolute/path/to/cook-router/crates/cpa-exec
 tmp=$(mktemp -d)
 cp "$crate"/tests/reference/openai_compat/*.go "$tmp/"
 (

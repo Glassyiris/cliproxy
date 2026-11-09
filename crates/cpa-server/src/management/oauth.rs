@@ -4,7 +4,7 @@
 //! `GET|POST /oauth/callback` and `POST /oauth/import` (vertex_import.go).
 //!
 //! Go hands callbacks to the waiting login through `.oauth-<provider>-<state>.oauth`
-//! files in auth-dir; gnocchi keeps the callback with the pending session in
+//! files in auth-dir; cook-router keeps the callback with the pending session in
 //! memory, so nothing extra appears in the watched directory.
 
 use cpa_core::gostr::GoStr;
