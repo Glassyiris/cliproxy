@@ -1,5 +1,13 @@
-// UI adapter for the React dashboard (src/). Same shape as svelte.mjs; see that file for how the
-// harness reads each field. Only built pages are listed: a page joins `pages` when its route does.
+// UI adapter for the React dashboard (src/). Every selector the harness uses lives here; the
+// harness itself knows nothing about the markup. Only built pages are listed: a page joins `pages`
+// when its route does.
+//
+// To measure another implementation, copy this file to adapters/<name>.mjs, change the selectors and
+// expressions, and run with --ui <name>.
+//
+// Expressions are JavaScript source strings evaluated in the page. They see `ctx`:
+//   ctx.n      number of accounts the mock serves
+//   ctx.title  the expected page heading
 //
 // Astryx AppShell renders the page area as <div role="main">, not <main>.
 

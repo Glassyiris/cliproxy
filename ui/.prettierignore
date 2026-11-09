@@ -32,5 +32,4 @@ src/lib/quotaWindows.test.ts
 tools/api-allowlist.json
 tools/check-api.mjs
 tools/mock/server.mjs
-tools/perf/adapters/svelte.mjs
 tools/perf/run.mjs

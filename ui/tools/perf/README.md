@@ -16,8 +16,8 @@ Build the UI somewhere other than `ui/dist`, then run the harness from `ui/`:
 
 ```sh
 cd ui
-node_modules/.bin/vite build --outDir /scratch/ssd/cliproxy-perf/dist-svelte --emptyOutDir
-node tools/perf/run.mjs --accounts 1000 --minutes 5 --dist /scratch/ssd/cliproxy-perf/dist-svelte
+node_modules/.bin/vite build --outDir "${TMPDIR:-/tmp}/cliproxy-perf/dist" --emptyOutDir
+node tools/perf/run.mjs --accounts 1000 --minutes 5 --dist "${TMPDIR:-/tmp}/cliproxy-perf/dist"
 ```
 
 The harness starts the mock on a free port, starts `vite preview` of `--dist` (its `/v8` proxy
@@ -28,9 +28,9 @@ form and measures. It stops both servers on exit. Nothing is built or written in
 | --- | --- | --- |
 | `--accounts N` | 1000 | accounts the mock serves |
 | `--minutes M` | 5 | how long to keep polling for M2 and M3 |
-| `--ui NAME` | svelte | adapter in `adapters/` |
+| `--ui NAME` | react | adapter in `adapters/` |
 | `--dist DIR` | `ui/dist` | built UI to serve |
-| `--out DIR` | `/scratch/ssd/cliproxy-perf/<timestamp>/` | where `report.json`, `report.md`, `mock.log`, `preview.log` go |
+| `--out DIR` | `<os tmpdir>/cliproxy-perf/<timestamp>/` | where `report.json`, `report.md`, `mock.log`, `preview.log` go |
 | `--seed N` | 1 | mock seed; the same seed gives the same accounts |
 | `--idle S` | 60 | seconds of M4 idle |
 | `--polls N` | 6 | polls M2 takes its median over |
@@ -51,7 +51,7 @@ The mock alone: `node tools/mock/server.mjs --port 8317 --accounts 1000 --seed 1
 ## What the mock serves
 
 Every route the dashboard calls, with response shapes taken from `crates/cpa-server/src/management/`
-and the fields `src/core.ts` and `src/quota.ts` read. `X-CPA-VERSION: cliproxy-rs-mock` makes the UI
+and the fields the dashboard's `src/lib/` modules read. `X-CPA-VERSION: cliproxy-rs-mock` makes the UI
 treat it as cliproxy-rs. Accounts spread over claude, codex, gemini, kimi, antigravity, xai, devin
 and vertex, with twenty `recent_requests` buckets each, about 5% disabled, 5% cooling, 2% signed
 out, 3% with a model cooldown, and passive quota signals on most Claude, Codex and Devin accounts.
@@ -86,14 +86,14 @@ renderer main thread only, not compositing or the GPU.
 - **M5 interactions.** On Accounts: select all, deselect all, select one row, unselect it, expand a row,
   collapse it. Time from the click event to the frame after the page reached the expected state.
   Median and maximum over `--reps`; a 10 s poll landing inside a step shows up as the maximum.
-- **Pages.** Client-side navigation to each of the 13 pages: time until its heading shows and nothing
+- **Pages.** Client-side navigation to each page the adapter lists: time until its heading shows and nothing
   is loading, the `/v8` requests it made, and any with status 400 or higher. The empty-body requests
   the dashboard sends to learn which routes a server has are expected to fail with 400; they are
   counted as probes and not listed (`isExpectedProbe` in the adapter). Console errors are listed.
 
 ## Adding another UI
 
-Copy `adapters/svelte.mjs`, change the selectors and expressions, run with `--ui <name>`. The adapter
-supplies the login selectors, the 13 page headings, a "ready" expression per page (and one that holds
+Copy `adapters/react.mjs`, change the selectors and expressions, run with `--ui <name>`. The adapter
+supplies the login selectors, the page headings, a "ready" expression per page (and one that holds
 once every account is listed), the M5 steps (a target to click and a condition that must hold), and
 `isExpectedProbe`. Keep the measured behaviour the same, or the numbers will not compare.
