@@ -1039,7 +1039,7 @@ dependencies = [
  "bytes",
  "cpa-common",
  "cpa-core",
- "rand 0.9.5",
+ "rand 0.10.3",
  "regex",
  "serde_json",
  "sha2 0.10.9",
