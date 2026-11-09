@@ -28,14 +28,16 @@ Limits set by the owner on 2026-11-08 unless noted. Performance baselines are fr
 | Pre-commit checks | none yet; the merge gate is the first tier | — | — |
 | Browser end-to-end checks | 60 s each, 5 min total; run before merge, not per commit | pending | review of the run log |
 | Performance harness | not a merge gate; run at P2 and before release | — | `tools/perf/run.mjs` |
-| Frontend entry chunk, gzip | set after the shell lands | old Svelte UI: JS 53,436 B, CSS 5,351 B (2026-11-07, desktop, load not recorded) | `tools/size.mjs` |
-| Frontend total JS + CSS, gzip | set after the shell lands | as above | `tools/size.mjs` |
+| Frontend entry chunk, gzip | ceilings, set once 2026-11-09: initial JS 360,000 B, initial CSS 55,000 B, largest lazy chunk 120,000 B (`tools/size-budget.json`) | 333,632 B, 47,776 B, 105,870 B (2026-11-09, committed build); old Svelte UI: JS 53,436 B, CSS 5,351 B (2026-11-07, desktop, load not recorded) | `tools/size.mjs` |
+| Frontend total JS + CSS, gzip | reported in the size report comment, no ceiling | JS 946,229 B, CSS 55,811 B (2026-11-09, committed build) | `tools/size.mjs` |
 | Accounts, 1,000 accounts: load to all rows painted | ≤ baseline | 426 ms | `tools/perf/run.mjs` |
 | One 10 s poll on Accounts, main thread | ≤ baseline | 101 ms | `tools/perf/run.mjs` |
 | JS heap after 5 min of polling | ≤ baseline | 53.2 MB (from 52.0 MB) | `tools/perf/run.mjs` |
 | Idle CPU on Accounts | ≤ baseline | 1.2% of one core | `tools/perf/run.mjs` |
 | Select all, main thread | ≤ baseline | 313 ms | `tools/perf/run.mjs` |
 | Contrast, both themes | body ≥ 10:1, secondary and status text ≥ 5:1 (above WCAG AA, from `DESIGN.md`) | Rosé Pine Moon dark: body 11.86, lowest 3.94; Rosé Pine (Main) dark: body 13.39, lowest 3.16; Dawn light, both palettes: body 8.69, lowest 2.86 (2026-11-08, browser, 1440 px, en; remeasured with the highlight roles, unchanged). Pairs below the limits: Exceptions | browser measurement, reported per phase |
+
+Bundle ceilings (owner, 2026-11-09: 「預算判夠不要每次都改 和doona honk的ci一樣評論可以看到變化的」): the limits above are ceilings with headroom, not the last measurement, so a pull request that grows the bundle does not edit `tools/size-budget.json`. CI posts each pull request's sizes next to master's and the ceilings as a comment (`.github/ci/report`). Raise a ceiling only when a change needs it, with the owner's approval.
 
 ## Enforcement
 

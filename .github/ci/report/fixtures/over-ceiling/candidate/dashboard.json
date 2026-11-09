@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "lane": "dashboard",
+  "metrics": [
+    {
+      "key": "initialJs",
+      "value": 361204,
+      "ceiling": 360000,
+      "unit": "bytes"
+    },
+    {
+      "key": "initialCss",
+      "value": 47776,
+      "ceiling": 55000,
+      "unit": "bytes"
+    },
+    {
+      "key": "largestLazyChunk",
+      "value": 105870,
+      "ceiling": 120000,
+      "unit": "bytes",
+      "detail": "plots-B1QdKRpU.js"
+    },
+    {
+      "key": "totalJs",
+      "value": 973801,
+      "ceiling": null,
+      "unit": "bytes"
+    },
+    {
+      "key": "totalCss",
+      "value": 55811,
+      "ceiling": null,
+      "unit": "bytes"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "lane": "perf-2000",
+  "metrics": [
+    {
+      "key": "idle.linux.2000.wakeups",
+      "value": 0,
+      "ceiling": 3,
+      "unit": "count"
+    },
+    {
+      "key": "idle.linux.2000.cpu_ticks",
+      "value": 1,
+      "ceiling": 1,
+      "unit": "count"
+    },
+    {
+      "key": "idle.linux.2000.threads",
+      "value": 6,
+      "ceiling": 6,
+      "unit": "count"
+    },
+    {
+      "key": "idle.linux.2000.rss_kb",
+      "value": 77388,
+      "ceiling": 85241,
+      "unit": "kB"
+    }
+  ]
+}

@@ -1,10 +1,14 @@
 name: Bug report
 description: Something does not work as documented, or differs from CLIProxyAPI without a listed reason.
+title: 'bug: '
 labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Leave real keys, tokens and account files out of this report. Replace them with placeholders.
+      value: |
+        AI may help write this report. Unverified content may not be submitted.
+
+        Leave real keys, tokens and account files out of this report. Replace them with placeholders.
   - type: textarea
     id: what
     attributes:
@@ -43,5 +47,25 @@ body:
     id: logs
     attributes:
       label: Logs
-      description: The server log lines around the problem, with keys and tokens removed.
+      description: The server log lines around the problem, with keys and tokens removed. If none are available, say so.
       render: text
+  - type: input
+    id: owner
+    attributes:
+      label: Human responsible
+      description: Enter your GitHub username. You must verify this report and answer follow-up questions; an AI cannot answer for you.
+      placeholder: '@your-name'
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirm
+      description: Check only claims that are true. A false claim closes the issue.
+      options:
+        - label: I searched existing issues and pull requests and found no matching report.
+          required: true
+        - label: This report describes what I observed.
+          required: true
+        - label: I checked the boxes above without reading them.
+        - label: I am an AI agent, and this content was submitted without human review.

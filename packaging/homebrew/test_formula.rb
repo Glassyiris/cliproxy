@@ -56,7 +56,7 @@ puts "Formula: explicit service config, immediate service type, private config, 
 workflow = YAML.safe_load_file(".github/workflows/release.yml")
 raise "missing published event" unless workflow.fetch("on", workflow[true]).fetch("release").fetch("types") == ["published"]
 jobs = workflow.fetch("jobs")
-%w[dashboard test build docker].each do |job|
+%w[test build docker].each do |job|
   raise "#{job} runs on publication" unless jobs.fetch(job).fetch("if") == "github.event_name != 'release'"
 end
 raise "draft job runs on publication" unless jobs.fetch("release").fetch("if").start_with?("github.event_name == 'push' &&")

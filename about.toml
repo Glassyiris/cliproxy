@@ -1,0 +1,25 @@
+# cargo-about config for THIRD-PARTY-NOTICES (tools/third-party-notices.py runs it offline).
+# Needs cargo-about 0.9.3: cargo install cargo-about --version 0.9.3 --locked --features cli
+# A crate with a license outside this list fails the run, so a new license gets reviewed.
+# AGPL-3.0-or-later is cliproxy's own workspace crates, which the script leaves out.
+accepted = [
+  "0BSD",
+  "AGPL-3.0-or-later",
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "CDLA-Permissive-2.0",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib",
+]
+# The five release targets (.github/workflows/release.yml).
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+# Only what is linked into the binary.
+ignore-dev-dependencies = true
+ignore-build-dependencies = true

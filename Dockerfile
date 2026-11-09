@@ -28,6 +28,8 @@ RUN apt-get update \
  && mkdir -p /data \
  && chown cliproxy:cliproxy /data
 COPY --from=build /usr/local/bin/cliproxy /usr/local/bin/cliproxy
+# The license, the MIT notices it carries forward, and the third-party licenses the binary needs.
+COPY LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES /usr/share/doc/cliproxy/
 USER cliproxy
 # Config and credentials live in /data; mount a volume there. No VOLUME instruction:
 # some hosts, Railway among them, refuse to build a Dockerfile that has one.

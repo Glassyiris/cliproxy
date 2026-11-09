@@ -25,21 +25,39 @@ Tests use local mock upstreams only. Never point a test at a real provider or us
 
 CI holds the binary to the numbers in [`bench/budgets.txt`](bench/budgets.txt), and it counts events and bytes, never elapsed time:
 
-- Size, on every pull request: the Linux release binary, its `.text` and `.rodata`, the release archive, and the number of crates linked in more than one version.
-- Idle, on every pull request: [`bench/idle.sh`](bench/idle.sh) with 1 and with 2,000 auth files: wakeups, CPU ticks, threads and RSS over 30 seconds without requests.
+- Size, on every push to master and on pull requests that can change the binary (see `.github/scripts/ci-lanes.py`): the Linux release binary, its `.text` and `.rodata`, the release archive, and the number of crates linked in more than one version.
+- Idle, on the same changes: [`bench/idle.sh`](bench/idle.sh) with 1 and with 2,000 auth files: wakeups, CPU ticks, threads and RSS over 30 seconds without requests.
 - Heap per request: `crates/cpa-server/tests/alloc_budget.rs`, part of `cargo test`, sends one 306 KB and one 1.9 MB request through the Claude route, the same sizes through Claude count_tokens (counted locally) and through the Codex Responses route, and the Claude bodies cloaked and signed through a Claude OAuth login with request capture, one at a time and eight at once, under a counting allocator.
 - macOS and Windows idle, in the release builds and weekly ([`idle.yml`](.github/workflows/idle.yml)). Memory soaks ([`soak.yml`](.github/workflows/soak.yml), [`bench/soak.sh`](bench/soak.sh)): one hour of the Claude load and one hour of the field mix (Claude, Codex and count_tokens requests of 200 KB to 2 MB) on every release tag, 300 minutes of the field mix every week, and up to 330 minutes by hand before a release. The resting RSS must stay flat, and the field mix's peak (`VmHWM`) within its budget.
 
-To run the Linux gates locally, build with `cargo build --release -p cliproxy`, then run `bench/gate.sh size x86_64-unknown-linux-gnu target/release/cliproxy` and `bench/gate.sh idle linux target/release/cliproxy 1`. When a change needs more, raise the value in `bench/budgets.txt` and add a dated line above it that names the feature and its cost.
+To run the Linux gates locally, build with `cargo build --release -p cliproxy`, then run `bench/gate.sh size x86_64-unknown-linux-gnu target/release/cliproxy` and `bench/gate.sh idle linux target/release/cliproxy 1`. The size lines and the dashboard's `ui/tools/size-budget.json` are ceilings with headroom, set once (owner, 2026-11-09), so an ordinary pull request does not edit them; each pull request instead gets a size report comment with its numbers next to master's and the ceilings ([`.github/ci/report`](.github/ci/report/README.md)). Raise a ceiling or budget only when a change needs it, with the owner's approval, and give the reason next to the line.
 
 The dashboard lives in `ui/` (React 19 and Astryx). `npm ci`, `npm run check`, `npm test` and `npm run build` there; the build also checks the bundle size budget. See [ui/README.md](ui/README.md).
 
+## Changelog fragments
+
+Do not edit `CHANGELOG.md` in a pull request. Add one file, `changes/<branch-slug>.md`, whose first line is `Added`, `Changed`, `Fixed`, `Removed`, `Security` or `Internal`, followed by `- ` bullets that say what users see change:
+
+```markdown
+Fixed
+
+- The relay stops waiting when the upstream request times out.
+```
+
+A pull request that touches shipped code needs a new fragment: `crates/`, `ui/src/`, `ui/dist/`, `ui/public/`, `ui/index.html`, `install.sh`, `install.ps1`, `Dockerfile`, `vendor/`, `Cargo.toml` or `Cargo.lock`. Tests and documentation do not. A maintainer can apply the `no-changelog` label when an entry is unnecessary. The `Changes` workflow checks every fragment; `python3 -I tools/changelog.py check` runs the same check locally and `python3 -I tools/changelog.py render` previews the Unreleased section. [changes/README.md](changes/README.md) has the full rules and the release command.
+
 ## Pull requests
 
+- Fill in the [pull request template](.github/pull_request_template.md); a Chinese template is available through its first link. Name the person who answers for the change. You may use AI to help write it, but you must have read and verified every line, and you answer for it.
 - Keep each pull request to one change, with a test that fails without it.
+- Keep each commit to one coherent change, with a short English subject and body.
 - Request bodies are forwarded byte for byte unless a ported rule rewrites them; do not re-serialize JSON just to pass it through.
 - Never log or forward credentials or client keys to the wrong side.
 - Mark a deliberate simplification with a `ponytail:` comment that names its limit and how to lift it.
-- CI must pass: format, clippy, tests, the harness check, clippy on Windows (all targets, warnings as errors) and the Linux size and idle gates.
+- CI must pass: the `ci-ok` check, which requires every lane the change selects (format, clippy, tests, the harness check, clippy on Windows with all targets and warnings as errors, the Linux size and idle gates, the dashboard checks and actionlint), and the changelog fragment check. Add the `ci:full` label to run every lane.
 
-By contributing you agree that your work is released under the [MIT license](LICENSE).
+## Issues
+
+Search existing issues first, then pick a form: bug report or feature request, each in English and in Simplified Chinese. State your version (`cliproxy --version`), how you installed it, and whether CLIProxyAPI behaves the same. Remove keys, tokens and account files from logs and configuration before posting. Usage questions go through [SUPPORT.md](.github/SUPPORT.md), and vulnerabilities through [SECURITY.md](SECURITY.md), never a public issue. Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
+
+By contributing you agree that your work is released under the [GNU Affero General Public License, version 3 or later](LICENSE).

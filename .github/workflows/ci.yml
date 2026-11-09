@@ -1,17 +1,26 @@
-# Formatting, lints, the full test suite and the harness build on every pull request and
-# push to master, plus clippy and the file writer tests on Windows and the Linux size and
-# idle gates. release.yml calls this workflow too, so a tagged release runs the same checks
-# before it builds anything.
+# Formatting, lints, the full test suite and the harness build, clippy and the file writer
+# tests on Windows, the Linux size and idle gates, the dashboard's checks, actionlint and the
+# THIRD-PARTY-NOTICES check.
+# Every push to master, every manual run and the call from release.yml (so a tagged release
+# runs the same checks before it builds anything) run all of them. A pull request runs the
+# lanes its changed paths can affect (.github/scripts/ci-lanes.py, which lists the rules);
+# the label ci:full runs every lane. The ci-ok job passes when every selected lane passed
+# and every other lane was skipped, so it is the one check to require.
 # One run per change: pushes to master, and pull requests through `pull_request` only. A
 # branch push used to start a second run of every job for the same commit. Runs are
 # grouped per pull request (or per ref outside one), and a newer push cancels the older
 # run.
+# The only artifacts are the size report's metrics (ci-report-*, .github/ci/report), and
+# only pull requests and pushes to master upload them: release.yml calls this workflow and
+# publishes the build artifacts of its run.
 name: CI
 
 on:
   push:
     branches: [master]
   pull_request:
+    # labeled: adding ci:full reruns the pull request with every lane.
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
   workflow_call:
 
@@ -30,12 +39,44 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  # Which lanes this run needs. Its own tests run first, so a pull request that changes the
+  # rules is selected by rules that pass them. If this job fails, every lane runs and ci-ok
+  # fails.
+  changes:
+    name: lanes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      lanes: ${{ steps.select.outputs.lanes }}
+      dashboard: ${{ steps.select.outputs.dashboard }}
+      tests: ${{ steps.select.outputs.tests }}
+      lint: ${{ steps.select.outputs.lint }}
+      windows: ${{ steps.select.outputs.windows }}
+      perf: ${{ steps.select.outputs.perf }}
+      workflows: ${{ steps.select.outputs.workflows }}
+      notices: ${{ steps.select.outputs.notices }}
+    steps:
+      # The test merge commit and its first parent, the base branch tip.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Selector tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes.py'
+      # The size report's renderer (report.yml runs master's copy after each pull request run).
+      - name: Size report renderer tests
+        run: python3 -I -m unittest discover -s .github/ci/report -p 'test_render.py'
+      - name: Select lanes
+        id: select
+        run: python3 .github/scripts/ci-lanes.py
+
   # The workspace tests in two shards on two runners, each building the tests itself
   # (building once and copying the binaries took longer than building again). Nextest
   # assigns every test to exactly one shard by a hash of its name; the counts job below
   # checks that the shards together ran every test that `cargo nextest list` lists.
   linux:
     name: tests (Linux, shard ${{ matrix.shard }} of 2)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.tests == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -44,7 +85,7 @@ jobs:
     timeout-minutes: 120
     # Each shard sets only its own output; an empty output does not replace another
     # leg's value. Outputs rather than artifacts, because release.yml calls this
-    # workflow and publishes every artifact of its run.
+    # workflow and publishes the artifacts of its run.
     outputs:
       counts-1: ${{ steps.counts.outputs.counts-1 }}
       counts-2: ${{ steps.counts.outputs.counts-2 }}
@@ -55,7 +96,7 @@ jobs:
       # CARGO_* variables, and the perf and Windows jobs keep theirs.
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build tools
         # BoringSSL (through btls-sys) needs cmake, clang and perl; bindgen needs libclang.
         # The script bounds a stalled mirror download (it says how).
@@ -78,7 +119,7 @@ jobs:
           tool: cargo-nextest@0.9.148
       # The plugin tests build Go plugins (cgo, c-shared) from this module. Without Go 1.26
       # they would skip; CPA_TEST_NO_SKIP below turns that skip into a failure.
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: crates/cpa-plugin/tests/goplugins/go.mod
           cache-dependency-path: crates/cpa-plugin/tests/goplugins/go.sum
@@ -154,10 +195,11 @@ jobs:
   test-counts:
     name: test counts (Linux)
     needs: linux
+    if: ${{ !cancelled() && needs.linux.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/scripts
       - name: Test counts
@@ -174,12 +216,14 @@ jobs:
   # optional media-relay feature. In parallel with the tests above.
   lint:
     name: fmt, clippy, harness and media relay tests (Linux)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.lint == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build tools
         run: .github/scripts/apt-install.sh cmake clang libclang-dev perl
       - name: Rust
@@ -235,11 +279,13 @@ jobs:
   # byte-for-byte reproducible.
   dashboard:
     name: dashboard (checks and committed build)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.dashboard == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -249,6 +295,23 @@ jobs:
         run: |
           npm ci
           npm run check
+      # The bundle sizes and ceilings for the size report comment, also when a gate above
+      # failed. size.mjs needs no packages; it exits 1 over a ceiling, which the check above
+      # already reports.
+      - name: Size report
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+        working-directory: ui
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-report"
+          node tools/size.mjs --json "$RUNNER_TEMP/ci-report/dashboard.json" || [ $? -eq 1 ]
+      - name: Upload the size report
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-report-dashboard
+          path: ${{ runner.temp }}/ci-report/dashboard.json
+          if-no-files-found: ignore
+          retention-days: 90
       - name: Rebuild
         working-directory: ui
         run: npm run build
@@ -263,10 +326,15 @@ jobs:
 
   perf:
     name: ${{ matrix.gates }} (Linux)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.perf == 'true') }}
     # The release builds use Ubuntu 22.04 too, so the sizes compare with theirs, and its
     # unprivileged user namespaces give bench/idle.sh a loopback-only network. The two
     # idle gates run on separate runners, so neither waits out the other's 60 s window;
-    # each still has its machine to itself. Both build the same release binary.
+    # each still has its machine to itself. Both build the same release binary: the
+    # build is about 340 s, nearly all of it the workspace crates one after another
+    # (codegen-units = 1, thin LTO), and a gate job that waited for one shared build would
+    # finish later than these two building side by side.
     strategy:
       fail-fast: false
       matrix:
@@ -276,7 +344,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build tools
         run: .github/scripts/apt-install.sh cmake clang libclang-dev perl
       - name: Rust
@@ -293,31 +361,56 @@ jobs:
             exit 1
           fi
           cargo build --release --locked -p cliproxy
-      # Bytes and counts against bench/budgets.txt, never elapsed time.
+      # Bytes and counts against bench/budgets.txt, never elapsed time. GATE_REPORT collects
+      # every measurement and its ceiling for the size report comment.
       - name: Size
         if: matrix.auth-files == 1
+        env:
+          GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
         run: |
           name=cliproxy-ci-x86_64-unknown-linux-gnu
-          mkdir -p "$name" && cp target/release/cliproxy README.md LICENSE "$name/"
+          mkdir -p "$name" && cp target/release/cliproxy README.md LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES "$name/"
           tar -czf "$name.tar.gz" "$name"
           bench/gate.sh size x86_64-unknown-linux-gnu target/release/cliproxy "$name.tar.gz"
       - name: Idle
         env:
           AUTH_FILES: ${{ matrix.auth-files }}
+          GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
         run: bench/gate.sh idle linux target/release/cliproxy "$AUTH_FILES"
+      # Also after a failed gate; nothing when the build failed before any gate ran.
+      - name: Size report
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+        env:
+          LANE: perf-${{ matrix.auth-files }}
+          GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
+        run: |
+          [ -f "$GATE_REPORT" ] || exit 0
+          mkdir -p "$RUNNER_TEMP/ci-report"
+          jq -s --arg lane "$LANE" '{schema_version: 1, lane: $lane, metrics: .}' "$GATE_REPORT" \
+            > "$RUNNER_TEMP/ci-report/$LANE.json"
+      - name: Upload the size report
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-report-perf-${{ matrix.auth-files }}
+          path: ${{ runner.temp }}/ci-report/perf-${{ matrix.auth-files }}.json
+          if-no-files-found: ignore
+          retention-days: 90
 
   # Clippy over every target (tests, examples, benches) with warnings as errors, so code
   # that only builds on Windows, test-only code included, is held to the Linux rules.
   # Checking only, no codegen or link, so it stays a few minutes on a warm cache.
   windows:
     name: clippy (Windows)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.windows == 'true') }}
     runs-on: windows-2025
     timeout-minutes: 60
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # btls-sys keeps BoringSSL's assembly on a native MSVC build, and BoringSSL assembles
       # x86_64 Windows code with NASM, which the image lacks. bindgen needs libclang.
       - name: NASM and libclang
@@ -344,3 +437,99 @@ jobs:
           cargo test --locked --target x86_64-pc-windows-msvc -p cpa-exec -p cpa-store --lib --
           browser_login_writes_go_file a_busy_port_is_go_port_in_use existing_file_keeps_user_fields codex_siwc_bind::
           seed_config_copies_the_template
+
+  # actionlint, with shellcheck over the run scripts (the runner image has shellcheck), on
+  # every workflow. Pinned in .github/ci/pins.env and checked against its SHA-256.
+  workflows:
+    name: actionlint
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.workflows == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        run: |
+          # shellcheck source=/dev/null
+          . .github/ci/pins.env
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -version
+          "$RUNNER_TEMP/actionlint"
+
+  # The one check to require. It passes when the lane selection succeeded, every selected
+  # lane's jobs succeeded and every other lane's jobs were skipped; a docs-only pull
+  # request selects none and passes on the selection alone.
+  # THIRD-PARTY-NOTICES must list the dependency set and license texts the binary ships:
+  # tools/third-party-notices.py regenerates it from cargo-about and the dashboard build and
+  # fails on any difference. cargo-about is pinned in .github/ci/pins.env and cached.
+  notices:
+    name: third-party notices
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.notices == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Read the cargo-about pin
+        id: pin
+        run: |
+          . .github/ci/pins.env
+          echo "version=$CARGO_ABOUT_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Cache cargo-about
+        id: about
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo-about
+          key: cargo-about-${{ steps.pin.outputs.version }}-${{ runner.os }}
+      # Without --features cli, cargo-about installs no binary and still exits 0.
+      - name: Install cargo-about
+        if: steps.about.outputs.cache-hit != 'true'
+        run: cargo install cargo-about --version "${{ steps.pin.outputs.version }}" --locked --features cli --root ~/.cargo-about
+      - name: Install the dashboard's packages
+        working-directory: ui
+        run: npm ci
+      - name: THIRD-PARTY-NOTICES matches the dependencies
+        run: CARGO_ABOUT="$HOME/.cargo-about/bin/cargo-about" python3 -I tools/third-party-notices.py --check
+
+  ci-ok:
+    needs: [changes, linux, test-counts, lint, dashboard, perf, windows, workflows, notices]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Selected lanes passed, the others skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ["NEEDS"])
+          jobs = {"dashboard": ["dashboard"], "tests": ["linux", "test-counts"], "lint": ["lint"],
+                  "windows": ["windows"], "perf": ["perf"], "workflows": ["workflows"],
+                  "notices": ["notices"]}
+          ok = needs["changes"]["result"] == "success"
+          selected = set(json.loads(needs["changes"]["outputs"].get("lanes") or "null") or []) if ok else set()
+          rows = [f"| changes | lane selection | {needs['changes']['result']} | success |"]
+          for lane, names in jobs.items():
+              want = "success" if lane in selected else "skipped"
+              for name in names:
+                  got = needs[name]["result"]
+                  ok &= got == want
+                  rows.append(f"| {name} | {lane} | {got} | {want} |")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write("### CI result\n\n| Job | Lane | Result | Expected |\n| --- | --- | --- | --- |\n")
+              out.write("\n".join(rows) + "\n")
+          print("\n".join(rows))
+          if not ok:
+              print("::error::A selected lane did not pass, or an unselected lane did not skip")
+              sys.exit(1)
+          PY

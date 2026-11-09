@@ -1,9 +1,20 @@
-cliproxy-rs
+cliproxy
+Copyright (C) 2026 cliproxy contributors
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version. LICENSE holds the license text.
+
+cliproxy is derived from software distributed under the MIT License:
+
+cliproxy-rs (https://github.com/vayungodara/cliproxy-rs)
 Copyright (c) 2026 Vayun Godara and cliproxy-rs contributors
 
-Portions of this software are derived from CLIProxyAPI
-(https://github.com/router-for-me/CLIProxyAPI), distributed under the MIT License:
+CLIProxyAPI (https://github.com/router-for-me/CLIProxyAPI)
 Copyright (c) 2025-2005.9 Luis Pater
 Copyright (c) 2025.9-present Router-For.ME
 
-LICENSE holds the MIT License text, which covers both.
+LICENSE-MIT holds the MIT License text, which covers those portions.
+
+THIRD-PARTY-NOTICES lists the other third-party software in the binary and its licenses.

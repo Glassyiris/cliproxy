@@ -1,19 +1,35 @@
-// Bundle budget (REQUIREMENTS row 18), run after `vite build`. Sizes are gzip bytes of
+// Bundle budget (REQUIREMENTS rows 31 and 32), run after `vite build`. Sizes are gzip bytes of
 //   initialJs        the entry script, its static imports and the inline scripts of index.html
 //   initialCss       the stylesheets index.html links
 //   largestLazyChunk the biggest JS chunk outside the initial set (loaded on demand)
-// against tools/size-budget.json. A `null` limit prints the measured size and passes; the owner
-// fixes the numbers once the first pages exist. Lazy CSS is not counted.
+//   totalJs          every JS chunk and the inline scripts, initial and lazy
+//   totalCss         every stylesheet, linked and lazy
+// against tools/size-budget.json. A `null` or absent limit prints the measured size and passes.
 //
+// The limits are ceilings with headroom, set once (owner, 2026-11-09: 「預算判夠不要每次都改」),
+// not the last measurement: a pull request that grows the bundle does not edit them, and the CI
+// report comment shows its change against master. The committed build of 2026-11-09 measured
+// initial JS 333,632 B, initial CSS 47,776 B and largest lazy chunk 105,870 B (plots). Ceilings:
+// 360,000 B (+7.9%, about 26 KB), 55,000 B (+15%; CSS grows slowly) and 120,000 B (+13%; the
+// largest chunk is the plotting library, which grows only with its upgrades). Totals are reported
+// without a ceiling. Raise a ceiling only when a change needs it, with the owner's approval.
+//
+//   node tools/size.mjs [dist] [--json <file>]
+//
+// --json also writes the measurements and ceilings for the CI report (.github/ci/report).
 // Exit codes: 0 within budget, 1 over budget, 2 no build output or unreadable budget.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 const ui = fileURLToPath(new URL("..", import.meta.url));
+const args = process.argv.slice(2);
+const jsonAt = args.indexOf("--json");
+const jsonFile = jsonAt === -1 ? null : args[jsonAt + 1];
+if (jsonAt !== -1) args.splice(jsonAt, 2);
 // The first argument names another build directory; the default is the committed ui/dist.
-const dist = resolve(ui, process.argv[2] ?? "dist");
+const dist = resolve(ui, args[0] ?? "dist");
 const budgetFile = fileURLToPath(new URL("./size-budget.json", import.meta.url));
 const STATIC_IMPORT =
   /\b(?:import|export)\s*(?:\*\s*as\s+[\w$]+|\{[^}]*\}|[\w$]+(?:\s*,\s*(?:\{[^}]*\}|\*\s*as\s+[\w$]+))?)?\s*(?:from\s*)?["'`]([^"'`]+\.js)["'`]/g;
@@ -73,7 +89,10 @@ function measure() {
     .map((match) => match[1])
     .join("\n");
   const sum = (names) => [...names].reduce((total, name) => total + gzip(read(name)), 0);
-  const lazy = readdirSync(join(dist, "assets"))
+  const files = readdirSync(join(dist, "assets"));
+  const all = (extension) =>
+    files.filter((name) => name.endsWith(extension)).map((name) => join("assets", name));
+  const lazy = files
     .filter((name) => name.endsWith(".js") && !initial.has(join("assets", name)))
     .map((name) => ({ name, size: gzip(read(join("assets", name))) }))
     .sort((a, b) => b.size - a.size);
@@ -81,6 +100,8 @@ function measure() {
     initialJs: sum(initial) + (inline ? gzip(inline) : 0),
     initialCss: sum(assets.css),
     largestLazyChunk: lazy[0]?.size ?? 0,
+    totalJs: sum(all(".js")) + (inline ? gzip(inline) : 0),
+    totalCss: sum(all(".css")),
     lazyName: lazy[0]?.name ?? "none",
   };
 }
@@ -94,9 +115,11 @@ try {
   cannotRun(`size-budget.json: ${error.message}`);
 }
 const measured = measure();
+if (jsonAt !== -1 && !jsonFile) cannotRun("--json needs a file");
+const KINDS = ["initialJs", "initialCss", "largestLazyChunk", "totalJs", "totalCss"];
 let over = false;
-for (const kind of ["initialJs", "initialCss", "largestLazyChunk"]) {
-  const limit = budget[kind];
+for (const kind of KINDS) {
+  const limit = budget[kind] ?? null;
   if (limit !== null && !Number.isInteger(limit))
     cannotRun(`size-budget.json: ${kind} must be an integer or null`);
   const verdict =
@@ -109,6 +132,19 @@ for (const kind of ["initialJs", "initialCss", "largestLazyChunk"]) {
   const detail = kind === "largestLazyChunk" ? ` (${measured.lazyName})` : "";
   console.log(
     `${kind.padEnd(16)} ${String(measured[kind]).padStart(7)} B gzip  budget ${limit ?? "null"}  ${verdict}${detail}`,
+  );
+}
+if (jsonFile) {
+  const metrics = KINDS.map((kind) => ({
+    key: kind,
+    value: measured[kind],
+    ceiling: budget[kind] ?? null,
+    unit: "bytes",
+    ...(kind === "largestLazyChunk" ? { detail: measured.lazyName } : {}),
+  }));
+  writeFileSync(
+    resolve(jsonFile),
+    `${JSON.stringify({ schema_version: 1, lane: "dashboard", metrics }, null, 2)}\n`,
   );
 }
 process.exit(over ? 1 : 0);

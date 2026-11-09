@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # The workspace and the harness, which has its own lockfile. vendor/gjson is a patched
+  # copy (vendor/README.md) and is updated by hand. A dependency bump changes the binary,
+  # so its pull request runs the size and idle gates against bench/budgets.txt.
+  - package-ecosystem: cargo
+    directories:
+      - /
+      - /harness/rust
+    schedule:
+      interval: monthly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
