@@ -45,7 +45,7 @@ zstd = { version = "0.14", default-features = false }
 base64 = "0.22"
 bcrypt = "0.19"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-getrandom = "0.3"
+getrandom = "0.4"
 sha2 = "0.10"
 subtle = "2.6"
 wreq.workspace = true
