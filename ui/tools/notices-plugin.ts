@@ -1,5 +1,5 @@
 // Collects the license text of every npm package that ends up in the bundle, for
-// tools/third-party-notices.py. Only active when CLIPROXY_NOTICES_OUT names a file, so a normal
+// tools/third-party-notices.py. Only active when GNOCCHI_NOTICES_OUT names a file, so a normal
 // build emits nothing extra and ui/dist stays byte-identical. The notices are not part of dist
 // and are not embedded in the binary; the repository's THIRD-PARTY-NOTICES carries them.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -36,9 +36,9 @@ function readNotice(root: string): Notice {
 }
 
 export function noticesPlugin(): Plugin {
-  const out = process.env.CLIPROXY_NOTICES_OUT;
+  const out = process.env.GNOCCHI_NOTICES_OUT;
   return {
-    name: "cliproxy-notices",
+    name: "gnocchi-notices",
     apply: "build",
     generateBundle(_options, bundle) {
       if (!out) return;

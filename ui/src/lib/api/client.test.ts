@@ -34,13 +34,13 @@ test("API session sends the key only while connected and never accesses storage"
     Response.json(
       { "config-version": 8 },
       {
-        headers: { "X-CPA-VERSION": "cliproxy-rs-1.0.0", "X-CPA-COMMIT": "abc1234" },
+        headers: { "X-CPA-VERSION": "gnocchi-1.0.0", "X-CPA-COMMIT": "abc1234" },
       },
     );
   assert.deepEqual(await request(routes.readConfig), { "config-version": 8 });
   assert.equal(server.sent[0].headers.Authorization, "Bearer secret");
   assert.equal(server.sent[0].url.href, "http://cpa.test/v8/management/config");
-  assert.deepEqual(builds.at(-1), { version: "cliproxy-rs-1.0.0", commit: "abc1234", built: "" });
+  assert.deepEqual(builds.at(-1), { version: "gnocchi-1.0.0", commit: "abc1234", built: "" });
   disconnect();
   const sent = server.sent.length;
   await assert.rejects(

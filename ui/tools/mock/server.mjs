@@ -28,7 +28,7 @@ const { values: opt } = parseArgs({
 const N = Math.max(0, Number(opt.accounts));
 const CHURN = Number(opt.churn);
 const KEY = opt.key;
-const VERSION = "cliproxy-rs-mock";
+const VERSION = "gnocchi-mock";
 // Three days before start, so the dashboard shows a past build in every time zone.
 const BUILD_DATE = new Date(Date.now() - 3 * 86_400_000).toISOString();
 const BUCKET_MS = 600_000;
@@ -127,7 +127,7 @@ function makeAccount(i) {
     updated_at: iso(startedAt - int(1, 300) * 3_600_000),
     modtime: iso(startedAt - int(1, 300) * 3_600_000),
     last_refresh: iso(startedAt - int(1, 48) * 3_600_000),
-    path: `/var/lib/cliproxy/auth/${name}`,
+    path: `/var/lib/gnocchi/auth/${name}`,
     cooldowns: [],
   };
   if (provider === "codex") {
@@ -512,7 +512,7 @@ on("POST", "/credentials", (ctx) => {
     }
     const a = makeAccount(accounts.length);
     a.name = a.id = file;
-    a.path = `/var/lib/cliproxy/auth/${file}`;
+    a.path = `/var/lib/gnocchi/auth/${file}`;
     if (typeof meta.type === "string") a.type = a.provider = meta.type;
     if (typeof meta.email === "string") a.email = a.account = meta.email;
     accounts.push(a);
@@ -761,7 +761,7 @@ function clientModels(req, send) {
   const type = { "Content-Type": "application/json; charset=utf-8" };
   if (!given || !keys.includes(given)) return send(401, type, '{"error":{"message":"invalid api key","type":"authentication_error"}}'), 401;
   const ids = [...new Set(Object.values(MODELS).flat())];
-  send(200, type, JSON.stringify({ object: "list", data: ids.map((id) => ({ id, object: "model", created: 0, owned_by: "cliproxy" })) }));
+  send(200, type, JSON.stringify({ object: "list", data: ids.map((id) => ({ id, object: "model", created: 0, owned_by: "gnocchi" })) }));
   return 200;
 }
 

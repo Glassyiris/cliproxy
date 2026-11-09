@@ -128,7 +128,7 @@ function ReleaseResult({ latest }: { latest: UseQueryResult<string> }) {
     return (
       <Banner
         status="info"
-        title={t("system.updates.disabled", { setting: "CLIPROXY_NO_UPDATE_CHECK=1" })}
+        title={t("system.updates.disabled", { setting: "GNOCCHI_NO_UPDATE_CHECK=1" })}
       />
     );
   // The server answers 502 invalid_response when the repository has no release to redirect to.

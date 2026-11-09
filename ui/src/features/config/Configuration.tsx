@@ -8,7 +8,7 @@
 //   reviews all changes as a diff first, which per-row Save buttons cannot show.
 // - The group is `?section=` in the hash, so Back and reload keep it; the template keeps it in state.
 // - Icons are lucide, not heroicons; the "Professional hosting tools" list and the info cards are
-//   omitted because cliproxy has no counterpart.
+//   omitted because gnocchi has no counterpart.
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileCode, KeyRound, Globe, Route, ScrollText, Send } from "lucide-react";

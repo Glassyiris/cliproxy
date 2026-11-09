@@ -5,7 +5,7 @@
 // A store that throws (blocked site data, a private window) counts as holding nothing.
 
 const STORAGE_KEY = "cliproxy.managementKey";
-const CHANNEL = "cliproxy.session";
+const CHANNEL = "gnocchi.session";
 const SIGNED_OUT = "signed-out";
 
 type Store = "sessionStorage" | "localStorage";

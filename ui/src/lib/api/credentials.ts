@@ -14,7 +14,7 @@ export type Cooldown = {
     | "unknown";
   retry_at: string;
   remaining_seconds: number;
-  /** cliproxy-rs only: the upstream's stated reset when the trusted cooldown bound cut it. */
+  /** gnocchi only: the upstream's stated reset when the trusted cooldown bound cut it. */
   recover_at?: string;
   backoff_level?: number;
   http_status?: number;

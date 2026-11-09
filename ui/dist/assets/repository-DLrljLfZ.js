@@ -1,0 +1,1 @@
+var e={url:`https://github.com/prep-cook/gnocchi`,name:`prep-cook/gnocchi`};export{e as t};

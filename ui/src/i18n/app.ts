@@ -1,8 +1,8 @@
 export default {
   en: {
-    "app.brand.name": "cliproxy-rs",
-    "app.document.pageTitle": "{title} · cliproxy-rs",
-    "app.document.signInTitle": "Sign in · cliproxy-rs",
+    "app.brand.name": "gnocchi",
+    "app.document.pageTitle": "{title} · gnocchi",
+    "app.document.signInTitle": "Sign in · gnocchi",
 
     "app.signIn.managementKey": "Management key",
     "app.signIn.help":

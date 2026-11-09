@@ -71,7 +71,7 @@ async function readStatus(flow: Polled, signal: AbortSignal): Promise<StatusAnsw
   const r = await oauthStatus(flow.state, signal);
   if (r.status !== "error")
     return r.status === "ok" ? { status: "ok", account: null, found: false } : { status: "wait" };
-  // cliproxy-rs keeps a finished sign-in's result for 30 minutes; Go and older servers forget a
+  // gnocchi keeps a finished sign-in's result for 30 minutes; Go and older servers forget a
   // successful one after a minute. Then only a new name, read successfully, says it worked.
   if (r.error !== "unknown or expired state") return { status: "error", error: r.error };
   const now = (await listCredentials(signal)).files;

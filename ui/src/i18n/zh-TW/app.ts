@@ -1,8 +1,8 @@
 export default {
   "zh-TW": {
-    "app.brand.name": "cliproxy-rs",
-    "app.document.pageTitle": "{title} · cliproxy-rs",
-    "app.document.signInTitle": "登入 · cliproxy-rs",
+    "app.brand.name": "gnocchi",
+    "app.document.pageTitle": "{title} · gnocchi",
+    "app.document.signInTitle": "登入 · gnocchi",
 
     "app.signIn.managementKey": "管理金鑰",
     "app.signIn.help":

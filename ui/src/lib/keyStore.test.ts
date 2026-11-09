@@ -89,7 +89,7 @@ test("discard drops only the refused key, store by store, and tells no one", asy
   session.setItem(STORAGE_KEY, "old");
   local.setItem(STORAGE_KEY, "new");
   const heard: unknown[] = [];
-  const watcher = new BroadcastChannel("cliproxy.session");
+  const watcher = new BroadcastChannel("gnocchi.session");
   watcher.onmessage = (event: MessageEvent) => heard.push(event.data);
   discard("old");
   assert.equal(session.getItem(STORAGE_KEY), null);
@@ -120,7 +120,7 @@ test("forget tells the other tabs, which clear their stores without telling anyo
   remember("mock", true);
   // Another tab: a second listener on the channel, as a page in another tab would hold.
   const heard: string[] = [];
-  const watcher = new BroadcastChannel("cliproxy.session");
+  const watcher = new BroadcastChannel("gnocchi.session");
   watcher.onmessage = (event: MessageEvent) => heard.push(String(event.data));
   const signedOut = new Promise<void>((resolve) => {
     const stop = onForgotten(() => {

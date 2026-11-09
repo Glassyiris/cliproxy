@@ -119,7 +119,7 @@ const { values: opt } = parseArgs({
 const routes = opt.routes ? opt.routes.split(",").filter(Boolean) : Object.keys(ROUTES);
 const out = path.resolve(
   opt.out ??
-    path.join(os.tmpdir(), "cliproxy-measure", new Date().toISOString().replace(/[:.]/g, "-")),
+    path.join(os.tmpdir(), "gnocchi-measure", new Date().toISOString().replace(/[:.]/g, "-")),
 );
 const children = [];
 
