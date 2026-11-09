@@ -49,7 +49,7 @@ check() { # key measured
   report "$key" "$got" "$limit"
   if (( got > limit )); then
     printf '%-44s %12s > %s (budget %s +%s%%)  OVER\n' "$key" "$got" "$limit" "$value" "$tol"
-    echo "::error title=Performance budget::$key is $got, over $limit (bench/budgets.txt: $value +$tol%). Find the cause; a ceiling is raised only when a change needs it, with the owner's approval."
+    echo "::error title=Performance budget::$key is $got, over $limit (bench/budgets.txt: $value +$tol%). Find the cause; a ceiling is raised only when a change needs it, with a maintainer's approval."
     failed=1
   else
     printf '%-44s %12s <= %s\n' "$key" "$got" "$limit"

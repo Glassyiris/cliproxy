@@ -66,7 +66,7 @@ const ROUTES = {
   settings: { answer: "#settings-nav", measures: ["primaryButton", "headerControl"] },
 };
 
-// The nbcards admin's values (p3/r/ref/nbcards/REPORT.md) each role must have, per viewport; the
+// The card-v2 admin's values each role must have, per viewport; the
 // sidebar is 260 wide at 1440, so the h1 starts 24 inside the main area. A role not listed here is
 // only required to agree across routes.
 const EXPECTED = {
@@ -280,7 +280,7 @@ function judgeRoute(label, route, result, { answer, required = ALWAYS }) {
   return { failures, values };
 }
 
-/** Failure lines for one viewport: samples, limits and nbcards values per route, then roles across routes. */
+/** Failure lines for one viewport: samples, limits and card-v2 values per route, then roles across routes. */
 function judge(label, results, declared) {
   const failures = [];
   const values = {};

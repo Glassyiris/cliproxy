@@ -38,5 +38,5 @@
 | Threads | 6 | 6 | 0 | 6 | at the ceiling |
 | RSS | 77,420 kB | 77,388 kB | -32 kB (-0.04%) | 85,241 kB | 9.2% |
 
-<sub>Ceilings: `bench/budgets.txt` and `ui/tools/size-budget.json`; raising one needs the owner's approval. Baseline: the latest successful CI run of a push to `master` before this run.</sub>
+<sub>Ceilings: `bench/budgets.txt` and `ui/tools/size-budget.json`; raising one needs a maintainer's approval. Baseline: the latest successful CI run of a push to `master` before this run.</sub>
 <!-- cliproxy-size-report -->

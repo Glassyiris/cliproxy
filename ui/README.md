@@ -29,8 +29,8 @@ The React dashboard source. Code rules are in [CONVENTIONS.md](CONVENTIONS.md).
 | --- | --- |
 | `src/main.tsx` | Entry. Loads Astryx's Chinese strings first when the page starts in Chinese, then renders `App`. |
 | `src/app/` | Providers, sign-in, the shell (`AppShell` and the side nav), the page frame `PageFrame.tsx`, the route table `routes.ts` with hash routing and one lazy chunk per page, the page error boundary, the theme and language switches. |
-| `src/features/<page>/` | One directory per screen: the page, its query hooks in `queries.ts`, tests. Now: `system`. |
-| `src/components/` | Parts used by two or more screens: the status lamp. |
+| `src/features/<page>/` | One directory per screen: the page, its query hooks in `queries.ts`, tests. |
+| `src/components/` | Parts used by two or more screens, such as the status lamp, the code editor and the chart wrappers. |
 | `src/lib/api/` | One module per Management API area, one typed function per route; `routes.ts` is the registry `check:api` compares with the Rust router. |
 | `src/lib/` | The i18n runtime (`i18n.ts`), `notify()`, the session (sign-in, sign-in help, capability probes) and pure domain logic with tests. |
 | `src/i18n/` | Message catalogs, one per area: English in `<area>.ts`, ships with the app; the translations in `zh-CN/` and `zh-TW/`, each locale loaded on demand as one chunk through its `index.ts`. |
@@ -68,7 +68,7 @@ Config list writes reread the target first and refuse to write if it changed sin
 
 ## Verification scripts
 
-Both scripts are for disposable servers with fake credentials only: they edit configuration and credential files. Fixture requirements: management key `orb-dashboard-test-only`, a disabled fake Claude credential with email `operator@example.invalid`, routing strategy `round-robin`, and an empty `requests.payload.default`.
+These scripts are for disposable servers with fake credentials only: they edit configuration and credential files. Fixture requirements: management key `orb-dashboard-test-only`, a disabled fake Claude credential with email `operator@example.invalid`, routing strategy `round-robin`, and an empty `requests.payload.default`.
 
 - `node scripts/browser-check-rust.mjs [url] [capture-dir]` drives the dashboard with agent-browser against the Rust binary (or Go): nine screens in both themes, unsupported actions disabled on Rust, a payload rule written and removed, a YAML diff discarded, 390 px layout, and no key in storage.
 - `node scripts/fake-logins.mjs [port]` serves fake provider login endpoints (Claude, Codex, Kimi, Meta token, profile, device-code and key-mint routes) and a Claude usage endpoint that echoes its `Authorization` header. Fake tokens and `@example.invalid` emails only.
@@ -78,11 +78,11 @@ Both scripts are for disposable servers with fake credentials only: they edit co
 - `node scripts/api-call-check.mjs <base> [<base> ...]` sends the Accounts screen's `POST /requests/api-call` to the fake usage endpoint through each server, checks `$TOKEN$` substitution and that the quota parser reads the windows, and compares the response shape between servers.
 - `CHROME_PATH=... node scripts/quota-check.mjs [dashboard-url] [capture-dir]` drives Overview and Accounts with fake management responses (Playwright, like `oauth-check.mjs`): failed checks retain live or passive limits and their timestamps, Claude 403 advice explains setup-token permissions, a successful retry clears errors, a second check within 2 minutes sends nothing, the drawer's Check quota re-enables by itself after its 2 minutes, and a partial batch delete keeps the failed account selected and names it. It makes no provider calls.
 - The checks that sign in or send through a real server (`oauth-check.mjs` fake and dead modes, `first-run-check.mjs`, `api-call-check.mjs`) refuse to start unless the server reports an auth-dir whose real path, symlinks resolved, is strictly inside the system temp dir's real path (`scripts/private-auth-dir.mjs`; a path that doesn't resolve is refused too, and `npm test` covers it with disposable symlinks). The key is `oauth.auth-dir` (or the legacy root `auth-dir`). Anything else, such as `management.auth-dir`, falls back to `~/.cli-proxy-api`, where real logins live, and `isolated.sh` isolates the network, not the filesystem. Set `HOME` to a temp dir as well. `first-run-check.mjs` alone runs against `tools/mock/server.mjs --accounts 0` and skips the check for it (the mock answers `X-CPA-VERSION: cliproxy-rs-mock` and keeps accounts in memory).
-- `scripts/verify-backend.mjs` is the API-level verifier for the Go release backend, unchanged from the previous dashboard.
+- `scripts/verify-backend.mjs` is the API-level verifier for the Go release backend.
 
 ## Security
 
-The management key lives in `src/lib/api/client.ts` module memory and is cleared on sign-out; reloading signs out. Only the theme mode, the palette and the language are stored (`src/app/preferences.ts`), plus the first-run card's flags (`src/lib/firstRun.ts`). Plugin store descriptions are decoded as text, never inserted as HTML. Downloaded credential files and configuration previews contain secrets; treat them accordingly. Do not use the dashboard over plain HTTP across a network.
+Requests read the management key from `src/lib/api/client.ts` module memory. It is also kept in the tab's session storage, so a reload stays signed in, and in local storage only when "Remember on this device" is ticked (`src/lib/keyStore.ts`); sign-out clears both. Otherwise only the theme mode, the palette and the language are stored (`src/app/preferences.ts`), plus the first-run card's flags (`src/lib/firstRun.ts`). Plugin store descriptions are decoded as text, never inserted as HTML. Downloaded credential files and configuration previews contain secrets; treat them accordingly. Do not use the dashboard over plain HTTP across a network.
 
 ## Fonts
 

@@ -1,4 +1,4 @@
-// Token, layout and motion bans for src/ (REQUIREMENTS rows 3, 4, 5, 11, 20).
+// Token, layout and motion bans for src/ (REQUIREMENTS.md "Enforcement").
 //
 // - Colour, px and radius/spacing literals and `style` attributes: only under src/themes/.
 // - Size literals (a number or a length such as "8rem") on the size props of the Astryx 0.7.11
@@ -22,7 +22,7 @@
 //   no Heading `type`, since the level sets the scale. A route file (the page a feature's index.ts
 //   exports) has at most one level-1 Heading and renders PageFrame, whose LayoutHeader holds the
 //   page's h1, so the h1 sits at one place on every page.
-// - Card padding: a Card or ClickableCard takes roles.card.padding (the nbcards admin's one card
+// - Card padding: a Card or ClickableCard takes roles.card.padding (the card-v2 admin's one card
 //   padding) or 0 (a flush card around a list); the exceptions below say why.
 //
 // Tests and the i18n catalogs are skipped: tests hold fixtures and the catalogs hold prose.
@@ -89,7 +89,7 @@ const FRAME = "src/app/PageFrame.tsx";
 const BRAND_MARKS = "src/components/ProviderIcon.tsx";
 const CARD_PADDINGS = new Set([roles.card.padding, 0]);
 const CARD_PADDING_EXCEPTIONS = {
-  // login-card's own card (padding 8); card-v2 UI-RULES.md exempts the auth card the same way.
+  // login-card's own card (padding 8); card-v2's rules exempt the auth card the same way.
   "src/app/SignIn.tsx": "sign-in card",
   // A chart tooltip is a popover drawn as a small card, as card-v2's TrendTip draws it.
   "src/components/charts/plots.tsx": "chart tooltip",

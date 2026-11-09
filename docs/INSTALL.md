@@ -127,8 +127,6 @@ Each [release](https://github.com/vayungodara/cliproxy-rs/releases) has an archi
 | macOS Intel | `cliproxy-<version>-x86_64-apple-darwin.tar.gz` |
 | Windows x86_64 | `cliproxy-<version>-x86_64-pc-windows-msvc.zip` |
 
-The release also carries `management.html`, the dashboard as a single file for Go CLIProxyAPI servers (see [ui/PANEL.md](../ui/PANEL.md)). The Rust binary does not need it.
-
 Check the download before you run it:
 
 ```sh

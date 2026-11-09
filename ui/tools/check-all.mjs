@@ -1,4 +1,4 @@
-// `npm run check`: the fast gate (REQUIREMENTS row 26). Runs every gate in order, prints each
+// `npm run check`: the fast gate (REQUIREMENTS.md "Numbers"). Runs every gate in order, prints each
 // step's time and the total, and fails when the total is over BUDGET_SECONDS. Each step may use
 // only what is left of the budget; one that runs past it is killed, so a hung gate cannot stall
 // the merge.

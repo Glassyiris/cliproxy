@@ -43,5 +43,5 @@
 - an artifact: `report artifact exceeds 1 MiB`
 - `perf-2000.json`: `idle.linux.2000.rss_kb: value and ceiling must be nonnegative integers or null`
 
-<sub>Ceilings: `bench/budgets.txt` and `ui/tools/size-budget.json`; raising one needs the owner's approval. Baseline: the latest successful CI run of a push to `master` before this run.</sub>
+<sub>Ceilings: `bench/budgets.txt` and `ui/tools/size-budget.json`; raising one needs a maintainer's approval. Baseline: the latest successful CI run of a push to `master` before this run.</sub>
 <!-- cliproxy-size-report -->
