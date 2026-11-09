@@ -114,7 +114,7 @@ jobs:
         with:
           key: ${{ steps.profile.outputs.hash }}
           save-if: ${{ github.ref == 'refs/heads/master' && matrix.shard == 1 }}
-      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: cargo-nextest@0.9.148
       # The plugin tests build Go plugins (cgo, c-shared) from this module. Without Go 1.26
@@ -237,7 +237,7 @@ jobs:
         with:
           key: ${{ steps.profile.outputs.hash }}
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: cargo-nextest@0.9.148
       - name: Format
