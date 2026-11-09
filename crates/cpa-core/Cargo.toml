@@ -27,7 +27,7 @@ serde_yaml_ng.workspace = true
 # serde_yaml_ng's parser; its events carry the resolved tags that serde drops.
 unsafe-libyaml = "0.2.11"
 tracing.workspace = true
-base64 = "0.22"
+base64 = "0.23"
 bcrypt = "0.19"
 sha2 = "0.10"
 yaml-edit = "0.3.2"
