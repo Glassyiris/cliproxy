@@ -30,8 +30,28 @@ env:
   VERSION: ${{ inputs.version || 'latest' }}
 
 jobs:
+  release:
+    name: A release to install
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      found: ${{ steps.find.outputs.found }}
+    steps:
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The release install tests need a published release; until the first one they are skipped.
+          if [ "$VERSION" != latest ] || gh release view --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo found=true >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No release is published yet, so the release install tests are skipped."
+          fi
+
   unix:
     name: install.sh (${{ matrix.os }})
+    needs: release
+    if: needs.release.outputs.found == 'true'
     strategy:
       fail-fast: false
       matrix:

@@ -208,6 +208,9 @@ def main():
                 with (old_home / "cliproxy.log").open("ab") as out:
                     old = subprocess.Popen([old_bin, "--config", old_home / "config.yaml"], cwd=old_home, env=legacy,
                                            stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
+                # Reap the old server as soon as it exits, as init would: the service shims wait on
+                # `kill -0`, and macOS runners refuse `ps`, so a zombie would never look gone.
+                threading.Thread(target=old.wait, daemon=True).start()
                 new_pid = None
                 try:
                     if as_service:
