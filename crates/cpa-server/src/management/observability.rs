@@ -16,8 +16,8 @@ use super::auth_files::{Query, auth_kind, fail, recent_requests, reply};
 use super::{Management, json as respond};
 
 /// Public redirect endpoint, not the authenticated GitHub API.
-pub const LATEST_RELEASE_URL: &str = "https://github.com/prep-cook/cliproxy/releases/latest";
-const LATEST_RELEASE_USER_AGENT: &str = "cliproxy-rs";
+pub const LATEST_RELEASE_URL: &str = "https://github.com/prep-cook/gnocchi/releases/latest";
+const LATEST_RELEASE_USER_AGENT: &str = "gnocchi";
 const RELEASE_CACHE_TTL: Duration = Duration::from_secs(12 * 60 * 60);
 
 /// Explicit checks only. One HEAD, no redirects, cookies or GitHub/store tokens.
@@ -30,7 +30,7 @@ pub(crate) async fn latest_version(State(state): State<Arc<Management>>) -> Resp
                 ("error", "update_check_disabled".into()),
                 (
                     "message",
-                    "Update checks are disabled by CLIPROXY_NO_UPDATE_CHECK=1.".into(),
+                    "Update checks are disabled by GNOCCHI_NO_UPDATE_CHECK=1.".into(),
                 ),
             ],
         );
@@ -77,7 +77,7 @@ pub(crate) async fn latest_version(State(state): State<Arc<Management>>) -> Resp
         .headers()
         .get("location")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("https://github.com/prep-cook/cliproxy/releases/tag/"))
+        .and_then(|v| v.strip_prefix("https://github.com/prep-cook/gnocchi/releases/tag/"))
         .filter(|v| {
             !v.is_empty() && v.len() <= 128 && v.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_".contains(&b))
         });

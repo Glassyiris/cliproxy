@@ -586,7 +586,7 @@ const FOLLOWS_V8_0_35: &[&str] = &[
 
 /// Requests without payload rules that cloaking turns into a probe or a helper, or out
 /// of one, and image-tool stripping and `prompt_cache_options` handling, which now run
-/// after cloaking. cliproxy-rs before 868e137 sent each of these differently.
+/// after cloaking. gnocchi before 868e137 sent each of these differently.
 const NO_RULES_V8_0_35: &[&str] = &[
     "noroles-quota-probe-with-system",
     "noroles-legacy-title-helper",
@@ -805,7 +805,7 @@ const FOLLOWS_V8_0_27: &[&str] = &[
 ];
 
 /// v8.0.27 scenarios where Go keeps an API key's caller system text top-level and
-/// cliproxy-rs moves it after the leading user run, as it does for every request
+/// gnocchi moves it after the leading user run, as it does for every request
 /// (docs/DIFFERENCES-FROM-GO.md). Rust's body is compared with Go's after
 /// [`with_relocated_system`].
 const RELOCATES_API_KEY_SYSTEM: &[&str] = &[
@@ -818,7 +818,7 @@ const RELOCATES_API_KEY_SYSTEM: &[&str] = &[
 /// Go v8.0.27's upstream body with the caller system blocks it left top-level (those
 /// after the billing, Claude Code identity and Fable blocks) moved into one system
 /// turn each after the leading user run (the first user turn and the user turns and
-/// effort directives that follow it), where cliproxy-rs puts them for API keys too.
+/// effort directives that follow it), where gnocchi puts them for API keys too.
 /// Every other byte is Go's; a body without such blocks comes back unchanged.
 pub(super) fn with_relocated_system(go_body: &str) -> String {
     let system = rawjson::get(go_body, "system");

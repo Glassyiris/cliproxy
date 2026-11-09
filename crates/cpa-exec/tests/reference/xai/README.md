@@ -27,7 +27,7 @@ boundary (the reference checkout is not modified):
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # 6fecc6e with the commits above
-crate=/absolute/path/to/cliproxy-rs/crates/cpa-exec
+crate=/absolute/path/to/gnocchi/crates/cpa-exec
 tmp=$(mktemp -d)
 cp "$crate"/tests/reference/xai/*.go "$tmp/"
 (

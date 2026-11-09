@@ -1,7 +1,7 @@
 //! `routing.cooldown.save-cooldown-status`: cooldowns persisted as one `.cds` file per
 //! credential under `auth-dir` (Go sdk/cliproxy/auth/cooldown_state.go). The files use
 //! Go's layout and field names, so state survives a switch between CLIProxyAPI and
-//! cliproxy-rs in either direction.
+//! gnocchi in either direction.
 
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -48,8 +48,8 @@ pub struct Quota {
     pub backoff_level: u32,
     #[serde(default, with = "go_time")]
     pub observed_at: Option<SystemTime>,
-    /// cliproxy-rs only (`max-trusted-cooldown`): bounded windows spent, 0 for none.
-    /// Written on every quota record cliproxy-rs saves, so its presence marks a record
+    /// gnocchi only (`max-trusted-cooldown`): bounded windows spent, 0 for none.
+    /// Written on every quota record gnocchi saves, so its presence marks a record
     /// whose deadline restores as it is. Go's decoder ignores it; records without it
     /// (Go's, or older) get the first bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -423,7 +423,7 @@ mod tests {
             let mut actual: serde_json::Value = serde_json::from_str(&raw).unwrap();
             mask(&mut actual);
             // The one deliberate difference (docs/DIFFERENCES-FROM-GO.md): every quota
-            // record cliproxy-rs writes carries `trust_windows`, which Go's decoder skips.
+            // record gnocchi writes carries `trust_windows`, which Go's decoder skips.
             for record in actual["records"].as_array_mut().unwrap() {
                 if record["quota"]["exceeded"] == true {
                     let removed = record["quota"].as_object_mut().unwrap().remove("trust_windows");

@@ -451,7 +451,7 @@ func main() {
 		{Name: "get-user-info-same-host-location-bearer-exact", Method: "GET", Headers: auth, User: str("u:p"), Start: "/y1", Script: map[string]step{
 			"/y1": {302, "http://v:q@MAINHOST/y2"}}},
 		// Go writes the Host header with the port as written: an empty one on a redirect
-		// (the first hop drops it), or the scheme's default. cliproxy-rs refuses these.
+		// (the first hop drops it), or the scheme's default. gnocchi refuses these.
 		{Name: "get-empty-then-default-port-location-exact", Method: "GET", Headers: auth, Start: "/p1", DialMain: true, Script: map[string]step{
 			"/p1": {302, "http://127.0.0.1:/p2"}, "/p2": {302, "http://127.0.0.1:80/p3"}}},
 		{Name: "get-default-port-source-exact", Method: "GET", Headers: auth, Start: "/p3", Target: "http://127.0.0.1:80/p3", DialMain: true},

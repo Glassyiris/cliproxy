@@ -1,7 +1,7 @@
 # cargo-about config for THIRD-PARTY-NOTICES (tools/third-party-notices.py runs it offline).
 # Needs cargo-about 0.9.3: cargo install cargo-about --version 0.9.3 --locked --features cli
 # A crate with a license outside this list fails the run, so a new license gets reviewed.
-# AGPL-3.0-or-later is cliproxy's own workspace crates, which the script leaves out.
+# AGPL-3.0-or-later is gnocchi's own workspace crates, which the script leaves out.
 accepted = [
   "0BSD",
   "AGPL-3.0-or-later",

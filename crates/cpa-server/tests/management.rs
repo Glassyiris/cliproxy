@@ -2032,9 +2032,9 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
                 async move {
                     record.lock().unwrap().push((method, headers));
                     let location = match case.as_str() {
-                        "tag" => "https://github.com/prep-cook/cliproxy/releases/tag/v1.2.3",
+                        "tag" => "https://github.com/prep-cook/gnocchi/releases/tag/v1.2.3",
                         "other" => "https://example.invalid/releases/tag/v9",
-                        "empty" => "https://github.com/prep-cook/cliproxy/releases/tag/",
+                        "empty" => "https://github.com/prep-cook/gnocchi/releases/tag/",
                         _ => "",
                     };
                     (
@@ -2093,7 +2093,7 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
         get("tag", true).await,
         (
             503,
-            json!({"error": "update_check_disabled", "message": "Update checks are disabled by CLIPROXY_NO_UPDATE_CHECK=1."})
+            json!({"error": "update_check_disabled", "message": "Update checks are disabled by GNOCCHI_NO_UPDATE_CHECK=1."})
         )
     );
     assert!(seen.lock().unwrap().is_empty(), "nothing is asked when disabled");
@@ -2113,7 +2113,7 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
         (502, json!({"error": "unexpected_status", "message": "status 403"}))
     );
     assert!(seen.lock().unwrap().iter().all(|(method, h)| *method == Method::HEAD
-        && h["user-agent"] == "cliproxy-rs"
+        && h["user-agent"] == "gnocchi"
         && !h.contains_key("authorization")
         && !h.contains_key("proxy-authorization")
         && !h.contains_key("cookie")));
@@ -2224,8 +2224,8 @@ async fn a_v0_write_over_a_file_with_an_invalid_catalog_source_is_refused() {
 async fn latest_version_uses_configured_and_environment_proxies() {
     use axum::http::{HeaderMap, Method, Uri};
     use std::sync::Mutex;
-    if let Ok(case) = std::env::var("CLIPROXY_TEST_RELEASE_PROXY") {
-        let configured = std::env::var("CLIPROXY_TEST_PROXY_URL").unwrap_or_default();
+    if let Ok(case) = std::env::var("GNOCCHI_TEST_RELEASE_PROXY") {
+        let configured = std::env::var("GNOCCHI_TEST_PROXY_URL").unwrap_or_default();
         let f = Fixture::from_yaml(&format!("release-proxy-{case}"), |auth, hash| {
             format!(
                 "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\nrequests:\n  proxy-url: '{configured}'\n",
@@ -2285,7 +2285,7 @@ async fn latest_version_uses_configured_and_environment_proxies() {
             async {
                 (
                     axum::http::StatusCode::FOUND,
-                    [("location", "https://github.com/prep-cook/cliproxy/releases/tag/v4.5.6")],
+                    [("location", "https://github.com/prep-cook/gnocchi/releases/tag/v4.5.6")],
                 )
             }
         });
@@ -2303,9 +2303,9 @@ async fn latest_version_uses_configured_and_environment_proxies() {
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("SYSTEMROOT", std::env::var("SYSTEMROOT").unwrap_or_default())
             .env("HOME", std::env::temp_dir())
-            .env("CLIPROXY_TEST_RELEASE_PROXY", case)
+            .env("GNOCCHI_TEST_RELEASE_PROXY", case)
             .env(
-                "CLIPROXY_TEST_PROXY_URL",
+                "GNOCCHI_TEST_PROXY_URL",
                 match case {
                     "configured" => &proxy_url,
                     "direct" => "direct",
@@ -2355,7 +2355,7 @@ async fn latest_version_uses_configured_and_environment_proxies() {
         );
         assert!(!headers.contains_key("authorization"));
         assert!(!headers.contains_key("cookie"));
-        assert_eq!(headers["user-agent"], "cliproxy-rs");
+        assert_eq!(headers["user-agent"], "gnocchi");
     }
 }
 
@@ -2406,7 +2406,7 @@ async fn latest_version_keeps_tls_verification_through_proxy() {
         axum::Router::new().fallback(|| async {
             (
                 axum::http::StatusCode::FOUND,
-                [("location", "https://github.com/prep-cook/cliproxy/releases/tag/v4.5.6")],
+                [("location", "https://github.com/prep-cook/gnocchi/releases/tag/v4.5.6")],
             )
         }),
         Some(Arc::new(tls.build())),
@@ -3667,7 +3667,7 @@ async fn kimi_channel_selects_kimi_ai_and_codex_exchange_errors_read_like_go() {
         cpa_server::runtime::OAuthDelivery::Delivered
     );
     // Go appends the upstream body; session errors are readable by anyone holding
-    // the state, so cliproxy-rs stops at the status (deliberate hardening).
+    // the state, so gnocchi stops at the status (deliberate hardening).
     assert_eq!(
         final_status(&base, &state, 10).await,
         json!({"status": "error", "error":

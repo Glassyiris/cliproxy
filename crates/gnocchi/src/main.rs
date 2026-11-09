@@ -21,7 +21,7 @@ use cpa_server::Runtime;
 use cpa_server::listener::bind;
 
 /// Same strings as the management `X-CPA-*` headers.
-const VERSION: &str = concat!("cliproxy-rs-", env!("CARGO_PKG_VERSION"));
+const VERSION: &str = concat!("gnocchi-", env!("CARGO_PKG_VERSION"));
 const COMMIT: &str = match option_env!("CPA_COMMIT") {
     Some(v) => v,
     None => "none",
@@ -1428,7 +1428,7 @@ async fn serve(
     }
     // Go `misc.StartAntigravityVersionUpdater` and `startModelCatalogUpdaters`.
     cpa_server::model_updater::start(&rt, home_config.is_some());
-    // Model router benchmarks (cliproxy-rs only); idle without `artificial-analysis.api-key`.
+    // Model router benchmarks (gnocchi only); idle without `artificial-analysis.api-key`.
     if home_config.is_none() {
         cpa_server::aa::start(&rt);
     }
@@ -1565,7 +1565,7 @@ mod tests {
             }
         }
         let root = std::env::temp_dir().join(format!(
-            "cliproxy-siwc-store-{}-{}",
+            "gnocchi-siwc-store-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1608,7 +1608,7 @@ mod tests {
     /// file, falls back to min(CPUs, 2). (`TOKIO_WORKER_THREADS` is not set in tests.)
     #[test]
     fn worker_threads_come_from_the_config_file() {
-        let dir = std::env::temp_dir().join(format!("cliproxy-workers-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gnocchi-workers-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.yaml");
         let default = std::thread::available_parallelism().map_or(1, |n| n.get().min(2));
@@ -1702,7 +1702,7 @@ mod tests {
     #[test]
     fn a_plugin_flag_before_discover_parses_in_discover_mode() {
         let parse = |a: &[&str]| {
-            let raw: Vec<String> = std::iter::once("cliproxy")
+            let raw: Vec<String> = std::iter::once("gnocchi")
                 .chain(a.iter().copied())
                 .map(str::to_owned)
                 .collect();
@@ -1724,7 +1724,7 @@ mod tests {
         let argv = |a: &[&str]| {
             go_flags(
                 &Args::command(),
-                std::iter::once("cliproxy").chain(a.iter().copied()).map(String::from),
+                std::iter::once("gnocchi").chain(a.iter().copied()).map(String::from),
                 &(),
             )
             .unwrap()
@@ -1849,7 +1849,7 @@ mod tests {
         let args = ["-working-dir", "-log-file", "l"].map(str::to_owned);
         assert_eq!(prescan_value(&args, "log-file"), None);
         // The full parse agrees, and neither flag is passed to plugins.
-        let raw = ["cliproxy", "-tui", "--working-dir=d", "-log-file", "l"].map(str::to_owned);
+        let raw = ["gnocchi", "-tui", "--working-dir=d", "-log-file", "l"].map(str::to_owned);
         let cmd = Args::command();
         let matches = cmd.clone().get_matches_from(go_flags(&cmd, raw.clone(), &()).unwrap());
         let args = Args::from_arg_matches(&matches).unwrap();

@@ -192,7 +192,7 @@ impl Runner {
         let config = runner.work.join("config.yaml");
         std::fs::write(&config, runner.placeholders(scenario["config"].as_str().unwrap())).unwrap();
         let log = std::fs::File::create(runner.work.join("server.log")).unwrap();
-        runner.child = Command::new(env!("CARGO_BIN_EXE_cliproxy"))
+        runner.child = Command::new(env!("CARGO_BIN_EXE_gnocchi"))
             .arg("-config")
             .arg(&config)
             .arg("-local-model")

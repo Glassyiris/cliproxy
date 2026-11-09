@@ -125,11 +125,11 @@ func TestZZCmdFixture(t *testing.T) {
 		"discovery:\n  interfaces:\n    <<: {exclude: [eth0]}\n",
 		"discovery:\n  interfaces:\n    <<: {exclude: [!!binary ZXRoMA==]}\n    include: [wl*]\n",
 		"discovery:\n  interfaces:\n    <<: [{exclude: [a], include: [x]}, {exclude: [b]}]\n    include: [c]\n",
-		// Invalid base64 on the path, then elsewhere: cliproxy-rs refuses both.
+		// Invalid base64 on the path, then elsewhere: gnocchi refuses both.
 		"discovery:\n  interfaces:\n    include: [!!binary '!!!']\n",
 		"proxy-url: !!binary '!!!'\ndiscovery:\n  interfaces:\n    exclude: [eth0]\n",
 		// A quoted merge key (a plain key to yaml.v3) and an aliased sequence as a merge
-		// operand (a decode error): cliproxy-rs refuses both.
+		// operand (a decode error): gnocchi refuses both.
 		"discovery:\n  interfaces:\n    '<<': {exclude: [eth0]}\n    include: [wl*]\n",
 		"seq: &s [{exclude: [eth0]}]\ndiscovery:\n  interfaces:\n    <<: *s\n    include: [wl*]\n",
 	} {

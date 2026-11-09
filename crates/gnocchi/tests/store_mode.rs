@@ -11,7 +11,7 @@ fn scratch(name: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("cliproxy-store-{name}-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("gnocchi-store-{name}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // The binary resolves its store root from the canonical working directory
     // (macOS temp paths sit behind the /var -> /private/var symlink).
@@ -51,8 +51,8 @@ impl Drop for Server {
 
 /// The binary with a clean environment: only what the store selection needs.
 /// `-local-model` keeps the model catalog updaters from fetching remote URLs.
-fn cliproxy(wd: &Path, env: &[(&str, &str)]) -> Server {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_cliproxy"));
+fn gnocchi(wd: &Path, env: &[(&str, &str)]) -> Server {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gnocchi"));
     cmd.arg("-local-model")
         .current_dir(wd)
         .env_clear()
@@ -106,7 +106,7 @@ fn git_store_mode_bootstraps_from_the_template_and_pushes_watcher_changes() {
     let template = "host: 127.0.0.1\nport: 0\nauth-dir: /nonexistent/elsewhere\napi-keys: [fake-client]\n";
     std::fs::write(wd.join("config.example.yaml"), template).unwrap();
     let remote_url = remote.to_string_lossy().into_owned();
-    let mut child = cliproxy(
+    let mut child = gnocchi(
         &wd,
         &[("GITSTORE_GIT_URL", &remote_url), ("gitstore_git_branch", "main")],
     );
@@ -170,7 +170,7 @@ fn git_store_mode_bootstraps_from_the_template_and_pushes_watcher_changes() {
 #[test]
 fn a_failing_store_logs_go_s_line_and_starts_nothing() {
     let wd = scratch("pg");
-    let mut child = cliproxy(
+    let mut child = gnocchi(
         &wd,
         &[
             // Postgres wins over git, as in Go; nothing listens on port 1.

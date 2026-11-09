@@ -1,4 +1,4 @@
-**Size report** for `776f2f0`: every measurement within its ceiling. No `master` baseline: no successful CI run of a push to master before this run. ([run](https://github.com/prep-cook/cliproxy/actions/runs/123456789))
+**Size report** for `776f2f0`: every measurement within its ceiling. No `master` baseline: no successful CI run of a push to master before this run. ([run](https://github.com/prep-cook/gnocchi/actions/runs/123456789))
 
 #### Dashboard bundle, gzip
 
@@ -16,4 +16,4 @@
 - Idle with 2,000 auth files: not run (the changed paths do not reach it)
 
 <sub>Ceilings: `bench/budgets.txt` and `ui/tools/size-budget.json`; raising one needs a maintainer's approval. Baseline: the latest successful CI run of a push to `master` before this run.</sub>
-<!-- cliproxy-size-report -->
+<!-- gnocchi-size-report -->

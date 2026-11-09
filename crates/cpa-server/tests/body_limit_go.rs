@@ -74,7 +74,7 @@ fn app(dir: &std::path::Path, yaml: &str, plugin_auth: bool) -> (axum::Router, A
         cpa_server::testing::unloaded_frontend_auth(&rt);
     }
     let state = Management::with_options(rt.clone(), path, management::Options::default());
-    // crates/cliproxy/src/main.rs, without Home, observability and the heap trimmer.
+    // crates/gnocchi/src/main.rs, without Home, observability and the heap trimmer.
     let app = cpa_server::app(rt.clone(), management::router(state.clone()));
     let app = cpa_server::safe_mode::router(&rt, app);
     let app = app.layer(axum::middleware::from_fn(management::cors));

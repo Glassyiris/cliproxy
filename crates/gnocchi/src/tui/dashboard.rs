@@ -18,7 +18,7 @@ pub struct Data {
     pub(super) auth_files: Vec<Object>,
     pub(super) api_keys: Vec<String>,
     /// The server's effective strategy (`GET /v0/management/routing/strategy`), shown
-    /// when the config leaves it unset: cliproxy-rs reads that as soonest-reset, Go as
+    /// when the config leaves it unset: gnocchi reads that as soonest-reset, Go as
     /// round-robin. `None` when the server did not answer it.
     pub(super) strategy: Option<String>,
     pub(super) err: Option<String>,
@@ -250,7 +250,7 @@ mod tests {
     }
 
     /// A blank configured strategy shows the server's effective one (soonest-reset on
-    /// cliproxy-rs), round-robin when the server does not say (Go's reading); a
+    /// gnocchi), round-robin when the server does not say (Go's reading); a
     /// configured one is shown as configured.
     #[test]
     fn an_unset_strategy_shows_the_servers_effective_one() {

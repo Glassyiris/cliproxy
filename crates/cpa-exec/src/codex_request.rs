@@ -77,7 +77,7 @@ pub(crate) fn response_steering(cfg: &Config) -> bool {
         .unwrap_or(false)
 }
 
-/// `oauth.providers.codex.chatgpt-keep-alive`, a cliproxy-rs addition: off unless set to
+/// `oauth.providers.codex.chatgpt-keep-alive`, a gnocchi addition: off unless set to
 /// true (YAML 1.1 spellings such as `yes` are normalised by the config schema).
 pub(crate) fn chatgpt_keep_alive(cfg: &Config) -> bool {
     setting(cfg, &["oauth", "providers", "codex", "chatgpt-keep-alive"])
@@ -224,7 +224,7 @@ pub(crate) struct View<'a> {
     pub proxy: crate::proxy::Proxy,
     /// `$CPA-SESSION-ID`: the request's explicit session, never derived fallbacks.
     pub session: Option<String>,
-    /// `oauth.providers.codex.chatgpt-keep-alive` (cliproxy-rs addition, off by default):
+    /// `oauth.providers.codex.chatgpt-keep-alive` (gnocchi addition, off by default):
     /// keep idle chatgpt.com connections instead of Go's connection per request. Read
     /// from the config snapshot of each request, so a reload applies to the next one.
     pub chatgpt_keep_alive: bool,

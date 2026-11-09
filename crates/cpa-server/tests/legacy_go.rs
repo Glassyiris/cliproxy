@@ -233,7 +233,7 @@ async fn go_v0_routes_replay_byte_for_byte() {
             }
             let mut want = step["raw_response"].as_str().unwrap();
             // docs/DIFFERENCES-FROM-GO.md "Default routing strategy": for an unset strategy
-            // Go answers round-robin, cliproxy-rs the effective soonest-reset.
+            // Go answers round-robin, gnocchi the effective soonest-reset.
             if strategy_read && unset {
                 assert_eq!(want, r#"{"strategy":"round-robin"}"#, "{at}");
                 want = r#"{"strategy":"soonest-reset"}"#;

@@ -1,6 +1,6 @@
 package auth
 
-// cliproxy-rs fixture generator: parseDevinManualPaste vectors (RSFIX_OUT=<dir>).
+// gnocchi fixture generator: parseDevinManualPaste vectors (RSFIX_OUT=<dir>).
 
 import (
 	"encoding/json"

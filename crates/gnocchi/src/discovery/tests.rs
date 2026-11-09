@@ -384,7 +384,7 @@ fn terminal_sanitizing_and_filters_match_go() {
     for case in f["config_filters"].as_array().unwrap() {
         std::fs::write(&path, s(&case["yaml"])).unwrap();
         let got = cli::load_scan_filters(path.to_str().unwrap());
-        // cliproxy-rs refuses invalid `!!binary` data anywhere in the file, where Go
+        // gnocchi refuses invalid `!!binary` data anywhere in the file, where Go
         // scans with no filters (on the path) or the file's (elsewhere).
         if s(&case["yaml"]).contains("!!binary '!!!'") {
             let e = got.unwrap_err();

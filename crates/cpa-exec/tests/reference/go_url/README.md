@@ -12,7 +12,7 @@ fragments, escaped user info, omitted and opaque hosts. `src/xai_url.rs`
 git -C <CLIProxyAPI> worktree add /tmp/cpa-url ae3ee3be
 cp zz_rsfix_url_string_test.go /tmp/cpa-url/internal/runtime/executor/
 (cd /tmp/cpa-url && RSFIX_OUT=/tmp/rsfix-url go test -count=1 -run TestRSFixURLString ./internal/runtime/executor/)
-cp /tmp/rsfix-url/go_url_string.json <cliproxy-rs>/crates/cpa-exec/tests/fixtures/
+cp /tmp/rsfix-url/go_url_string.json <gnocchi>/crates/cpa-exec/tests/fixtures/
 ```
 
 Recorded with Go 1.26.4. Nothing is dialed; run it with external network denied.

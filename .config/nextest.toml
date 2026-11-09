@@ -31,7 +31,7 @@ filter = '''
         | test(=antigravity_request::tests::tool_schemas_are_cleaned_in_one_pass)))
     | (binary_id(cpa-server) & test(/^websocket::tests::/))
     | (binary_id(cpa-server) & test(=pprof::tests::pprof_cpu_profile_is_decodable_and_exclusive))
-    | (binary_id(cliproxy::bin/cliproxy) & (
+    | (binary_id(gnocchi::bin/gnocchi) & (
         test(=home::tests::usage_and_in_flight_reach_home_and_drains_cancel_running_work)
         | test(=home::tests::a_drain_cancels_a_stalled_alpha_search)
         | test(=home::tests::a_drain_ends_a_retained_live_pick)
@@ -48,7 +48,7 @@ filter = '''
     binary_id(cpa-server::plugin_routes) | binary_id(cpa-server::plugin_quota_cooldown)
     | binary_id(cpa-server::plugin_owned)
     | binary_id(cpa-server::plugin_host_model)
-    | binary_id(cliproxy::plugin_cli) | binary_id(cliproxy::plugin_wiring)
+    | binary_id(gnocchi::plugin_cli) | binary_id(gnocchi::plugin_wiring)
     | binary_id(cpa-plugin::go_host) | binary_id(cpa-plugin::native_abi)
 '''
 test-group = 'go-plugins'
@@ -62,7 +62,7 @@ command = '.config/private-tmpdir.sh'
 
 [[profile.default.scripts]]
 platform = { host = 'cfg(unix)' }
-filter = 'package(cpa-plugin) | binary_id(/^cpa-server::plugin_/) | binary_id(/^cliproxy::plugin_/)'
+filter = 'package(cpa-plugin) | binary_id(/^cpa-server::plugin_/) | binary_id(/^gnocchi::plugin_/)'
 setup = 'private-tmpdir'
 
 # One build of the Go test plugins for the whole run (see the script). Every test gets the

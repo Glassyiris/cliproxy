@@ -1,4 +1,4 @@
-//! Provider scope and order (cliproxy-rs only, see docs/DIFFERENCES-FROM-GO.md): the
+//! Provider scope and order (gnocchi only, see docs/DIFFERENCES-FROM-GO.md): the
 //! `providers` blocks of `routing` and of `model-routers` entries. `exclude` takes
 //! credentials out of a request's scope; `order` ranks the rest in tiers, tried top down,
 //! with `routing.strategy` balancing inside a tier. Order only decides unbound picks: a

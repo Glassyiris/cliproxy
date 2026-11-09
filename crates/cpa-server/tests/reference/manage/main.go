@@ -393,7 +393,7 @@ func snapshotDir(dir string) map[string]any {
 	out := map[string]any{}
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		// Callback hand-off files are transient (cliproxy-rs keeps callbacks in memory).
+		// Callback hand-off files are transient (gnocchi keeps callbacks in memory).
 		if strings.HasPrefix(e.Name(), ".oauth-") {
 			continue
 		}
@@ -1570,7 +1570,7 @@ func configScenarios() []configScenario {
 		}},
 		// Go reads a plugin's store.version from the raw node, so this pin stays
 		// base64 text (unpinned) there, and a migrating save that drops the anchor's
-		// unknown section keeps the tag. cliproxy-rs refuses the file.
+		// unknown section keeps the tag. gnocchi refuses the file.
 		{Name: "binary_plugin_pin", YAML: "remote-management:\n  secret-key: \"$HASH\"\npin: &v !!binary MS4yLjM=\nplugins:\n  configs:\n    x:\n      store:\n        version: *v\n", Steps: []configStep{
 			get("/config/plugins"),
 			put("/config/routing/strategy", `"fill-first"`),

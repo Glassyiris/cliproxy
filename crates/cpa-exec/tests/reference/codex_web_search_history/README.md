@@ -19,5 +19,5 @@ Regenerate (Go 1.26, no network beyond module download):
 cp zz_rsfix_codex_web_search_history_test.go <CLIProxyAPI>/internal/runtime/executor/
 cd <CLIProxyAPI>
 RSFIX_OUT=/tmp/rsfix-wsh go test -count=1 -run TestRSFixCodexWebSearchHistory ./internal/runtime/executor/
-cp /tmp/rsfix-wsh/codex_web_search_history_go.json <cliproxy-rs>/crates/cpa-exec/tests/fixtures/
+cp /tmp/rsfix-wsh/codex_web_search_history_go.json <gnocchi>/crates/cpa-exec/tests/fixtures/
 ```

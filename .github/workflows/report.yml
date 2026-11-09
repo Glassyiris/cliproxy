@@ -142,7 +142,7 @@ jobs:
           ROOT: ${{ steps.render.outputs.root }}
         run: |
           set -euo pipefail
-          marker='<!-- cliproxy-size-report -->'
+          marker='<!-- gnocchi-size-report -->'
           # A fork's run lists no pull requests in the event, so they are found by head.
           gh api "repos/$REPO/pulls?state=open&per_page=100" --paginate --slurp > "$ROOT/pulls.json"
           jq -r --arg sha "$HEAD_SHA" --arg repo "$REPO" '

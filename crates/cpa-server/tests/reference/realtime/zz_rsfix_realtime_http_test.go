@@ -1,6 +1,6 @@
 package api
 
-// HTTP goldens for cliproxy-rs's realtime routes: the real server (routes, access manager,
+// HTTP goldens for gnocchi's realtime routes: the real server (routes, access manager,
 // realtime middleware, live handler) with an executor that runs the real Codex
 // PrepareRequest and records the upstream request instead of sending it. Nothing leaves
 // the process. Copy into internal/api/ of CLIProxyAPI 6fecc6e and run with RSFIX_OUT=<dir>;

@@ -87,7 +87,7 @@ async fn list(
         return intercept("openai", crate::codex_models::response(&rt, &version)).await;
     }
     let registry = rt.registry();
-    // Model routers (cliproxy-rs only) list after the registry's models.
+    // Model routers (gnocchi only) list after the registry's models.
     let routers = crate::model_router::listed(&rt.config());
     let models = registry.available_with(|c, m| rt.suspension(c, m)).chain(&routers);
     let (source, body) = if anthropic {

@@ -78,7 +78,7 @@ fn plugin_command_line_matches_go() {
             .iter()
             .map(|a| a.as_str().unwrap().replace("CONFIG", &config.to_string_lossy()))
             .collect();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_cliproxy"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_gnocchi"))
             .args(&args)
             .current_dir(&work)
             .stdout(Stdio::piped())

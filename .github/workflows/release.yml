@@ -74,33 +74,33 @@ jobs:
           rustup default "$RUST_TOOLCHAIN"
       - name: Build
         run: |
-          cargo tree --locked -p cliproxy --target ${{ matrix.target }} --edges normal --prefix none > release-dependencies.txt
+          cargo tree --locked -p gnocchi --target ${{ matrix.target }} --edges normal --prefix none > release-dependencies.txt
           if grep -qE '^(pprof|backtrace) v' release-dependencies.txt; then
             echo '::error::Published release binaries must exclude CPU profiling and symbol resolution'
             exit 1
           fi
-          cargo build --release --locked -p cliproxy --target ${{ matrix.target }}
+          cargo build --release --locked -p gnocchi --target ${{ matrix.target }}
       # Pull requests gate Linux; macOS and Windows are gated here, before anything is
       # published, and weekly by idle.yml. CPU time, wakeups, threads and memory over a
       # minute without requests, against bench/budgets.txt.
       - name: Idle gate (macOS, Windows)
         if: runner.os != 'Linux'
         run: |
-          exe=cliproxy; os=macos
-          [[ "$RUNNER_OS" == Windows ]] && { exe=cliproxy.exe; os=windows; }
+          exe=gnocchi; os=macos
+          [[ "$RUNNER_OS" == Windows ]] && { exe=gnocchi.exe; os=windows; }
           bench/gate.sh idle "$os" "target/${{ matrix.target }}/release/$exe" 1
       - name: Package
         run: |
           tagged=false; [[ "$GITHUB_REF" == refs/tags/v* ]] && tagged=true
           if $tagged; then version="${GITHUB_REF_NAME#v}"; else version="dev-${GITHUB_SHA::7}"; fi
-          name="cliproxy-${version}-${{ matrix.target }}"
-          exe=cliproxy; [[ "$RUNNER_OS" == Windows ]] && exe=cliproxy.exe
+          name="gnocchi-${version}-${{ matrix.target }}"
+          exe=gnocchi; [[ "$RUNNER_OS" == Windows ]] && exe=gnocchi.exe
           mkdir -p "$name" out
           cp "target/${{ matrix.target }}/release/$exe" README.md LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES "$name/"
-          # The first line is Go's startup banner; the last is "cliproxy <version>".
+          # The first line is Go's startup banner; the last is "gnocchi <version>".
           reported="$("./$name/$exe" --version | tr -d '\r' | tail -n 1)"
           echo "$reported"
-          if $tagged && [[ "$reported" != "cliproxy $version" ]]; then
+          if $tagged && [[ "$reported" != "gnocchi $version" ]]; then
             echo "::error::tag $GITHUB_REF_NAME does not match the binary version ($reported)"; exit 1
           fi
           if [[ "$RUNNER_OS" == Windows ]]; then 7z a -tzip "out/$name.zip" "$name" >/dev/null; else tar -czf "out/$name.tar.gz" "$name"; fi
@@ -120,11 +120,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build
-        run: docker build -t cliproxy-rs:ci .
+        run: docker build -t gnocchi:ci .
       - name: Smoke test
-        run: docker run --rm cliproxy-rs:ci --version
+        run: docker run --rm gnocchi:ci --version
       - name: Size gate
-        run: bench/gate.sh image cliproxy-rs:ci
+        run: bench/gate.sh image gnocchi:ci
 
   release:
     name: draft release

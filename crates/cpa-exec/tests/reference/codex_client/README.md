@@ -14,7 +14,7 @@ cp zz_rsfix_codex_tokens_test.go <CLIProxyAPI>/internal/runtime/executor/
 cd <CLIProxyAPI>
 RSFIX_OUT=/tmp/rsfix-cct go test -count=1 -run TestRSFixCodexClientTranslate ./internal/runtime/executor/helps/
 RSFIX_OUT=/tmp/rsfix-cct go test -count=1 -run TestRSFixCodexTokens ./internal/runtime/executor/
-cp /tmp/rsfix-cct/*.json <cliproxy-rs>/crates/cpa-exec/tests/fixtures/
+cp /tmp/rsfix-cct/*.json <gnocchi>/crates/cpa-exec/tests/fixtures/
 ```
 
 The translate vectors cover `TranslateRequestWithAPIKeyModelCompatibilityForExecutor`

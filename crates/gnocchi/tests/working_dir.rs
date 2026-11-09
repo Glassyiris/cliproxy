@@ -9,7 +9,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("cliproxy-{name}-{}-{nanos}", std::process::id()))
+    std::env::temp_dir().join(format!("gnocchi-{name}-{}-{nanos}", std::process::id()))
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn working_dir_applies_before_dotenv_config_and_log_paths() {
     )
     .unwrap();
     std::fs::write(work.join(".env"), "WRITABLE_PATH=from-dotenv\n").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_cliproxy"))
+    let output = Command::new(env!("CARGO_BIN_EXE_gnocchi"))
         .args([
             "-local-model",
             "--working-dir",
@@ -67,7 +67,7 @@ fn a_warning_before_the_runtime_starts_goes_to_the_log_file() {
         "config-version: 8\nport: 0\nauth-dir: ./auth\n",
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_cliproxy"))
+    let output = Command::new(env!("CARGO_BIN_EXE_gnocchi"))
         .args([
             "-local-model",
             "--log-file",
@@ -94,8 +94,8 @@ fn a_warning_before_the_runtime_starts_goes_to_the_log_file() {
 
 #[test]
 fn a_missing_working_dir_fails_before_anything_runs() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cliproxy"))
-        .args(["-working-dir=/nonexistent/cliproxy-wd", "-vertex-import", "x.json"])
+    let output = Command::new(env!("CARGO_BIN_EXE_gnocchi"))
+        .args(["-working-dir=/nonexistent/gnocchi-wd", "-vertex-import", "x.json"])
         .current_dir(std::env::temp_dir())
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())

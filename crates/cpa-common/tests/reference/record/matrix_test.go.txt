@@ -8,7 +8,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
 )
 
-// TestRecordThinkingMatrix exists only to feed the cliproxy-rs recorder: it calls every
+// TestRecordThinkingMatrix exists only to feed the gnocchi recorder: it calls every
 // built-in applier and the resolved ApplyThinking pipeline over a cross product of
 // modes, capabilities and body shapes. Go's outputs are captured by the recorder.
 func TestRecordThinkingMatrix(t *testing.T) {

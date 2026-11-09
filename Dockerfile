@@ -14,8 +14,8 @@ COPY vendor vendor
 COPY ui/dist ui/dist
 # On small machines pass --build-arg BUILD_JOBS=1; the final link needs about 2 GB of memory.
 ARG BUILD_JOBS
-RUN cargo build --release --locked -p cliproxy ${BUILD_JOBS:+--jobs "$BUILD_JOBS"} \
- && install -m 0755 target/release/cliproxy /usr/local/bin/cliproxy
+RUN cargo build --release --locked -p gnocchi ${BUILD_JOBS:+--jobs "$BUILD_JOBS"} \
+ && install -m 0755 target/release/gnocchi /usr/local/bin/gnocchi
 
 # Runtime stage. The binary links glibc and libstdc++, so a slim Debian base is the
 # smallest image that runs it unchanged.
@@ -23,17 +23,17 @@ FROM debian:bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
- && groupadd --system --gid 10001 cliproxy \
- && useradd --system --uid 10001 --gid 10001 --home-dir /data --shell /usr/sbin/nologin cliproxy \
+ && groupadd --system --gid 10001 gnocchi \
+ && useradd --system --uid 10001 --gid 10001 --home-dir /data --shell /usr/sbin/nologin gnocchi \
  && mkdir -p /data \
- && chown cliproxy:cliproxy /data
-COPY --from=build /usr/local/bin/cliproxy /usr/local/bin/cliproxy
+ && chown gnocchi:gnocchi /data
+COPY --from=build /usr/local/bin/gnocchi /usr/local/bin/gnocchi
 # The license, the MIT notices it carries forward, and the third-party licenses the binary needs.
-COPY LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES /usr/share/doc/cliproxy/
-USER cliproxy
+COPY LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES /usr/share/doc/gnocchi/
+USER gnocchi
 # Config and credentials live in /data; mount a volume there. No VOLUME instruction:
 # some hosts, Railway among them, refuse to build a Dockerfile that has one.
 WORKDIR /data
 EXPOSE 8317
-ENTRYPOINT ["cliproxy"]
+ENTRYPOINT ["gnocchi"]
 CMD ["--config", "/data/config.yaml"]

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Memory and throughput comparison behind docs/BENCHMARKS.md.
 #
-#   bench/run.sh <cliproxy binary> <Go cli-proxy-api binary> <output dir> [rounds]
+#   bench/run.sh <gnocchi binary> <Go cli-proxy-api binary> <output dir> [rounds]
 #
 # Each server gets the same config.yaml: one OpenAI-compatible provider pointing at the
 # fake upstream in bench/upstream, one client key, an empty credential directory. The
