@@ -1,4 +1,4 @@
-// i18n gate (REQUIREMENTS rows 10, 11). An area's English catalog is src/i18n/<area>.ts with
+// i18n gate (REQUIREMENTS.md "Enforcement"). An area's English catalog is src/i18n/<area>.ts with
 // `export default { en }`, and each translation is src/i18n/<locale>/<area>.ts with
 // `export default { "<locale>": … }`; flat keys `<area>.<part>.<name>`, ICU messages.
 // src/i18n/<locale>/index.ts merges that locale's areas into the one table the app loads.

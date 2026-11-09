@@ -1,4 +1,4 @@
-// The key-number card of the nbcards admin (card-v2 `web/src/ui/MetricCard.tsx`, MIT): the label
+// The key-number card of the card-v2 admin (card-v2's `MetricCard`, MIT): the label
 // row (an icon in the status colour, the label, a chevron when the card links), the value at the
 // metric size with an optional badge, and one supporting line. With `href` the whole card is the
 // link. The card padding is the one card padding (roles.card).

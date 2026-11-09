@@ -280,7 +280,7 @@ def render(candidate_dir, baseline_dir, context):
     if problems:
         out += ["**Ignored reports**", ""] + problems + [""]
     out.append(f"<sub>Ceilings: `bench/budgets.txt` and `ui/tools/size-budget.json`; raising one needs "
-               f"the owner's approval. Baseline: the latest successful CI run of a push to `{branch}` "
+               f"a maintainer's approval. Baseline: the latest successful CI run of a push to `{branch}` "
                f"before this run.</sub>")
     out.append(MARKER)
     return "\n".join(out) + "\n"

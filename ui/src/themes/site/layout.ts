@@ -14,7 +14,7 @@ export const layout = {
   // The detail panel beside a list, as the table-filter template sizes it: wide enough for a
   // MetadataList's label column, narrow enough to leave the table its columns.
   detailPanel: { defaultSize: 380, minSize: 320, maxSize: 560 },
-  // BoothDex admin-shell widths: the sidebar opens at 260 and can be dragged between 220 and 360.
+  // The BoothDex admin shell's widths: the sidebar opens at 260 and can be dragged between 220 and 360.
   sidebar: { defaultWidth: 260, minWidth: 220, maxWidth: 360 },
   // The config editor dialog uses the preferences dialog's size; its code box takes that height
   // less the title rows, footer and padding,

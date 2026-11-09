@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Browser performance harness for the dashboard. See README.md.
 //
-//   node tools/perf/run.mjs --accounts 1000 --minutes 5 --dist /scratch/ssd/cliproxy-perf/dist-svelte
+//   node tools/perf/run.mjs --accounts 1000 --minutes 5 --dist <built dashboard>
 //
 // Starts the mock Management API and `vite preview` of a built dashboard, signs in through the real
 // login form in Chrome and measures M1 to M5 plus a pass over every page. UI-specific markup lives in
@@ -22,7 +22,7 @@ const { values: opt } = parseArgs({
   options: {
     accounts: { type: "string", default: "1000" },
     minutes: { type: "string", default: "5" },
-    ui: { type: "string", default: "svelte" },
+    ui: { type: "string", default: "react" },
     out: { type: "string" },
     dist: { type: "string", default: path.join(uiRoot, "dist") },
     seed: { type: "string", default: "1" },
@@ -43,7 +43,7 @@ const POLLS = Number(opt.polls);
 const LOADS = Number(opt.loads);
 const REPS = Number(opt.reps);
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const out = path.resolve(opt.out || `/scratch/ssd/cliproxy-perf/${stamp}`);
+const out = path.resolve(opt.out || path.join(os.tmpdir(), "cliproxy-perf", stamp));
 mkdirSync(out, { recursive: true });
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);

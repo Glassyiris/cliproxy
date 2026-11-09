@@ -38,7 +38,7 @@ import { FormDialogHeader } from "./FormDialog.tsx";
 import { ReadError } from "./ReadError.tsx";
 
 /** A config key path such as "routing/strategy" (edited as JSON), or the whole file as YAML. */
-export type ConfigSource = { path: string } | { yaml: true };
+type ConfigSource = { path: string } | { yaml: true };
 
 const sourceName = (source: ConfigSource) => ("path" in source ? source.path : "config.yaml");
 const format = (source: ConfigSource) => ("path" in source ? "JSON" : "YAML");

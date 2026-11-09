@@ -1,4 +1,4 @@
-// The template's filter row in the LayoutHeader (table-filter:4339-4475): the search leads and the
+// The template's filter row in the LayoutHeader (table-filter): the search leads and the
 // family filter and the view switch follow; the row wraps on a narrow screen.
 import { Icon } from "@astryxdesign/core/Icon";
 import { HStack, StackItem } from "@astryxdesign/core/Layout";

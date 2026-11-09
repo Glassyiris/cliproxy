@@ -39,7 +39,6 @@ export const routes = {
   oauthStatus: { method: "GET", path: "/oauth/status" },
   cancelOAuth: { method: "DELETE", path: "/oauth/session" },
   importOAuth: { method: "POST", path: "/oauth/import" },
-  bindSiwc: { method: "POST", path: "/oauth/siwc/bind" },
   submitOAuthCallback: { method: "POST", path: "/oauth/callback" },
 
   listPlugins: { method: "GET", path: "/plugins" },

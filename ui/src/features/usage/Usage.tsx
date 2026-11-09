@@ -1,5 +1,5 @@
 // Usage, the Activity route's first tab, from the Astryx template dashboard-comparison on the shared
-// PageFrame with the nbcards admin's sizes (DESIGN.md "Roles"). Deviations from the template, one
+// PageFrame with the card-v2 admin's sizes (DESIGN.md "Roles"). Deviations from the template, one
 // per line with its reason:
 // - The header is PageFrame's (route title, then tabs), padded by the page roles, so the h1
 //   sits where every page has it; the template's contentWidth 1440 is dropped (content is full).

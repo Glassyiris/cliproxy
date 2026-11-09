@@ -1,4 +1,4 @@
-// Bundle budget (REQUIREMENTS rows 31 and 32), run after `vite build`. Sizes are gzip bytes of
+// Bundle budget (REQUIREMENTS.md "Numbers"), run after `vite build`. Sizes are gzip bytes of
 //   initialJs        the entry script, its static imports and the inline scripts of index.html
 //   initialCss       the stylesheets index.html links
 //   largestLazyChunk the biggest JS chunk outside the initial set (loaded on demand)
@@ -6,13 +6,12 @@
 //   totalCss         every stylesheet, linked and lazy
 // against tools/size-budget.json. A `null` or absent limit prints the measured size and passes.
 //
-// The limits are ceilings with headroom, set once (owner, 2026-11-09: 「預算判夠不要每次都改」),
-// not the last measurement: a pull request that grows the bundle does not edit them, and the CI
-// report comment shows its change against master. The committed build of 2026-11-09 measured
-// initial JS 333,632 B, initial CSS 47,776 B and largest lazy chunk 105,870 B (plots). Ceilings:
-// 360,000 B (+7.9%, about 26 KB), 55,000 B (+15%; CSS grows slowly) and 120,000 B (+13%; the
-// largest chunk is the plotting library, which grows only with its upgrades). Totals are reported
-// without a ceiling. Raise a ceiling only when a change needs it, with the owner's approval.
+// The limits are ceilings with headroom, raised only when a change needs it, not the last
+// measurement: a pull request that grows the bundle does not edit them, and the CI report comment
+// shows its change against master. Headroom over the committed build: about 8% for initial JS,
+// 15% for initial CSS (CSS grows slowly) and 13% for the largest lazy chunk (the plotting library,
+// which grows only with its upgrades). Totals are reported without a ceiling. Raising a ceiling
+// needs a maintainer's approval.
 //
 //   node tools/size.mjs [dist] [--json <file>]
 //

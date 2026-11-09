@@ -1,4 +1,4 @@
-// The app frame, as the BoothDex console has it (admin/admin-shell.tsx) from the Astryx page
+// The app frame, as the BoothDex console has it from the Astryx page
 // template shell-side-nav: AppShell with one collapsible, resizable SideNav: its heading on top, the
 // six pages from routes.ts as flat items, the session rows in the footer, and the colour-mode toggle and the
 // settings button in the footer icon row beside the collapse button. On phones AppShell turns the nav into its drawer
@@ -181,8 +181,8 @@ function navEntry({ route, view }: NavRef, current: PageRoute, shownView?: strin
 }
 
 /**
- * The pages in `navSections`, each section's name a small heading over its items, never collapsed
- * (owner, 2026-11-09). In the collapsed rail every page is its own icon, so reaching one is one
+ * The pages in `navSections`, each section's name a small heading over its items, never collapsed.
+ * In the collapsed rail every page is its own icon, so reaching one is one
  * click.
  */
 function PageSections({ current }: { current: PageRoute }) {

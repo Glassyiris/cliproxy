@@ -24,7 +24,7 @@ export function failureNotice(error: unknown): { level: NoticeLevel; message: st
 }
 
 /** Runs `work` unless another run is still pending; true when it finished without an error. */
-export type RunAction = (work: () => Promise<unknown>, success?: string) => Promise<boolean>;
+type RunAction = (work: () => Promise<unknown>, success?: string) => Promise<boolean>;
 
 /** The one-write-at-a-time rule, apart from React so it can be tested. */
 export function createAction(setBusy: (busy: boolean) => void): RunAction {

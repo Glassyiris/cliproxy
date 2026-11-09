@@ -1,5 +1,5 @@
 // Requests over the server's ten-minute buckets as a number and a small bar sparkline, for the
-// rows of Accounts and Provider keys (M1-MUST: the TrafficStrip is retired). Each bar's height is
+// rows of Accounts and Provider keys. Each bar's height is
 // its bucket's requests against the row's busiest bucket; the failed part is stacked in love at
 // the bar's foot. The bars stand on one baseline as wide as the strip, so empty buckets still mark
 // their span and every row's timeline has the same length. The count sits in a slot of fixed width

@@ -64,7 +64,7 @@ async function astryxCatalog(locale: Locale): Promise<ProviderMessagesByLocale> 
   return {};
 }
 
-export type Preferences = {
+type Preferences = {
   mode: ThemeMode;
   palette: Palette;
   locale: Locale;

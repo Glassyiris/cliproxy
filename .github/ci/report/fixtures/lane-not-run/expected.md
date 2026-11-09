@@ -15,5 +15,5 @@
 - Release binary and idle with 1 auth file: not run (the changed paths do not reach it)
 - Idle with 2,000 auth files: no report (the job ended with `failure`)
 
-<sub>Ceilings: `bench/budgets.txt` and `ui/tools/size-budget.json`; raising one needs the owner's approval. Baseline: the latest successful CI run of a push to `master` before this run.</sub>
+<sub>Ceilings: `bench/budgets.txt` and `ui/tools/size-budget.json`; raising one needs a maintainer's approval. Baseline: the latest successful CI run of a push to `master` before this run.</sub>
 <!-- cliproxy-size-report -->

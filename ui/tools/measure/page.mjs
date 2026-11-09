@@ -90,7 +90,7 @@ export function readPage({ from, answer }) {
   const cards = [...main.querySelectorAll(".astryx-card, .astryx-clickable-card")].filter(
     (e) => e.getClientRects().length,
   );
-  // The card's inset to its content: padding plus the hairline border (nbcards: 19 + 1).
+  // The card's inset to its content: padding plus the hairline border (card-v2: 19 + 1).
   const inset = (e) => {
     const css = getComputedStyle(e);
     return `${parseFloat(css.paddingTop) + parseFloat(css.borderTopWidth)}px`;

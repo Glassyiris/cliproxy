@@ -146,7 +146,7 @@ function Clear({ hasAccounts }: { hasAccounts: boolean }) {
 const cards = { minWidth: layout.summaryTileMin, repeat: "fit" } as const;
 
 /**
- * "Needs attention": one card per reason that has accounts, most urgent first (the nbcards admin's
+ * "Needs attention": one card per reason that has accounts, most urgent first (the card-v2 admin's
  * "Open work"). `summary` is undefined while the accounts load; `reads` are failed reads of the
  * accounts or the configuration, shown above the cards they leave stale or incomplete.
  */

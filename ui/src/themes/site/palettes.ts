@@ -2,9 +2,8 @@ import type { DefinedTheme } from "@astryxdesign/core/theme";
 import { siteNeutralTheme } from "./site-neutral.js";
 
 /**
- * The three palettes, independent of light and dark: Neutral (Astryx's own colours, the default
- * since 2026-11-09: 「默認配色改成中性？」) for both modes, and Moon and Main for dark with Dawn for
- * light.
+ * The three palettes, independent of light and dark: Neutral (Astryx's own colours, the default)
+ * for both modes, and Moon and Main for dark with Dawn for light.
  */
 const palettes = ["neutral", "moon", "main"] as const;
 export type Palette = (typeof palettes)[number];

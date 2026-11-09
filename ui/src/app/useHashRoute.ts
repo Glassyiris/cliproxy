@@ -127,7 +127,7 @@ export function useHashRoute() {
  * a family, an open store), `replace` for typing and filters, so a search does not add a Back
  * step per key.
  */
-export type HashMode = "push" | "replace";
+type HashMode = "push" | "replace";
 
 /**
  * The query after the route (`#accounts?provider=codex`) and a setter that merges changes into

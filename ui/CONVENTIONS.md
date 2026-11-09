@@ -1,7 +1,7 @@
 # Dashboard code conventions
 
-How code in `ui/` is written. Visual rules are in `DESIGN.md`; the quality requirements every
-change is checked against are in `AGENTS.md`. Where a rule has a gate, the gate is named; a rule
+How code in `ui/` is written. Visual rules are in `DESIGN.md`; the numbers, gates and exceptions
+every change is checked against are in `REQUIREMENTS.md`. Where a rule has a gate, the gate is named; a rule
 without one is checked in review.
 
 ## Language and tooling
@@ -71,8 +71,8 @@ src/i18n/        catalogs per area: <area>.ts (en), zh-CN/<area>.ts, zh-TW/<area
 
 - English. Only for what the code cannot say: an invariant, a server quirk, a security boundary,
   a trade-off. No comments that restate the code, no commented-out code, no TODO.
-- A deliberate simplification carries `ponytail:` with its limit and how to lift it (repository
-  convention, see `CONTRIBUTING.md`).
+- Deliberate simplifications follow the `ponytail:` convention in
+  [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests).
 
 ## Limits
 
@@ -96,5 +96,5 @@ file that fails both when the count rises and when it falls without being lowere
 
 ## Commits
 
-Repository style: an optional area prefix and one plain sentence, e.g.
-`Dashboard: Accounts page for many accounts`. Body explains why. No AI attribution.
+Follow [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests). A subject may take an area prefix, e.g.
+`Dashboard: Accounts page for many accounts`. No AI attribution.

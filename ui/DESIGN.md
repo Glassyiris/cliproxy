@@ -10,14 +10,14 @@ They come to answer three questions, in this order: can the proxy serve right no
 needs me, and what did my tools just send. Every screen is built for scanning a long list and
 acting on one row, not for reading.
 
-This replaces the Braun "Instrument" language (2026-11-08, owner: the dashboard gets its own new
-style). Product rules in `PRODUCT.md` still apply; its visual and size clauses are superseded here.
+Product rules in `PRODUCT.md` still apply; where it and this file disagree on visual or size
+clauses, this file wins.
 
 ## Principles
 
 1. **Grey carries hierarchy, hue carries state.** Surfaces, text and controls are the palette's
    neutral roles. A coloured pixel means a state (ready, cooling, failing, info) or, in iris
-   only, the focus ring. Links are body text (as the nbcards admin draws them): a chevron, the
+   only, the focus ring. Links are body text (as the card-v2 admin draws them): a chevron, the
    hover and the button shape show what is clickable.
 2. **One way to draw each thing.** One row, one list, one detail panel, one dialog, one form field,
    one notice. Astryx components first; a local component exists only when two screens need it.
@@ -30,22 +30,20 @@ style). Product rules in `PRODUCT.md` still apply; its visual and size clauses a
 
 ## Colour
 
-The default palette is **Neutral** (owner, 2026-11-09: 「默認配色改成中性？」), described below.
+The default palette is **Neutral**, described below.
 The other two are [Rosé Pine](https://rosepinetheme.com): **Moon** in dark mode and **Dawn** in
 light mode, and **Rosé Pine** (Main) for dark with Dawn for light. The Rosé Pine values come
 unmodified from [rose-pine/palette](https://github.com/rose-pine/palette) (MIT): the named roles
 from `palette.json`, the highlight roles from `dist/css/rose-pine.css`; they live in
-`src/themes/site/rosePine.ts`. Owner, 2026-11-08: 「https://github.com/rose-pine 配色用這個把」;
-「原色優先」 — every colour is an official value; pairs that miss a contrast limit are listed in
+`src/themes/site/rosePine.ts`. Every colour is an official value; pairs that miss a contrast limit are listed in
 `REQUIREMENTS.md` Exceptions instead of being adjusted.
 
 **Neutral** is Astryx's neutral theme with its own colours in both modes, added for anyone who
-finds Rosé Pine too colourful (owner, 2026-11-09: 「至少把中性主題加回來把，這個主題顏色太豐富了可能有人不喜歡」).
+finds Rosé Pine too colourful.
 `siteNeutralTheme.ts` builds `site-neutral` (in the entry) with the site's sizes, type scale
-and motion rule, and a few colours so it reads monochrome (owner, 2026-11-09: 「不太中性感覺」
-「難看的配色」): bar fills take neutral's greys (#919191 light, #777777 dark) instead of core's
+and motion rule, and a few colours so it reads monochrome: bar fills take neutral's greys (#919191 light, #777777 dark) instead of core's
 blue-grey, chart volume takes Astryx's categorical blue #0171E3 in both modes, as BoothDex's trend
-charts draw it (「這個統計圖死灰色還要改」, chose 「Astryx 藍」), and warning takes neutral's orange family (soft #ffc7a1 / #503424
+charts draw it (a grey volume series reads as dead), and warning takes neutral's orange family (soft #ffc7a1 / #503424
 fill, #622700 / #ffb37e ink; light icons and dots core's #d66100) instead of its bright yellow
 #ffce2f. Accent, focus ring, error, success and info stay neutral's. Each override and its source
 value is commented in the file. The role table below is the Rosé Pine palettes'.
@@ -88,8 +86,8 @@ value is commented in the file. The role table below is the Rosé Pine palettes'
 
 - Status vocabulary, closed set: `ready`, `cooling`, `failing`, `info`, `disabled` (muted). A lamp
   is Astryx's `StatusDot` (`success`, `warning`, `error`, `neutral`; `info` is for banners and
-  badges only) with its word in secondary text beside it, as the owner's BoothDex console draws
-  it (`admin/live-status.tsx`). Icons, lamps and status borders take the hue; banner and badge
+  badges only) with its word in secondary text beside it, as the BoothDex console draws
+  it. Icons, lamps and status borders take the hue; banner and badge
   fills are overlay with the hue as their text, so no fill is mixed from a hue. Contrast limits stay: body text ≥ 10:1,
   secondary and status text ≥ 5:1, measured on the composited colour; the official colours miss
   some of them, see `REQUIREMENTS.md`.
@@ -100,14 +98,14 @@ value is commented in the file. The role table below is the Rosé Pine palettes'
 
 ## Type
 
-- Fonts are the neutral theme's own, unchanged (owner, 2026-11-08: fonts and icons use the
-  component library's defaults): Figtree, then the system sans stack, for body and headings;
+- Fonts are the neutral theme's own, unchanged (fonts and icons use the component library's
+  defaults): Figtree, then the system sans stack, for body and headings;
   the system monospace stack for code. Neutral's `fonts.css` loads Figtree from Google Fonts at
   run time; the app imports the same four weights from `@fontsource/figtree` instead (in
   `src/themes/site/index.ts`), so it makes no third-party request, as BoothDex does. There is no
   `typography` block and no per-locale font rule, so CJK text falls to the system fonts the
   browser picks for the page language.
-- Scale: the nbcards admin's (card-v2 `panelScale`, MIT, the owner's project): `typography.scale`
+- Scale: the card-v2 admin's (card-v2 `panelScale`, MIT): `typography.scale`
   base 15, ratio 1.2, in `siteTypography` (`src/themes/site/siteTheme.ts`). Body 15, card title in
   a list 18 (h3), section 22 (h2), page title 26 (h1), metric value 31 (`display-3`); supporting
   text 13 on a 20 px line (`--text-supporting-size`, as card-v2 `panelShared` sets it). Weights are
@@ -117,23 +115,20 @@ value is commented in the file. The role table below is the Rosé Pine palettes'
 
 ## Layout
 
-Every screen starts from an Astryx template and keeps its frame (owner, 2026-11-08: build from
-the templates and the components as they come; 「這個側邊欄絕對不是組件庫和我的項目有的純ai風格難看死了」;
-「內容都要組件庫的」). Each page file names its template in its header comment and lists every
+Every screen starts from an Astryx template and keeps its frame: build from the templates and the
+components as they come, and take page content from the component library too. Each page file names its template in its header comment and lists every
 deviation with its reason.
 
 ### Routes
 
-Six hash routes (owner, 2026-11-08: 「很多東西沒必要一定是一個頁面」). What used to be a page of its
-own is a view of one of them (`?view=`) or a dialog (`?open=`). The side nav groups the pages in
-titled sections, never collapsed, as the nbcards console does (owner, 2026-11-09: 「側邊欄可以對著
-nbcards重新改一下 不要收起也行」): Monitor (Overview, Usage), Accounts (Accounts, Provider keys),
-Models (Models, Payload rules), Server (Settings, Client keys, Logs) (owner, 2026-11-09: 「把概覽丟監控
-裡面然後弄到最上面 日誌放到伺服器那邊」). The table is `navSections` in `src/app/routes.ts`; a
-view's URL stays on its route whatever section lists it. Pages carry no tab strip (owner, 2026-11-08: header tabs read as 「切換太離譜了」;
-「側邊欄可以做之前那種收起」). Sign-in is not a route. The R1 to R5 rewrites
-redesign the content of Accounts, Clients, Models, Activity and Settings; until then each tab and
-dialog hosts the earlier page unchanged through a thin host in `src/app/pages/`.
+Six hash routes: not everything needs a page of its own, so the rest are views of one of them
+(`?view=`) or dialogs (`?open=`). The side nav groups the pages in titled sections, never
+collapsed, as the card-v2 console does: Monitor (Overview, Usage), Accounts (Accounts, Provider
+keys), Models (Models, Payload rules), Server (Settings, Client keys, Logs). The table is
+`navSections` in `src/app/routes.ts`; a view's URL stays on its route whatever section lists it.
+Pages carry no tab strip: switching through header tabs reads as too much. Sign-in is not a route.
+Each tab and dialog hosts a feature page from `src/features/` through a thin host in
+`src/app/pages/`.
 
 | Route (`#id`) | Answers first | Template | Views (side nav) and dialogs |
 | --- | --- | --- | --- |
@@ -145,11 +140,11 @@ dialog hosts the earlier page unchanged through a thin host in `src/app/pages/`.
 | Settings (`settings`) | Which server setting do I change, and what does it affect? | `settings-sidebar` | Dialog: Plugins (`?open=plugins`), from the header |
 | Sign-in (not a route) | Which server do I connect to, and what do I enter? | `login-card` | — |
 | Connect an account (dialog over any page, `?open=connect`) | Which kind of account, and how far is the authorization? | `form-wizard-dialog` | After the type is chosen only that flow shows |
-| About (preferences dialog, `?open=about`) | Which build is this, and is it current? | `settings-dialog` | The earlier System page, as the dialog's About panel (below) |
+| About (preferences dialog, `?open=about`) | Which build is this, and is it current? | `settings-dialog` | The dialog's About panel (below) |
 
 - One hash form: `#<route>[/<arg>][?<query>]`. A tab is `?view=<tab>` (the first tab has none); a
   dialog is `?open=<dialog>`; a filter is its own key (`#accounts?show=<reason>`, which Accounts
-  reads from R1 on). Logs keeps its own `?tab=`, which is why the route tab is `view`.
+  reads). Logs keeps its own `?tab=`, which is why the route tab is `view`.
 - Old hashes land through `redirect()` in `src/lib/hash.ts`, which replaces the entry in place:
   `#providers` → `#accounts?view=providers`, `#keys` → `#clients`, `#use` → `#clients?open=use`,
   `#usage` → `#activity`, `#logs` → `#activity?view=logs`, `#payload` → `#models?view=payload`,
@@ -171,8 +166,7 @@ dialog hosts the earlier page unchanged through a thin host in `src/app/pages/`.
 
 ### Shell (`shell-side-nav`, as BoothDex's admin shell)
 
-The precedent is the owner's BoothDex console, `web/src/components/admin/admin-shell.tsx`, itself
-built from the same template.
+The precedent is the BoothDex admin console, itself built from the same template.
 
 - Astryx `AppShell` with the side nav only; there is no top bar. `SideNav` is `collapsible` and
   `resizable` (260 px default, 220 to 360).
@@ -200,7 +194,7 @@ built from the same template.
 - The settings button opens the `settings-dialog` template. Appearance: palette (with a preview),
   mode (light, dark, follow the system) and language. Keyboard shortcuts: the template's own panel
   (`settings-dialog/page.tsx:413`). Options that affect only this browser sit in the dialog too.
-- The About panel (the earlier System page, below) is the dialog's last panel, opened directly by
+- The About panel (below) is the dialog's last panel, opened directly by
   `?open=about`.
 - Server settings, which affect everyone, stay on the Settings page and never enter the dialog.
 - Sign-in keeps its own mode, palette and language controls at the page's top end, on the page
@@ -222,11 +216,11 @@ built from the same template.
 
 ### Pages
 
-- Every page renders in one frame component, `src/app/PageFrame.tsx`, after the nbcards admin's
-  (card-v2 `web/src/ui/PageFrame.tsx`, MIT): `Layout height="fill"` with the page padding set once
+- Every page renders in one frame component, `src/app/PageFrame.tsx`, after the card-v2 admin's
+  (card-v2 `PageFrame.tsx`, MIT): `Layout height="fill"` with the page padding set once
   on the `Layout`, `LayoutHeader`, `LayoutContent` and, for a detail or a rail, `LayoutPanel` at
-  the end. A page puts its template's body inside it and never draws its own header (owner,
-  2026-11-08: 「每個頁面一個骨架有病」, after the h1 jumped between pages). The header and the
+  the end. A page puts its template's body inside it and never draws its own header, so the h1
+  does not jump between pages. The header and the
   content share one line, so the h1 sits at the same place on every page; the content line stops at
   the content width, and a reading-width page caps only its content, aligned to the header's
   start, never centred.
@@ -244,7 +238,7 @@ built from the same template.
 - Headings: h1 the page; h2 `SectionHeading` (`src/components/`) for a section outside cards; h3
   `CardHeading` inside a card; h4 a sub-block. Never two headings stacked. A key number is a
   `MetricCard` (label row, value at the metric size, optional badge, one supporting line; with
-  `href` the whole card is the link, marked by a chevron). All three follow card-v2 `web/src/ui/`.
+  `href` the whole card is the link, marked by a chevron). All three follow card-v2's components.
 - Cards have one style (radius 16, hairline border, the card padding) and hold only a few related
   facts or a chart. Lists, tables, settings and logs are flat with hairline dividers, never boxed.
 - The outcome of a page action is a toast, or a banner directly under the header for a read.
@@ -263,9 +257,8 @@ built from the same template.
 ### Roles
 
 A role that repeats across pages has one value. Sizes, spacing, type, radii, control heights,
-heading levels, card use and link colour come from the nbcards admin (card-v2, MIT, the owner's
-project; owner, 2026-11-08: 「大小統一東西多現在顯得亂你懂吧」「看看nbcards的後臺」), measured in
-`p3/r/ref/nbcards/REPORT.md`; colours stay Rosé Pine. The Astryx templates settle the rest.
+heading levels, card use and link colour come from the card-v2 admin (MIT): one
+size for each role keeps a dense page from looking cluttered. Colours stay Rosé Pine. The Astryx templates settle the rest.
 Spacing and sizes inside one template's own composition (its gaps, a toolbar's `size="sm"`) stay
 as that template writes them. Values are in `src/themes/site/roles.ts` and `layout.ts`; `check:ui`
 enforces the type rows and `npm run measure` the rendered values.
@@ -275,35 +268,32 @@ added to `roles.ts` with a named use and its source, so text stays one scale acr
 | Role | Value | Source |
 | --- | --- | --- |
 | Page frame | `Layout` / `LayoutHeader` / `LayoutContent` / `LayoutPanel`, padding set once on `Layout` | card-v2 `PageFrame.tsx`; `dashboard-alert-rail:1446-1567`, `table-filter:4333-4480` |
-| Header | Every route has a `LayoutHeader` with a divider holding the h1 (26/600) and one 13 px `Text type="supporting"` line; the h1 is at the same place on every route. `table-page` and `settings-sidebar` have no header (`:856-869`, `:301`); their pages add one, a recorded deviation | card-v2 `PageFrame.tsx`; REPORT.md "h1" |
+| Header | Every route has a `LayoutHeader` with a divider holding the h1 (26/600) and one 13 px `Text type="supporting"` line; the h1 is at the same place on every route. `table-page` and `settings-sidebar` have no header (`:856-869`, `:301`); their pages add one, a recorded deviation | card-v2 `PageFrame.tsx` |
 | Page padding | 6 (24 px), 4 (16 px) below Astryx `md`; the body ends with 10 (40 px) | card-v2 `PageFrame.tsx` |
 | Content width | The content line takes the full width (no 1440 cap, unlike card-v2: it left empty bands on wide screens). Settings pages cap their content at 1200, single-column forms at 800; lists and dashboards take the full line | card-v2 `PageFrame.tsx` `CONTENT_WIDTH`; `settings-sidebar:303`, `form-wizard-inline:610` |
 | Section gap | 6 (24 px) between a page's sections | card-v2 `layout.ts` `SECTION_GAP` |
 | Card gap | 4 (16 px) between cards and between blocks inside one card | card-v2 `layout.ts` `CARD_GAP` |
-| Card | One style: `Card` with radius 16, hairline border, padding 5 (20 px). Only for a few related facts or a chart | card-v2 `layout.ts` `CARD_PADDING`, `UI-RULES.md` |
+| Card | One style: `Card` with radius 16, hairline border, padding 5 (20 px). Only for a few related facts or a chart | card-v2 `layout.ts` `CARD_PADDING` |
 | Side column | 340 px beside the main column | card-v2 `layout.ts` `SIDE_WIDTH` |
 | Table density | `balanced`; `table-filter`'s density switch (`:3896`) is removed, a recorded deviation | `table-inbox:2628`, `table-grouped:953`, `table-page:933` |
-| Heading levels | 1 page title, 2 `SectionHeading` outside cards, 3 `CardHeading` inside, 4 a sub-block; nothing deeper; one level 1 per route; never two headings stacked | card-v2 `UI-RULES.md` "Page" |
-| Text types | `body` content and cells (15); `supporting` the line under a title and hints (13); `label` a field or metric label; `display-3` a metric value (31/600); `code` identifiers (model IDs, keys, paths) as plain mono text; versions and other numbers take `body` with tabular figures. The `Code` chip (filled, padded) is only for code inside a sentence or a snippet, never in a table cell, list row or metadata value (owner, 2026-11-08: 「組件庫包那麼死嗎？」 on version chips); `inherit` text inside another text. A `Heading` takes no `type`: its level sets the scale | card-v2 `MetricCard.tsx`, `panelScale`; `table-grouped:777`, `dashboard-alert-rail:1461`, `:863`, `dashboard-comparison:389` |
+| Heading levels | 1 page title, 2 `SectionHeading` outside cards, 3 `CardHeading` inside, 4 a sub-block; nothing deeper; one level 1 per route; never two headings stacked | card-v2 page rules |
+| Text types | `body` content and cells (15); `supporting` the line under a title and hints (13); `label` a field or metric label; `display-3` a metric value (31/600); `code` identifiers (model IDs, keys, paths) as plain mono text; versions and other numbers take `body` with tabular figures. The `Code` chip (filled, padded) is only for code inside a sentence or a snippet, never in a table cell, list row or metadata value; `inherit` text inside another text. A `Heading` takes no `type`: its level sets the scale | card-v2 `MetricCard.tsx`, `panelScale`; `table-grouped:777`, `dashboard-alert-rail:1461`, `:863`, `dashboard-comparison:389` |
 | Text size and weight | Size: `lg` for the brand name only. Weight: `semibold` for emphasis, `bold` for the brand and a group name, `normal` as the plain branch of a conditional emphasis. Rendered weights are 400/500/600 | `login-card:94`, `dashboard-alert-rail:1098`, `table-grouped:1001`, `table-inbox:1059` |
-| Primary action | At most one `Button variant="primary"` per page, default size (36 px), at the header's end; the other header controls are 36 too | card-v2 `UI-RULES.md` "Buttons", `panelShared` |
-| Row actions | `IconButton variant="ghost" size="sm"`: 32 × 32 with a 16 px glyph | card-v2 `UI-RULES.md`; `table-inbox:1008`, `table-filter:2159` |
-| Nav row | 36 px, 16 px icon and text | REPORT.md "Nav" |
-| Links | Body text colour, no underline; a chevron, the hover and the button shape show what is clickable; navigation is a link, an action is a button | card-v2 `siteTheme.ts` (text accent is the ink), `UI-RULES.md:55` |
+| Primary action | At most one `Button variant="primary"` per page, default size (36 px), at the header's end; the other header controls are 36 too | card-v2 button rules, `panelShared` |
+| Row actions | `IconButton variant="ghost" size="sm"`: 32 × 32 with a 16 px glyph | card-v2; `table-inbox:1008`, `table-filter:2159` |
+| Nav row | 36 px, 16 px icon and text | card-v2 admin nav |
+| Links | Body text colour, no underline; a chevron, the hover and the button shape show what is clickable; navigation is a link, an action is a button | card-v2 `siteTheme.ts` (text accent is the ink) |
 | Numbers | Every numeric column and metric value: `Text hasTabularNumbers`; a metric value is `Text type="display-3" hasTabularNumbers`, never a heading | card-v2 `MetricCard.tsx`; `dashboard-comparison:703`, `table-page:503` |
-| Charts | Two series at most, 2 px lines or bars, horizontal grid only, no dots; plot 14rem, 12rem on a phone; the legend is one text row | card-v2 `TrendChart.tsx`, REPORT.md "Charts" |
+| Charts | Two series at most, 2 px lines or bars, horizontal grid only, no dots; plot 14rem, 12rem on a phone; the legend is one text row | card-v2 `TrendChart.tsx` |
 | Detail panel | `LayoutPanel` behind a `ResizeHandle`, 380 px (320 to 560), padding 0. Below the compact query (`(max-width: 768px), (max-width: 1024px) and (pointer: coarse) and (hover: none)`) a `BottomSheet height="tall" padding={0}` | `table-filter:2229`, `:4300`, `:4313`, `:1129` |
 | Skeleton | Each region renders `Skeleton`s in the shape and size of its content, as `table-filter`'s loading rows do; a refetch keeps the previous data on screen | `table-filter:1882-1945` |
 
-Measured limits (`npm run measure`, plan section 八): CLS during load ≤ 0.02; the first region
+Measured limits (`npm run measure`): CLS during load ≤ 0.02; the first region
 moves ≤ 2 px from its skeleton to its content; each route's answer element (Overview's first
 attention card or its all-clear line, for example) is inside 1440×900 and 390×844. Every measured route declares
 its answer selector and the measurements its page draws (table rows, header buttons, row actions,
 skeleton); a missing declaration or a declared measurement with no sample fails, and so do
-buttons of one role whose heights differ within a route. A route whose content still awaits its
-rewrite (R1 to R5, `pending` in `tools/measure/run.mjs`) must hold the frame's roles; its load
-limits are reported without failing and it answers with its h1 until the rewrite gives it an
-answer.
+buttons of one role whose heights differ within a route.
 
 ### Keyboard
 
@@ -354,14 +344,14 @@ waiting, live usage). No page transitions, no row entrance stagger: a list that 
 - `isAnimationActive` is off on every series: the 10 s poll must not replay an animation.
 - Hover or focus shows a point's tooltip and the arrow keys step through points; a mouse click
   draws no browser outline, keyboard focus draws Astryx's focus ring.
-- Geometry after the nbcards admin (card-v2 `TrendChart.tsx`): two series at most, 2 px lines or
+- Geometry after the card-v2 admin (card-v2 `TrendChart.tsx`): two series at most, 2 px lines or
   bars, grid lines across the value axis only (horizontal in a time chart), no dots. The plot is
   14rem high, 12rem on a phone (`chartPlot` in `src/themes/site/charts.ts`); a bar list grows with
   its rows instead. The legend is one text row. Two chart cards side by side align at the top and keep their own heights.
 - Charts draw only what the API has: total and failed requests over 200 minutes (Overview), source
   comparison and failure rate (Activity, Usage tab). The templates' 1h / 1d / 7d windows are dropped.
   Each chart has a one-line written conclusion as its screen-reader description, not shown: the
-  tiles carry the same numbers (owner, 2026-11-08: 「廢話太多了。」).
+  tiles carry the same numbers, and a visible sentence would only repeat them.
 - KPI tiles (`MetricCard`) appear where the page's template has them: Overview and Activity's Usage tab.
 
 ## Not doing

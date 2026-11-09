@@ -1,4 +1,4 @@
-// The table-filter template's row activation (`table-filter:2728-2767`): each row is one tab stop,
+// The table-filter template's row activation: each row is one tab stop,
 // a click or Enter or Space opens its detail, and the open row is one step past hover. When the
 // detail closes and takes focus with it, focus goes back to the row, as rowKeys does for Accounts.
 import { rowStyles } from "../../components/rowStyles.ts";

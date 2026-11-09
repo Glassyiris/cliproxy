@@ -1,5 +1,5 @@
 // A card's title row: an h3 with an optional icon, controls at the end of the same row and one
-// supporting line under it. After card-v2 `web/src/ui/CardHeading.tsx` (MIT); place it first in
+// supporting line under it. After card-v2's `CardHeading` (MIT); place it first in
 // the card's column.
 import type { ReactNode } from "react";
 import { Icon, type IconProps } from "@astryxdesign/core/Icon";

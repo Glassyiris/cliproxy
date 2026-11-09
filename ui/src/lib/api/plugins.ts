@@ -92,7 +92,7 @@ export const installPlugin = (id: string, source?: string) =>
   });
 
 /** A quota plugin's reading; plugins may use snake_case, which the readers also accept. */
-export type PluginQuota = {
+type PluginQuota = {
   subscription?: { plan?: string; tierName?: string; tierId?: string };
   groups?: {
     displayName?: string;

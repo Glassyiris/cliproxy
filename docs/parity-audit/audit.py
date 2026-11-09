@@ -47,7 +47,7 @@ def items():
 def scan_files():
     """(relative path, text) for Rust sources, fixtures and dashboard tests."""
     roots = ["crates", "harness/rust", "ui/src"]
-    skip = {"target", "node_modules", "reference", "dist", "dist-panel"}
+    skip = {"target", "node_modules", "reference", "dist"}
     for root in roots:
         for dirpath, dirs, files in os.walk(os.path.join(ROOT, root)):
             dirs[:] = [d for d in dirs if d not in skip]

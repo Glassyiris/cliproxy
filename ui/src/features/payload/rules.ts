@@ -87,7 +87,7 @@ export function groupByModel(lists: { kind: Kind; entries: unknown[] }[]) {
 }
 
 export type ParamsError = "invalid" | "notList" | "notObject";
-export type ParsedParams = { value: unknown } | { error: ParamsError };
+type ParsedParams = { value: unknown } | { error: ParamsError };
 
 /** A filter lists the paths to remove; every other kind maps a path to its value. */
 export function parseParams(kind: Kind, text: string): ParsedParams {

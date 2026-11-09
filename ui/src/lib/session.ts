@@ -14,7 +14,7 @@ import { t } from "./i18n.ts";
  * Why a sign-in failed: the server refused the key (401), could not be reached, or anything else
  * (management API off, remote management disabled, address banned).
  */
-export type SignInReason = "rejected" | "unreachable" | "other";
+type SignInReason = "rejected" | "unreachable" | "other";
 
 /** Sign-in failed; `message` says what to do about it. */
 export class SignInError extends Error {

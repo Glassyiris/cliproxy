@@ -11,7 +11,7 @@ export type LogLine = {
 /** The lines this tab keeps and the cursor of the next read. */
 export type Tail = { lines: LogLine[]; cursor: string; nextKey: number };
 
-/** The newest lines a tab keeps, as the legacy dashboard did. */
+/** The newest lines a tab keeps. */
 export const MAX_LINES = 1500;
 
 // `[2026-11-08 12:00:00] [a1b2c3d4] [info ] [handler.go:42] message`; the source part is optional.

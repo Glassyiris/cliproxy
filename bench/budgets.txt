@@ -5,14 +5,12 @@
 #
 # A measurement fails when it exceeds value * (1 + tolerance / 100).
 #
-# 2026-11-09, owner: 「預算判夠不要每次都改 和doona honk的ci一樣評論可以看到變化的」. The size
-# lines are ceilings with headroom, set once, and no longer the last accepted measurement
-# with 2% of room. A pull request that grows the binary does not edit this file: the CI
-# report comment on the pull request (.github/workflows/report.yml) shows every size and
-# Linux idle number next to master's and the ceiling. This replaces the rule that a change
-# needing more raised the value with a dated line naming the feature and its cost.
-# Raise a line only when a change needs it, with the owner's approval, and give the reason
-# next to it. Counts that must stay near zero have no tolerance.
+# The size lines are ceilings with headroom, not the last accepted measurement. A pull
+# request that grows the binary does not edit this file: the CI report comment on the pull
+# request (.github/workflows/report.yml) shows every size and Linux idle number next to
+# master's and the ceiling. Raise a line only when a change needs it, with a maintainer's
+# approval, and give the reason next to it. Counts that must stay near zero have no
+# tolerance.
 #
 # Every budgeted number comes from one pinned compiler (RUST_TOOLCHAIN in the workflows).
 # A toolchain bump re-measures the measured budgets (idle, soak and heap) in the same pull
@@ -28,13 +26,11 @@
 
 # Release binary and archive, Linux x86_64 (every pull request that can change the
 # binary). Target: binary 30 MB or less, archive 13 MB or less.
-# 2026-11-09: ceilings set once (ruling above). The last measurement, at f6f6530 in this
-# job, was binary 45,858,704, .text 30,368,887, .rodata 9,369,056 and archive 20,120,276
-# bytes; each ceiling is 13 to 17% above it, rounded. .text grew 2.6 MB from 2026-10-20
-# (27,766,199) to then, so the room holds about a month of that pace, and a one-off jump
-# inside it still shows in the report comment. .rodata gets the most room because the
-# embedded dashboard (ui/dist, gzip-compressed) lives there. The dated measurements behind
-# the earlier values are in the history of this file (git log -p bench/budgets.txt).
+# Each ceiling is 13 to 17% above the measurement it was set from (binary 45,858,704,
+# .text 30,368,887, .rodata 9,369,056 and archive 20,120,276 bytes), rounded; a one-off
+# jump inside that room still shows in the report comment. .rodata gets the most room
+# because the embedded dashboard (ui/dist, gzip-compressed) lives there. The measurements
+# behind earlier values are in the history of this file (git log -p bench/budgets.txt).
 size.x86_64-unknown-linux-gnu.binary_bytes   52_000_000  0
 size.x86_64-unknown-linux-gnu.text_bytes     35_000_000  0
 size.x86_64-unknown-linux-gnu.rodata_bytes   11_000_000  0
