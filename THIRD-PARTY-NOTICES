@@ -23,12 +23,12 @@ group of crates right after them.
 177 packages:
   allocator-api2 0.2.21, anstream 1.0.0, anstyle 1.0.14, anstyle-parse 1.0.0,
   anstyle-query 1.1.5, anstyle-wincon 3.0.11, anyhow 1.0.104,
-  async-compression 0.4.50, async-trait 0.1.92, atomic-waker 1.1.2, base64
+  async-compression 0.4.52, async-trait 0.1.92, atomic-waker 1.1.2, base64
   0.22.1, base64 0.23.1, bit-set 0.5.3, bit-vec 0.6.3, bitflags 2.13.2,
   block-buffer 0.10.4, block-buffer 0.12.1, blowfish 0.10.0, bstr 1.13.1, btls
   0.5.6, cfg-if 1.0.5, chacha20 0.10.2, cipher 0.5.2, clap 4.6.7, clap_builder
   4.6.7, clap_derive 4.6.7, clap_lex 1.1.1, cmov 0.5.4, colorchoice 1.0.5,
-  compression-codecs 0.4.45, compression-core 0.4.33, const-oid 0.10.2,
+  compression-codecs 0.4.47, compression-core 0.4.34, const-oid 0.10.2,
   core-foundation-sys 0.8.7, countme 3.0.1, cpufeatures 0.2.17, cpufeatures
   0.3.1, crc32fast 1.5.2, crypto-common 0.1.7, crypto-common 0.2.2, ctutils
   0.4.2, digest 0.10.7, digest 0.11.3, displaydoc 0.2.7, document-features
@@ -41,7 +41,7 @@ group of crates right after them.
   1.10.1, httpdate 1.0.3, hybrid-array 0.4.15, iana-time-zone 0.1.65,
   ident_case 1.0.1, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, indoc
   2.0.7, inout 0.2.2, ipnet 2.12.2, is_terminal_polyfill 1.70.2, itertools
-  0.14.0, itoa 1.0.18, kasuari 0.4.12, lazy_static 1.5.1, libc 0.2.189,
+  0.14.0, itoa 1.0.18, kasuari 0.4.12, lazy_static 1.5.1, libc 0.2.191,
   line-clipping 0.3.8, linux-raw-sys 0.12.1, litrs 1.0.0, lock_api 0.4.14, log
   0.4.34, md-5 0.11.0, mime 0.3.17, miniz_oxide 0.9.1, num-traits 0.2.19,
   objc2-core-foundation 0.3.2, objc2-system-configuration 0.3.2, once_cell
@@ -52,7 +52,7 @@ group of crates right after them.
   0.9.0, regex 1.13.1, regex-automata 0.4.18, regex-syntax 0.8.11, rowan
   0.16.1, rustc-hash 1.1.0, rustix 1.1.5, rustls-pki-types 1.15.1, rustversion
   1.0.23, ryu 1.0.23, scopeguard 1.2.0, serde 1.0.229, serde_core 1.0.229,
-  serde_derive 1.0.229, serde_json 1.0.151, serde_path_to_error 0.1.20,
+  serde_derive 1.0.229, serde_json 1.0.154, serde_path_to_error 0.1.20,
   serde_urlencoded 0.7.1, sha1 0.10.7, sha2 0.10.9, sha2 0.11.0, signal-hook
   0.3.18, signal-hook-mio 0.2.5, signal-hook-registry 1.4.8, siphasher 1.0.4,
   smallvec 1.16.2, socket2 0.6.5, stable_deref_trait 1.2.1, static_assertions
@@ -66,7 +66,7 @@ group of crates right after them.
   uuid 1.26.1, whoami 2.1.3, winapi 0.3.9, windows-core 0.62.2,
   windows-implement 0.60.2, windows-interface 0.59.3, windows-link 0.2.1,
   windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.61.2, wreq
-  6.0.0-rc.31, wreq-proto 0.2.6, wreq-rt 0.2.2-rc.4, yaml-edit 0.3.2, zerocopy
+  6.0.0-rc.31, wreq-proto 0.2.6, wreq-rt 0.2.2-rc.4, yaml-edit 0.3.6, zerocopy
   0.8.59, zeroize 1.9.0
 ------------------------------------------------------------------------------
 
@@ -247,12 +247,12 @@ Apache License
 
 ------------------------------------------------------------------------------
 131 packages:
-  allocator-api2 0.2.21, anyhow 1.0.104, async-compression 0.4.50, async-trait
+  allocator-api2 0.2.21, anyhow 1.0.104, async-compression 0.4.52, async-trait
   0.1.92, atomic-waker 1.1.2, base64 0.22.1, base64 0.23.1, bit-set 0.5.3,
   bit-vec 0.6.3, bitflags 2.13.2, block-buffer 0.10.4, block-buffer 0.12.1,
   blowfish 0.10.0, bstr 1.13.1, btls 0.5.6, cfg-if 1.0.5, chacha20 0.10.2,
-  cipher 0.5.2, cmov 0.5.4, compression-codecs 0.4.45, compression-core
-  0.4.33, const-oid 0.10.2, core-foundation-sys 0.8.7, countme 3.0.1,
+  cipher 0.5.2, cmov 0.5.4, compression-codecs 0.4.47, compression-core
+  0.4.34, const-oid 0.10.2, core-foundation-sys 0.8.7, countme 3.0.1,
   cpufeatures 0.2.17, cpufeatures 0.3.1, crypto-common 0.1.7, crypto-common
   0.2.2, ctutils 0.4.2, digest 0.10.7, digest 0.11.3, displaydoc 0.2.7,
   document-features 0.2.12, either 1.18.0, equivalent 1.0.2, errno 0.3.14,
@@ -260,7 +260,7 @@ Apache License
   0.16.1, hashbrown 0.17.1, heck 0.5.0, hmac 0.13.0, httparse 1.10.1, httpdate
   1.0.3, hybrid-array 0.4.15, ident_case 1.0.1, idna 1.1.0, idna_adapter
   1.2.2, indexmap 2.14.2, indoc 2.0.7, inout 0.2.2, itertools 0.14.0, itoa
-  1.0.18, lazy_static 1.5.1, libc 0.2.189, linux-raw-sys 0.12.1, litrs 1.0.0,
+  1.0.18, lazy_static 1.5.1, libc 0.2.191, linux-raw-sys 0.12.1, litrs 1.0.0,
   lock_api 0.4.14, log 0.4.34, md-5 0.11.0, mime 0.3.17, miniz_oxide 0.9.1,
   num-traits 0.2.19, objc2-core-foundation 0.3.2, objc2-system-configuration
   0.3.2, once_cell 1.21.4, parking_lot 0.12.5, parking_lot_core 0.9.12,
@@ -269,7 +269,7 @@ Apache License
   0.9.5, rand_chacha 0.9.0, regex 1.13.1, regex-automata 0.4.18, regex-syntax
   0.8.11, rowan 0.16.1, rustc-hash 1.1.0, rustix 1.1.5, rustversion 1.0.23,
   ryu 1.0.23, scopeguard 1.2.0, serde 1.0.229, serde_core 1.0.229,
-  serde_derive 1.0.229, serde_json 1.0.151, serde_path_to_error 0.1.20,
+  serde_derive 1.0.229, serde_json 1.0.154, serde_path_to_error 0.1.20,
   serde_urlencoded 0.7.1, sha1 0.10.7, sha2 0.10.9, sha2 0.11.0, signal-hook
   0.3.18, signal-hook-mio 0.2.5, signal-hook-registry 1.4.8, siphasher 1.0.4,
   smallvec 1.16.2, socket2 0.6.5, stable_deref_trait 1.2.1, static_assertions
@@ -279,7 +279,7 @@ Apache License
   tungstenite 0.29.0, unicode-bidi 0.3.18, unicode-ident 1.0.26,
   unicode-normalization 0.1.25, unicode-properties 0.1.4, unicode-segmentation
   1.13.3, unicode-truncate 2.0.1, unicode-width 0.2.2, url 2.5.8, utf8_iter
-  1.0.4, utf8parse 0.2.2, uuid 1.26.1, whoami 2.1.3, yaml-edit 0.3.2, zeroize
+  1.0.4, utf8parse 0.2.2, uuid 1.26.1, whoami 2.1.3, yaml-edit 0.3.6, zeroize
   1.9.0
 ------------------------------------------------------------------------------
 
@@ -1595,7 +1595,7 @@ SOFTWARE.
 
 ------------------------------------------------------------------------------
 2 packages:
-  tokio 1.53.1, tokio-util 0.7.19
+  tokio 1.54.1, tokio-util 0.7.20
 ------------------------------------------------------------------------------
 
 MIT License
@@ -2313,7 +2313,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 1 package:
-  hyper 1.11.1
+  hyper 1.12.0
 ------------------------------------------------------------------------------
 
 Copyright (c) 2014-2026 Sean McArthur
