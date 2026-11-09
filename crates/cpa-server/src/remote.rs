@@ -573,7 +573,7 @@ pub async fn gate(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     let path = request.uri().path();
-    let exempt = ["/v0/management", "/v8/management"]
+    let exempt = ["/v0/management", "/v8/management", "/admin/v1"]
         .iter()
         .any(|base| path == *base || path.strip_prefix(base).is_some_and(|rest| rest.starts_with('/')))
         || path.starts_with("/v0/resource/plugins/")

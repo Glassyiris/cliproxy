@@ -77,13 +77,14 @@ pub fn router(management: &Arc<Management>, app: axum::Router) -> axum::Router {
     {
         return app;
     }
-    // Go resolves relative request-log directories against the config directory.
+    // A relative request-log directory is resolved against the config database's folder.
     let dir = if management.log_dir.is_absolute() {
         management.log_dir.clone()
     } else {
         management
-            .path
-            .parent()
+            .config
+            .path()
+            .and_then(Path::parent)
             .unwrap_or(Path::new("."))
             .join(&management.log_dir)
     };
@@ -97,7 +98,8 @@ pub fn router(management: &Arc<Management>, app: axum::Router) -> axum::Router {
 }
 
 fn eligible(request: &Request, path: &str) -> bool {
-    if ["/v0/management", "/v8/management", "/management"]
+    // Management bodies carry provider and client keys.
+    if ["/v0/management", "/v8/management", "/management", "/admin/"]
         .iter()
         .any(|p| path.starts_with(p))
     {

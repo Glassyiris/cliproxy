@@ -342,15 +342,6 @@ fn object(shape: &Shape, present: Option<&Yaml>, defaults: Option<&Value>, zeroe
     Value::Object(out)
 }
 
-/// Go's runtime config as GET /v0/management/config returns it.
-pub(super) fn config(doc: &Yaml) -> Value {
-    let legacy = flatten(doc);
-    let mut cfg = object(shape(), Some(&legacy), Some(&DEFAULTS), false);
-    super::keys::normalize_config(&mut cfg);
-    load_normalize(&mut cfg);
-    cfg
-}
-
 /// Reload comparisons need zero values and nil/empty slices, not JSON omitempty.
 pub(crate) fn config_for_diff(doc: &Yaml, snapshot: bool) -> Value {
     fn retain_empty(shape: &mut Shape) {

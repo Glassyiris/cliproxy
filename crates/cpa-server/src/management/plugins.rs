@@ -9,7 +9,7 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Path as UrlPath, Request, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use cpa_core::config::{Config, ConfigDocument, archive_comments};
+use cpa_core::config::{Config, ConfigDocument};
 use cpa_plugin::config::{self as pcfg, ItemConfig};
 use cpa_plugin::gojson::{self as pjson, Node};
 use serde_json::{Value, json};
@@ -433,51 +433,49 @@ impl Fail {
     }
 }
 
-/// Reads, edits and saves the config file the way `config_sync` does, then publishes
-/// it. Go's typed saver also writes `plugins.dir` resolved and cleaned (it was resolved
-/// at load), so the edit does the same.
+/// Edits the stored config the way the plugin endpoints change it, then publishes it.
+/// The saved `plugins.dir` is resolved and cleaned, as at load, so the edit does the
+/// same.
 pub(super) fn save(state: &Management, edit: impl FnOnce(&mut ConfigDocument) -> Res<()>) -> Result<(), Fail> {
     let failed = |e: &dyn std::fmt::Display| Fail::Save(e.to_string());
-    let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-    let original = std::fs::read_to_string(&state.path).map_err(|e| failed(&e))?;
-    let mut doc = ConfigDocument::parse(&original).map_err(|e| failed(&e))?;
-    let basis = doc.migrated_text(&original).unwrap_or_else(|| original.clone());
-    let archived = doc.archive_unknown();
-    // Go `NormalizePluginsConfig` gives a nil configs map a value before the edit.
-    for path in [&["plugins"][..], &["plugins", "configs"][..]] {
-        if doc.get(path).is_some_and(Yaml::is_null) {
-            doc.update(path, Yaml::Mapping(Mapping::new()), false)
+    let disk = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+    let done = state.edit_document(&disk, "plugins-api", "", |doc| {
+        // A null `plugins` or `configs` map gets a value before the edit.
+        for path in [&["plugins"][..], &["plugins", "configs"][..]] {
+            if doc.get(path).is_some_and(Yaml::is_null) {
+                doc.update(path, Yaml::Mapping(Mapping::new()), false)
+                    .map_err(|e| failed(&e))?;
+            }
+        }
+        edit(doc).map_err(Fail::Response)?;
+        // A null entry (never unmarshalled) is saved as an empty mapping.
+        let nulls: Vec<String> = match doc.get(&["plugins", "configs"]) {
+            Some(Yaml::Mapping(items)) => items
+                .iter()
+                .filter(|(_, v)| v.is_null())
+                .map(|(k, _)| pcfg::yaml_string(k))
+                .collect(),
+            _ => Vec::new(),
+        };
+        for id in nulls {
+            doc.update(&["plugins", "configs", &id], Yaml::Mapping(Mapping::new()), false)
                 .map_err(|e| failed(&e))?;
         }
-    }
-    edit(&mut doc).map_err(Fail::Response)?;
-    // Go's saver writes each plugin config through `MarshalYAML`: a null entry (never
-    // unmarshalled) becomes an empty mapping.
-    let nulls: Vec<String> = match doc.get(&["plugins", "configs"]) {
-        Some(Yaml::Mapping(items)) => items
-            .iter()
-            .filter(|(_, v)| v.is_null())
-            .map(|(k, _)| pcfg::yaml_string(k))
-            .collect(),
-        _ => Vec::new(),
-    };
-    for id in nulls {
-        doc.update(&["plugins", "configs", &id], Yaml::Mapping(Mapping::new()), false)
-            .map_err(|e| failed(&e))?;
-    }
-    let dir = doc.get(&["plugins", "dir"]).map(pcfg::yaml_string).unwrap_or_default();
-    if let Ok(resolved) = pcfg::resolve_dir(&dir) {
-        let resolved = resolved.to_string_lossy().into_owned();
-        if doc.get(&["plugins", "dir"]).and_then(Yaml::as_str) != Some(resolved.as_str()) {
-            doc.update(&["plugins", "dir"], resolved.into(), false)
-                .map_err(|e| failed(&e))?;
+        let dir = doc.get(&["plugins", "dir"]).map(pcfg::yaml_string).unwrap_or_default();
+        if let Ok(resolved) = pcfg::resolve_dir(&dir) {
+            let resolved = resolved.to_string_lossy().into_owned();
+            if doc.get(&["plugins", "dir"]).and_then(Yaml::as_str) != Some(resolved.as_str()) {
+                doc.update(&["plugins", "dir"], resolved.into(), false)
+                    .map_err(|e| failed(&e))?;
+            }
         }
+        Ok(())
+    });
+    match done {
+        Ok(_) => Ok(()),
+        Err(Ok(fail)) => Err(fail),
+        Err(Err(e)) => Err(Fail::Save(e.to_string())),
     }
-    let text = doc.render_preserving(&basis).map_err(|e| failed(&e))? + &archive_comments(&archived);
-    let cfg = Config::parse(&text).map_err(|e| failed(&e))?;
-    ConfigDocument::write(&state.path, &text).map_err(|e| failed(&e))?;
-    state.publish(cfg, None);
-    Ok(())
 }
 
 /// Runs a [`save`] off the async runtime and answers Go's `{"status":"ok"}`.

@@ -39,47 +39,61 @@ impl PluginFlags for Host {
     }
 }
 
-/// Go `pluginBootstrapConfigPath`: the `-config` value from a raw scan of the arguments
-/// (up to `--`), else the default path.
-pub fn bootstrap_config_path(args: &[String], default: &str) -> PathBuf {
+/// The value of `-name`/`--name` from a raw scan of the arguments (up to `--`): `None`
+/// when absent, `Some("")` when it ends the arguments.
+fn raw_flag(args: &[String], name: &str) -> Option<String> {
+    let (short, long) = (format!("-{name}"), format!("--{name}"));
     let mut i = 0;
     while i < args.len() {
         let arg = args[i].as_str();
-        match arg {
-            "--" => break,
-            "-config" | "--config" => {
-                return match args.get(i + 1) {
-                    Some(path) => PathBuf::from(path),
-                    None => default_config_path(default),
-                };
-            }
-            _ => {
-                if let Some(path) = arg.strip_prefix("-config=").or_else(|| arg.strip_prefix("--config=")) {
-                    return PathBuf::from(path);
-                }
-            }
+        if arg == "--" {
+            break;
+        }
+        if arg == short || arg == long {
+            return Some(args.get(i + 1).cloned().unwrap_or_default());
+        }
+        if let Some(value) = arg
+            .strip_prefix(&format!("{short}="))
+            .or_else(|| arg.strip_prefix(&format!("{long}=")))
+        {
+            return Some(value.to_owned());
         }
         i += 1;
     }
-    default_config_path(default)
+    None
 }
 
-/// Go `defaultPluginBootstrapConfigPath`.
-fn default_config_path(default: &str) -> PathBuf {
-    if !default.trim().is_empty() {
-        return PathBuf::from(default);
-    }
-    match std::env::current_dir() {
-        Ok(wd) => wd.join("config.yaml"),
-        Err(_) => PathBuf::from("config.yaml"),
+/// Go `pluginBootstrapConfigPath`: the `-config` value from a raw scan of the
+/// arguments, else `./config.yaml`.
+pub fn bootstrap_config_path(args: &[String]) -> PathBuf {
+    match raw_flag(args, "config").filter(|p| !p.is_empty()) {
+        Some(path) => PathBuf::from(path),
+        None => std::env::current_dir().unwrap_or_default().join("config.yaml"),
     }
 }
 
-/// Go `loadPluginBootstrapConfig`: the file's config; an empty one (plugins off) when it
-/// is missing, empty or invalid.
-pub fn load_bootstrap_config(path: &Path) -> Config {
+/// The config the process starts with, read before the flag parse for the worker
+/// threads and the plugins' flags: the config database's when it exists, else the
+/// config file a first start imports, else an empty one (plugins off).
+pub fn bootstrap_config(args: &[String]) -> Config {
     let empty = || Config::parse("").expect("an empty config parses");
-    let raw = match std::fs::read(path) {
+    let file = bootstrap_config_path(args);
+    let db = crate::db_path(&raw_flag(args, "db").unwrap_or_default(), &file);
+    // Opening a missing database would create it; `--help` must not.
+    if db.is_file() {
+        return match cpa_server::config_store::ConfigStore::open(&db).map(|s| s.load()) {
+            Ok(Ok(loaded)) => loaded.config,
+            Ok(Err(fault)) => {
+                tracing::warn!("failed to load the plugin bootstrap config: {fault}");
+                empty()
+            }
+            Err(e) => {
+                tracing::warn!("failed to open the config database: {e:#}");
+                empty()
+            }
+        };
+    }
+    let raw = match std::fs::read(&file) {
         Ok(raw) => raw,
         Err(e) => {
             if e.kind() != std::io::ErrorKind::NotFound {
@@ -101,9 +115,8 @@ pub fn load_bootstrap_config(path: &Path) -> Config {
 /// Loads plugins from the bootstrap config and registers their flags. `builtin` says
 /// whether the binary already has a flag of that name. Returns the host and the flags
 /// it accepted.
-pub async fn bootstrap(args: &[String], builtin: &dyn Fn(&str) -> bool) -> (Host, Vec<CliFlag>) {
+pub async fn bootstrap(cfg: Config, builtin: &dyn Fn(&str) -> bool) -> (Host, Vec<CliFlag>) {
     let host = Host::new();
-    let cfg = load_bootstrap_config(&bootstrap_config_path(args, ""));
     host.apply_config(Arc::new(cfg)).await;
     let flags = host.register_command_line_flags(builtin).await;
     (host, flags)
@@ -211,26 +224,16 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_path_scans_like_go() {
+    fn raw_flags_scan_like_go() {
         // Go scans every argument (not only flags) until `--`.
-        assert_eq!(
-            bootstrap_config_path(&args(&["x", "-config", "a.yaml"]), "d"),
-            PathBuf::from("a.yaml")
-        );
-        assert_eq!(
-            bootstrap_config_path(&args(&["--config=b.yaml"]), "d"),
-            PathBuf::from("b.yaml")
-        );
-        assert_eq!(bootstrap_config_path(&args(&["-config"]), "d"), PathBuf::from("d"));
-        assert_eq!(
-            bootstrap_config_path(&args(&["--", "-config", "a"]), "d"),
-            PathBuf::from("d")
-        );
+        let config = |list: &[&str]| raw_flag(&args(list), "config");
+        assert_eq!(config(&["x", "-config", "a.yaml"]).as_deref(), Some("a.yaml"));
+        assert_eq!(config(&["--config=b.yaml"]).as_deref(), Some("b.yaml"));
+        assert_eq!(config(&["-config"]).as_deref(), Some(""));
+        assert_eq!(config(&["--", "-config", "a"]), None);
         // `-config` takes the next argument even when it looks like a flag.
-        assert_eq!(
-            bootstrap_config_path(&args(&["-config", "-tui"]), "d"),
-            PathBuf::from("-tui")
-        );
-        assert_eq!(bootstrap_config_path(&args(&["---config=c"]), "d"), PathBuf::from("d"));
+        assert_eq!(config(&["-config", "-tui"]).as_deref(), Some("-tui"));
+        assert_eq!(config(&["---config=c"]), None);
+        assert_eq!(raw_flag(&args(&["-db", "x.db"]), "db").as_deref(), Some("x.db"));
     }
 }

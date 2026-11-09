@@ -53,6 +53,14 @@ CREATE TABLE change (
 /// The schema version in `PRAGMA user_version`; each step upgrades from the one before.
 const MIGRATIONS: &[&str] = &[SCHEMA];
 
+/// Revisions the credential and plugin layers keep in the config; clients do not set
+/// them.
+const READ_ONLY: &[&str] = &[
+    "credentials/concurrency/lifecycle-config-revision",
+    "credentials/concurrency/observation-barrier-revision",
+    "plugins/auth-revision",
+];
+
 pub struct ConfigStore {
     conn: Mutex<Connection>,
     path: Option<PathBuf>,
@@ -189,6 +197,10 @@ impl CommitError {
             code,
             fault: Fault::new(resource, message),
         }
+    }
+    /// A 422 for a config that cannot be stored.
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::new(422, "invalid_config", None, message)
     }
     fn db(e: impl std::fmt::Display) -> Self {
         Self::new(500, "store_failed", None, e.to_string())
@@ -348,14 +360,37 @@ impl ConfigStore {
         })
     }
 
-    /// Applies `ops` in order, all or none, as one revision.
+    /// Applies `ops` in order, all or none, as one revision. The fields the server
+    /// keeps itself ([`READ_ONLY`]) cannot change this way.
     pub fn commit(&self, ops: &[Op], actor: &str, message: &str, dry_run: bool) -> Result<Committed, CommitError> {
         self.transact(actor, message, dry_run, |current| {
             let mut next = current.to_vec();
             for op in ops {
                 apply(&mut next, op)?;
             }
+            let (before, after) = (resources::document(current, false), resources::document(&next, false));
+            for field in READ_ONLY {
+                let parts: Vec<&str> = field.split('/').collect();
+                if resources::at_path(&before, &parts) != resources::at_path(&after, &parts) {
+                    return Err(CommitError::new(400, "read_only_field", None, *field));
+                }
+            }
             Ok(next)
+        })
+    }
+
+    /// Lets `edit` change the annotated document (`"@id"` on each provider and router
+    /// entry), then stores the resources it splits into, as one revision.
+    pub fn edit(
+        &self,
+        actor: &str,
+        message: &str,
+        edit: impl FnOnce(&mut Json) -> Result<(), CommitError>,
+    ) -> Result<Committed, CommitError> {
+        self.transact(actor, message, false, |current| {
+            let mut doc = resources::document(current, true);
+            edit(&mut doc)?;
+            from_document(&doc, current)
         })
     }
 
@@ -878,10 +913,13 @@ fn set_at(next: &mut Vec<Resource>, path: &str, value: Option<Json>, expect: Opt
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     if let Some(expect) = expect {
         let shown = resources::document_for_read(next);
-        let now = resources::at_path(&shown, &parts);
+        let now = resources::at_path(&shown, &parts)
+            .cloned()
+            .map(resources::without_read_only);
+        let expect = resources::without_read_only(expect.clone());
         let same = match now {
-            Some(v) => v == expect || empty_like(v) && empty_like(expect),
-            None => empty_like(expect),
+            Some(v) => v == expect || empty_like(&v) && empty_like(&expect),
+            None => empty_like(&expect),
         };
         if !same {
             return Err(CommitError::new(
@@ -894,14 +932,20 @@ fn set_at(next: &mut Vec<Resource>, path: &str, value: Option<Json>, expect: Opt
     }
     let mut doc = resources::document(next, true);
     resources::set_path(&mut doc, &parts, value).map_err(|e| CommitError::new(400, "invalid_path", None, e))?;
-    let mut split = resources::split(&doc, next).map_err(fault_422)?;
+    *next = from_document(&doc, next)?;
+    Ok(())
+}
+
+/// `doc` split into resources that keep the identity they have in `current`, with
+/// each [`resources::SECRET`] resolved and a plaintext management key hashed.
+fn from_document(doc: &Json, current: &[Resource]) -> Result<Vec<Resource>, CommitError> {
+    let mut split = resources::split(doc, current).map_err(fault_422)?;
     for r in &mut split {
-        let stored = next.iter().find(|s| s.kind == r.kind && s.id == r.id);
+        let stored = current.iter().find(|s| s.kind == r.kind && s.id == r.id);
         resources::resolve_secrets(r, stored).map_err(fault_422)?;
         resources::hash_management_key(r).map_err(fault_422)?;
     }
-    *next = split;
-    Ok(())
+    Ok(split)
 }
 
 #[cfg(test)]

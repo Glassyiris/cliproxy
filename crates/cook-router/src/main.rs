@@ -18,6 +18,7 @@ use cpa_core::config::Config;
 use cpa_exec::Executors;
 use cpa_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL};
 use cpa_server::Runtime;
+use cpa_server::config_store::ConfigStore;
 use cpa_server::listener::bind;
 
 /// Same strings as the management `X-CPA-*` headers.
@@ -39,9 +40,13 @@ fn banner() -> String {
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
-    /// Configure File Path
+    /// The config file a first start imports into the config database (default
+    /// ./config.yaml); later starts do not read it.
     #[arg(long, default_value = "")]
     config: String,
+    /// The config database (default: cook.db beside the config file, or COOK_DB).
+    #[arg(long, default_value = "")]
+    db: String,
     /// Write process logs to this file (10 MiB rotation), without a shell wrapper.
     #[arg(long)]
     log_file: Option<PathBuf>,
@@ -491,23 +496,16 @@ fn discover_options(
 /// blocking pool keeps tokio's default ceiling (512): its threads start on demand and
 /// exit after 10 idle seconds, and a native plugin call holds one for the whole call
 /// while its HTTP callbacks need others (DNS), so a low ceiling could deadlock.
-fn runtime(config: Option<&Path>) -> io::Result<tokio::runtime::Runtime> {
+fn runtime(config: Option<&Config>) -> io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads(config))
         .enable_all()
         .build()
 }
 
-/// `worker-threads` as written in `path`, if any.
-fn configured_workers(path: &Path) -> Option<u64> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    let doc = cpa_core::config::parse_yaml(&raw).ok()?;
-    doc.get("worker-threads")?.as_u64()
-}
-
 /// `TOKIO_WORKER_THREADS`, else `worker-threads` in `config` (read once at start), else
 /// the smaller of the CPU count and 2.
-fn worker_threads(config: Option<&Path>) -> usize {
+fn worker_threads(config: Option<&Config>) -> usize {
     let positive = |n: u64| usize::try_from(n).ok().filter(|n| *n > 0);
     if let Ok(raw) = std::env::var("TOKIO_WORKER_THREADS") {
         match raw.trim().parse().ok().and_then(positive) {
@@ -515,7 +513,9 @@ fn worker_threads(config: Option<&Path>) -> usize {
             None => tracing::warn!("ignoring TOKIO_WORKER_THREADS={raw:?}: not a positive number"),
         }
     }
-    let configured = config.and_then(configured_workers).and_then(positive);
+    let configured = config
+        .and_then(|c| c.document.get("worker-threads")?.as_u64())
+        .and_then(positive);
     configured.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get().min(2)))
 }
 
@@ -534,41 +534,78 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-/// Go `LoadConfigOptional`: in cloud deploy mode a missing, empty or undecodable file
-/// is an empty config (the server then stands by).
-fn load_config(path: &Path, optional: bool) -> anyhow::Result<Config> {
-    let loaded = Config::load(path).with_context(|| format!("failed to load config {}", path.display()));
-    match loaded {
-        Err(e) if optional => {
-            let missing = std::fs::read(path).map_or(true, |b| String::from_utf8_lossy(&b).trim().is_empty());
-            if !missing {
-                // ponytail: Go stays fatal for its post-decode validations (trusted
-                // proxies, weights, in-flight); cpa-core reports both kinds alike, so
-                // cloud mode stands by on every load error and logs it.
-                tracing::error!("{e:#}");
-            }
-            Config::parse("")
-        }
-        other => other,
+/// The config database: `--db`, else `COOK_DB`, else `cook.db` beside the config file.
+fn db_path(flag: &str, config_file: &Path) -> PathBuf {
+    if !flag.trim().is_empty() {
+        return PathBuf::from(flag);
     }
+    if let Some(env) = std::env::var_os("COOK_DB").filter(|v| !v.is_empty()) {
+        return PathBuf::from(env);
+    }
+    config_file
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .join("cook.db")
 }
 
-/// Go's cloud-deploy check of the config file (main.go, `isCloudDeploy`).
-fn cloud_config_present(path: &Path, config: &Config) -> bool {
-    let (present, message) = match std::fs::metadata(path) {
-        Err(_) => (
+/// Opens the config database and, on its first start, imports `config_file` into it.
+/// The config it holds is returned; `optional` (cloud deploy mode) starts with an
+/// empty one instead of failing.
+fn load_config(db: &Path, config_file: &Path, optional: bool) -> anyhow::Result<(Arc<ConfigStore>, Config)> {
+    let store = ConfigStore::open(db)?;
+    if store.is_empty()? {
+        let fail = |e: String| -> anyhow::Result<()> {
+            if optional {
+                tracing::error!("{e}");
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(e))
+            }
+        };
+        match std::fs::read_to_string(config_file) {
+            Ok(text) if text.trim().is_empty() => {}
+            Ok(text) => match store.import_yaml(&text, "import", &format!("import {}", config_file.display())) {
+                Ok(done) => tracing::info!(
+                    "imported {} into the config database {} as revision {}; the file is not read again",
+                    config_file.display(),
+                    db.display(),
+                    done.rev
+                ),
+                Err(e) => fail(format!("failed to import config {}: {e}", config_file.display()))?,
+            },
+            Err(e) => fail(format!(
+                "failed to load config: {} is empty and {} cannot be read: {e}",
+                db.display(),
+                config_file.display()
+            ))?,
+        }
+    }
+    let config = match store.load() {
+        Ok(loaded) => loaded.config,
+        Err(fault) if optional => {
+            tracing::error!("failed to load config from {}: {fault}", db.display());
+            Config::parse("")?
+        }
+        Err(fault) => anyhow::bail!("failed to load config from {}: {fault}", db.display()),
+    };
+    Ok((Arc::new(store), config))
+}
+
+/// Go's cloud-deploy check, of the config database.
+fn cloud_config_present(store: &ConfigStore, config: &Config) -> bool {
+    let (present, message) = if store.is_empty().unwrap_or(true) {
+        (
             false,
-            "Cloud deploy mode: No configuration file detected; standing by for configuration",
-        ),
-        Ok(m) if m.is_dir() => (
+            "Cloud deploy mode: No configuration detected; standing by for configuration",
+        )
+    } else if config.port == 0 {
+        (
             false,
-            "Cloud deploy mode: Config path is a directory; standing by for configuration",
-        ),
-        Ok(_) if config.port == 0 => (
-            false,
-            "Cloud deploy mode: Configuration file is empty or invalid; standing by for valid configuration",
-        ),
-        Ok(_) => (true, "Cloud deploy mode: Configuration file detected; starting service"),
+            "Cloud deploy mode: Configuration is empty or invalid; standing by for valid configuration",
+        )
+    } else {
+        (true, "Cloud deploy mode: Configuration detected; starting service")
     };
     tracing::info!("{message}");
     present
@@ -628,12 +665,13 @@ fn main() -> anyhow::Result<()> {
     if !discover_mode {
         dotenv::load_from_working_dir();
     }
-    let runtime = runtime(Some(&plugin_cli::bootstrap_config_path(&raw[1..], "")))?;
+    let boot = plugin_cli::bootstrap_config(&raw[1..]);
+    let runtime = runtime(Some(&boot))?;
     // Go: plugins from the bootstrap config register their flags before the parse.
     let builtin_cmd = Args::command();
     let plugins = (!discover_mode).then(|| {
         let builtin = |name: &str| builtin_cmd.get_arguments().any(|a| a.get_long() == Some(name));
-        runtime.block_on(plugin_cli::bootstrap(&raw[1..], &builtin))
+        runtime.block_on(plugin_cli::bootstrap(boot, &builtin))
     });
     let mut cmd = match &plugins {
         Some((_, flags)) => plugin_cli::with_flags(Args::command(), flags),
@@ -821,26 +859,34 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
         None if args.config.is_empty() => wd.join("config.yaml"),
         None => PathBuf::from(&args.config),
     };
+    let db = db_path(&args.db, &config_path);
     let cloud = std::env::var("DEPLOY").is_ok_and(|v| v == "cloud");
-    // Go main: with a Home JWT the config comes from Home; the config path stays for
-    // downstream components but need not exist.
-    let (mut config, home_config, home_plugins) = match &home_jwt {
+    // Go main: with a Home JWT the config comes from Home; no config database is used.
+    let (config_store, mut config, home_config, home_plugins) = match &home_jwt {
         Some(jwt) => match home::bootstrap(jwt, args.home_disable_cluster_discovery, &plugins).await {
-            Ok((home_config, config, home_plugins)) => (config, Some(home_config), Some(home_plugins)),
+            Ok((home_config, config, home_plugins)) => (
+                Arc::new(ConfigStore::memory()),
+                config,
+                Some(home_config),
+                Some(home_plugins),
+            ),
             Err(line) => {
                 tracing::error!("{line}");
                 return Ok(());
             }
         },
-        None => (load_config(&config_path, cloud)?, None, None),
+        None => {
+            let (config_store, config) = load_config(&db, &config_path, cloud)?;
+            (config_store, config, None, None)
+        }
     };
     if let Some(store) = &store {
         config.auth_dir = store.auth_dir.clone();
         tracing::info!("{}", store.enabled);
     }
-    // The runtime was sized from -config (or ./config.yaml) before a store or Home
-    // supplied the config it now runs on.
-    if (store.is_some() || home_config.is_some())
+    // The runtime was sized from the bootstrap config before Home supplied the config it
+    // now runs on.
+    if home_config.is_some()
         && std::env::var_os("TOKIO_WORKER_THREADS").is_none()
         && let Some(n) = config
             .document
@@ -848,18 +894,14 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
             .and_then(serde_yaml_ng::Value::as_u64)
         && usize::try_from(n).ok() != Some(tokio::runtime::Handle::current().metrics().num_workers())
     {
-        let source = match &home_config {
-            Some(_) => "the config Home supplies".to_owned(),
-            None => config_path.display().to_string(),
-        };
         tracing::warn!(
-            "worker-threads in {source} is ignored: it is read only from -config/./config.yaml; set TOKIO_WORKER_THREADS"
+            "worker-threads in the config Home supplies is ignored: it is read only from the local config database; set TOKIO_WORKER_THREADS"
         );
     }
     let config_present = match &home_config {
         // Go: `configFileExists = cfg.Port != 0` for a config loaded from Home.
         Some(_) => !cloud || config.port != 0,
-        None => !cloud || cloud_config_present(&config_path, &config),
+        None => !cloud || cloud_config_present(&config_store, &config),
     };
     // Go ConfigureLogOutput and SetLogLevel, before any login command.
     cpa_server::logging::configure(&config);
@@ -874,7 +916,7 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
         tracing::error!("{line}");
         return Ok(());
     }
-    if let Some(code) = plugin_cli::execute(&plugins, &config_path, &builtin).await {
+    if let Some(code) = plugin_cli::execute(&plugins, &db, &builtin).await {
         if let (Some(store), Some(before)) = (&store, &before) {
             persist_login(store, before).await;
         }
@@ -901,7 +943,7 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
         if args.standalone {
             standalone_tui(
                 config,
-                config_path,
+                config_store,
                 args.password,
                 args.local_model,
                 store,
@@ -922,7 +964,7 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
     }
     serve(
         config,
-        config_path,
+        config_store,
         args.password,
         args.local_model,
         store,
@@ -1053,7 +1095,7 @@ impl QuietStdio {
 /// tab, and it stops after the TUI quits.
 async fn standalone_tui(
     config: Config,
-    config_path: PathBuf,
+    config_store: Arc<ConfigStore>,
     password: String,
     local_model: bool,
     store: Option<cpa_store::Store>,
@@ -1080,7 +1122,7 @@ async fn standalone_tui(
     let (listening, listener) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(serve(
         config,
-        config_path,
+        config_store,
         password.clone(),
         local_model,
         store,
@@ -1373,7 +1415,7 @@ fn app(rt: &Arc<Runtime>, management: &Arc<cpa_server::management::Management>, 
 #[allow(clippy::too_many_arguments)]
 async fn serve(
     config: Config,
-    config_path: PathBuf,
+    config_store: Arc<ConfigStore>,
     password: String,
     local_model: bool,
     store: Option<cpa_store::Store>,
@@ -1449,7 +1491,7 @@ async fn serve(
         store: store.map(|store| store.persister),
         ..Default::default()
     };
-    let management = cpa_server::management::Management::with_options(rt.clone(), config_path, options);
+    let management = cpa_server::management::Management::with_options(rt.clone(), config_store, options);
     if home.is_some() {
         // Go enables the usage queue in Home mode whatever the management secret
         // (`redisqueue.SetEnabled(... || cfg.Home.Enabled)`); the forwarder drains it.

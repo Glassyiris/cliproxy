@@ -17,7 +17,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use cpa_common::gostr::GoStr;
 use cpa_common::json::GoValue;
-use cpa_core::config::{ConfigDocument, credentials};
+use cpa_core::config::{Config, credentials};
 use cpa_core::credential::{Credential, MetadataPatch, Source};
 use serde_json::{Map, Value, json};
 
@@ -1426,63 +1426,74 @@ fn sync_patched_attributes(c: &mut Credential, roots: &[String]) {
 
 /// Go `toggleConfigAPIKeyExcludedAll`: a config API key is disabled by adding `*` to
 /// its excluded models. The key's own list is written (group inheritance resolved).
-fn toggle_config_key(state: &Management, id: &str, disabled: bool) -> Result<bool, String> {
-    // Locate the key in the same snapshot that is edited: the file on disk may be
-    // newer than the published config (an external edit the watcher has not seen).
-    let original = std::fs::read_to_string(&state.path).map_err(|e| e.to_string())?;
-    let file_cfg = cpa_core::config::Config::parse(&original).map_err(|e| e.to_string())?;
-    let Some(credentials::KeyLocation {
-        family,
-        group: g,
-        key: k,
-    }) = credentials::config_key_location(&file_cfg, id)
-    else {
-        return Ok(false);
-    };
-    let mut doc = ConfigDocument::parse(&original).map_err(|e| e.to_string())?;
-    let basis = doc.migrated_text(&original).unwrap_or_else(|| original.clone());
-    let group = doc.get(&["api-keys", family]).and_then(|v| v.get(g)).cloned();
-    let key_value = group.as_ref().and_then(|grp| grp.get("keys")?.get(k)).cloned();
-    let pick = |v: Option<&serde_yaml_ng::Value>| -> Option<Vec<String>> {
-        v.filter(|v| !v.is_null())?
-            .as_sequence()
-            .map(|s| s.iter().filter_map(|m| m.as_str().map(str::to_owned)).collect())
-    };
-    let current = pick(key_value.as_ref().and_then(|kv| kv.get("excluded-models")))
-        .or_else(|| pick(group.as_ref().and_then(|grp| grp.get("excluded-models"))))
-        .unwrap_or_default();
-    let mut next: Vec<String> = current.into_iter().filter(|m| m.trim() != "*").collect();
-    if disabled {
-        next.push("*".into());
+/// The caller holds `disk`.
+fn toggle_config_key(
+    state: &Management,
+    disk: &std::sync::MutexGuard<'_, ()>,
+    id: &str,
+    disabled: bool,
+) -> Result<bool, String> {
+    let message = format!("{} {id}", if disabled { "disable" } else { "enable" });
+    // The edit fails with `None` when no config key has this ID, so nothing is written.
+    let missing = || Some("config api key entry not found".to_owned());
+    let edited = state.edit_document(disk, "credentials-api", &message, |doc| -> Result<(), Option<String>> {
+        // Locate the key in the document being edited, which may be newer than the
+        // published config (another process committed since the last poll).
+        let text = doc.yaml().map_err(|e| Some(e.to_string()))?;
+        let current = Config::parse(&text).map_err(|e| Some(e.to_string()))?;
+        let Some(credentials::KeyLocation {
+            family,
+            group: g,
+            key: k,
+        }) = credentials::config_key_location(&current, id)
+        else {
+            return Err(None);
+        };
+        let group = doc.get(&["api-keys", family]).and_then(|v| v.get(g)).cloned();
+        let key_value = group.as_ref().and_then(|grp| grp.get("keys")?.get(k)).cloned();
+        let pick = |v: Option<&serde_yaml_ng::Value>| -> Option<Vec<String>> {
+            v.filter(|v| !v.is_null())?
+                .as_sequence()
+                .map(|s| s.iter().filter_map(|m| m.as_str().map(str::to_owned)).collect())
+        };
+        let current = pick(key_value.as_ref().and_then(|kv| kv.get("excluded-models")))
+            .or_else(|| pick(group.as_ref().and_then(|grp| grp.get("excluded-models"))))
+            .unwrap_or_default();
+        let mut next: Vec<String> = current.into_iter().filter(|m| m.trim() != "*").collect();
+        if disabled {
+            next.push("*".into());
+        }
+        let next = credentials::normalize_excluded(&next);
+        let mut keys = group
+            .and_then(|grp| grp.get("keys").cloned())
+            .and_then(|v| v.as_sequence().cloned())
+            .ok_or_else(missing)?;
+        let entry = keys
+            .get_mut(k)
+            .and_then(serde_yaml_ng::Value::as_mapping_mut)
+            .ok_or_else(missing)?;
+        entry.insert(
+            "excluded-models".into(),
+            serde_yaml_ng::Value::Sequence(next.into_iter().map(Into::into).collect()),
+        );
+        // Sequence elements are replaced through their parent list.
+        let mut groups = doc
+            .get(&["api-keys", family])
+            .and_then(|v| v.as_sequence().cloned())
+            .ok_or_else(missing)?;
+        if let Some(grp) = groups.get_mut(g).and_then(serde_yaml_ng::Value::as_mapping_mut) {
+            grp.insert("keys".into(), serde_yaml_ng::Value::Sequence(keys));
+        }
+        doc.update(&["api-keys", family], serde_yaml_ng::Value::Sequence(groups), false)
+            .map_err(|e| Some(e.to_string()))?;
+        Ok(())
+    });
+    match edited {
+        Ok(_) => Ok(true),
+        Err(Ok(None)) => Ok(false),
+        Err(Ok(Some(e))) => Err(e),
+        Err(Err(e)) => Err(e.to_string()),
     }
-    let next = credentials::normalize_excluded(&next);
-    let mut keys = group
-        .and_then(|grp| grp.get("keys").cloned())
-        .and_then(|v| v.as_sequence().cloned())
-        .ok_or("config api key entry not found")?;
-    let entry = keys
-        .get_mut(k)
-        .and_then(serde_yaml_ng::Value::as_mapping_mut)
-        .ok_or("config api key entry not found")?;
-    entry.insert(
-        "excluded-models".into(),
-        serde_yaml_ng::Value::Sequence(next.into_iter().map(Into::into).collect()),
-    );
-    // Sequence elements are replaced through their parent list.
-    let mut groups = doc
-        .get(&["api-keys", family])
-        .and_then(|v| v.as_sequence().cloned())
-        .ok_or("config api key entry not found")?;
-    if let Some(grp) = groups.get_mut(g).and_then(serde_yaml_ng::Value::as_mapping_mut) {
-        grp.insert("keys".into(), serde_yaml_ng::Value::Sequence(keys));
-    }
-    doc.update(&["api-keys", family], serde_yaml_ng::Value::Sequence(groups), false)
-        .map_err(|e| e.to_string())?;
-    let text = doc.render_preserving(&basis).map_err(|e| e.to_string())?;
-    let next_cfg = cpa_core::config::Config::parse(&text).map_err(|e| e.to_string())?;
-    ConfigDocument::write(&state.path, &text).map_err(|e| e.to_string())?;
-    state.publish(next_cfg, None);
-    Ok(true)
 }
 
 pub(crate) async fn status(State(state): State<Arc<Management>>, body: Result<FirstJson, BytesRejection>) -> Response {
@@ -1541,7 +1552,7 @@ pub(crate) async fn status(State(state): State<Arc<Management>>, body: Result<Fi
         };
     }
     let saved = with_codex_lock(&state, move |state, lock| {
-        let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+        let disk = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
         if plugin_virtual(&target) {
             // Go: only through the source file's name, which toggles the file and every
             // credential parsed from it; a parsed credential alone cannot be changed.
@@ -1551,7 +1562,7 @@ pub(crate) async fn status(State(state): State<Arc<Management>>, body: Result<Fi
             return Ok(virtual_source_status(state, &target, disabled));
         }
         if matches!(target.source, Source::Config { .. }) {
-            return Ok(match toggle_config_key(state, &target.id, disabled) {
+            return Ok(match toggle_config_key(state, &disk, &target.id, disabled) {
                 Ok(true) => reply(
                     StatusCode::OK,
                     [

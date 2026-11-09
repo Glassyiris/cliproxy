@@ -325,7 +325,8 @@ pub fn split(doc: &Json, old: &[Resource]) -> Result<Vec<Resource>, Fault> {
                 };
                 for (family, list) in families {
                     for (i, item) in list.as_array().into_iter().flatten().enumerate() {
-                        let mut spec = entry_object(item, &format!("api-keys.{family}[{i}]"))?;
+                        let entry = without_read_only(item.clone());
+                        let mut spec = entry_object(&entry, &format!("api-keys.{family}[{i}]"))?;
                         let asked = spec.remove("@id").and_then(|v| v.as_str().map(str::to_owned));
                         let asked = asked.filter(|id| old_id(Kind::Provider, id) || valid_id(id));
                         let name = spec.get("name").and_then(Json::as_str).map(str::to_owned);
@@ -519,6 +520,24 @@ pub fn hash_management_key(r: &mut Resource) -> Result<(), Fault> {
     *key =
         bcrypt::hash(key.as_bytes(), 10).map_err(|e| Fault::new(Some("setting/management".into()), e.to_string()))?;
     Ok(())
+}
+
+/// `value` without the `auth_index` fields reads add to provider entries, which a
+/// client may send back.
+pub fn without_read_only(mut value: Json) -> Json {
+    fn strip(v: &mut Json) {
+        match v {
+            Json::Object(map) => {
+                map.remove("auth_index");
+                map.remove("auth-index");
+                map.values_mut().for_each(strip);
+            }
+            Json::Array(items) => items.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    strip(&mut value);
+    value
 }
 
 /// The value at the slash-separated `path` of a document: mapping keys, and array

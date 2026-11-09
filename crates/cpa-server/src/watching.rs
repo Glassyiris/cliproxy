@@ -1,19 +1,17 @@
-//! Hot reload of `config.yaml` and the auth directory (Go internal/watcher).
+//! Hot reload of the auth directory and of config revisions committed by another
+//! process (Go internal/watcher, for the auth part).
 //!
-//! Go watches the config file and the top level of the auth directory with fsnotify.
-//! A config event reloads after 150 ms without further events (`configReloadDebounce`);
-//! auth events apply at once, removals after a 50 ms replace check
-//! (`replaceCheckDelay`). Both compare content hashes, so self-writes and
-//! unchanged rewrites are no-ops.
+//! The watcher sleeps until the operating system reports a change in the auth folder or
+//! the config database's folder ([`crate::fs_events`]). It then stats the top-level
+//! `*.json` auth files every 50 ms, hashing only files whose metadata changed or that
+//! were modified in the last two seconds (git's racy timestamp rule), until the change
+//! has been stable for one tick and is applied; removals wait 50 ms for a replacement
+//! (Go `replaceCheckDelay`). While nothing changes it does no file work and sets no
+//! timer. As in Go, changes made by another machine on a network or FUSE file system
+//! raise no event and are seen with the next local change.
 //!
-//! The watcher sleeps until the operating system reports a change in the config file's
-//! folder or the auth folder ([`crate::fs_events`]). It then stats the config file and
-//! the top-level `*.json` auth files every 50 ms, hashing only files whose metadata
-//! changed or that were modified in the last two seconds (git's racy timestamp rule),
-//! until the change has been stable for 150 ms (config) or one tick (auth files) and is
-//! applied. While nothing changes it does no work and sets no timer. As in Go, changes
-//! made by another machine on a network or FUSE file system raise no event and are seen
-//! with the next local change.
+//! Config writes through the management API publish when they commit. A revision
+//! another process commits is noticed within a second ([`poll_config`]).
 use cpa_core::gostr::GoStr;
 use std::collections::{BTreeMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -39,11 +37,9 @@ const RACY: Duration = Duration::from_secs(2);
 
 type Hash = [u8; 32];
 
-/// Content identity of everything the watcher observes.
+/// Content identity of the auth files the watcher observes.
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Snapshot {
-    /// `None` when the config file cannot be read (missing).
-    config: Option<Hash>,
     auth: BTreeMap<PathBuf, Hash>,
 }
 
@@ -120,10 +116,6 @@ fn is_auth_json(path: &Path) -> bool {
 fn observe(state: &Management, cache: &mut HashCache) -> Snapshot {
     let now = SystemTime::now();
     let mut seen = Vec::new();
-    let config = std::fs::metadata(&state.path)
-        .ok()
-        .and_then(|meta| cache.hash(&state.path, &meta, now));
-    seen.push(state.path.clone());
     let mut auth = BTreeMap::new();
     let dir = state.rt.config().auth_dir.clone();
     // An unreadable auth dir is an empty set, as in reload.
@@ -139,7 +131,7 @@ fn observe(state: &Management, cache: &mut HashCache) -> Snapshot {
         auth.insert(path, hash);
     }
     cache.0.retain(|path, _| seen.contains(path));
-    Snapshot { config, auth }
+    Snapshot { auth }
 }
 
 /// Go's per-event log lines for auth files that changed between two snapshots.
@@ -168,26 +160,22 @@ pub fn start(state: &Arc<Management>) -> tokio::task::JoinHandle<()> {
         move || plugin_auth.notify_one()
     })));
     let weak = Arc::downgrade(state);
+    poll_config(weak.clone());
     let state = state.clone();
     tokio::spawn(async move {
-        // Off the request threads: reading the file waits for the disk lock, setup can
-        // block on a slow network path, and on Windows it waits for the watch thread. A
-        // panic in the setup leaves the 2-second poll. Go stores its own serialized
-        // config snapshot, independently of management mutations of the published
-        // runtime config before their disk event arrives.
+        // Off the request threads: setup can block on a slow network path, and on
+        // Windows it waits for the watch thread. A panic in the setup leaves the
+        // 2-second poll.
         let started = tokio::task::spawn_blocking(move || {
             let snapshot = {
                 let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-                let hash = std::fs::read(&state.path)
-                    .ok()
-                    .map(|data| <Hash>::from(Sha256::digest(data)));
-                (state.rt.config(), hash)
+                state.rt.config()
             };
             let events = catch_unwind(AssertUnwindSafe(|| Events::new(&first))).unwrap_or_default();
             (snapshot, events)
         })
         .await;
-        let Ok(((mut previous_config, initial_hash), mut events)) = started else {
+        let Ok((mut previous_config, mut events)) = started else {
             return;
         };
         let state = weak;
@@ -262,19 +250,14 @@ pub fn start(state: &Arc<Management>) -> tokio::task::JoinHandle<()> {
             if applied.as_ref() == Some(&current) && applied_epoch == epoch {
                 continue;
             }
-            let config_changed = applied.as_ref().map_or(initial_hash, |a| a.config) != current.config;
-            // The first observation always reads the file: an edit made after the
-            // runtime loaded its config but before `start` hashed the file matches
-            // `initial_hash`, yet the runtime has never seen it.
-            let read_config = config_changed || applied.is_none();
+            // The first observation reads the stored config once, as Go's watcher reloads
+            // clients when it starts.
+            let read_config = applied.is_none();
             if since.elapsed() < if read_config { CONFIG_SETTLE } else { AUTH_SETTLE } {
                 continue;
             }
             if let Some(before) = &applied {
                 log_auth_changes(before, &current);
-                if config_changed && current.config.is_some() {
-                    tracing::info!("config file changed, reloading: {}", state.path.display());
-                }
             }
             // The reload may move auth-dir, and new auth files need their own watches on
             // macOS: retarget after it, on the same blocking thread. A change that lands
@@ -309,27 +292,18 @@ pub fn start(state: &Arc<Management>) -> tokio::task::JoinHandle<()> {
                 tracing::error!("config watcher: reload failed unexpectedly; retrying on the next change");
             }
             if let Some(before) = &applied {
-                let accepted = matches!(loaded, Ok(Ok(Some(_))));
-                persist_changes(&state, before, &current, config_changed && accepted);
+                persist_changes(&state, before, &current);
             }
             match loaded {
                 Ok(Ok(Some(next_config))) => {
-                    // The first observation's read of the file the runtime started
-                    // with is quiet; Go does not reload at startup.
-                    if config_changed || next_config.document != previous_config.document {
+                    // The first look at the config the runtime started with is quiet.
+                    if next_config.document != previous_config.document {
                         crate::config_diff::log(&previous_config, &next_config);
                         tracing::info!("config successfully reloaded, triggering client reload");
                     }
                     previous_config = Arc::new(next_config);
                 }
-                Ok(Err(error)) if config_changed || applied.is_none() => match error {
-                    ReloadError::Missing(e) => tracing::error!(
-                        "failed to read config file for hash check: open {}: {}",
-                        state.path.display(),
-                        go_errno_text(&e)
-                    ),
-                    ReloadError::Invalid(e) => tracing::error!("failed to reload config: {e:#}"),
-                },
+                Ok(Err(error)) if applied.is_none() => tracing::error!("failed to reload config: {error}"),
                 _ => {}
             }
             // Applied once either way: a failed config load retries on its next change,
@@ -352,28 +326,50 @@ fn record(cache: &mut HashCache, observed: Snapshot, read: Option<Snapshot>) -> 
     read
 }
 
-/// What the watch should cover: the config file, the auth folder of the published
-/// config, and the auth files last seen there.
+/// What the watch should cover: the auth folder of the published config and the auth
+/// files last seen there. The config database's folder is watched too; its writes are
+/// noticed by [`poll_config`].
 fn targets(state: &Management, current: Option<&Snapshot>) -> Targets {
+    let auth_dir = state.rt.config().auth_dir.clone();
     Targets {
-        config: state.path.clone(),
-        auth_dir: state.rt.config().auth_dir.clone(),
+        // An in-memory store (tests) has no file: a name in the auth folder stands in.
+        config: state
+            .config
+            .path()
+            .map_or_else(|| auth_dir.join(".config-store"), Path::to_owned),
+        auth_dir,
         files: current.map(|s| s.auth.keys().cloned().collect()).unwrap_or_default(),
     }
 }
 
-/// Go `persistConfigAsync` / `persistAuthAsync`: with a remote store, what changed
-/// between two applied snapshots is pushed in the background. The config goes only
-/// after a reload accepted it, and never when empty or missing (Go ignores those
-/// events). An auth write goes as "Sync auth <name>" unless the file is empty or not a
-/// JSON object; a removal goes as "Remove auth <name>".
+/// How often [`poll_config`] asks the database whether another process committed.
+const CONFIG_POLL: Duration = Duration::from_secs(1);
+
+/// Publishes config revisions another process (the CLI) commits, within a second.
+/// One `PRAGMA data_version` per tick; nothing runs for an in-memory store.
+fn poll_config(state: std::sync::Weak<Management>) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(CONFIG_POLL).await;
+            let Some(state) = state.upgrade() else { return };
+            if state.config.path().is_none() {
+                return;
+            }
+            let _ = tokio::task::spawn_blocking(move || state.reload_config()).await;
+        }
+    });
+}
+
+/// Go `persistAuthAsync`: with a remote store, the auth files that changed between two
+/// applied snapshots are pushed in the background. A write goes as "Sync auth <name>"
+/// unless the file is empty or not a JSON object; a removal goes as "Remove auth
+/// <name>". The config lives in the config database and is not pushed.
 // ponytail: Go also skips files whose JSON does not decode into its `Auth` struct or
 // whose weight is invalid; here any JSON object is pushed.
-fn persist_changes(state: &Management, before: &Snapshot, after: &Snapshot, config_accepted: bool) {
+fn persist_changes(state: &Management, before: &Snapshot, after: &Snapshot) {
     let Some(store) = state.store.clone() else {
         return;
     };
-    let config = config_accepted && std::fs::metadata(&state.path).is_ok_and(|m| m.len() > 0);
     let mut auth = Vec::new();
     for (path, hash) in &after.auth {
         if before.auth.get(path) == Some(hash) {
@@ -390,18 +386,11 @@ fn persist_changes(state: &Management, before: &Snapshot, after: &Snapshot, conf
     for path in before.auth.keys().filter(|p| !after.auth.contains_key(*p)) {
         auth.push(("Remove", path.clone()));
     }
-    if !config && auth.is_empty() {
+    if auth.is_empty() {
         return;
     }
     tokio::spawn(async move {
         let bound = Duration::from_secs(30);
-        if config {
-            match tokio::time::timeout(bound, store.persist_config()).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => tracing::error!("failed to persist config change: {error:#}"),
-                Err(_) => tracing::error!("failed to persist config change: context deadline exceeded"),
-            }
-        }
         for (verb, path) in auth {
             let name = path
                 .file_name()
@@ -417,41 +406,23 @@ fn persist_changes(state: &Management, before: &Snapshot, after: &Snapshot, conf
     });
 }
 
-/// Go's `syscall.Errno` text: strerror in lower case, without Rust's suffix.
-fn go_errno_text(e: &std::io::Error) -> String {
-    let text = e.to_string();
-    let text = text.split(" (os error").next().unwrap_or_default();
-    let mut chars = text.chars();
-    chars
-        .next()
-        .map_or_else(String::new, |c| c.to_lowercase().chain(chars).collect())
-}
-
-/// Why [`reload`] kept the last good config.
+/// Why [`reload`] kept the last good config: the stored one does not compile.
 #[derive(Debug)]
-pub enum ReloadError {
-    /// The config file could not be read (Go logs it and keeps running).
-    Missing(std::io::Error),
-    /// The config file did not load (Go `failed to reload config`).
-    Invalid(anyhow::Error),
-}
+pub struct ReloadError(pub crate::config_store::Fault);
 
 impl std::fmt::Display for ReloadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Missing(e) => write!(f, "{e}"),
-            Self::Invalid(e) => write!(f, "{e:#}"),
-        }
+        self.0.fmt(f)
     }
 }
 
 impl std::error::Error for ReloadError {}
 
-/// Blocking reload. Shared with deterministic tests; no provider calls are made.
+/// Blocking reload of the stored config and the auth folder. Shared with
+/// deterministic tests; no provider calls are made.
 ///
-/// A missing, empty or rejected config keeps the last good config, and the auth
-/// directory is reconciled against it anyway: Go handles auth events independently
-/// of the config file.
+/// A config that does not compile keeps the last good config, and the auth directory
+/// is reconciled against it anyway.
 pub fn reload(state: &Management) -> Result<(), ReloadError> {
     reload_config(state, true, &Snapshot::default()).0.map(|_| ())
 }
@@ -472,37 +443,11 @@ fn reload_config(
         credentials::preparse_auth_dir(&state.rt.config());
     }
     let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-    let mut read = Snapshot {
-        config: observed.config,
-        auth: BTreeMap::new(),
-    };
-    // Recorded as the observation records it: the hash of the bytes read, `None` when
-    // the read fails.
-    let (mut config, config_error, accepted) = match read_config.then(|| std::fs::read(&state.path)) {
+    let mut read = Snapshot { auth: BTreeMap::new() };
+    let (mut config, config_error, accepted) = match read_config.then(|| state.stored_config()) {
         None => ((*state.rt.config()).clone(), None, false),
-        Some(Err(error)) => {
-            read.config = None;
-            let error = if std::fs::metadata(&state.path).is_err() {
-                ReloadError::Missing(error)
-            } else {
-                ReloadError::Invalid(error.into())
-            };
-            ((*state.rt.config()).clone(), Some(error), false)
-        }
-        Some(Ok(data)) => {
-            read.config = Some(Sha256::digest(&data).into());
-            let loaded = (!data.is_empty()).then(|| {
-                std::str::from_utf8(&data)
-                    .map_err(anyhow::Error::from)
-                    .and_then(|text| Config::load_text(&state.path, text))
-            });
-            match loaded {
-                // Go ignores an empty config write.
-                None => ((*state.rt.config()).clone(), None, false),
-                Some(Ok(config)) => (config, None, true),
-                Some(Err(error)) => ((*state.rt.config()).clone(), Some(ReloadError::Invalid(error)), false),
-            }
-        }
+        Some(Ok(config)) => (config, None, true),
+        Some(Err(fault)) => ((*state.rt.config()).clone(), Some(ReloadError(fault)), false),
     };
     state.lock_auth_dir(&mut config);
     let mut scan = credentials::scan_auth_dir(&config);
