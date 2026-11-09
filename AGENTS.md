@@ -1,6 +1,6 @@
-# cliproxy-rs
+# gnocchi
 
-If you are an agent installing cliproxy-rs for a user rather than developing it, stop here and follow [docs/AI-SETUP.md](docs/AI-SETUP.md).
+If you are an agent installing gnocchi for a user rather than developing it, stop here and follow [docs/AI-SETUP.md](docs/AI-SETUP.md).
 
 A Rust rewrite of CLIProxyAPI (https://github.com/router-for-me/CLIProxyAPI) targeting full parity and drop-in compatibility: same `config.yaml`, same auth JSON files in `auth-dir`, same HTTP routes and response shapes, same v8 Management API.
 
@@ -18,7 +18,7 @@ A Rust rewrite of CLIProxyAPI (https://github.com/router-for-me/CLIProxyAPI) tar
 - `crates/cpa-exec`: one module per upstream provider (wire format, auth headers, HTTP client profile).
 - `crates/cpa-server`: axum routes, client auth, credential selection, management API.
 - `crates/cpa-plugin`, `crates/cpa-store`, `crates/cpa-home`: the plugin host, the remote config and auth stores, and Home mode.
-- `crates/cliproxy`: the binary. Go-style single-dash flags are accepted.
+- `crates/gnocchi`: the binary. Go-style single-dash flags are accepted.
 - `ui/` is the dashboard, `harness/` sends the same requests to Go and Rust and compares them.
 
 ## Rules

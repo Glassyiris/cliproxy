@@ -1,4 +1,4 @@
-# CLIProxyAPI source-derived parity checklist for cliproxy-rs
+# CLIProxyAPI source-derived parity checklist for gnocchi
 
 Reference: `router-for-me/CLIProxyAPI`, release **v8.0.35**, commit **`ae3ee3be303fb07fb8173279923413005bf32177`**, committed `2026-10-20T00:55:07+08:00` (19 October UTC). The target is frozen for this porting pass. Citations are immutable commit permalinks. Historical removed declarations are labeled explicitly. The Go checkout is read-only; no runtime implementation or live provider calls are part of this inventory.
 

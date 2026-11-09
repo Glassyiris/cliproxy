@@ -1,9 +1,9 @@
-# cliproxy-rs
+# gnocchi
 
-[![CI](https://github.com/prep-cook/cliproxy/actions/workflows/ci.yml/badge.svg)](https://github.com/prep-cook/cliproxy/actions/workflows/ci.yml)
+[![CI](https://github.com/prep-cook/gnocchi/actions/workflows/ci.yml/badge.svg)](https://github.com/prep-cook/gnocchi/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/vayungodara/cliproxy-rs)](https://github.com/vayungodara/cliproxy-rs/releases/latest)
 [![Homebrew](https://img.shields.io/badge/brew-vayungodara%2Ftap%2Fcliproxy--rs-orange)](https://github.com/vayungodara/homebrew-tap)
-[![Stars](https://img.shields.io/github/stars/prep-cook/cliproxy)](https://github.com/prep-cook/cliproxy/stargazers)
+[![Stars](https://img.shields.io/github/stars/prep-cook/gnocchi)](https://github.com/prep-cook/gnocchi/stargazers)
 
 Use DeepSeek, GLM, Kimi, OpenRouter and more in Codex CLI and Claude Code: one local endpoint, API translation, failover. Single Rust binary, CLIProxyAPI-compatible.
 
@@ -12,13 +12,13 @@ Use DeepSeek, GLM, Kimi, OpenRouter and more in Codex CLI and Claude Code: one l
 - **One binary with the dashboard built in.** It reads CLIProxyAPI's `config.yaml` and credential files. Parity with CLIProxyAPI v8.0.35 is partial; [PARITY.md](docs/PARITY.md) has the counts.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/vayungodara/cliproxy-rs/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.sh | sh
 ```
 
 On Windows, or with Homebrew or Scoop, see [Quick start](#quick-start).
 
 <p align="center">
-  <a href="https://github.com/vayungodara/cliproxy-rs/releases/latest"><img src="docs/img/hero.gif" alt="cliproxy-rs on 127.0.0.1:8317 translates a Codex CLI Responses request to Chat Completions for DeepSeek and moves it to a second key when the first answers 429. Claude Code's Messages requests reach GLM the same way. Kimi and OpenRouter are the other providers shown." width="880"></a>
+  <a href="https://github.com/vayungodara/cliproxy-rs/releases/latest"><img src="docs/img/hero.gif" alt="gnocchi on 127.0.0.1:8317 translates a Codex CLI Responses request to Chat Completions for DeepSeek and moves it to a second key when the first answers 429. Claude Code's Messages requests reach GLM the same way. Kimi and OpenRouter are the other providers shown." width="880"></a>
 </p>
 
 0.4.0 changes how some configs load. Read [Before you upgrade](https://github.com/vayungodara/cliproxy-rs/releases/tag/v0.4.0#:~:text=Before%20you%20upgrade) in the [release notes](https://github.com/vayungodara/cliproxy-rs/releases/tag/v0.4.0) first.
@@ -26,7 +26,7 @@ On Windows, or with Homebrew or Scoop, see [Quick start](#quick-start).
 > **Set it up with your coding agent.** Paste this into Claude Code, Codex or Amp on the machine where the proxy should run:
 >
 > ```text
-> Install cliproxy-rs on this machine by following https://github.com/prep-cook/cliproxy/blob/master/docs/AI-SETUP.md
+> Install gnocchi on this machine by following https://github.com/prep-cook/gnocchi/blob/master/docs/AI-SETUP.md
 > ```
 
 ## Quick start
@@ -34,22 +34,22 @@ On Windows, or with Homebrew or Scoop, see [Quick start](#quick-start).
 1. On macOS or Linux, run the install command at the top of this page. On Windows, in PowerShell:
 
    ```powershell
-   irm https://raw.githubusercontent.com/vayungodara/cliproxy-rs/master/install.ps1 | iex
+   irm https://raw.githubusercontent.com/prep-cook/gnocchi/master/install.ps1 | iex
    ```
 
-   The installer checks the release checksum, writes `~/.cliproxy-rs/config.yaml`, starts the proxy and opens the dashboard. On Windows, the config is `%USERPROFILE%\.cliproxy-rs\config.yaml`. It saves new keys in `keys.env` without printing them.
+   The installer checks the release checksum, writes `~/.gnocchi/config.yaml`, starts the proxy and opens the dashboard. On Windows, the config is `%USERPROFILE%\.gnocchi\config.yaml`. It saves new keys in `keys.env` without printing them.
 
    Other ways to install: [Homebrew](docs/INSTALL.md#homebrew) on macOS or Linux, [Scoop](docs/INSTALL.md#scoop) on Windows, and the rest in [INSTALL.md](docs/INSTALL.md).
 
-2. Sign in to the dashboard with `CLIPROXY_MANAGEMENT_KEY` from the `keys.env` next to your config. Add a provider API key, or connect your own account. Read [Accounts and provider terms](#accounts-and-provider-terms) before connecting a subscription.
+2. Sign in to the dashboard with `GNOCCHI_MANAGEMENT_KEY` from the `keys.env` next to your config. Add a provider API key, or connect your own account. Read [Accounts and provider terms](#accounts-and-provider-terms) before connecting a subscription.
 
-3. On the dashboard's **Client keys** page, open **Use with tools** and copy the Codex CLI or Claude Code settings. Your tools use `CLIPROXY_CLIENT_KEY`, not the management key.
+3. On the dashboard's **Client keys** page, open **Use with tools** and copy the Codex CLI or Claude Code settings. Your tools use `GNOCCHI_CLIENT_KEY`, not the management key.
 
 Run the install command again to upgrade, or `brew upgrade cliproxy-rs` with Homebrew. Both keep your config and keys. [INSTALL.md](docs/INSTALL.md) covers start at login, release binaries, Docker and building from source. [GETTING-STARTED.md](docs/GETTING-STARTED.md) has the longer walkthrough.
 
 ## What is this?
 
-cliproxy-rs is a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). It reads the same `config.yaml` and credential formats and implements the client routes and v8 Management API. The dashboard shows provider keys and their traffic, request history and tool settings.
+gnocchi is a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). It reads the same `config.yaml` and credential formats and implements the client routes and v8 Management API. The dashboard shows provider keys and their traffic, request history and tool settings.
 
 <p align="center">
   <picture>
@@ -64,7 +64,7 @@ The compatibility target is CLIProxyAPI v8.0.35. Parity is incomplete: the audit
 
 Checked against each project's own README on 28 October 2026. All five translate between the OpenAI and Anthropic formats, Responses to Chat Completions included, and can move a request to another key when one fails¹.
 
-| | cliproxy-rs | [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | [claude-code-router](https://github.com/musistudio/claude-code-router) | [LiteLLM](https://github.com/BerriAI/litellm) | [opencodex](https://github.com/lidge-jun/opencodex) |
+| | gnocchi | [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | [claude-code-router](https://github.com/musistudio/claude-code-router) | [LiteLLM](https://github.com/BerriAI/litellm) | [opencodex](https://github.com/lidge-jun/opencodex) |
 | --- | --- | --- | --- | --- | --- |
 | Language and packaging | Rust, one binary | Go, one binary¹ | Node.js 22+ (npm), desktop app, Docker | Python (pip or uv), Docker | Bun (npm), desktop app, Docker |
 | Linux x86_64 release² | 19.0 MB download, 44.6 MB binary with the dashboard | 23.6 MB download, 71.1 MB binary; it downloads its panel at start | Not measured | Not measured | Not measured |
@@ -72,13 +72,13 @@ Checked against each project's own README on 28 October 2026. All five translate
 | Built-in dashboard | Yes, in the binary | Separate project (Management Center) | Yes | Yes | Yes |
 | Reads CLIProxyAPI's config and credential files | Yes, with [partial parity](docs/PARITY.md) | It is the reference | No | No | No |
 
-¹ Not stated in CLIProxyAPI's README; checked in its v8.0.35 source and release assets. cliproxy-rs's translation and failover are ports of that code.
+¹ Not stated in CLIProxyAPI's README; checked in its v8.0.35 source and release assets. gnocchi's translation and failover are ports of that code.
 
-² cliproxy-rs 0.4.0 and CLIProxyAPI v8.0.35 release binaries. Idle at start is the RSS 15 seconds after launch with one API key and no traffic, measured on one Linux machine on 31 October 2026. The field-mix hour sent streamed Claude and Codex requests of about 1 MB for an hour, each server on its own GitHub-hosted runner at the same time, on 28 October 2026. [BENCHMARKS.md](docs/BENCHMARKS.md#size-and-idle-memory-040-against-v8035) has both.
+² gnocchi 0.4.0 and CLIProxyAPI v8.0.35 release binaries. Idle at start is the RSS 15 seconds after launch with one API key and no traffic, measured on one Linux machine on 31 October 2026. The field-mix hour sent streamed Claude and Codex requests of about 1 MB for an hour, each server on its own GitHub-hosted runner at the same time, on 28 October 2026. [BENCHMARKS.md](docs/BENCHMARKS.md#size-and-idle-memory-040-against-v8035) has both.
 
 Where the others are stronger:
 
-- CLIProxyAPI is the complete implementation that cliproxy-rs follows. It was faster in the synthetic runs under [Performance](#performance), and its README lists many apps built on it.
+- CLIProxyAPI is the complete implementation that gnocchi follows. It was faster in the synthetic runs under [Performance](#performance), and its README lists many apps built on it.
 - LiteLLM covers 100+ providers and adds virtual keys, spend tracking, guardrails and a Python SDK.
 - claude-code-router has routing conditions on headers and bodies, ordered fallback models, its own client keys with request and token limits, and a desktop app.
 - opencodex supports 40+ providers out of the box, also serves Claude Desktop and Grok Build, and has a desktop app.
@@ -97,7 +97,7 @@ If you only use one provider and it serves the Responses API, Codex can talk to 
 
 The proxy is for the rest: an endpoint that only offers Chat Completions, such as OpenCode Go's models, or several providers and keys behind one endpoint, with failover when one returns 429. It accepts Responses requests from Codex and sends Chat Completions upstream, tool calls included.
 
-You do not need a subscription login. Merge this provider block into `~/.cliproxy-rs/config.yaml`, or `%USERPROFILE%\.cliproxy-rs\config.yaml` on Windows. Keep `access.api-keys`, `management.secret-key` and the rest of your config. The proxy reloads the configuration on save. The upstream keys below are separate from your proxy's client key. Replace the key and upstream model placeholders with values from each provider.
+You do not need a subscription login. Merge this provider block into `~/.gnocchi/config.yaml`, or `%USERPROFILE%\.gnocchi\config.yaml` on Windows. Keep `access.api-keys`, `management.secret-key` and the rest of your config. The proxy reloads the configuration on save. The upstream keys below are separate from your proxy's client key. Replace the key and upstream model placeholders with values from each provider.
 
 ```yaml
 api-keys:
@@ -132,27 +132,27 @@ Put this in `~/.codex/config.toml`:
 
 ```toml
 model = "deepseek"
-model_provider = "cliproxy"
+model_provider = "gnocchi"
 
-[model_providers.cliproxy]
-name = "cliproxy-rs"
+[model_providers.gnocchi]
+name = "gnocchi"
 base_url = "http://127.0.0.1:8317/v1"
-env_key = "CLIPROXY_CLIENT_KEY"
+env_key = "GNOCCHI_CLIENT_KEY"
 wire_api = "responses"
 ```
 
 ```sh
-export CLIPROXY_CLIENT_KEY=your-client-key
+export GNOCCHI_CLIENT_KEY=your-client-key
 codex
 ```
 
-Use the port and `CLIPROXY_CLIENT_KEY` from your installation's `keys.env`. Codex CLI sends Responses requests to the proxy; the proxy translates them to Chat Completions for these upstreams. Set `model = "router"` to use the second provider. Other clients can use either alias at the same endpoint, alongside any connected subscription accounts.
+Use the port and `GNOCCHI_CLIENT_KEY` from your installation's `keys.env`. Codex CLI sends Responses requests to the proxy; the proxy translates them to Chat Completions for these upstreams. Set `model = "router"` to use the second provider. Other clients can use either alias at the same endpoint, alongside any connected subscription accounts.
 
 For failover, give two provider entries the same model alias, or add another key to a provider's `keys` list. By default, a 429 cools that credential for the failing model, and the proxy tries another eligible credential for the alias, within the configured attempt limits and error rules. [MULTI-ACCOUNT.md](docs/MULTI-ACCOUNT.md#cooldowns-and-limits) explains retries when none are ready.
 
-<p align="center"><img src="docs/img/codex-deepseek.gif" alt="Codex CLI fixing a bug and running a check with DeepSeek V4.1 Flash through cliproxy-rs" width="880"></p>
+<p align="center"><img src="docs/img/codex-deepseek.gif" alt="Codex CLI fixing a bug and running a check with DeepSeek V4.1 Flash through gnocchi" width="880"></p>
 
-On 7 October 2026, Codex CLI 0.160 finished a task with a file edit and a shell command through cliproxy-rs 0.2.2, using DeepSeek V4.1 Flash on OpenCode Go's Chat Completions endpoint (above). The DeepSeek, GLM, Kimi and OpenRouter endpoints in the table haven't been run live.
+On 7 October 2026, Codex CLI 0.160 finished a task with a file edit and a shell command through gnocchi 0.2.2, using DeepSeek V4.1 Flash on OpenCode Go's Chat Completions endpoint (above). The DeepSeek, GLM, Kimi and OpenRouter endpoints in the table haven't been run live.
 
 ## Accounts and provider terms
 
@@ -160,7 +160,7 @@ This project is for one person using their own accounts on their own machines. K
 
 Use the provider's sanctioned path where one exists:
 
-- OpenAI offers [Sign in with ChatGPT](https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt) so eligible users can use their plan in participating tools, including local personal projects. That permission depends on the integration and consent scopes. cliproxy-rs's Codex login follows CLIProxyAPI's existing login flow; it is not the new Sign in with ChatGPT integration. The Management API can bind Sign in with ChatGPT tokens to a Codex credential, and Codex requests use them when the credential's `use_siwc` is on.
+- OpenAI offers [Sign in with ChatGPT](https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt) so eligible users can use their plan in participating tools, including local personal projects. That permission depends on the integration and consent scopes. gnocchi's Codex login follows CLIProxyAPI's existing login flow; it is not the new Sign in with ChatGPT integration. The Management API can bind Sign in with ChatGPT tokens to a Codex credential, and Codex requests use them when the credential's `use_siwc` is on.
 - Claude Code supports [gateway configuration](https://code.claude.com/docs/en/llm-gateway-connect). You can route other models into Claude Code through the proxy using their API keys. Anthropic's [authentication rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) reserve Claude subscription OAuth for Claude Code and other native Anthropic applications. Use an API key or supported cloud provider for Claude in third-party tools.
 
 Personal use is still subject to each provider's terms, and providers can restrict or suspend accounts that break them. Sharing an account, or using it to serve other people, is the clearest case.
@@ -171,17 +171,17 @@ Each sign-in creates a file in `auth-dir`. Routing chooses among ready credentia
 
 ## CLIProxyAPI compatibility
 
-Config and protocol tests check compatibility with Go CLIProxyAPI at `6fecc6e`. The bundled dashboard has tests against both servers. No third-party CLIProxyAPI app has been tested with cliproxy-rs yet.
+Config and protocol tests check compatibility with Go CLIProxyAPI at `6fecc6e`. The bundled dashboard has tests against both servers. No third-party CLIProxyAPI app has been tested with gnocchi yet.
 
 Before switching, read [MIGRATING-FROM-GO.md](docs/MIGRATING-FROM-GO.md), especially the refresh-token warning. The default Docker image expects `/data/config.yaml` and runs as UID/GID 10001. Update mounts and permissions, or override `--config` and set an accessible `oauth.auth-dir` to keep existing paths.
 
 ## Terminal UI
 
-`cliproxy -tui` manages a running server. It uses `-management-base-url`, then `management.base-url`, then `http://127.0.0.1:<port>`, and asks for the management key. `cliproxy -tui -standalone` starts the server in the same process and stops it when you quit. Standalone mode needs a loopback or wildcard `host` and no `server.tls`.
+`gnocchi -tui` manages a running server. It uses `-management-base-url`, then `management.base-url`, then `http://127.0.0.1:<port>`, and asks for the management key. `gnocchi -tui -standalone` starts the server in the same process and stops it when you quit. Standalone mode needs a loopback or wildcard `host` and no `server.tls`.
 
 ## Upcoming features
 
-Not in cliproxy-rs yet:
+Not in gnocchi yet:
 
 - An AUR package.
 - Three plugin pieces: model discovery for each credential, response hooks on a buffered Claude answer, and sending your GitHub token on plugin store requests.
@@ -194,13 +194,13 @@ On 23 October 2026, 67 minutes after 0.3.0 started on the maintainer's server, i
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/img/perf-field-soak-dark.svg">
-    <img src="docs/img/perf-field-soak-light.svg" alt="Bar chart of the field-mix soak on 28 October 2026, 60 minutes on two runners at the same time. Requests of 200 KB to 2 MB, about 1 MB on average, peak RSS: Go 198.3 MB, cliproxy-rs 161.5 MB; RSS after 300 s idle: Go 75.8 MB, cliproxy-rs 97.8 MB." width="880">
+    <img src="docs/img/perf-field-soak-light.svg" alt="Bar chart of the field-mix soak on 28 October 2026, 60 minutes on two runners at the same time. Requests of 200 KB to 2 MB, about 1 MB on average, peak RSS: Go 198.3 MB, gnocchi 161.5 MB; RSS after 300 s idle: Go 75.8 MB, gnocchi 97.8 MB." width="880">
   </picture>
 </p>
 
-In the [field-mix soak](docs/BENCHMARKS.md#against-go-v8035) of 28 October 2026, the CLIProxyAPI v8.0.35 and cliproxy-rs 0.4.0 release binaries each served an hour of streamed Claude and Codex requests of 200 KB to 2 MB, plus count_tokens, on a GitHub-hosted runner of their own at the same time. Neither failed a request. cliproxy-rs peaked at 161.5 MB and Go at 198.3 MB. Read 20 seconds after each batch, cliproxy-rs held 85.7 to 102.0 MB and Go 91.4 to 152.8 MB. After 5 minutes without traffic Go had given more back: it held 75.8 MB and cliproxy-rs 97.8 MB, which keeps the o200k_base tokenizer that count_tokens built (46.8 MB when [measured](docs/BENCHMARKS.md#what-the-heap-held) on 6 October). On the same CPU model, cliproxy-rs used 49 ms of CPU per request and Go 146 ms.
+In the [field-mix soak](docs/BENCHMARKS.md#against-go-v8035) of 28 October 2026, the CLIProxyAPI v8.0.35 and gnocchi 0.4.0 release binaries each served an hour of streamed Claude and Codex requests of 200 KB to 2 MB, plus count_tokens, on a GitHub-hosted runner of their own at the same time. Neither failed a request. gnocchi peaked at 161.5 MB and Go at 198.3 MB. Read 20 seconds after each batch, gnocchi held 85.7 to 102.0 MB and Go 91.4 to 152.8 MB. After 5 minutes without traffic Go had given more back: it held 75.8 MB and gnocchi 97.8 MB, which keeps the o200k_base tokenizer that count_tokens built (46.8 MB when [measured](docs/BENCHMARKS.md#what-the-heap-held) on 6 October). On the same CPU model, gnocchi used 49 ms of CPU per request and Go 146 ms.
 
-Go was faster in the 0.1.0 launch build's synthetic runs. It served 1,568 non-streaming requests/s against 1,168, with 0.62 ms of CPU per request against 0.85 ms, and 916 plain streams/s against 833. With 256 slow streams, cliproxy-rs had the worse p99 latency: 1,414.5 ms against Go's 1,272.2 ms.
+Go was faster in the 0.1.0 launch build's synthetic runs. It served 1,568 non-streaming requests/s against 1,168, with 0.62 ms of CPU per request against 0.85 ms, and 916 plain streams/s against 833. With 256 slow streams, gnocchi had the worse p99 latency: 1,414.5 ms against Go's 1,272.2 ms.
 
 [BENCHMARKS.md](docs/BENCHMARKS.md) has the methods, raw results and other measurements, including the [Claude soak](docs/BENCHMARKS.md#claude-soak-large-prompts-and-memory) against CLIProxyAPI 6fecc6e and the [field mix](docs/BENCHMARKS.md#field-mix-claude-codex-and-count_tokens) against earlier releases. [Two 32 MB tokenizers](https://dev.to/vayun/two-32-mb-tokenizers-hunting-a-memory-floor-in-a-rust-proxy-4hfl) explains how its memory floor was found.
 
@@ -231,9 +231,9 @@ cargo test --workspace --locked
 
 ## License and credits
 
-GNU Affero General Public License, version 3 or later. See [LICENSE](LICENSE). If you run a modified cliproxy as a network service, the license requires you to offer its source to the people who use it.
+GNU Affero General Public License, version 3 or later. See [LICENSE](LICENSE). If you run a modified gnocchi as a network service, the license requires you to offer its source to the people who use it.
 
-cliproxy grew from [cliproxy-rs](https://github.com/vayungodara/cliproxy-rs), a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) by Luis Pater and Router-For.ME. Both are MIT licensed; [NOTICE](NOTICE) keeps their copyright notices and [LICENSE-MIT](LICENSE-MIT) the MIT text that covers the portions derived from them.
+gnocchi grew from [cliproxy-rs](https://github.com/vayungodara/cliproxy-rs), a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) by Luis Pater and Router-For.ME. Both are MIT licensed; [NOTICE](NOTICE) keeps their copyright notices and [LICENSE-MIT](LICENSE-MIT) the MIT text that covers the portions derived from them.
 
 The binary also contains third-party Rust crates, a bundled copy of BoringSSL and the dashboard's npm packages, each under its own license; [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES) lists them with their license texts.
 

@@ -4,7 +4,7 @@ Thanks for helping. Bug reports, fixes and new tests are all welcome.
 
 ## Before you start
 
-- cliproxy-rs follows CLIProxyAPI at commit `6fecc6e`. When the two disagree, CLIProxyAPI's code is the reference, unless the difference is listed in [docs/DIFFERENCES-FROM-GO.md](docs/DIFFERENCES-FROM-GO.md). [docs/PARITY.md](docs/PARITY.md) shows what is ported and what is not.
+- gnocchi follows CLIProxyAPI at commit `6fecc6e`. When the two disagree, CLIProxyAPI's code is the reference, unless the difference is listed in [docs/DIFFERENCES-FROM-GO.md](docs/DIFFERENCES-FROM-GO.md). [docs/PARITY.md](docs/PARITY.md) shows what is ported and what is not.
 - For a larger change, open an issue first so we can agree on the approach.
 
 ## Building and testing
@@ -30,7 +30,7 @@ CI holds the binary to the numbers in [`bench/budgets.txt`](bench/budgets.txt), 
 - Heap per request: `crates/cpa-server/tests/alloc_budget.rs`, part of `cargo test`, sends one 306 KB and one 1.9 MB request through the Claude route, the same sizes through Claude count_tokens (counted locally) and through the Codex Responses route, and the Claude bodies cloaked and signed through a Claude OAuth login with request capture, one at a time and eight at once, under a counting allocator.
 - macOS and Windows idle, in the release builds and weekly ([`idle.yml`](.github/workflows/idle.yml)). Memory soaks ([`soak.yml`](.github/workflows/soak.yml), [`bench/soak.sh`](bench/soak.sh)): one hour of the Claude load and one hour of the field mix (Claude, Codex and count_tokens requests of 200 KB to 2 MB) on every release tag, 300 minutes of the field mix every week, and up to 330 minutes by hand before a release. The resting RSS must stay flat, and the field mix's peak (`VmHWM`) within its budget.
 
-To run the Linux gates locally, build with `cargo build --release -p cliproxy`, then run `bench/gate.sh size x86_64-unknown-linux-gnu target/release/cliproxy` and `bench/gate.sh idle linux target/release/cliproxy 1`. The size lines and the dashboard's `ui/tools/size-budget.json` are ceilings with headroom, so an ordinary pull request does not edit them; each pull request instead gets a size report comment with its numbers next to master's and the ceilings ([`.github/ci/report`](.github/ci/report/README.md)). Raise a ceiling or budget only when a change needs it, with a maintainer's approval, and give the reason next to the line.
+To run the Linux gates locally, build with `cargo build --release -p gnocchi`, then run `bench/gate.sh size x86_64-unknown-linux-gnu target/release/gnocchi` and `bench/gate.sh idle linux target/release/gnocchi 1`. The size lines and the dashboard's `ui/tools/size-budget.json` are ceilings with headroom, so an ordinary pull request does not edit them; each pull request instead gets a size report comment with its numbers next to master's and the ceilings ([`.github/ci/report`](.github/ci/report/README.md)). Raise a ceiling or budget only when a change needs it, with a maintainer's approval, and give the reason next to the line.
 
 The dashboard lives in `ui/` (React 19 and Astryx). `npm ci`, `npm run check`, `npm test` and `npm run build` there; the build also checks the bundle size budget. See [ui/README.md](ui/README.md).
 
@@ -58,6 +58,6 @@ A pull request that touches shipped code needs a new fragment: `crates/`, `ui/sr
 
 ## Issues
 
-Search existing issues first, then pick a form: bug report or feature request, each in English and in Simplified Chinese. State your version (`cliproxy --version`), how you installed it, and whether CLIProxyAPI behaves the same. Remove keys, tokens and account files from logs and configuration before posting. Usage questions go through [SUPPORT.md](.github/SUPPORT.md), and vulnerabilities through [SECURITY.md](SECURITY.md), never a public issue. Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
+Search existing issues first, then pick a form: bug report or feature request, each in English and in Simplified Chinese. State your version (`gnocchi --version`), how you installed it, and whether CLIProxyAPI behaves the same. Remove keys, tokens and account files from logs and configuration before posting. Usage questions go through [SUPPORT.md](.github/SUPPORT.md), and vulnerabilities through [SECURITY.md](SECURITY.md), never a public issue. Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
 
 By contributing you agree that your work is released under the [GNU Affero General Public License, version 3 or later](LICENSE).

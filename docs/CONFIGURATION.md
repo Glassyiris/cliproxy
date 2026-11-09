@@ -1,6 +1,6 @@
 # Configuration
 
-cliproxy-rs reads one YAML file, `config.yaml`. Pass its path with `--config`; without it, the server reads `config.yaml` in the current directory. It accepts CLIProxyAPI's v8 layout (shown here) and the older flat layout, and every setting in CLIProxyAPI's [`config.example.yaml`](https://github.com/router-for-me/CLIProxyAPI/blob/6fecc6e5567912661654a4eaf9b8f5436facd1c2/config.example.yaml) is accepted. Settings for features that are not ported yet are kept in the file but have no effect.
+gnocchi reads one YAML file, `config.yaml`. Pass its path with `--config`; without it, the server reads `config.yaml` in the current directory. It accepts CLIProxyAPI's v8 layout (shown here) and the older flat layout, and every setting in CLIProxyAPI's [`config.example.yaml`](https://github.com/router-for-me/CLIProxyAPI/blob/6fecc6e5567912661654a4eaf9b8f5436facd1c2/config.example.yaml) is accepted. Settings for features that are not ported yet are kept in the file but have no effect.
 
 The server watches the file and applies most changes within a second, without a restart. `server.host`, `server.port`, `server.tls` and `server.trusted-proxies` are read at start, so restart after changing them. When the dashboard or the Management API changes a setting, only that key is rewritten; the rest of the file, comments included, stays as it was. The first such save of a file in an older layout moves its settings to the current layout, with their comments, and writes Windows (CRLF) line endings as LF. Saves through the older `/v0/management` setting endpoints are the exception: as in CLIProxyAPI, they keep a file that has no current-layout sections in its older layout. When the file uses YAML that cannot be moved line by line, such as anchors, that save writes the file again from its values: the comments at the top are kept, and other comments may be lost.
 
@@ -17,7 +17,7 @@ access:
 management:
   secret-key: "your-management-key"
 oauth:
-  auth-dir: "~/.cliproxy-rs/auth"
+  auth-dir: "~/.gnocchi/auth"
 routing:
   strategy: round-robin
   session-affinity: true
@@ -36,7 +36,7 @@ observability:
 | `port` | The port, `8317` by default. |
 | `tls.enable`, `tls.cert`, `tls.key` | Serve HTTPS on the same port with this certificate and key file. |
 | `max-request-body-bytes` | The largest request body accepted, in bytes; `0` (the default) or a negative value sets no limit. A larger body gets `413` before it is processed: on the client routes, the Management API and plugin routes. As in Go, a streamed body whose JSON value or multipart form ends before the limit is handled from the bytes before it. Changes apply to the next request. The client routes also stop at 64 MiB whatever this says. The older top-level `max-request-body-bytes` also works; the one under `server` wins. |
-| `github-token` | A GitHub token. CLIProxyAPI sends it to the GitHub API ahead of the `GITHUB_TOKEN` environment variable: on its release checks, its panel downloads and plugin store requests that no `plugins.store-auth` rule covers. cliproxy-rs keeps the setting but sends it nowhere yet: its release check sends no token, its dashboard is built in, and the plugin store use is upcoming. Management API config reads show it, as in CLIProxyAPI. The older top-level `github-token` also works; the one under `server` wins. |
+| `github-token` | A GitHub token. CLIProxyAPI sends it to the GitHub API ahead of the `GITHUB_TOKEN` environment variable: on its release checks, its panel downloads and plugin store requests that no `plugins.store-auth` rule covers. gnocchi keeps the setting but sends it nowhere yet: its release check sends no token, its dashboard is built in, and the plugin store use is upcoming. Management API config reads show it, as in CLIProxyAPI. The older top-level `github-token` also works; the one under `server` wins. |
 | `trusted-proxies` | Addresses of reverse proxies or tunnels whose `X-Forwarded-For` header is trusted. Set it when a tunnel on the same machine forwards requests, for example `[127.0.0.1, "::1"]`. See [running it safely](GETTING-STARTED.md#running-it-safely). |
 
 ## access
@@ -58,8 +58,8 @@ observability:
 | Setting | What it does |
 |---|---|
 | `auth-dir` | The folder for account sign-in files, `~/.cli-proxy-api` by default. `~` is expanded. The server watches it, so a file added, edited or removed there takes effect without a restart. |
-| `providers.codex.signin-with-chatgpt-identifier` | The agent name sent when binding Sign in with ChatGPT tokens to a Codex credential (`POST /v8/management/oauth/siwc/bind`), `CLIProxyAPI` when empty. Legacy spelling: `codex.signin-with-chatgpt-identifier`. Go also uses it as the SIWC request User-Agent prefix; cliproxy-rs does not send SIWC requests yet. |
-| `providers.codex.chatgpt-keep-alive` | A cliproxy-rs addition, `false` by default. `true` keeps up to 2 idle connections to `chatgpt.com` per proxy for 90 seconds, so Codex HTTP requests skip the TCP and TLS handshake. Off, every Codex request opens its own connection, as CLIProxyAPI does. A change applies from the next request, without a restart. Go starts with the key in the file and ignores it. A config edit through Go's v8 Management API moves the key into a comment, so the setting is off again when you return to cliproxy-rs; edits through Go's v0 endpoints keep it. Setting the key through Go's v8 API is refused, as for any key Go does not know. |
+| `providers.codex.signin-with-chatgpt-identifier` | The agent name sent when binding Sign in with ChatGPT tokens to a Codex credential (`POST /v8/management/oauth/siwc/bind`), `CLIProxyAPI` when empty. Legacy spelling: `codex.signin-with-chatgpt-identifier`. Go also uses it as the SIWC request User-Agent prefix; gnocchi does not send SIWC requests yet. |
+| `providers.codex.chatgpt-keep-alive` | A gnocchi addition, `false` by default. `true` keeps up to 2 idle connections to `chatgpt.com` per proxy for 90 seconds, so Codex HTTP requests skip the TCP and TLS handshake. Off, every Codex request opens its own connection, as CLIProxyAPI does. A change applies from the next request, without a restart. Go starts with the key in the file and ignores it. A config edit through Go's v8 Management API moves the key into a comment, so the setting is off again when you return to gnocchi; edits through Go's v0 endpoints keep it. Setting the key through Go's v8 API is refused, as for any key Go does not know. |
 
 ## upstream
 
@@ -114,12 +114,12 @@ How the server picks an account for each request. [MULTI-ACCOUNT.md](MULTI-ACCOU
 | `cooldown.disable-cooling` | `true` keeps failing accounts in rotation instead of resting them. |
 | `cooldown.transient-error-cooldown-seconds` | How long to rest an account after a temporary upstream error; `0` means 60 seconds, a negative value turns it off. |
 | `cooldown.save-cooldown-status` | `true` keeps cooldowns in `.cds` files in `auth-dir`, so a restart does not forget them. |
-| `cooldown.max-trusted-cooldown` | A cliproxy-rs addition. When an account hits its usage limit, the provider says when it resets, sometimes days ahead, and the account rests until then. Providers often reset early, so cliproxy-rs trusts the stated time for at most this long (`"1h"` by default; a Go duration such as `"90m"`, or a bare number meaning seconds; at least 10 seconds), then lets the next request through to check. If the account is still limited, the next rest is twice as long, and never longer than the stated reset. `0` trusts the stated reset, as CLIProxyAPI does. An unreadable value is logged and the default is used. See [differences from Go](DIFFERENCES-FROM-GO.md#deliberate-differences). |
-| `providers.exclude`, `providers.order` | A cliproxy-rs addition: which providers a request may use and in what order. See [Provider scope and order](#provider-scope-and-order). |
+| `cooldown.max-trusted-cooldown` | A gnocchi addition. When an account hits its usage limit, the provider says when it resets, sometimes days ahead, and the account rests until then. Providers often reset early, so gnocchi trusts the stated time for at most this long (`"1h"` by default; a Go duration such as `"90m"`, or a bare number meaning seconds; at least 10 seconds), then lets the next request through to check. If the account is still limited, the next rest is twice as long, and never longer than the stated reset. `0` trusts the stated reset, as CLIProxyAPI does. An unreadable value is logged and the default is used. See [differences from Go](DIFFERENCES-FROM-GO.md#deliberate-differences). |
+| `providers.exclude`, `providers.order` | A gnocchi addition: which providers a request may use and in what order. See [Provider scope and order](#provider-scope-and-order). |
 
 ### Provider scope and order
 
-When several providers serve a model, `routing.providers` limits which may serve it and in what order (cliproxy-rs only). Without it, `priority` and `strategy` decide, as in CLIProxyAPI.
+When several providers serve a model, `routing.providers` limits which may serve it and in what order (gnocchi only). Without it, `priority` and `strategy` decide, as in CLIProxyAPI.
 
 ```yaml
 routing:
@@ -166,7 +166,7 @@ Uncomment the block to use it. `oauth-request-scoped-errors` is the legacy spell
 | Setting | What it does |
 |---|---|
 | `proxy-url` | An outbound proxy for every upstream request, such as `socks5://127.0.0.1:1080` or `http://proxy:3128`. A single account can use its own proxy instead; see [per-account proxies](MULTI-ACCOUNT.md#per-account-proxies-and-request-shaping). |
-| `tls-handshake-timeout-seconds` | Seconds a new connection to `api.anthropic.com` (Claude) or `chatgpt.com` (Codex) may take to be ready, so a server that accepts the connection but never answers the TLS handshake fails the attempt and request retry can engage. The default `0` waits indefinitely. It never limits a request once connected. In cliproxy-rs it also covers the DNS lookup, the TCP connect and a proxy's CONNECT, which Go leaves unbounded. |
+| `tls-handshake-timeout-seconds` | Seconds a new connection to `api.anthropic.com` (Claude) or `chatgpt.com` (Codex) may take to be ready, so a server that accepts the connection but never answers the TLS handshake fails the attempt and request retry can engage. The default `0` waits indefinitely. It never limits a request once connected. In gnocchi it also covers the DNS lookup, the TCP connect and a proxy's CONNECT, which Go leaves unbounded. |
 
 Claude accounts ignore `HTTPS_PROXY` and `HTTP_PROXY`. Without an explicit proxy, they connect directly. Set `requests.proxy-url` or the account's `proxy_url` when you need one. Claude API keys pointed at a custom, non-Anthropic base URL use the standard transport, which can inherit environment proxies.
 
@@ -177,7 +177,7 @@ Claude accounts ignore `HTTPS_PROXY` and `HTTP_PROXY`. Without an explicit proxy
 | `logs.logging-to-file` | `true` writes the log to `main.log` in a `logs` folder, rotated, instead of standard output. |
 | `logs.logs-max-total-size-mb` | The most disk space the log files may use. |
 | `logs.request-log` | `true` writes one file per request with client and upstream request/response sections. Recognised sensitive headers and URL fields are masked, but bodies can contain credentials, including Realtime client secrets, as well as private prompts and output. Keep the logs private. |
-| `usage.claude-cache-telemetry` | A cliproxy-rs addition, `false` by default. With `usage.usage-statistics-enabled: true` and management enabled, adds content-free final-wire Claude cache observations to the existing usage queue and RESP channel. No tokenizer or maintenance requests run. Hashes rotate on restart; additional records without returned usage have `usage_observed: false`. Large payloads add parsing and hashing work before upstream send. See [Claude cache telemetry](CLAUDE-CACHE-TELEMETRY.md). Go ignores the setting at startup, preserves it on v0 saves, and archives it on v8 edits. |
+| `usage.claude-cache-telemetry` | A gnocchi addition, `false` by default. With `usage.usage-statistics-enabled: true` and management enabled, adds content-free final-wire Claude cache observations to the existing usage queue and RESP channel. No tokenizer or maintenance requests run. Hashes rotate on restart; additional records without returned usage have `usage_observed: false`. Large payloads add parsing and hashing work before upstream send. See [Claude cache telemetry](CLAUDE-CACHE-TELEMETRY.md). Go ignores the setting at startup, preserves it on v0 saves, and archives it on v8 edits. |
 | `pprof.enable` | `false` by default. `true` starts a separate plain-HTTP debug listener, without API keys, management authentication or TLS. Keep it on loopback: its command-line route can expose arguments, and profiling consumes CPU. Changes apply without a restart. |
 | `pprof.addr` | The debug listener address, `"127.0.0.1:8316"` by default, also used for an empty or whitespace-only value. Changes move the listener without a restart. A bind failure is logged without stopping the main server; another config publication retries it. |
 
@@ -185,7 +185,7 @@ The legacy top-level `pprof` mapping works too. `/debug/pprof/` lists the routes
 `cmdline` returns NUL-separated arguments and `symbol` accepts program counters in
 the raw query or a POST body, separated by `+`. Go runtime profiles return plain-text
 `501` answers. CPU `profile?seconds=30` requires a Unix build with
-`cargo build --release -p cliproxy --features cpa-server/pprof` and returns a pprof
+`cargo build --release -p gnocchi --features cpa-server/pprof` and returns a pprof
 protobuf. Default builds, published release binaries and Docker images exclude the
 profiler and symbol resolver. Their `symbol` route consumes POST bodies but returns
 only `num_symbols: 1`, without resolving any names, including shared-library names.
@@ -201,15 +201,15 @@ service-name ports such as `:http` are not accepted.
 
 | Setting | What it does |
 |---|---|
-| `catalog`, `codex-catalog`, `devin-catalog` | Where the model catalog (`models.json`), the Codex client catalog and the Devin catalog come from: an absolute local path or an `http`/`https` URL. Empty keeps the default. Any other value, such as a relative path, `~/models.json` or a `file://` URL, refuses the config, as in CLIProxyAPI v8.0.35. cliproxy-rs checks and keeps these settings but does not use them yet; see [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md). |
+| `catalog`, `codex-catalog`, `devin-catalog` | Where the model catalog (`models.json`), the Codex client catalog and the Devin catalog come from: an absolute local path or an `http`/`https` URL. Empty keeps the default. Any other value, such as a relative path, `~/models.json` or a `file://` URL, refuses the config, as in CLIProxyAPI v8.0.35. gnocchi checks and keeps these settings but does not use them yet; see [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md). |
 
 ## worker-threads
 
-`worker-threads: 4` at the top level sets how many threads serve requests. Without it, cliproxy-rs uses the smaller of the CPU count and two, which is plenty for one person: a coding-agent request with a 300 KB prompt costs about 20 to 30 ms of CPU (a small chat request about 1 ms), and most of a request's time is spent waiting on the provider. Each extra thread can keep its own pool of freed memory, so more threads mean a larger resident size. The `TOKIO_WORKER_THREADS` environment variable overrides it.
+`worker-threads: 4` at the top level sets how many threads serve requests. Without it, gnocchi uses the smaller of the CPU count and two, which is plenty for one person: a coding-agent request with a 300 KB prompt costs about 20 to 30 ms of CPU (a small chat request about 1 ms), and most of a request's time is spent waiting on the provider. Each extra thread can keep its own pool of freed memory, so more threads mean a larger resident size. The `TOKIO_WORKER_THREADS` environment variable overrides it.
 
 The key is read once at start from the `-config` file (`./config.yaml` by default), before a remote store (`PGSTORE_*`, `OBJECTSTORE_*`, `GITSTORE_*`) or Home supplies a config. It has no effect in a store's `config.yaml` or in the config Home supplies (the local `-config` file still applies); set `TOKIO_WORKER_THREADS` there. A value there that differs from the running thread count logs a warning.
 
-This setting exists only in cliproxy-rs. CLIProxyAPI starts with it in the file and keeps it through v0 Management API saves, but any v8 configuration write comments it out, and uploading a whole `config.yaml` that contains it is refused. With a config shared between the two servers, use `TOKIO_WORKER_THREADS`. See [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md).
+This setting exists only in gnocchi. CLIProxyAPI starts with it in the file and keeps it through v0 Management API saves, but any v8 configuration write comments it out, and uploading a whole `config.yaml` that contains it is refused. With a config shared between the two servers, use `TOKIO_WORKER_THREADS`. See [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md).
 
 ## model-routers
 
@@ -218,7 +218,7 @@ A model router is a model name, such as `smart`, that picks the model and effort
 ```yaml
 artificial-analysis:
   api-key: aa-...            # without one, nothing is fetched
-  cache-file: /var/lib/cliproxy/artificial-analysis.json   # optional: survives restarts
+  cache-file: /var/lib/gnocchi/artificial-analysis.json   # optional: survives restarts
 
 api-keys:
   openai-compatibility:
@@ -256,7 +256,7 @@ How a request to `smart` is routed:
 - **Pick.** The grade maps linearly onto the index range of the candidates' cost/capability Pareto front, moved by -15% (`cost`), 0 or +20% (`quality`) of that range; the cheapest variant within 1 index point of it serves, since smaller gaps are benchmark noise. The client's suffix is kept when the route has none of its own. Without any rated candidate, the first available listed model serves, else the newest available model.
 - **Conversation.** A conversation (the session the server derives, see `session_source` in [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)) keeps its model for an hour after its last request, so its prompt cache stays warm. Tool-result requests always keep it; a new user message is graded again and moves the conversation only to a stronger model. It also moves when its model becomes unavailable, leaves `models` or is too small. `count_tokens` neither asks the judge nor binds; image, video and speech routes do not route. A Responses client chaining `previous_response_id` should send `prompt_cache_key`, `conversation_id` or a session header, or each turn can land on another model.
 
-The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-CPA-Routed-Model` names the model that served a request and `X-CPA-Routed-Provider` its provider; `GET /v1/models` lists the routers. Not covered yet: Home mode (Home receives the router name as sent), the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cliproxy-rs ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
+The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-CPA-Routed-Model` names the model that served a request and `X-CPA-Routed-Provider` its provider; `GET /v1/models` lists the routers. Not covered yet: Home mode (Home receives the router name as sent), the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in gnocchi ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
 
 ## Environment
 
