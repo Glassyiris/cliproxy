@@ -1,20 +1,32 @@
 version: 2
 updates:
+  # One pull request a week per ecosystem. Major versions need code changes and are done
+  # by hand, so Dependabot does not open them.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   # The workspace and the harness, which has its own lockfile. vendor/gjson is a patched
   # copy (vendor/README.md) and is updated by hand. A dependency bump changes the binary,
-  # so its pull request runs the size and idle gates against bench/budgets.txt.
+  # so its pull request runs the size and idle gates against bench/budgets.txt, and
+  # THIRD-PARTY-NOTICES has to be regenerated on the branch
+  # (`python3 -I tools/third-party-notices.py`). No changelog fragment is needed.
   - package-ecosystem: cargo
     directories:
       - /
       - /harness/rust
     schedule:
-      interval: monthly
+      interval: weekly
+    labels: [dependencies, rust, no-changelog]
     groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
+      cargo:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

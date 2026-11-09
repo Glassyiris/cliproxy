@@ -4,7 +4,7 @@
 # Every push to master, every manual run and the call from release.yml (so a tagged release
 # runs the same checks before it builds anything) run all of them. A pull request runs the
 # lanes its changed paths can affect (.github/scripts/ci-lanes.py, which lists the rules);
-# the label ci:full runs every lane. The ci-ok job passes when every selected lane passed
+# the label ci:full, followed by a re-run, runs every lane. The ci-ok job passes when every selected lane passed
 # and every other lane was skipped, so it is the one check to require.
 # One run per change: pushes to master, and pull requests through `pull_request` only. A
 # branch push used to start a second run of every job for the same commit. Runs are
@@ -18,9 +18,10 @@ name: CI
 on:
   push:
     branches: [master]
+  # Not on `labeled`: Dependabot adds two labels as it opens a pull request, and each label
+  # event started a run that cancelled the one before it, leaving a failed ci-ok behind.
   pull_request:
-    # labeled: adding ci:full reruns the pull request with every lane.
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
   workflow_call:
 
@@ -46,6 +47,10 @@ jobs:
     name: lanes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # Reads the pull request's current labels (ci:full).
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       lanes: ${{ steps.select.outputs.lanes }}
       dashboard: ${{ steps.select.outputs.dashboard }}
@@ -67,6 +72,8 @@ jobs:
         run: python3 -I -m unittest discover -s .github/ci/report -p 'test_render.py'
       - name: Select lanes
         id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/ci-lanes.py
 
   # The workspace tests in two shards on two runners, each building the tests itself

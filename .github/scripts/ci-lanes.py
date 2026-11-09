@@ -8,7 +8,9 @@
     ci-lanes.py --paths <path>...     locally: the lanes for a list of changed paths
 
 A push to master, a manual run, the call from release.yml, a pull request labelled
-`ci:full`, and any change this script cannot read run every lane. Otherwise each changed
+`ci:full`, and any change this script cannot read run every lane. Adding a label does not
+start a run; re-run the workflow after adding `ci:full`. A re-run keeps the original event
+payload, so the labels are read from the API, falling back to the payload's. Otherwise each changed
 path selects the lanes listed by the first rule it matches, and a path no rule matches
 selects every lane, so a new top-level file or directory runs everything until a rule
 says otherwise. A pull request is read as GitHub's test merge commit against its first
@@ -28,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.request
 
 LANES = ("dashboard", "tests", "lint", "windows", "perf", "workflows", "notices")
 ALL = frozenset(LANES)
@@ -141,6 +144,27 @@ def select(event_name, event, git=None):
     return classify(paths), f"{len(paths)} changed paths"
 
 
+def current_labels(event, env=None, fetch=None):
+    """The pull request's labels now, so a re-run after adding ci:full sees it."""
+    env = os.environ if env is None else env
+    pull = event.get("pull_request") or {}
+    labels = [label.get("name") for label in pull.get("labels") or []]
+    number, repo, token = pull.get("number"), env.get("GITHUB_REPOSITORY"), env.get("GH_TOKEN")
+    if not (number and repo and token):
+        return labels
+    url = f"{env.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{repo}/issues/{number}/labels"
+
+    def get(url):
+        request = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.load(response)
+    try:
+        return sorted(set(labels) | {label["name"] for label in (fetch or get)(url)})
+    except (OSError, ValueError, KeyError, TypeError):
+        return labels
+
+
 def write_outputs(lanes, reason):
     ordered = [lane for lane in LANES if lane in lanes]
     with open(os.environ["GITHUB_OUTPUT"], "a") as out:
@@ -177,6 +201,9 @@ def main(argv):
         if event_name == "pull_request":
             write_outputs(ALL, "event payload unreadable: every lane")
             return 0
+    if event_name == "pull_request":
+        pull = event.setdefault("pull_request", {})
+        pull["labels"] = [{"name": name} for name in current_labels(event)]
     lanes, reason = select(event_name, event)
     write_outputs(lanes, reason)
     return 0
