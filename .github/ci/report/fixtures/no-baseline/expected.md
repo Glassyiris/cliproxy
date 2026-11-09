@@ -1,4 +1,4 @@
-**Size report** for `776f2f0`: every measurement within its ceiling. No `master` baseline: no successful CI run of a push to master before this run. ([run](https://github.com/Glassyiris/cliproxy/actions/runs/123456789))
+**Size report** for `776f2f0`: every measurement within its ceiling. No `master` baseline: no successful CI run of a push to master before this run. ([run](https://github.com/prep-cook/cliproxy/actions/runs/123456789))
 
 #### Dashboard bundle, gzip
 

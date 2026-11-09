@@ -162,7 +162,7 @@ On macOS, `xcode-select --install` and `brew install cmake` are enough. On Windo
 Then build:
 
 ```sh
-git clone https://github.com/Glassyiris/cliproxy.git
+git clone https://github.com/prep-cook/cliproxy.git
 cd cliproxy
 cargo build --release -p cliproxy
 ./target/release/cliproxy --version

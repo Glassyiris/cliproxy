@@ -1,0 +1,1 @@
+var e={url:`https://github.com/prep-cook/cliproxy`,name:`prep-cook/cliproxy`};export{e as t};

@@ -1,4 +1,4 @@
-**Size report** for `776f2f0`: 3 measurements over their ceilings. Compared with `master` at `346e667`. ([run](https://github.com/Glassyiris/cliproxy/actions/runs/123456789))
+**Size report** for `776f2f0`: 3 measurements over their ceilings. Compared with `master` at `346e667`. ([run](https://github.com/prep-cook/cliproxy/actions/runs/123456789))
 
 - **Binary 52.310 MB** (Release binary, Linux x86_64), ceiling 52.000 MB, `master` 45.859 MB
 - **Crates in two or more versions 12** (Release binary, Linux x86_64), ceiling 11, `master` 11

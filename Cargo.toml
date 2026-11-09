@@ -9,8 +9,8 @@ version = "0.4.1"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 rust-version = "1.88"
-repository = "https://github.com/Glassyiris/cliproxy"
-homepage = "https://github.com/Glassyiris/cliproxy"
+repository = "https://github.com/prep-cook/cliproxy"
+homepage = "https://github.com/prep-cook/cliproxy"
 categories = ["network-programming", "web-programming"]
 # The Go reference recordings and fixtures stay in the repository; a published crate
 # only needs to build.
