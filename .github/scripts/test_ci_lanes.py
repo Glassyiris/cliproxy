@@ -52,6 +52,16 @@ class Paths(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), {"workflows"})
 
+    def test_size_report_runs_no_lane(self):
+        # The renderer's tests run in the changes job; report.yml only reaches actionlint.
+        for path in (".github/ci/report/render.py", ".github/ci/report/test_render.py",
+                     ".github/ci/report/fixtures/ordinary/expected.md",
+                     ".github/ci/report/README.md"):
+            with self.subTest(path=path):
+                self.assertEqual(lanes(path), set())
+        self.assertEqual(lanes(".github/workflows/report.yml"), {"workflows"})
+        self.assertEqual(lanes(".github/ci/pins.env"), ALL)
+
     def test_ci_definition_runs_everything(self):
         for path in (".github/workflows/ci.yml", ".github/ci/pins.env",
                      ".github/scripts/ci-lanes.py", ".github/scripts/test_ci_lanes.py"):

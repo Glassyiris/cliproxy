@@ -37,6 +37,9 @@ RUST = frozenset({"tests", "lint", "windows", "perf"})
 
 # (pattern for the whole path, lanes); the first match wins.
 RULES = (
+    # The size report's renderer: report.yml runs the default branch's copy after CI, and
+    # the changes job runs its tests on every run, so no lane needs it.
+    (r"\.github/ci/report/.*", NONE),
     # This workflow, its pins and this selector: a change here can alter any lane.
     (r"\.github/workflows/ci\.yml|\.github/ci/.*|\.github/scripts/(ci-lanes|test_ci_lanes)\.py", ALL),
     # Build tools for the Linux jobs that compile (idle.yml and install.yml use it too

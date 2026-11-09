@@ -11,11 +11,21 @@
 # line of the same key in bench/budgets.txt: `<key> <value> <tolerance %>`. A key with no
 # line is printed and not gated, so a new target starts reporting before it has a budget.
 # Gates count events and bytes, never elapsed time: shared runners vary by about 15%.
+# With GATE_REPORT set to a file, every check also appends one JSON line to it for the CI
+# report comment (.github/ci/report/schema.md): the key, the measurement (null when not
+# measured), the ceiling (null without a line) and the unit.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 BUDGETS=$HERE/budgets.txt
 failed=0
+
+report() { # key value ceiling
+  [[ -n ${GATE_REPORT:-} ]] || return 0
+  local unit=count
+  case $1 in *_bytes) unit=bytes ;; *_kb) unit=kB ;; *_ms) unit=ms ;; esac
+  printf '{"key":"%s","value":%s,"ceiling":%s,"unit":"%s"}\n' "$1" "${2:-null}" "${3:-null}" "$unit" >> "$GATE_REPORT"
+}
 
 check() { # key measured
   local key=$1 got=$2 line value tol limit
@@ -23,20 +33,23 @@ check() { # key measured
   if [[ ! $got =~ ^[0-9]+$ ]]; then
     printf '%-44s %12s   NOT MEASURED\n' "$key" "${got:-<empty>}"
     echo "::error title=Performance budget::$key was not measured (got '${got}')."
+    report "$key" "" ""
     failed=1
     return 0
   fi
   line=$(sed 's/#.*//' "$BUDGETS" | awk -v k="$key" '$1 == k {print $2, ($3 == "" ? 0 : $3)}')
   if [[ -z $line ]]; then
     printf '%-44s %12s   (no budget)\n' "$key" "$got"
+    report "$key" "$got" ""
     return
   fi
   read -r value tol <<<"$line"
   value=${value//_/}
   limit=$(awk -v v="$value" -v t="$tol" 'BEGIN {printf "%d", v * (1 + t / 100)}')
+  report "$key" "$got" "$limit"
   if (( got > limit )); then
     printf '%-44s %12s > %s (budget %s +%s%%)  OVER\n' "$key" "$got" "$limit" "$value" "$tol"
-    echo "::error title=Performance budget::$key is $got, over $limit (bench/budgets.txt: $value +$tol%). Find the cause, or raise the budget with a dated line that names the feature and its cost."
+    echo "::error title=Performance budget::$key is $got, over $limit (bench/budgets.txt: $value +$tol%). Find the cause; a ceiling is raised only when a change needs it, with the owner's approval."
     failed=1
   else
     printf '%-44s %12s <= %s\n' "$key" "$got" "$limit"
@@ -117,6 +130,6 @@ case ${1:-} in
   size) shift; size_gate "$@" ;;
   image) shift; image_gate "$@" ;;
   idle) shift; idle_gate "$@" ;;
-  *) sed -n '2,13p' "$0"; exit 2 ;;
+  *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
 exit "$failed"

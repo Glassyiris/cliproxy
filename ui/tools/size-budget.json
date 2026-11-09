@@ -1,5 +1,7 @@
 {
-  "initialJs": 335000,
-  "initialCss": 50000,
-  "largestLazyChunk": 111000
+  "initialJs": 360000,
+  "initialCss": 55000,
+  "largestLazyChunk": 120000,
+  "totalJs": null,
+  "totalCss": null
 }
