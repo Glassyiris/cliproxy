@@ -50,11 +50,21 @@ A pull request that touches shipped code needs a new fragment: `crates/`, `ui/sr
 
 - Fill in the [pull request template](.github/pull_request_template.md); a Chinese template is available through its first link. Name the person who answers for the change. You may use AI to help write it, but you must have read and verified every line, and you answer for it.
 - Keep each pull request to one change, with a test that fails without it.
-- Keep each commit to one coherent change, with a short English subject and body.
+- Keep each pull request's commits signed; they are squashed when it merges.
 - Request bodies are forwarded byte for byte unless a ported rule rewrites them; do not re-serialize JSON just to pass it through.
 - Never log or forward credentials or client keys to the wrong side.
 - Mark a deliberate simplification with a `ponytail:` comment that names its limit and how to lift it.
 - CI must pass: the `ci-ok` check, which requires every lane the change selects (format, clippy, tests, the harness check, clippy on Windows with all targets and warnings as errors, the Linux size and idle gates, the dashboard checks and actionlint), and the changelog fragment check. To run every lane, add the `ci:full` label and re-run the CI workflow.
+
+## Commits and pull request titles
+
+Pull requests are squash-merged: the pull request title becomes the commit subject on `master`, and GitHub appends the number, as in `ui: keep Overview tiles whole on a phone (#41)`. The description stays on the pull request, so write why there.
+
+- Write the title as `<area>: <subject>`, or `<area>, <area>: <subject>` for a change that spans areas.
+- Areas: `cli` (crates/cook-router), `server`, `exec`, `translate`, `core` (cpa-core and cpa-common), `plugin`, `store`, `home` (the matching `crates/cpa-*`), `ui`, `installer`, `docker`, `packaging`, `ci`, `docs`, `deps`, `bench`, `tools` and `release`.
+- The subject is an English imperative phrase starting in lower case, such as `retry a reset Claude stream once`, with no full stop. A first word such as `OAuth` keeps its case.
+- The whole title fits in 72 characters.
+- The `Changes` workflow checks the title and reruns when you edit it. `python3 -I .github/scripts/pr-title.py '<title>'` runs the same check locally. The area list lives in that script.
 
 ## Issues
 
