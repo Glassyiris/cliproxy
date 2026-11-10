@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use cpa_core::config::Config;
 use cpa_exec::Executors;
+use cpa_server::config_store::ConfigStore;
 use serde_json::{Value, json};
 
 fn canned(records: &Path, label: &str, method: &str, result: Value) {
@@ -1271,7 +1272,7 @@ async fn a_new_builtin_credential_never_reaches_a_plugin_executor_for_its_provid
     let credential = |file: &str| {
         let path = cfg.auth_dir.join(file);
         let body = br#"{"type":"claude","access_token":"fake"}"#;
-        std::fs::write(&path, body).unwrap();
+        env.rt.store().credential_backend().save(&path, body).unwrap();
         cpa_core::config::credentials::from_file(&cfg, &cfg.auth_dir, &path, body)
             .unwrap()
             .unwrap()
@@ -2112,9 +2113,8 @@ async fn an_auth_provider_can_save_while_it_parses() {
     else {
         return;
     };
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     // The watcher's first observation reloads the auth folder.
     let watcher = cpa_server::watching::start(&management);
     eventually("the reload stalled", || env.rt.store().get("acme-a").is_some()).await;
@@ -2167,9 +2167,8 @@ async fn a_reload_and_a_serial_plugins_save_both_complete() {
         return;
     };
     let release = Release(env.records.join("respond/slow/auth.parse.hold"));
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     let watcher = cpa_server::watching::start(&management);
     eventually("the reload never reached the first file", || {
         !calls(&env.records, "slow", "auth.parse").is_empty()
@@ -2256,9 +2255,8 @@ async fn a_plugin_save_applies_the_files_settings_and_persists_as_go_does() {
     else {
         return;
     };
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     let store = env.rt.store().clone();
     let auth_dir = env.rt.config().auth_dir.clone();
     let answer = |auth: Value| {
@@ -2408,9 +2406,8 @@ async fn a_plugin_save_registers_what_the_auth_provider_parses() {
     else {
         return;
     };
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     let store = env.rt.store().clone();
     assert!(store.get("acme-1").is_some() && store.get("acme-2").is_some());
@@ -2525,9 +2522,8 @@ async fn a_saved_auth_waits_for_its_parsed_refresh_deadline() {
             json!({"Handled":true,"Auths":[auth]}),
         )
     };
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     answer("later", Some("2099-01-01T00:00:00Z"));
     let saved = host_save(&env, "acme", "later.json", json!({"type":"acme"})).await;
     assert_eq!(saved["ok"], true, "{saved}");
@@ -2599,9 +2595,8 @@ async fn a_saved_auth_takes_its_refresh_deadline_only_when_registered() {
     // No auth manager: the file is written and nothing is registered.
     answer(vec![auth("orphan", later)]);
     assert_eq!(save("orphan.json").await["ok"], true);
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     answer(vec![auth("orphan", None)]);
     assert_eq!(save("orphan.json").await["ok"], true);
 
@@ -2726,9 +2721,8 @@ async fn a_reload_keeps_a_saved_auths_refresh_deadline() {
             json!({"Handled":true,"Auths":[auth]}),
         )
     };
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     answer(Some("2099-01-01T00:00:00Z"));
     let saved = host_save(&env, "acme", "kept.json", json!({"type":"acme"})).await;
     assert_eq!(saved["ok"], true, "{saved}");
@@ -2774,9 +2768,8 @@ async fn a_save_whose_parse_saves_the_same_file_completes_after_one_parse() {
     else {
         return;
     };
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     let body = json!({"calls":[{"method":"host.auth.save","request":{
         "name":"acme.json","json":{"type":"acme","n":1}}}]});
     let response = tokio::time::timeout(
@@ -2924,9 +2917,8 @@ async fn a_spawned_save_during_a_saves_parse_is_refused_and_the_recursion_stops(
     else {
         return;
     };
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     let file = env.rt.config().auth_dir.join("acme.json");
     let n = || serde_json::from_slice::<Value>(&std::fs::read(&file).unwrap()).unwrap()["n"].clone();
     let refused = |response: &Value| {
@@ -3002,7 +2994,14 @@ async fn a_file_changed_after_its_parse_keeps_its_credentials_until_the_next_rel
     let release = Release(hold);
     let slow_parses = calls(&env.records, "slow", "auth.parse").len();
     // Changed, so the next reload asks about it again, and is held there.
-    std::fs::write(env.rt.config().auth_dir.join("a-slow.json"), r#"{"type":"slow","v":2}"#).unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .save(
+            &env.rt.config().auth_dir.join("a-slow.json"),
+            br#"{"type":"slow","v":2}"#,
+        )
+        .unwrap();
     let reload = tokio::spawn({
         let rt = env.rt.clone();
         async move { cpa_server::plugins::reload_plugin_auth_files(&rt).await }
@@ -3012,12 +3011,22 @@ async fn a_file_changed_after_its_parse_keeps_its_credentials_until_the_next_rel
     })
     .await;
     // acme's file was parsed (cached) before the held one; it changes now.
-    std::fs::write(env.rt.config().auth_dir.join("0-acme.json"), r#"{"type":"acme","v":2}"#).unwrap();
-    std::fs::write(
-        env.rt.config().auth_dir.join("1-new.json"),
-        r#"{"type":"claude","access_token":"fake"}"#,
-    )
-    .unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .save(
+            &env.rt.config().auth_dir.join("0-acme.json"),
+            br#"{"type":"acme","v":2}"#,
+        )
+        .unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .save(
+            &env.rt.config().auth_dir.join("1-new.json"),
+            br#"{"type":"claude","access_token":"fake"}"#,
+        )
+        .unwrap();
     drop(release);
     tokio::time::timeout(Duration::from_secs(10), reload)
         .await
@@ -3083,9 +3092,8 @@ async fn unloading_an_auth_provider_reloads_its_files_without_a_file_change() {
     else {
         return;
     };
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     let watcher = cpa_server::watching::start(&management);
     let store = env.rt.store().clone();
     eventually("P's credentials never loaded", || {
@@ -3120,13 +3128,102 @@ fn parse_saving(id: &str, save: Value) -> String {
     .to_string()
 }
 
-/// Starts the config watcher over `env` (its config file written first).
+/// Starts the auth watcher over `env` with an in-memory config store.
 fn watch(env: &Env) -> (Arc<cpa_server::management::Management>, tokio::task::JoinHandle<()>) {
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     let watcher = cpa_server::watching::start(&management);
     (management, watcher)
+}
+
+/// A same-connection management save publishes its built-in synthesis first, then
+/// wakes the watcher to restore the auth provider's ID and custom attributes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn management_fields_and_status_reparse_plugin_credentials_after_commit() {
+    let Some(env) = env(
+        "plugin-owned-management-reparse",
+        &[("acme", "auth_provider")],
+        "",
+        &[("acme.json", r#"{"type":"acme","wrapped":"material"}"#)],
+        |records| {
+            canned(
+                records,
+                "acme",
+                "auth.parse",
+                json!({"Handled":true,"Auths":[{
+                    "Provider":"acme","ID":"account-7",
+                    "Metadata":{"type":"acme","wrapped":"material"},
+                    "Attributes":{"plugin_marker":"kept"}
+                }]}),
+            );
+        },
+    )
+    .await
+    else {
+        return;
+    };
+    let management = cpa_server::management::Management::with_options(
+        env.rt.clone(),
+        Arc::new(ConfigStore::memory_with(&env.yaml)),
+        cpa_server::management::Options {
+            management_password: Some("management-test-only".into()),
+            ..Default::default()
+        },
+    );
+    let watcher = cpa_server::watching::start(&management);
+    let store = env.rt.store().clone();
+    eventually("the plugin credential never loaded", || {
+        store.get("account-7").is_some()
+    })
+    .await;
+    settles(&env, "acme").await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let app = cpa_server::management::router(management.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .unwrap();
+    });
+    let client = wreq::Client::new();
+    let path = env.rt.config().auth_dir.join("acme.json");
+    // File priority is inherited into parsed metadata and attributes, so this canned
+    // provider preserves the fields edit through subsequent status saves.
+    for (endpoint, body, disabled) in [
+        ("fields", json!({"name":"account-7","priority":7}), false),
+        ("status", json!({"name":"account-7","disabled":true}), true),
+        ("status", json!({"name":"account-7","disabled":false}), false),
+    ] {
+        let before = calls(&env.records, "acme", "auth.parse").len();
+        let response = client
+            .patch(format!("{base}/v8/management/credentials/{endpoint}"))
+            .bearer_auth("management-test-only")
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status().as_u16();
+        let response = response.text().await.unwrap();
+        assert_eq!(status, 200, "{response}");
+        let saved: Value = serde_json::from_slice(&store.credential_backend().read(&path).unwrap().unwrap()).unwrap();
+        assert_eq!(saved["priority"], 7);
+        assert_eq!(saved["disabled"], disabled);
+        eventually("the committed edit never regained its plugin credential", || {
+            calls(&env.records, "acme", "auth.parse").len() > before
+                && store.get("acme.json").is_none()
+                && store.get("account-7").is_some_and(|credential| {
+                    credential.disabled == disabled
+                        && credential.attributes.get("plugin_marker").map(String::as_str) == Some("kept")
+                        && credential.attributes.get("priority").map(String::as_str) == Some("7")
+                })
+        })
+        .await;
+        settles(&env, "acme").await;
+    }
+    server.abort();
+    watcher.abort();
+    drop(management);
+    env.finish().await;
 }
 
 /// A plugin that saves the file it parses: the parse's answer is published, and the
@@ -3278,15 +3375,19 @@ async fn a_host_config_change_reparses_the_auth_files() {
     else {
         return;
     };
-    let (management, watcher) = watch(&env);
+    let path = env.dir.join("cook.db");
+    let store = Arc::new(ConfigStore::open(&path).unwrap());
+    store.import_yaml(&env.yaml, "test", "").unwrap();
+    let management = cpa_server::management::Management::new(env.rt.clone(), store);
+    let watcher = cpa_server::watching::start(&management);
     eventually("the file was never parsed", || env.rt.store().get("acme-a").is_some()).await;
     settles(&env, "acme").await;
     let proxy = "http://127.0.0.1:9";
-    std::fs::write(
-        env.dir.join("config.yaml"),
-        format!("requests:\n  proxy-url: {proxy}\n{}", env.yaml),
-    )
-    .unwrap();
+    let writer = ConfigStore::open(&path).unwrap();
+    writer
+        .import_yaml(&format!("proxy-url: {proxy}\n{}", env.yaml), "test", "")
+        .unwrap();
+    management.reload_config();
     eventually("the plugin was never asked with the new host config", || {
         calls(&env.records, "acme", "auth.parse")
             .iter()
@@ -3764,7 +3865,6 @@ async fn a_failed_background_plugin_refresh_retries_when_the_token_expires() {
 /// instead of refreshing again at once on every pass of the refresh loop.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_plugin_refresh_that_cannot_be_saved_backs_off() {
-    use std::os::unix::fs::PermissionsExt;
     let Some(env) = env(
         "plugin-owned-refresh-unsaved",
         &[("acme", "auth_provider")],
@@ -3787,14 +3887,11 @@ async fn a_plugin_refresh_that_cannot_be_saved_backs_off() {
         return;
     };
     let auth_dir = env.rt.config().auth_dir.clone();
-    let mode = |m: u32| std::fs::set_permissions(&auth_dir, std::fs::Permissions::from_mode(m)).unwrap();
-    // A read-only auth dir: the atomic write of the refreshed file fails.
-    mode(0o555);
-    if std::fs::write(auth_dir.join("probe"), "").is_ok() {
-        // Running as root: permissions do not stop the write.
-        mode(0o755);
-        return;
-    }
+    let database = auth_dir.to_str().unwrap().strip_suffix(".credentials").unwrap();
+    let connection = rusqlite::Connection::open(database).unwrap();
+    connection.execute_batch(
+        "CREATE TRIGGER refuse_refresh BEFORE UPDATE ON credential_document BEGIN SELECT RAISE(FAIL, 'test credential save failure'); END;",
+    ).unwrap();
     let refreshes = || calls(&env.records, "acme", "auth.refresh").len();
     // The binary's startup load, as plugins parse auth files.
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
@@ -3802,7 +3899,7 @@ async fn a_plugin_refresh_that_cannot_be_saved_backs_off() {
     eventually("the refresh", || refreshes() >= 1).await;
     tokio::time::sleep(Duration::from_millis(3000)).await;
     env.rt.stop_auto_refresh();
-    mode(0o755);
+    connection.execute_batch("DROP TRIGGER refuse_refresh").unwrap();
     assert_eq!(refreshes(), 1, "backing off after the unsaved refresh");
     assert_eq!(auth_file(&env, "u.json")["access_token"], "u");
     env.finish().await;
@@ -3845,7 +3942,13 @@ async fn a_credential_registered_afresh_does_not_inherit_a_parsed_refresh_deadli
             .filter(|r| r["AuthID"] == id)
             .count()
     };
-    let write = |name: &str, body: &str| std::fs::write(auth_dir.join(name), body).unwrap();
+    let write = |name: &str, body: &str| {
+        env.rt
+            .store()
+            .credential_backend()
+            .save(&auth_dir.join(name), body.as_bytes())
+            .unwrap()
+    };
     // A refresh is done when its tokens are committed, in the store and on disk: one
     // committing after its section ends would write its file back into the next.
     let committed = |id: &str| {
@@ -3896,7 +3999,11 @@ async fn a_credential_registered_afresh_does_not_inherit_a_parsed_refresh_deadli
     env.rt.start_auto_refresh();
     settle().await;
     assert_eq!(refreshes("a.json"), 0, "waiting for the parsed NextRefreshAfter");
-    std::fs::remove_file(auth_dir.join("a.json")).unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .delete(&auth_dir.join("a.json"))
+        .unwrap();
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     assert!(env.rt.store().get("a.json").is_none());
     settle().await;
@@ -3906,13 +4013,21 @@ async fn a_credential_registered_afresh_does_not_inherit_a_parsed_refresh_deadli
     assert_eq!(env.rt.store().get("a.json").unwrap().metadata["access_token"], "q");
     eventually("a.json's committed refresh", || committed("a.json")).await;
     env.stop_refreshes().await;
-    std::fs::remove_file(auth_dir.join("a.json")).unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .delete(&auth_dir.join("a.json"))
+        .unwrap();
 
     // Parsed, deleted and created again before the refresh loop runs.
     canned(&env.records, "pp", "auth.parse", parsed("b.json"));
     write("b.json", wrapped);
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
-    std::fs::remove_file(auth_dir.join("b.json")).unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .delete(&auth_dir.join("b.json"))
+        .unwrap();
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     canned(&env.records, "pp", "auth.parse", json!({"Handled":false}));
     write("b.json", ordinary);
@@ -3925,7 +4040,11 @@ async fn a_credential_registered_afresh_does_not_inherit_a_parsed_refresh_deadli
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     env.stop_refreshes().await;
-    std::fs::remove_file(auth_dir.join("b.json")).unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .delete(&auth_dir.join("b.json"))
+        .unwrap();
 
     // Disabled and enabled again.
     canned(&env.records, "pp", "auth.parse", parsed("c.json"));
@@ -3989,22 +4108,32 @@ async fn an_auth_another_file_registers_does_not_inherit_a_parsed_refresh_deadli
             "Metadata":{"type":"pp","access_token":"p","refresh_interval":"1h"},
             "NextRefreshAfter":"2099-01-01T00:00:00Z"}]}),
     );
-    std::fs::write(
-        auth_dir.join("a.json"),
-        r#"{"type":"pp","wrapped":"material","disabled":true}"#,
-    )
-    .unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .save(
+            &auth_dir.join("a.json"),
+            br#"{"type":"pp","wrapped":"material","disabled":true}"#,
+        )
+        .unwrap();
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     assert!(env.rt.store().get("b.json").unwrap().disabled);
-    std::fs::remove_file(auth_dir.join("a.json")).unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .delete(&auth_dir.join("a.json"))
+        .unwrap();
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     assert!(env.rt.store().get("b.json").is_none());
     canned(&env.records, "pp", "auth.parse", json!({"Handled":false}));
-    std::fs::write(
-        auth_dir.join("b.json"),
-        r#"{"type":"pp","access_token":"q","refresh_interval":"1h"}"#,
-    )
-    .unwrap();
+    env.rt
+        .store()
+        .credential_backend()
+        .save(
+            &auth_dir.join("b.json"),
+            br#"{"type":"pp","access_token":"q","refresh_interval":"1h"}"#,
+        )
+        .unwrap();
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     assert_eq!(env.rt.store().get("b.json").unwrap().metadata["access_token"], "q");
     env.rt.start_auto_refresh();
@@ -4024,7 +4153,11 @@ async fn a_disabling_reload_drops_a_credentials_refresh_schedule() {
     let auth_dir = env.rt.config().auth_dir.clone();
     canned(&env.records, "pp", "auth.parse", json!({"Handled":false}));
     let reload = |body: Value| {
-        std::fs::write(auth_dir.join("d.json"), body.to_string()).unwrap();
+        env.rt
+            .store()
+            .credential_backend()
+            .save(&auth_dir.join("d.json"), body.to_string().as_bytes())
+            .unwrap();
         cpa_server::plugins::reload_plugin_auth_files(&env.rt)
     };
     let file = |extra: Value| {
@@ -4124,7 +4257,11 @@ async fn a_refresh_from_an_earlier_registration_leaves_the_new_ones_schedule() {
     let auth_dir = env.rt.config().auth_dir.clone();
     let body = r#"{"type":"pp","access_token":"q","refresh_interval":"1h"}"#;
     for name in ["f.json", "c.json"] {
-        std::fs::write(auth_dir.join(name), body).unwrap();
+        env.rt
+            .store()
+            .credential_backend()
+            .save(&auth_dir.join(name), body.as_bytes())
+            .unwrap();
     }
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     // `f.json`'s refresh fails, `c.json`'s answers new tokens and a last refresh; each is
@@ -4153,10 +4290,18 @@ async fn a_refresh_from_an_earlier_registration_leaves_the_new_ones_schedule() {
             async move { rt.refresh_credential(&name).await }
         });
         eventually("the held refresh", || refreshes(name) == 1).await;
-        std::fs::remove_file(auth_dir.join(name)).unwrap();
+        env.rt
+            .store()
+            .credential_backend()
+            .delete(&auth_dir.join(name))
+            .unwrap();
         cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
         assert!(env.rt.store().get(name).is_none());
-        std::fs::write(auth_dir.join(name), body).unwrap();
+        env.rt
+            .store()
+            .credential_backend()
+            .save(&auth_dir.join(name), body.as_bytes())
+            .unwrap();
         cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
         assert!(env.rt.store().get(name).is_some());
         release(hold, since, &pending);
@@ -4190,7 +4335,11 @@ async fn a_refresh_across_a_token_replacement_and_back_is_dropped() {
     let auth_dir = env.rt.config().auth_dir.clone();
     let write = |token: &str| {
         let body = json!({"type":"pp","access_token":token,"refresh_interval":"1h"});
-        std::fs::write(auth_dir.join("x.json"), body.to_string()).unwrap();
+        env.rt
+            .store()
+            .credential_backend()
+            .save(&auth_dir.join("x.json"), body.to_string().as_bytes())
+            .unwrap();
     };
     write("q");
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
@@ -4242,7 +4391,11 @@ async fn a_failed_refresh_backs_off_to_the_current_expiry() {
     let write = |expires_in: chrono::Duration| {
         let expired = (chrono::Utc::now() + expires_in).to_rfc3339();
         let body = json!({"type":"pp","access_token":"q","refresh_interval":"1h","expired":expired});
-        std::fs::write(auth_dir.join("e.json"), body.to_string()).unwrap();
+        env.rt
+            .store()
+            .credential_backend()
+            .save(&auth_dir.join("e.json"), body.to_string().as_bytes())
+            .unwrap();
     };
     write(chrono::Duration::hours(1));
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
@@ -4299,9 +4452,8 @@ async fn a_builtin_save_keeps_the_refresh_state_its_watcher_would_keep() {
     else {
         return;
     };
-    let path = env.dir.join("config.yaml");
-    std::fs::write(&path, &env.yaml).unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), path);
+    let management =
+        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     let refreshes = || calls(&env.records, "acme", "auth.refresh").len();
     let save = |extra: Value| {

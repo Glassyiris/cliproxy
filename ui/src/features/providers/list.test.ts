@@ -11,7 +11,7 @@ const traffic = (total: number, failed: number) => ({
 const entry = (name: string, over: Partial<Entry> = {}): Entry => ({
   family: "claude",
   index: 0,
-  group: { name },
+  group: { "@id": `provider-${name}`, name },
   name,
   keys: [{ key: { "api-key": "k" }, traffic: null }],
   traffic: null,
@@ -19,12 +19,16 @@ const entry = (name: string, over: Partial<Entry> = {}): Entry => ({
 });
 
 const ready = entry("team");
-const off = entry("off", { group: { name: "off", disabled: true } });
+const off = entry("off", { group: { "@id": "provider-off", name: "off", disabled: true } });
 const empty = entry("empty", { keys: [] });
 const failing = entry("down", { keys: [{ key: {}, traffic: traffic(4, 2) }] });
 const some = entry("half", {
   family: "codex",
-  group: { name: "half", "base-url": "https://relay.example.invalid/v1" },
+  group: {
+    "@id": "provider-half",
+    name: "half",
+    "base-url": "https://relay.example.invalid/v1",
+  },
   keys: [
     { key: {}, traffic: traffic(4, 2) },
     { key: {}, traffic: traffic(4, 0) },

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Mock v8 Management API for the dashboard. Zero dependencies, deterministic for a seed.
+// Mock Management and admin config APIs. Zero dependencies, deterministic for a seed.
 //
 //   node server.mjs [--port 0] [--accounts 1000] [--seed 1] [--key mock] [--release v0.0.0-mock]
 //
@@ -8,10 +8,11 @@
 // Response shapes follow crates/cpa-server/src/management/*.rs. State lives in memory: write routes
 // answer like the real server and change what the next read returns. GET /credentials changes about
 // 5% of the accounts per call (request counts, last-used bucket) so the dashboard sees live traffic;
-// every other account serialises to identical bytes. Unknown routes answer Go's empty 404.
+// every other account serialises to identical bytes. Unknown routes answer an empty 404.
 // GET /v1/models answers a client key from access.api-keys as the proxy does, for the Use page's test.
 import http from "node:http";
-import { parseArgs } from "node:util";
+import { parseArgs, isDeepStrictEqual } from "node:util";
+import { createHash } from "node:crypto";
 
 const { values: opt } = parseArgs({
   options: {
@@ -220,8 +221,8 @@ accounts.sort((x, y) => (x.name.toLowerCase() < y.name.toLowerCase() ? -1 : x.na
 /** The wire form of one account, cached until the account changes. */
 function wire(a) {
   if (a._json) return a._json;
-  const { _b, _json, ...rest } = a;
-  const out = { ...rest };
+  const { _b, ...out } = a;
+  delete out._json;
   out.recent_requests = _b.map(([s, f], i) => ({ time: bucketLabel(19 - i), success: s, failed: f }));
   // The real list is key-sorted (Go map ordering).
   const sorted = {};
@@ -265,13 +266,13 @@ const find = (name, index) =>
   accounts.find((a) => (name ? a.name === name || a.id === name : true) && (index ? a.auth_index === index : true) && (name || index));
 
 // ---------------------------------------------------------------------------------------------
-// Configuration (kebab-case, as GET /config returns it)
+// Configuration (kebab-case, as GET /admin/v1/effective/config returns it)
 const apiKey = () => `sk-${hex(48)}`;
 let configVersion = 1;
-const config = {
+let config = {
   "config-version": 8,
   server: { host: "", port: 8317, tls: { enable: false } },
-  management: { "allow-remote": false, "secret-key": "$2a$10$mockmockmockmockmockmu", "disable-auto-update-panel": false },
+  management: { "allow-remote": false, "secret-key": KEY, "disable-auto-update-panel": false },
   access: { "api-keys": [apiKey(), apiKey()] },
   routing: { strategy: "soonest-reset", retry: { "request-retry": 3, "max-retry-interval": 30 }, "session-affinity": true },
   requests: {
@@ -304,37 +305,171 @@ const config = {
   observability: { logs: { "logging-to-file": true }, usage: { enabled: true } },
   plugins: { enabled: true, dir: "plugins", configs: { "quota-demo": { enabled: true }, "idle-demo": { enabled: false } } },
 };
-let yamlText = null;
-
-const walk = (parts) => parts.reduce((v, k) => (v && typeof v === "object" ? v[k] : undefined), config);
-function setPath(parts, value, merge) {
-  let o = config;
-  for (const k of parts.slice(0, -1)) o = o[k] && typeof o[k] === "object" ? o[k] : (o[k] = {});
-  const last = parts[parts.length - 1];
-  if (merge && o[last] && typeof o[last] === "object" && value && typeof value === "object" && !Array.isArray(value)) Object.assign(o[last], value);
-  else o[last] = value;
+const walk = (root, parts) => parts.reduce((v, k) => (v && typeof v === "object" && Object.hasOwn(v, k) ? v[k] : undefined), root);
+const emptyLike = (v) => v == null || (typeof v === "object" && Object.keys(v).length === 0);
+function withoutAuth(value) {
+  if (Array.isArray(value)) return value.map(withoutAuth);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !["auth_index", "auth-index"].includes(key)).map(([key, item]) => [key, withoutAuth(item)]));
 }
-function delPath(parts) {
-  const parent = parts.length > 1 ? walk(parts.slice(0, -1)) : config;
-  if (!parent || typeof parent !== "object" || !(parts[parts.length - 1] in parent)) return false;
-  delete parent[parts[parts.length - 1]];
-  return true;
-}
-function toYaml(v, pad = "") {
-  const scalar = (x) => (typeof x === "string" ? (/^[\w./~@-][\w ./~@:-]*$/.test(x) && !/^(true|false|null|\d.*)$/i.test(x) ? x : JSON.stringify(x)) : String(x));
-  if (Array.isArray(v)) return v.length ? v.map((x) => (x && typeof x === "object" ? `${pad}-\n${toYaml(x, pad + "  ")}` : `${pad}- ${scalar(x)}`)).join("\n") : `${pad}[]`;
-  if (v && typeof v === "object") {
-    const keys = Object.keys(v);
-    if (!keys.length) return `${pad}{}`;
-    return keys
-      .map((k) => {
-        const x = v[k];
-        if (x && typeof x === "object" && Object.keys(x).length) return `${pad}${k}:\n${toYaml(x, pad + "  ")}`;
-        return `${pad}${k}: ${x && typeof x === "object" ? (Array.isArray(x) ? "[]" : "{}") : scalar(x)}`;
-      })
-      .join("\n");
+let nextIdentity = 1;
+const newIdentity = () => createHash("sha256").update(`${opt.seed}:${nextIdentity++}`).digest("hex").replace(/^(.{8})(.{4}).(.{3}).(.{3})(.{12}).*$/, "$1-$2-4$3-8$4-$5");
+function identify(document, before = {}) {
+  const providers = new Set();
+  const routers = new Set();
+  const clients = new Set();
+  const assign = (entry, used, base) => {
+    const valid = (id) => typeof id === "string" && /^[A-Za-z0-9_.-]+$/.test(id) && !used.has(id);
+    let id = [entry["@id"], entry.name?.trim()].find(valid);
+    for (let n = 1; !id; n++) if (valid(`${base}-${n}`)) id = `${base}-${n}`;
+    entry["@id"] = id;
+    used.add(id);
+  };
+  for (const [family, list] of Object.entries(document["api-keys"] || {})) {
+    for (const entry of list || []) {
+      assign(entry, providers, family);
+      const children = new Set();
+      for (const key of entry.keys || []) {
+        if (!key["@id"]) key["@id"] = newIdentity();
+        if (children.has(key["@id"])) throw new Error("duplicate provider key @id");
+        children.add(key["@id"]);
+        key.auth_index = createHash("sha256").update(`${entry["@id"]}:${key["api-key"]}`).digest("hex").slice(0, 16);
+      }
+    }
   }
-  return `${pad}${scalar(v)}`;
+  for (const entry of document["model-routers"] || []) assign(entry, routers, "router");
+  if (document.access?.["api-keys"]) document.access["api-keys"] = document.access["api-keys"].map((key) => {
+    const entry = typeof key === "string" ? { key } : key;
+    if (!entry["@id"]) entry["@id"] = before.access?.["api-keys"]?.find((stored) => stored.key === entry.key)?.["@id"] || newIdentity();
+    assign(entry, clients, "key");
+    return entry;
+  });
+  return document;
+}
+identify(config);
+const secretFields = new Set(["api-key", "key", "secret-key", "github-token", "credential", "username", "password", "token", "access-token", "refresh-token", "client-secret", "authorization", "cookie"]);
+function mask(value, field = "", headers = false) {
+  let credentialUrl = false;
+  if (typeof value === "string") {
+    try { const url = new URL(value); credentialUrl = !!(url.username || url.password || url.search); } catch { credentialUrl = false; }
+  }
+  if ((headers || secretFields.has(field) || credentialUrl) && value != null && value !== "") return "$secret";
+  if (Array.isArray(value)) return value.map((item) => mask(item, field, headers));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mask(item, key, field === "headers" || field === "header-defaults")]));
+}
+function shownConfig(document) {
+  const shown = mask(document);
+  if (shown.plugins?.configs) for (const id of Object.keys(shown.plugins.configs)) shown.plugins.configs[id] = "$secret";
+  return shown;
+}
+function resolveHiddenSecrets(value, before) {
+  if (value === "$secret") {
+    if (before === undefined || before === "$secret") throw new Error("masked value has no stored identity");
+    return structuredClone(before);
+  }
+  if (Array.isArray(value)) {
+    const used = new Set();
+    return value.map((item) => {
+      let stored;
+      if (JSON.stringify(item)?.includes('"$secret"')) {
+        const candidates = (Array.isArray(before) ? before : []).filter((candidate) => item?.["@id"]
+          ? candidate?.["@id"] === item["@id"]
+          : isDeepStrictEqual(mask(withoutAuth(candidate)), mask(withoutAuth(item))));
+        if (candidates.length !== 1 || used.has(candidates[0])) throw new Error("masked value has no unambiguous stored identity");
+        stored = candidates[0];
+        used.add(stored);
+      }
+      return resolveHiddenSecrets(item, stored);
+    });
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolveHiddenSecrets(item, before?.[key])]));
+}
+function resources(document) {
+  const list = [];
+  const add = (kind, id, spec, ord = 0) => list.push({ kind, id, ord, description: "", spec: withoutAuth(spec) });
+  for (const [id, value] of Object.entries(document)) {
+    if (["config-version", "api-keys", "model-routers"].includes(id)) continue;
+    const spec = structuredClone(value);
+    if (id === "access") delete spec["api-keys"];
+    if (id === "plugins") delete spec.configs;
+    if (Object.keys(spec).length) add("setting", id, spec);
+  }
+  for (const [family, groups] of Object.entries(document["api-keys"] || {})) groups.forEach((entry, ord) => {
+    const { "@id": id, ...spec } = entry;
+    add("provider", id, { ...spec, type: family }, ord);
+  });
+  (document.access?.["api-keys"] || []).forEach((entry, ord) => add("client-key", entry["@id"], { key: entry.key }, ord));
+  (document["model-routers"] || []).forEach(({ "@id": id, ...spec }, ord) => add("router", id, spec, ord));
+  for (const [id, spec] of Object.entries(document.plugins?.configs || {})) add("plugin", id, spec);
+  return list;
+}
+const resourceKey = ({ kind, id }) => `${kind}/${id}`;
+const resourceRevisions = new Map(resources(config).map((resource) => [resourceKey(resource), { rev: 1, created_rev: 1 }]));
+function readResources(document = config) {
+  return resources(document).map((resource) => ({ ...resource, ...resourceRevisions.get(resourceKey(resource)) }));
+}
+const shownResource = (resource) => ({ ...resource, spec: resource.kind === "plugin" ? "$secret" : mask(resource.spec) });
+function replaceClientKey(document, id, spec, deleting) {
+  if (!deleting && (typeof spec?.key !== "string" || !spec.key.trim() || Object.keys(spec).length !== 1)) throw new Error("client key must have a non-empty key");
+  document.access ??= {};
+  const list = document.access["api-keys"] ??= [];
+  const index = list.findIndex((entry) => entry["@id"] === id);
+  if (deleting) list.splice(index, 1);
+  else if (index < 0) list.push({ "@id": id, key: spec.key });
+  else list[index] = { "@id": id, key: spec.key };
+}
+function replacePlugin(document, id, spec, deleting) {
+  if (!deleting && (!spec || typeof spec !== "object" || Array.isArray(spec))) throw new Error("plugin spec must be a mapping");
+  document.plugins ??= {};
+  document.plugins.configs ??= {};
+  if (deleting) delete document.plugins.configs[id];
+  else document.plugins.configs[id] = spec;
+}
+function replaceResource(document, operation, existing) {
+  const { kind, id } = operation;
+  const deleting = operation.op === "delete";
+  const spec = deleting ? undefined : resolveHiddenSecrets(withoutAuth(operation.op === "patch" ? mergePatch(existing.spec, operation.patch) : operation.spec), existing?.spec);
+  if (kind === "client-key") replaceClientKey(document, id, spec, deleting);
+  else if (kind === "plugin") replacePlugin(document, id, spec, deleting);
+  else throw new Error("unsupported resource kind");
+}
+function mergePatch(value, patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return structuredClone(patch);
+  const result = value && typeof value === "object" && !Array.isArray(value) ? structuredClone(value) : {};
+  for (const [key, item] of Object.entries(patch)) {
+    if (item === null) delete result[key];
+    else result[key] = mergePatch(result[key], item);
+  }
+  return result;
+}
+function parentAtPath(document, parts) {
+  let parent = document;
+  for (const key of parts) {
+    if (!parent || typeof parent !== "object") throw new Error("not a mapping or list");
+    if (Array.isArray(parent) && (!/^\d+$/.test(key) || Number(key) >= parent.length)) throw new Error("no list entry");
+    if (!Object.hasOwn(parent, key)) Object.defineProperty(parent, key, { value: {}, enumerable: true, writable: true, configurable: true });
+    parent = parent[key];
+  }
+  return parent;
+}
+function mutatePath(document, parts, value, unset) {
+  if (!parts.length) {
+    if (unset || !value || typeof value !== "object" || Array.isArray(value)) throw new Error("the whole config must be a mapping");
+    return value;
+  }
+  const parent = parentAtPath(document, parts.slice(0, -1));
+  const key = parts.at(-1);
+  if (!parent || typeof parent !== "object") throw new Error("not a mapping or list");
+  if (Array.isArray(parent)) {
+    const index = Number(key);
+    if (!/^\d+$/.test(key) || index > parent.length || (unset && index === parent.length)) throw new Error("no list entry");
+    if (unset) parent.splice(index, 1);
+    else parent[index] = value;
+  } else if (unset) delete parent[key];
+  else Object.defineProperty(parent, key, { value, enumerable: true, writable: true, configurable: true });
+  return document;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -371,8 +506,8 @@ const pluginView = (p) => ({
   path: `plugins/${p.id}`,
   configured: true,
   registered: p.registered,
-  enabled: p.enabled,
-  effective_enabled: config.plugins.enabled && p.enabled && p.registered,
+  enabled: config.plugins.configs?.[p.id]?.enabled ?? p.enabled,
+  effective_enabled: config.plugins.enabled && (config.plugins.configs?.[p.id]?.enabled ?? p.enabled) && p.registered,
   supports_oauth: p.oauth,
   oauth_provider: p.oauth ? "demo-oauth" : "",
   supports_quota: p.quota,
@@ -390,7 +525,7 @@ const storeCatalog = [
 const sessions = new Map();
 
 /** Per-provider usage payloads a quota check parses (src/core.ts quotaWindows). */
-function usagePayload(url, a) {
+function usagePayload(url) {
   const used = () => int(3, 95);
   const reset = (h) => iso(Date.now() + h * 3_600_000);
   if (url.includes("anthropic.com"))
@@ -410,7 +545,7 @@ function usagePayload(url, a) {
 // ---------------------------------------------------------------------------------------------
 // HTTP
 const routes = [];
-const on = (method, pattern, handler) => routes.push({ method, re: new RegExp(`^${pattern}$`), handler });
+const on = (method, pattern, handler) => routes.push({ method, re: new RegExp(`^${pattern.startsWith("/admin/v1/") ? "" : "/v8/management"}${pattern}$`), handler });
 const fail = (status, error, extra) => ({ status, body: { error, ...extra } });
 const ok = (body = { status: "ok" }, status = 200) => ({ status, body });
 const text = (status, body, type = "text/plain; charset=utf-8", headers = {}) => ({ status, raw: body, type, headers });
@@ -425,49 +560,82 @@ function obj(ctx) {
 }
 const str = (v) => (typeof v === "string" ? v.trim() : "");
 
-// Config
-const configPath = (ctx) => decodeURIComponent(ctx.m[1] || "").split("/").filter(Boolean);
-const etag = () => `"mock-${configVersion}"`;
-on("GET", "/config", () => ({ status: 200, body: config, headers: { ETag: etag(), "Cache-Control": "no-store" } }));
-on("GET", "/config/(.*)", (ctx) => {
-  const v = walk(configPath(ctx));
-  return v === undefined ? fail(404, "not_found") : { status: 200, body: v, headers: { ETag: etag(), "Cache-Control": "no-store" } };
+// Config: each operation observes earlier operations, but failures publish none of them.
+on("GET", "/admin/v1/effective/config", () => ok(shownConfig(config)));
+on("GET", "/admin/v1/r/([^/]+)", (ctx) => {
+  const kind = decodeURIComponent(ctx.m[1]);
+  if (!["setting", "provider", "client-key", "router", "plugin"].includes(kind)) return fail(400, "invalid_kind");
+  return { ...ok({ items: readResources().filter((resource) => resource.kind === kind).map(shownResource) }), headers: { ETag: `"${configVersion}"` } };
 });
-for (const method of ["PUT", "PATCH"]) {
-  on(method, "/config(?:/(.*))?", (ctx) => {
-    const parts = ctx.m[1] ? configPath(ctx) : [];
-    let value;
-    try {
-      value = JSON.parse(ctx.body.toString("utf8"));
-    } catch {
-      return fail(400, "invalid_json");
-    }
-    if (!parts.length) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return fail(400, "config_must_be_object");
-      for (const k of Object.keys(config)) if (method === "PUT") delete config[k];
-      Object.assign(config, value);
-    } else setPath(parts, value, method === "PATCH");
-    configVersion++;
-    yamlText = null;
-    return { status: 200, body: { "config-version": 8, status: "ok" }, headers: { ETag: etag() } };
-  });
+on("GET", "/admin/v1/r/([^/]+)/([^/]+)", (ctx) => {
+  const resource = readResources().find((entry) => entry.kind === decodeURIComponent(ctx.m[1]) && entry.id === decodeURIComponent(ctx.m[2]));
+  return resource ? { ...ok(shownResource(resource)), headers: { ETag: `"${resource.rev}"` } } : fail(404, "not_found");
+});
+on("GET", "/admin/v1/export", (ctx) => {
+  const include = ctx.q.get("include_secrets");
+  if (include !== null && !["true", "false"].includes(include)) return fail(400, "invalid_query");
+  const items = resources(config).map((resource) => include === "true" ? resource : shownResource(resource));
+  return ok({ format: "cook-router-config", version: 1, revision: configVersion, resources: items });
+});
+function validOperation(operation) {
+  if (!operation) return false;
+  if (["set", "unset"].includes(operation.op)) return typeof operation.path === "string" && (operation.op !== "set" || Object.hasOwn(operation, "value"));
+  return ["put", "patch", "delete"].includes(operation.op) && ["client-key", "plugin"].includes(operation.kind) && typeof operation.id === "string" && /^[A-Za-z0-9_.-]+$/.test(operation.id) && (operation.op !== "put" || Object.hasOwn(operation, "spec")) && (operation.op !== "patch" || Object.hasOwn(operation, "patch"));
 }
-on("DELETE", "/config/(.*)", (ctx) => {
-  const parts = configPath(ctx);
-  if (!parts.length) return fail(400, "cannot_delete_config");
-  if (!delPath(parts)) return fail(404, "not_found");
+function matchesExpectation(document, parts, operation) {
+  if (!Object.hasOwn(operation, "expect")) return true;
+  const now = withoutAuth(walk(shownConfig(document), parts));
+  const expect = withoutAuth(operation.expect);
+  return isDeepStrictEqual(now, expect) || (emptyLike(now) && emptyLike(expect));
+}
+function applyOperation(document, operation) {
+  const before = structuredClone(document);
+  if (["set", "unset"].includes(operation.op)) {
+    const parts = operation.path.split("/").filter(Boolean);
+    if (!matchesExpectation(document, parts, operation)) return { error: fail(412, "precondition_failed") };
+    document = mutatePath(document, parts, withoutAuth(operation.value), operation.op === "unset");
+    document = resolveHiddenSecrets(document, before);
+  } else {
+    const existing = readResources(document).find((resource) => resource.kind === operation.kind && resource.id === operation.id);
+    if ((operation.if_absent && existing) || (operation.if_rev !== undefined && existing?.rev !== operation.if_rev)) return { error: fail(412, "precondition_failed") };
+    if (operation.op !== "put" && !existing) return { error: fail(404, "not_found") };
+    replaceResource(document, operation, existing);
+  }
+  return { document: identify(document, before) };
+}
+function publishConfig(next) {
+  const before = new Map(resources(config).map((resource) => [resourceKey(resource), resource]));
+  const after = resources(next);
+  const keys = new Set(after.map(resourceKey));
+  for (const key of resourceRevisions.keys()) if (!keys.has(key)) resourceRevisions.delete(key);
+  for (const resource of after) {
+    const key = resourceKey(resource);
+    if (!isDeepStrictEqual(before.get(key), resource)) resourceRevisions.set(key, { rev: configVersion + 1, created_rev: resourceRevisions.get(key)?.created_rev ?? configVersion + 1 });
+  }
+  config = next;
   configVersion++;
-  yamlText = null;
-  return { status: 200, body: { "config-version": 8, status: "ok" }, headers: { ETag: etag() } };
-});
-on("GET", "/config\\.yaml", () => text(200, yamlText ?? toYaml(config) + "\n", "application/yaml; charset=utf-8", { ETag: etag(), "Cache-Control": "no-store" }));
-on("PUT", "/config\\.yaml", (ctx) => {
-  // The mock keeps the text; it does not parse YAML back into the JSON view.
-  const t = ctx.body.toString("utf8");
-  if (!t.trim()) return fail(400, "invalid_body");
-  yamlText = t;
-  configVersion++;
-  return { status: 200, body: { "config-version": 8, status: "ok" }, headers: { ETag: etag() } };
+}
+on("POST", "/admin/v1/apply", (ctx) => {
+  const body = obj(ctx);
+  if (!body || !Array.isArray(body.ops)) return fail(400, "invalid_body");
+  let next = structuredClone(config);
+  for (const operation of body.ops) {
+    if (!validOperation(operation)) return fail(400, "invalid_body");
+    try {
+      const result = applyOperation(next, operation);
+      if (result.error) return result.error;
+      next = result.document;
+    } catch (error) {
+      return fail(400, "invalid_path", { message: error.message });
+    }
+  }
+  for (const path of ["credentials/concurrency/lifecycle-config-revision", "credentials/concurrency/observation-barrier-revision", "plugins/auth-revision"]) {
+    if (!isDeepStrictEqual(walk(config, path.split("/")), walk(next, path.split("/")))) return fail(400, "read_only_field");
+  }
+  const written = !isDeepStrictEqual(config, next);
+  const restartRequired = ["host", "port", "tls", "trusted-proxies"].some((key) => !isDeepStrictEqual(config.server?.[key], next.server?.[key]));
+  if (written && !body.dry_run) publishConfig(next);
+  return ok({ revision: configVersion, written, changes: [], restart_required: restartRequired });
 });
 
 // Credentials
@@ -614,7 +782,7 @@ on("POST", "/requests/api-call", (ctx) => {
   if (!b || !str(b.url) || !str(b.method)) return fail(400, "invalid request body");
   const a = find("", str(b.authIndex ?? b.auth_index));
   if (str(b.authIndex ?? b.auth_index) && !a) return fail(404, "auth not found");
-  return { status: 200, body: { status_code: 200, header: { "Content-Type": ["application/json"] }, body: JSON.stringify(usagePayload(str(b.url), a)) } };
+  return { status: 200, body: { status_code: 200, header: { "Content-Type": ["application/json"] }, body: JSON.stringify(usagePayload(str(b.url))) } };
 });
 on("GET", "/server/latest-version", () =>
   opt.release === "none"
@@ -635,7 +803,7 @@ on("GET", "/observability/usage/api-keys", () => {
   for (const [family, groups] of Object.entries(config["api-keys"] || {})) {
     for (const g of groups) {
       const provider = family === "openai-compatibility" ? String(g.name || "").toLowerCase() : family;
-      body[provider] = { ...(body[provider] || {}), ...entries((g.keys || []).map((k) => `${g["base-url"] || ""}|${k["api-key"]}`)) };
+      body[provider] = { ...(body[provider] || {}), ...entries((g.keys || []).map((k) => k.auth_index)) };
     }
   }
   return ok(body);
@@ -759,7 +927,7 @@ function clientModels(req, send) {
   const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || String(req.headers["x-api-key"] || "");
   const keys = config.access?.["api-keys"] || [];
   const type = { "Content-Type": "application/json; charset=utf-8" };
-  if (!given || !keys.includes(given)) return send(401, type, '{"error":{"message":"invalid api key","type":"authentication_error"}}'), 401;
+  if (!given || !keys.some((entry) => entry.key === given)) return send(401, type, '{"error":{"message":"invalid api key","type":"authentication_error"}}'), 401;
   const ids = [...new Set(Object.values(MODELS).flat())];
   send(200, type, JSON.stringify({ object: "list", data: ids.map((id) => ({ id, object: "model", created: 0, owned_by: "cook-router" })) }));
   return 200;
@@ -780,16 +948,15 @@ const server = http.createServer((req, res) => {
     try {
       if (url.pathname === "/healthz") return (status = 200), send(200, { "Content-Type": "application/json" }, '{"status":"ok"}');
       if (url.pathname === "/v1/models" && req.method === "GET") return (status = clientModels(req, send));
-      if (!url.pathname.startsWith(PREFIX + "/") && url.pathname !== PREFIX) return send(404, {}, "");
-      const headers = { "X-CPA-VERSION": VERSION, "X-CPA-COMMIT": "0000000", "X-CPA-BUILD-DATE": BUILD_DATE, "Cache-Control": "no-store" };
+      if (![PREFIX, "/admin/v1"].some((prefix) => url.pathname.startsWith(prefix + "/") || url.pathname === prefix)) return send(404, {}, "");
+      const headers = { "X-CPA-VERSION": VERSION, "X-CPA-COMMIT": "0000000", "X-CPA-BUILD-DATE": BUILD_DATE, "Cache-Control": "no-store", "X-Cook-Revision": String(configVersion), "X-Cook-Published-Revision": String(configVersion) };
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
       const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || String(req.headers["x-management-key"] || "");
       if (!given) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"missing management key"}');
       if (given !== KEY) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"invalid management key"}');
-      const sub = url.pathname.slice(PREFIX.length);
       for (const r of routes) {
         if (r.method !== req.method) continue;
-        const m = r.re.exec(sub);
+        const m = r.re.exec(url.pathname);
         if (!m) continue;
         const out = r.handler({ req, q: url.searchParams, body: Buffer.concat(chunks), m });
         status = out.status;
@@ -797,9 +964,9 @@ const server = http.createServer((req, res) => {
           const type = out.type === "json" ? "application/json; charset=utf-8" : out.type;
           return send(out.status, { ...headers, "Content-Type": type, ...out.headers }, out.raw);
         }
-        return send(out.status, { ...headers, "Content-Type": "application/json; charset=utf-8", ...out.headers }, JSON.stringify(out.body));
+        return send(out.status, { ...headers, ETag: `"${configVersion}"`, "X-Cook-Revision": String(configVersion), "X-Cook-Published-Revision": String(configVersion), "Content-Type": "application/json; charset=utf-8", ...out.headers }, JSON.stringify(out.body));
       }
-      send(404, headers, ""); // gin NoRoute
+      send(404, headers, "");
     } catch (e) {
       status = 500;
       console.error(e);

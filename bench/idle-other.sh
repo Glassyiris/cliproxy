@@ -69,8 +69,12 @@ for i in $(seq 1 "$FILES"); do
 done
 
 config=$DIR/config.yaml
-[[ $OS == windows ]] && config=$(cygpath -w "$config")
-"$BIN" -config "$config" > "$DIR/server.log" 2>&1 &
+db=$DIR/cook.db
+if [[ $OS == windows ]]; then
+  config=$(cygpath -w "$config")
+  db=$(cygpath -w "$db")
+fi
+COOK_DB="$db" "$BIN" -config "$config" > "$DIR/server.log" 2>&1 &
 PID=$!
 WINPID=$PID
 [[ $OS == windows ]] && WINPID=$(cat "/proc/$PID/winpid")

@@ -4,11 +4,10 @@
 #
 # The first run downloads the Windows release, checks it against the release's SHA256SUMS
 # and installs %LOCALAPPDATA%\Programs\cook-router\cook-router.exe. It writes
-# %USERPROFILE%\.cook-router\config.yaml with a free port (8317, or the next free one) and
-# new keys, which it saves in keys.env next to it and never prints. Then it starts the
-# server in the background and checks that it answers. Running it again upgrades the
-# binary and restarts the server; if the new version does not answer, the previous binary
-# is put back and restarted. An existing config.yaml or keys.env is never changed.
+# %USERPROFILE%\.cook-router\cook.db from a first config.yaml import, with a free
+# port and new keys in private keys.env, which it never prints. Later runs use the
+# database, preserving YAML as an import backup. A failed upgrade restores the
+# previous binary only if it supports the database; older versions require a new release.
 #
 # An install from before the rename to cook-router keeps working: without %USERPROFILE%\.cook-router,
 # an existing %USERPROFILE%\.cliproxy-rs is used as it is, its cliproxy server is stopped, and
@@ -24,6 +23,7 @@
 # COOK_ROUTER_INSTALL_DIR, COOK_ROUTER_HOME, COOK_ROUTER_NO_OPEN=1 (never open a browser) and
 # COOK_ROUTER_RELEASES (release page base URL, for mirrors and tests). Each falls back to its
 # CLIPROXY_* name from before the rename.
+# COOK_DB sets the database path (default: <selected home>\cook.db).
 param([switch]$Service, [switch]$BinaryOnly)
 
 # Everything runs in this function, so a download cut short cannot run half a script, and
@@ -101,14 +101,16 @@ function Install-CookRouter([bool]$Service, [bool]$BinaryOnly) {
   $pidfile = Join-Path $data 'cook-router.pid'
   $config = Join-Path $data 'config.yaml'
   $keys = Join-Path $data 'keys.env'
+  $db = if ($env:COOK_DB) { $env:COOK_DB } else { Join-Path $data 'cook.db' }
+  $db = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($db)
   $log = Join-Path $data 'cook-router.log'
   try {
     $help = Get-CookRouterHelp $staged
-    if ($help -notmatch '--log-file' -or $help -notmatch '--working-dir') {
-      throw "install.ps1: release $tag is too old for this installer (its cook-router.exe has no --log-file or --working-dir option); install a newer release, or unset COOK_ROUTER_VERSION for the latest. Nothing was changed."
+    if ($help -notmatch '--db' -or $help -notmatch '--log-file' -or $help -notmatch '--working-dir') {
+      throw "install.ps1: release $tag is too old for this installer (requires --db, --log-file and --working-dir); install a newer release, or unset COOK_ROUTER_VERSION for the latest. Nothing was changed."
     }
     $version = & $staged --version | Select-Object -Last 1
-    if (-not $BinaryOnly) { $probe = Initialize-CookRouterHome $data $config $keys }
+    if (-not $BinaryOnly) { $probe = Initialize-CookRouterHome $data $config $keys $db $staged }
   } catch {
     Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
     throw
@@ -118,7 +120,7 @@ function Install-CookRouter([bool]$Service, [bool]$BinaryOnly) {
   # Use that image for rollback, not the untested cook-router.exe already on disk.
   $runningPrevious = $null
   if (-not $BinaryOnly) {
-    $runningPrevious = Get-CookRouterServers $dir $config | ForEach-Object {
+    $runningPrevious = Get-CookRouterServers $dir $config -db $db | ForEach-Object {
       $image = Get-CookRouterImage $_.ProcessId $dir
       if ($image -and [IO.Path]::GetFileName($image) -like 'cook-router.prev-*.exe') { $image }
     } | Select-Object -First 1
@@ -128,9 +130,8 @@ function Install-CookRouter([bool]$Service, [bool]$BinaryOnly) {
   $previous = if ($runningPrevious) { $runningPrevious } else { $exe }
   if (Test-Path -LiteralPath $previous) {
     $previousHelp = ''
-    # An image that cannot print its help is restarted, if needed, with --config only.
     try { $previousHelp = Get-CookRouterHelp $previous } catch { $previousHelp = '' }
-    $previousArguments = New-CookRouterArguments $previousHelp $config $log $data
+    if ($previousHelp -match '--db') { $previousArguments = New-CookRouterArguments $previousHelp $db $log $data }
   } else { $previous = $null }
   # Windows permits renaming a running image, so a running server keeps serving from
   # this run's cook-router.prev-<guid>.exe until it is stopped.
@@ -153,8 +154,8 @@ function Install-CookRouter([bool]$Service, [bool]$BinaryOnly) {
   if ($BinaryOnly) { Write-OldBinaryNote $oldDirs; return }
 
   # Direct process launch and in-process logging; no persistent shell or WMI host.
-  $arguments = New-CookRouterArguments $help $config $log $data
-  try { Stop-CookRouter $pidfile $dir $config $oldDirs } catch {
+  $arguments = New-CookRouterArguments $help $db $log $data
+  try { Stop-CookRouter $pidfile $dir $config $oldDirs $db } catch {
     $why = $_.Exception.Message
     if ($previous) { Restore-CookRouterImage $exe $previous }
     throw "install.ps1: could not stop the running cook-router ($why); the previous binary is back in place"
@@ -166,17 +167,22 @@ function Install-CookRouter([bool]$Service, [bool]$BinaryOnly) {
     $problem = Wait-CookRouter $proc $probe
   } catch { $problem = "cook-router could not be started ($($_.Exception.Message))" }
   if ($problem) {
-    $tail = Get-Content -LiteralPath $log -Tail 20 -ErrorAction SilentlyContinue | Out-String
     $stopped = $true
     if ($proc) { try { Stop-CookRouterId $proc.Id } catch { $stopped = $false } }
     Remove-Item -LiteralPath $pidfile -Force -ErrorAction SilentlyContinue
-    if (-not $previous) { throw "install.ps1: $problem. The end of $log says:`n$tail" }
+    if (-not $previous) { throw "install.ps1: $problem; see $log" }
     $rollback = $null
     try {
       if (-not $stopped) { throw "the new process $($proc.Id) did not stop" }
       Restore-CookRouterImage $exe $previous
+      if (-not $previousArguments) {
+        Remove-ItemProperty -Path $runKey -Name 'cook-router' -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path $runKey -Name $oldRunName -ErrorAction SilentlyContinue
+        throw "the restored binary cannot read $db. Install a current release (unset COOK_ROUTER_VERSION). Automatic sign-in was disabled; do not start from the stale config.yaml backup"
+      }
       $old = $null
       try {
+        $probe = Get-CookRouterProbe $exe $db
         $old = Start-CookRouter $exe $previousArguments $data $pidfile
         $oldProblem = Wait-CookRouter $old $probe
       } catch { $oldProblem = "it could not be started ($($_.Exception.Message))" }
@@ -187,9 +193,9 @@ function Install-CookRouter([bool]$Service, [bool]$BinaryOnly) {
       }
     } catch { $rollback = $_.Exception.Message }
     if ($rollback) {
-      throw "install.ps1: the upgrade failed: $problem. ROLLBACK FAILED: $rollback. cook-router may not be running; see $log. The end of $log said:`n$tail"
+      throw "install.ps1: the upgrade failed: $problem. ROLLBACK FAILED: $rollback. cook-router may not be running; see $log."
     }
-    throw "install.ps1: the upgrade failed: $problem. Rolled back: the previous binary is in place and answers again at $($probe.Base). The end of $log said:`n$tail"
+    throw "install.ps1: the upgrade failed: $problem. Rolled back: the previous binary is in place and answers again at $($probe.Base); see $log."
   }
 
   # Only a healthy new server replaces the sign-in entry or this run's previous image.
@@ -209,14 +215,14 @@ function Install-CookRouter([bool]$Service, [bool]$BinaryOnly) {
 
   $base = $probe.Base
   $url = "$base/management.html"
-  $configText = $config -replace "'", "''"
+  $dbText = $db -replace "'", "''"
   Write-Host ''
   Write-Host "cook-router is running at $base"
   Write-Host "  Dashboard  $url"
   if (Test-Path $keys) { Write-Host "  Keys       $keys (show them with: Get-Content `"$keys`")" }
-  Write-Host "  Config     $config"
+  Write-Host "  Database   $db"
   Write-Host "  Log        $log"
-  Write-Host "  Stop       Get-CimInstance Win32_Process -Filter `"Name LIKE 'cook-router%.exe'`" | Where-Object { `$_.CommandLine -and `$_.CommandLine.Contains('$configText') } | ForEach-Object { Stop-Process -Id `$_.ProcessId }"
+  Write-Host "  Stop       Get-CimInstance Win32_Process -Filter `"Name LIKE 'cook-router%.exe'`" | Where-Object { `$_.CommandLine -and `$_.CommandLine.Contains('$dbText') } | ForEach-Object { Stop-Process -Id `$_.ProcessId }"
   if ($Service) {
     Write-Host "It starts when you sign in to Windows. To stop that: Remove-ItemProperty $runKey -Name cook-router"
   } else {
@@ -275,8 +281,10 @@ function New-Hex {
   -join ($bytes | ForEach-Object { $_.ToString('x2') })
 }
 
-# Writes config.yaml and keys.env on a first run, then returns where the server answers.
-function Initialize-CookRouterHome($data, $config, $keys) {
+# Import YAML once. Existing databases never regenerate keys or read the YAML backup.
+function Initialize-CookRouterHome($data, $config, $keys, $db, $image) {
+  New-Item -ItemType Directory -Force -Path $data | Out-Null
+  if ((Test-Path -LiteralPath $db)) { return Get-CookRouterProbe $image $db }
   if (-not (Test-Path -LiteralPath $config)) {
     if (Test-Path -LiteralPath $keys) { throw "install.ps1: $keys exists but $config does not; restore config.yaml, or move keys.env away to make new keys" }
     New-Item -ItemType Directory -Force -Path (Join-Path $data 'auth') | Out-Null
@@ -322,7 +330,17 @@ function Initialize-CookRouterHome($data, $config, $keys) {
         ) -join "`n") + "`n")
     Write-Host "Wrote $config, with new keys in $keys"
   }
-  Get-CookRouterProbe $config
+  # Windows PowerShell 5.1 treats redirected native stderr as an error record.
+  $importPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    $importOutput = & $image --db $db config import $config 2>&1
+    $importExitCode = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $importPreference }
+  $importOutput | Out-String | Add-Content -LiteralPath (Join-Path $data 'cook-router.log') -Encoding UTF8
+  if ($importExitCode -ne 0) { throw "install.ps1: could not import $config into $db; see cook-router.log; keep config.yaml and retry with a current release" }
+  Write-Host "Imported $config into $db; YAML is now a backup."
+  Get-CookRouterProbe $image $db
 }
 
 function Get-CookRouterHelp($image) {
@@ -334,10 +352,10 @@ function Get-CookRouterHelp($image) {
 # A quoted Windows argument; a trailing backslash would otherwise escape the closing quote.
 function ConvertTo-Argument([string]$value) { '"' + ($value -replace '(\\+)$', '$1$1') + '"' }
 
-# The same options for the direct start and the Run entry. An older previous image restarted
-# by a rollback gets only the options its --help lists.
-function New-CookRouterArguments($help, $config, $log, $data) {
-  $arguments = "--config $(ConvertTo-Argument $config)"
+# Both direct start and the Run entry name the same stable database.
+function New-CookRouterArguments($help, $db, $log, $data) {
+  if ($help -notmatch '--db') { throw 'install.ps1: binary cannot read cook.db; install a current release instead of using the stale YAML backup' }
+  $arguments = "--db $(ConvertTo-Argument $db)"
   if ($help -match '--log-file') { $arguments += " --log-file $(ConvertTo-Argument $log)" }
   if ($help -match '--working-dir') { $arguments += " --working-dir $(ConvertTo-Argument $data)" }
   $arguments
@@ -350,32 +368,16 @@ function Start-CookRouter($image, $arguments, $data, $pidfile) {
   $proc
 }
 
-# Address, port and scheme from server.host/port/tls.enable, or the older top-level
-# host/port/tls keys. Wildcards are probed on their family's loopback address.
-# ponytail: block-style YAML only; a flow mapping such as `server: {port: 9000}` falls back to
-# the defaults. Parse with the binary itself if configs start using that form.
-function Get-CookRouterProbe($config) {
-  $values = @{}
-  $stack = New-Object System.Collections.ArrayList
-  foreach ($line in Get-Content -LiteralPath $config) {
-    if ($line -notmatch '^( *)([A-Za-z0-9_.-]+) *:(.*)$') { continue }
-    $indent = $Matches[1].Length
-    $key = $Matches[2]
-    $value = ($Matches[3] -replace '(^|\s+)#.*$', '').Trim()
-    while ($stack.Count -and $stack[$stack.Count - 1].Indent -ge $indent) { $stack.RemoveAt($stack.Count - 1) }
-    $path = (@($stack | ForEach-Object { $_.Key }) + $key) -join '.'
-    if ($value -eq '') { [void]$stack.Add([pscustomobject]@{ Indent = $indent; Key = $key }) }
-    if ($value -match '^"(.*)"$' -or $value -match "^'(.*)'$") { $value = $Matches[1] }
-    if (-not $values.ContainsKey($path)) { $values[$path] = $value }
-  }
-  $pick = { param($new, $old) if ($values.ContainsKey($new)) { $values[$new] } elseif ($values.ContainsKey($old)) { $values[$old] } else { $null } }
-  $address = [string](& $pick 'server.host' 'host')
-  $address = $address.Trim().TrimStart('[').TrimEnd(']')
+# The binary reads committed settings and emits only listener fields, never secrets.
+function Get-CookRouterProbe($image, $db) {
+  $settings = @(& $image --db $db config listener)
+  if ($LASTEXITCODE -ne 0 -or $settings.Count -ne 3) { throw "install.ps1: could not read committed listener settings from $db" }
+  $address = ([string]$settings[0]).Trim().TrimStart('[').TrimEnd(']')
   if ($address -in '', '0.0.0.0') { $address = '127.0.0.1' }
   if ($address -eq '::') { $address = '::1' }
   $port = 0
-  if (-not [int]::TryParse([string](& $pick 'server.port' 'port'), [ref]$port) -or $port -le 0) { $port = 8317 }
-  $tls = [string](& $pick 'server.tls.enable' 'tls.enable') -match '^(?i:true|y|yes|on)$'
+  if (-not [int]::TryParse([string]$settings[1], [ref]$port) -or $port -le 0 -or $port -gt 65535) { throw "install.ps1: invalid committed listener port in $db" }
+  $tls = [string]$settings[2] -eq 'true'
   $urlHost = if ($address.Contains(':')) { "[$address]" } else { $address }
   $scheme = if ($tls) { 'https' } else { 'http' }
   [pscustomobject]@{ Address = $address; Port = $port; Tls = $tls; Base = "${scheme}://${urlHost}:$port" }
@@ -488,21 +490,23 @@ public static class CookRouterInstallerMappedImage {
 # config, including Run-entry launches without a pid file. A reused pid must not
 # select a server for another config sharing the binary. With $prefix 'cliproxy' and the
 # directories an install from before the rename used, it finds that install's server.
-function Get-CookRouterServers($dir, $config, $prefix = 'cook-router') {
+function Get-CookRouterServers($dir, $config, $prefix = 'cook-router', $db = $null) {
   $directories = @($dir) | ForEach-Object { $_.TrimEnd('\') }
   try { $all = @(Get-CimInstance Win32_Process -Filter "Name LIKE '$prefix%.exe'" -OperationTimeoutSec 10) }
   catch { throw "install.ps1: could not list running processes ($($_.Exception.Message))" }
   $all | Where-Object {
+    $dbArgument = [regex]::Match([string]$_.CommandLine, '(?:^|\s)--db(?:\s+|=)(?:"([^"]*)"|([^\s"]+))(?=\s|$)')
     ($_.Name -eq "$prefix.exe" -or $_.Name -like "$prefix.prev-*.exe") -and
       $_.ExecutablePath -and [IO.Path]::GetDirectoryName($_.ExecutablePath) -in $directories -and
-      $_.CommandLine -and $_.CommandLine.IndexOf($config, [StringComparison]::OrdinalIgnoreCase) -ge 0
+      $_.CommandLine -and ($_.CommandLine.IndexOf($config, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        ($db -and $dbArgument.Success -and ($dbArgument.Groups[1].Value -eq $db -or $dbArgument.Groups[2].Value -eq $db)))
   }
 }
 
 # Stops this install's server, and the cliproxy server of the same config from before the rename,
 # which would otherwise keep the port.
-function Stop-CookRouter($pidfile, $dir, $config, $oldDirs) {
-  foreach ($p in (Get-CookRouterServers $dir $config)) { Stop-CookRouterId $p.ProcessId }
+function Stop-CookRouter($pidfile, $dir, $config, $oldDirs, $db) {
+  foreach ($p in (Get-CookRouterServers $dir $config -db $db)) { Stop-CookRouterId $p.ProcessId }
   foreach ($p in (Get-CookRouterServers $oldDirs $config 'cliproxy')) { Stop-CookRouterId $p.ProcessId }
   Remove-Item -LiteralPath $pidfile -Force -ErrorAction SilentlyContinue
 }

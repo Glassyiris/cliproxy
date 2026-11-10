@@ -1,6 +1,6 @@
 # Installing cook-router
 
-cook-router is one executable, `cook-router` (`cook-router.exe` on Windows), with the dashboard built in. It needs a `config.yaml` and a directory for credential files. Nothing else is installed.
+cook-router is one executable, `cook-router` (`cook-router.exe` on Windows), with the dashboard built in. Configuration and OAuth credentials are persisted in SQLite. It needs a private, writable, persistent database directory; YAML and credential files are legacy first-import sources, not runtime storage.
 
 ## With the install script
 
@@ -20,13 +20,13 @@ Neither needs `sudo`, administrator rights, Rust or any other tool. The first ru
 
 1. Picks the release archive for your system, downloads it with the release's `SHA256SUMS`, and stops without installing anything if the checksum does not match.
 2. Installs the binary: `~/.local/bin/cook-router` on macOS and Linux, `%LOCALAPPDATA%\Programs\cook-router\cook-router.exe` on Windows.
-3. If `~/.cook-router/config.yaml` does not exist (`%USERPROFILE%\.cook-router` on Windows), writes it: the server listens on `127.0.0.1`, on port 8317 or the next free port if something such as CLIProxyAPI already uses 8317, with a credential folder `auth` and session affinity on. It creates a client key and a management key and saves both in `keys.env` next to the config. Only you can read the folder, and the script never prints the keys.
+3. Selects an absolute database path from `COOK_DB`, or `cook.db` in the selected install home. An existing database skips key generation and YAML import, even if `config.yaml` and `keys.env` are missing. Otherwise it imports existing legacy YAML once, or creates private bootstrap YAML with a loopback free port and session affinity plus private `keys.env`, then runs `config import`. It never prints the keys. The retained YAML is stale migration backup, not runtime configuration.
 4. Starts the server in the background, logging to `cook-router.log`, and checks that `/healthz` answers.
 5. Prints the dashboard address and opens it in your browser when there is one.
 
 Sign in to the dashboard with the `COOK_ROUTER_MANAGEMENT_KEY` line from `keys.env` (`cat ~/.cook-router/keys.env`, or `Get-Content ~\.cook-router\keys.env` on Windows). Your tools use `COOK_ROUTER_CLIENT_KEY`.
 
-Running the script again upgrades the binary to the latest release and restarts the server. On macOS and Linux, a current binary is left alone only when the managed server is running and its last-start marker is at least as new as the binary. A rerun after `--binary-only` or an interrupted upgrade starts the installed version without downloading it again. Unix upgrades keep a hard link at `cook-router.prev`; Windows stages and checks the replacement before renaming the running executable. Both restore the previous image and verify it answers if startup fails. Neither script changes an existing `config.yaml` or `keys.env`. Probes and printed dashboard addresses follow the configured host, port and TLS setting; wildcard hosts use loopback. The Windows installer requires a release with `--log-file` and `--working-dir`; older releases are refused before the existing installation changes.
+Running the script again upgrades the binary and restarts the server using the same explicit absolute `--db` path. Background starts, systemd/launchd services and the Windows Run entry all use it. Health probes read committed host/port/TLS with the secret-free `config listener` command, not stale YAML. Preserve the database and keys when upgrading. On Windows a failed upgrade restores the old binary, but a binary without `--db` support is not restarted: sign-in entries are disabled and the installer asks you to install a current release rather than silently serving stale YAML.
 
 On a machine without a browser, such as a server you reach over SSH, keep the server on `127.0.0.1` and open an SSH tunnel from your own computer, for example `ssh -L 8317:127.0.0.1:8317 you@server`, then open `http://127.0.0.1:8317/management.html` there. [Tailscale](MULTI-ACCOUNT.md#reach-the-proxy-from-other-machines) works too. Never listen on `0.0.0.0` without client keys.
 
@@ -56,7 +56,8 @@ Both scripts read these environment variables. Each also accepts its `CLIPROXY_*
 | --- | --- | --- |
 | `COOK_ROUTER_VERSION` | the latest release | Release tag to install, such as `v0.1.0`. |
 | `COOK_ROUTER_INSTALL_DIR` | `~/.local/bin`, or `%LOCALAPPDATA%\Programs\cook-router` | Where the binary goes. |
-| `COOK_ROUTER_HOME` | `~/.cook-router`, or `%USERPROFILE%\.cook-router` | Config, keys, credentials and log. |
+| `COOK_ROUTER_HOME` | `~/.cook-router`, or `%USERPROFILE%\.cook-router` | Bootstrap files, persistent SQLite database, keys and log. |
+| `COOK_DB` | `cook.db` in the selected install home | Persistent SQLite database used by imports, probes and every managed launch; the installer resolves it to an absolute path. |
 | `COOK_ROUTER_NO_OPEN` | unset | Set to `1` to never open a browser. |
 | `COOK_ROUTER_RELEASES` | `https://github.com/prep-cook/cook-router/releases` | Release page base URL for a mirror or installer tests. Unless `COOK_ROUTER_VERSION` is set, a HEAD request for `<base>/latest` must redirect to a final URL ending in `/tag/<tag>`: the installers read the tag from that URL. It must also serve `/download/<tag>/SHA256SUMS` and the platform archive under `/download/<tag>/`. |
 
@@ -68,7 +69,7 @@ Without `--service`, the server runs until the computer restarts (on Windows, un
 
 - Linux: a systemd user unit, `~/.config/systemd/user/cook-router.service`, enabled and started. It runs while you are logged in; for a server that should run without a login session, run `loginctl enable-linger` once. Stop it with `systemctl --user disable --now cook-router`.
 - macOS: a launchd agent, `~/Library/LaunchAgents/io.github.prep-cook.cook-router.plist`, which also restarts the server if it crashes. Stop it with `launchctl bootout gui/$(id -u)/io.github.prep-cook.cook-router` and delete the file.
-- Windows: an entry named `cook-router` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that runs `cook-router.exe --config ... --log-file ... --working-dir ...` directly when you sign in. A console or Windows Terminal window may flash briefly before the server detaches. The working directory is your config folder, including at sign-in, so its `.env` and relative paths resolve as they do after installation. No PowerShell, WMI or cmd.exe launcher remains. Process logs rotate at 10 MiB. With a positive `logs-max-total-size-mb`, they share that budget with the normal log directory, including rotations outside that directory; the existing cleaner runs every minute. With the default `0`, normal logs remain unlimited, but `--log-file` rotations have a separate 32 MiB total cap, enforced at startup and rotation without another timer. Neither cleanup path deletes the active output file, which can exceed the budget. `logging-to-file: true` still writes `main.log` for the dashboard. Remove the entry with `Remove-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -Name cook-router`.
+- Windows: a `cook-router` entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Ensure its command uses the same `--db` or `COOK_DB` as interactive starts. The working directory controls `.env` and relative paths, not an alternate configuration authority. Remove the entry with `Remove-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -Name cook-router`. `--log-file` and `--working-dir` remain available for a managed launch.
 
 Once set up, later upgrades restart the server through the same mechanism. The System page checks for a new release only when clicked, with an anonymous HEAD request cached for 12 h. Set `COOK_ROUTER_NO_UPDATE_CHECK=1` (or `CLIPROXY_NO_UPDATE_CHECK=1`, its name before the rename) in the server's environment before starting it to disable these checks. Release checks use the configured `proxy-url`, or the environment proxy when none is set, and never send tokens or cookies; proxy credentials go only to your proxy, with TLS verification on and redirects off.
 
@@ -76,22 +77,13 @@ Once set up, later upgrades restart the server through the same mechanism. The S
 
 The project was called cliproxy-rs, and its binary `cliproxy`. Run the install script as before; it picks up the old install:
 
-- Without `~/.cook-router`, it keeps using `~/.cliproxy-rs` (`%USERPROFILE%\.cliproxy-rs` on Windows) where it is, with its config, keys and accounts. Its `keys.env` keeps the `CLIPROXY_*` names.
-- It stops the `cliproxy` server that runs from that config. A start-at-login service from before the rename (`cliproxy.service`, the `io.github.vayungodara.cliproxy-rs` agent or the `cliproxy-rs` Run entry) is replaced by the cook-router one once the new server answers.
+- Without `~/.cook-router`, it keeps using `~/.cliproxy-rs` (`%USERPROFILE%\.cliproxy-rs` on Windows). Its `keys.env` can retain the `CLIPROXY_*` names. Existing legacy YAML is imported once into `cook.db` there unless `COOK_DB` selects another database; YAML is retained as stale backup.
+- It stops the old managed server and replaces start-at-login commands with the explicit database-backed launch. Back up legacy YAML/auth data before migration; never keep both binaries refreshing the same account's tokens.
 - It installs `cook-router` next to the old binary and leaves `cliproxy` (on Windows, `%LOCALAPPDATA%\Programs\cliproxy-rs\cliproxy.exe`) in place; delete it yourself. The old `cliproxy.log` stays too; the server now logs to `cook-router.log`.
 
 ### Removing it
 
-Stop the server (`kill $(cat ~/.cook-router/cook-router.pid)` or the Unix service command above), then delete the binary. On Windows, select the process by its config path, because a direct sign-in launch does not update the installer's pid file:
-
-```powershell
-$config = Join-Path $env:USERPROFILE '.cook-router\config.yaml'
-Get-CimInstance Win32_Process -Filter "Name LIKE 'cook-router%.exe'" |
-  Where-Object { $_.CommandLine -and $_.CommandLine.Contains($config) } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId }
-```
-
-Use your actual config path if you set `COOK_ROUTER_HOME`. This leaves other configurations sharing the binary directory running. `~/.cook-router` holds your config, keys and signed-in accounts; delete it only if you no longer need them.
+Stop the server (`kill $(cat ~/.cook-router/cook-router.pid)` or the service command above), then delete the binary. On Windows stop the intended instance using its service/process command and selected database path, not a stale YAML path. This leaves other instances alone. Your data directory contains the SQLite database, WAL/SHM sidecars, bootstrap files, keys and signed-in accounts; delete it only if no longer needed. Logical deletion does not guarantee physical erasure from disk or backups.
 
 ## Homebrew
 
@@ -104,11 +96,9 @@ brew services start cliproxy-rs
 
 The formula downloads the release binary for Apple silicon, Intel macOS, Linux arm64 or Linux x86_64; it does not compile Rust. Linux needs glibc 2.35 or newer, as with the release archives. Homebrew may also install its own runtime dependencies on older Linux systems; these are separate from the cliproxy binary.
 
-On first install, it creates `$(brew --prefix)/etc/cliproxy-rs/config.yaml`, listening only on `127.0.0.1:8317`, with generated client and management keys in `keys.env` beside it. The directory is private and the config and keys are readable only by the installing user. Sign-in credentials go in its `auth` subdirectory. An upgrade never replaces an existing config or keys. If the config is missing but `keys.env` remains, the formula reuses those keys.
+Homebrew uses `$(brew --prefix)/etc/cliproxy-rs/cook.db`. On first install it creates private bootstrap YAML and `keys.env`, then imports once; an existing database is retained. Its service uses the explicit database path. Change settings through the dashboard or resource export/import after initialization, not by editing retained YAML. A secret-inclusive JSON resource export preserves configuration semantics; use `config backup` for full database/credential recovery.
 
-Open `http://127.0.0.1:8317/management.html` and use `CLIPROXY_MANAGEMENT_KEY` from `keys.env` to sign in. Your tools use `CLIPROXY_CLIENT_KEY`. If another server uses port 8317, change `server.port` in the config before starting the service. Run the service as your own user, without `sudo`.
-
-The service passes the config path explicitly, so it does not depend on the current directory. Logs go to `$(brew --prefix)/var/log/cliproxy-rs.log`. Stop it with `brew services stop cliproxy-rs`; remove the binary with `brew uninstall cliproxy-rs`. Your config, keys and sign-in credentials remain until you delete them yourself.
+Open `http://127.0.0.1:8317/management.html` with `CLIPROXY_MANAGEMENT_KEY` from `keys.env`; tools use `CLIPROXY_CLIENT_KEY`. Choose the listen address/port before importing, or change it through `/admin/v1` and restart when required. Run the service as your own user, without `sudo`. Logs go to `$(brew --prefix)/var/log/cliproxy-rs.log`. Stop it with `brew services stop cliproxy-rs`; remove the binary with `brew uninstall cliproxy-rs`. Your database and keys remain until you delete them yourself.
 
 For maintainers: add `HOMEBREW_TAP_TOKEN` to this repository's Actions secrets. Give that token contents write access to the tap only. Publishing a stable release renders `Formula/cliproxy-rs.rb` from the release's `SHA256SUMS` and commits it to the tap. Without the token, the job skips the update; prereleases do not update the formula. Publishing does not rerun the release builds. The template lives in [`packaging/homebrew/cliproxy-rs.rb`](../packaging/homebrew/cliproxy-rs.rb).
 
@@ -121,7 +111,7 @@ scoop bucket add vayungodara https://github.com/vayungodara/scoop-bucket
 scoop install vayungodara/cliproxy-rs
 ```
 
-Scoop installs the binary only. Create the config and keys as in [First run without the install script](#first-run-without-the-install-script).
+Scoop installs the binary only. Initialize SQLite as in [First run without the install script](#first-run-without-the-install-script).
 
 ## From a release
 
@@ -186,33 +176,33 @@ The repository's `Dockerfile` builds the binary and copies it into a small Debia
 
 ```sh
 docker build -t cook-router .
-mkdir -p data/auth
-$EDITOR data/config.yaml                  # see the notes below
+mkdir -m 700 -p data
+$EDITOR data/config.yaml                  # initial import only; see below
 sudo chown -R 10001:10001 data            # the container runs as uid and gid 10001
-docker run -d --name cook-router -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" cook-router
+docker run -d --name cook-router -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" cook-router --db /data/cook.db --config /data/config.yaml
 ```
 
-Inside the container the config is `/data/config.yaml`. In that config:
+The first bootstrap imports `/data/config.yaml`; later starts use `/data/cook.db`, not changes to the YAML. In the initial import:
 
 - Set `server.host` to `""` or `0.0.0.0` so the server listens on the container's interface.
-- Set `oauth.auth-dir` to `/data/auth` so credentials persist in the mounted volume.
-- Set `management.allow-remote: true` if you want the dashboard. Docker forwards the published port from its bridge network, so even requests from your own machine reach the server from a non-local address, and with `allow-remote: false` the management API refuses them ("remote management disabled"). Publishing the port on `127.0.0.1` as above still keeps other machines out. The Go server behaves the same way in a container.
+- Set `management.allow-remote: true` for the dashboard. Docker bridge requests are non-local; publishing on `127.0.0.1` as above still keeps other machines out.
+- Point any legacy `oauth.auth-dir` at the private credential import source only; ongoing login and refresh state belongs to SQLite.
 
-The image declares no `VOLUME`, so `/data` persists only where you mount one: `-v` as above, a named Docker volume, or your host's volume feature. On Railway, attach a Railway Volume mounted at `/data`; Railway mounts volumes as root, so also set `RAILWAY_RUN_UID=0` on the service, as [Railway's volume docs](https://docs.railway.com/volumes#permissions) say for images that run as another user (the proxy then runs as root). Without a mount, credentials and dashboard changes stay in the container and are lost when it is removed. Images up to 0.2.5 declared `VOLUME ["/data"]`, so a container started from one without a mount kept `/data` in an anonymous volume; reattach or copy that volume before you recreate the container from a newer image.
+The image declares no `VOLUME`: mount `/data` as a persistent directory so the database and WAL/SHM sidecars survive replacement together. A YAML-only mount, remote config store or unmounted container filesystem is insufficient. On Railway attach a Volume at `/data`; its volume ownership must permit writes by the service user (see [Railway permissions](https://docs.railway.com/volumes#permissions)). The image runs as UID/GID 10001. Older images up to 0.2.5 could create an anonymous `/data` volume; preserve/import its private legacy data before replacing it.
 
-The server must be able to write to `data/`: it saves the hashed management key into `config.yaml` on first start, and the dashboard writes settings and credential files. If it cannot, the key stays in plain text and saves fail, which is what the `chown` above prevents. Publish the port on `127.0.0.1` unless other machines need access; see [running it safely](GETTING-STARTED.md#running-it-safely).
+The service must write the database directory and its sidecars. Keep that directory private and database/WAL/SHM files private; SQLite contains configuration secrets and OAuth tokens. Use `config backup`, not a raw live-file copy. See [Database safety](CONFIGURATION.md#database-safety-and-backup). Publish on loopback unless other machines need access.
 
 Browser sign-in inside a container needs the OAuth callback ports (54545 for Claude, 1455 for Codex) published to your machine, so it is usually easier to sign in from the dashboard and paste the final callback URL, or to use `--codex-device-login`, Kimi or Meta, which use device codes:
 
 ```sh
-docker exec -it cook-router cook-router --config /data/config.yaml --codex-device-login
+docker exec -it cook-router cook-router --db /data/cook.db --codex-device-login
 ```
 
 ## First run without the install script
 
 If you installed the binary another way, set it up by hand:
 
-1. Make two random keys, for example with `openssl rand -hex 24`, and write `config.yaml`:
+1. Create a private data directory (`mkdir -m 700 -p ~/.cook-router`), make two random keys (for example `openssl rand -hex 24`) and write a private bootstrap `config.yaml`:
 
    ```yaml
    server:
@@ -223,17 +213,21 @@ If you installed the binary another way, set it up by hand:
        - "PASTE-CLIENT-KEY"     # your tools send this key to the proxy
    management:
      secret-key: "PASTE-MANAGEMENT-KEY"  # the dashboard password
-   oauth:
-     auth-dir: "~/.cook-router/auth"     # where account sign-ins are saved
    ```
 
-   Keep a copy of the management key: on first start the server replaces it in `config.yaml` with a bcrypt hash. Every setting in CLIProxyAPI's [`config.example.yaml`](https://github.com/router-for-me/CLIProxyAPI/blob/main/config.example.yaml) is accepted, although settings for features listed as not yet supported have no effect; [CONFIGURATION.md](CONFIGURATION.md) explains the common ones.
-2. Start the server: `cook-router --config config.yaml`. With no `--config`, it reads `config.yaml` in the current directory. Check it with `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
-3. Connect accounts with `--claude-login`, `--codex-login`, `--codex-device-login`, `--antigravity-login`, `--kimi-login`, `--kimi-ai-login`, `--meta-login`, `--xai-login` or `--devin-login`, import a Vertex AI service account with `--vertex-import key.json`, or connect accounts from the dashboard at `/management.html`. Add `--no-browser` on a machine without a browser.
+   Keep a private copy of the keys: SQLite stores the management key as a bcrypt hash. This YAML is an import/runtime projection shape, not the canonical persisted schema; [CONFIGURATION.md](CONFIGURATION.md) explains the settings. Keep the bootstrap file private while it exists.
+2. Import once, then run the database-backed server:
 
-Go-style single-dash flags such as `-config config.yaml` work too.
+   ```sh
+   cook-router --db ~/.cook-router/cook.db config validate config.yaml
+   cook-router --db ~/.cook-router/cook.db config import config.yaml
+   cook-router --db ~/.cook-router/cook.db
+   ```
 
-The server reloads `config.yaml` and the credential directory when they change. Set `RUST_LOG=debug` for more detailed logs; the default level is `info`.
+   `--db` overrides `COOK_DB`; without either the default is `cook.db` beside `--config` (`config.yaml` by default). `--config FILE` is a first-bootstrap compatibility import selector only. A fresh ordinary startup needs that source; once initialized, the server does not read or watch it. Check `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
+3. Connect accounts from `/management.html` or use the same database path with `--claude-login`, `--codex-login`, `--codex-device-login`, `--antigravity-login`, `--kimi-login`, `--kimi-ai-login`, `--meta-login`, `--xai-login` or `--devin-login`. Import a Vertex service account with `--vertex-import key.json`. Add `--no-browser` on a machine without a browser. Sign-ins and refresh tokens are saved in SQLite, not a watched directory.
+
+Change configuration through the dashboard or `/admin/v1`; old v0/v8 config endpoints are removed. Go-style single-dash flags still work. `RUST_LOG=debug` enables detailed logging; the default is `info`.
 
 ## Running as a system service
 
@@ -249,7 +243,7 @@ Wants=network-online.target
 [Service]
 User=cook-router
 WorkingDirectory=/var/lib/cook-router
-ExecStart=/usr/local/bin/cook-router --config /var/lib/cook-router/config.yaml
+ExecStart=/usr/local/bin/cook-router --db /var/lib/cook-router/cook.db
 Restart=on-failure
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -265,6 +259,6 @@ sudo systemctl enable --now cook-router
 journalctl -u cook-router -f
 ```
 
-The server writes to `config.yaml` (when the dashboard saves settings or hashes a plaintext management key) and to the credential directory, so both must be writable by the service user.
+Initialize the database under `/var/lib/cook-router` before starting the service, using the service user. The directory must be writable for SQLite WAL/SHM files and private; set `UMask=0077` in the unit as defense in depth. Mount this directory persistently in ephemeral deployments. No legacy PostgreSQL/S3/git config authority or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).
 
 On Windows, to run it as a system service without a signed-in user, wrap it with a service manager such as NSSM.

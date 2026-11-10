@@ -1,77 +1,59 @@
 # Moving from CLIProxyAPI (Go) to cook-router
 
-cook-router follows CLIProxyAPI at commit `6fecc6e` (v8.0.10). It reads the same files, so switching is a matter of stopping one binary and starting the other on the same config. This page lists what carries over, what does not, and how to switch back.
+cook-router develops independently from CLIProxyAPI. SQLite is now the sole durable authority for configuration **and OAuth credentials**. Migration is a one-time import, not two binaries sharing `config.yaml` or an auth directory. The old Go parity audit remains [historical evidence](PARITY.md), not the current administration contract.
 
-## What carries over
+## Before switching
 
-- `config.yaml`. The v8 layout and the older flat layout (top-level `port`, `auth-dir`, an `api-keys` list, `remote-management`) are both read. Every v8 setting is accepted, including settings for features cook-router does not have yet (listed below); those are kept in the file but have no effect.
-- Credential files in `oauth.auth-dir` (default `~/.cli-proxy-api`). Claude, Codex, Antigravity, Kimi, Meta, xAI, Devin, Vertex and AI Studio files are used as they are.
-- The hashed management key. Go and cook-router both hash a plaintext `management.secret-key` with bcrypt on start and write the hash back, and each accepts the other's hash.
-- Client keys in `access.api-keys`, provider keys under `api-keys`, OpenAI-compatible upstreams, model aliases and exclusions, payload rules, proxies, routing strategy, retries and cooldowns.
-- The client routes (`/v1/...`, `/v1beta/...`, `/backend-api/codex/...`) and the Responses WebSocket, so clients need no changes.
-- The v8 Management API at `/v8/management`, apart from the gaps below, and the dashboard at `/management.html`.
+1. Locate the Go server's YAML config, credential directory and service command. Legacy layouts use `auth-dir`; v8 layouts use `oauth.auth-dir` (often `~/.cli-proxy-api`). Export legacy remote-store contents to private local files if necessary; cook-router will not fetch or mutate them as runtime state.
+2. Stop the Go server before copying or importing credentials. Back up its YAML and credential files privately. They contain provider secrets and refresh tokens.
+3. Choose a stable SQLite path on a persistent local volume, for example `/var/lib/cook-router/cook.db`. Give the cook-router service user exclusive write access to the directory; keep it private (0700 on Unix). The database, WAL, SHM and backups must be private (0600 or equivalent ACLs).
+4. Remove selected `PGSTORE_*`, `OBJECTSTORE_*` and `GITSTORE_*` backend settings from the new server's environment. A selected legacy remote config store now fails startup with a migration error; it is not a fallback authority or asynchronous YAML mirror.
 
-When a setting is changed through the dashboard or the Management API, cook-router edits only that key and keeps the rest of the text and its comments. As in Go, that first write also converts a flat legacy config to the v8 layout and moves keys that are not v8 settings into comments instead of deleting them. The dashboard's raw editor saves the text you submit.
+Do not run Go and cook-router with credentials for the same account at the same time, even from separate copies. Providers can rotate refresh tokens; one server's refresh can invalidate the other's copy. A copied credential directory is not an isolated test. Use a separate test account and a different port for side-by-side trials. A backup's refresh tokens may stop working after either server refreshes them.
 
-The way back works too. In our tests against fake sign-in servers, Go 6fecc6e listed the Claude, Codex, Kimi and Meta credential files written by cook-router as active, and accepted a management key hashed by cook-router.
+## Import and start
 
-## Switching
+Prepare the YAML with the desired listen address, client keys and management access. The v8 and older flat layouts are import formats; [Configuration](CONFIGURATION.md) describes their settings and runtime projection, not SQLite's internal persisted schema. OAuth-only scope and versioned plugin raw data are preserved during import; do not assume unknown or invalid settings are silently dropped. Review validation errors before switching.
 
-1. Stop the Go server.
-2. Back up `config.yaml` and the credential directory. They hold OAuth refresh tokens, so keep the backup private.
-3. Check your command line against the flag list below. A few Go modes are not available yet, and cook-router exits with an error instead of starting without them.
-4. Start cook-router with the same config: `cook-router --config /path/to/config.yaml`.
-5. Open `/management.html` and check that your credentials are listed and healthy, then send a test request with one of your client keys.
+```sh
+cook-router --db /var/lib/cook-router/cook.db config validate /private/config.yaml
+cook-router --db /var/lib/cook-router/cook.db config import /private/config.yaml
+cook-router --db /var/lib/cook-router/cook.db
+```
 
-For a systemd service, replace the binary and keep your config and credential paths. The default Docker image expects `/data/config.yaml` and runs as UID/GID 10001. Update mounts and permissions, or override `--config` and set an accessible `oauth.auth-dir` to keep existing paths. [INSTALL.md](INSTALL.md#docker) covers volume ownership, listen address and management access.
+Use that same `--db` path (or `COOK_DB`) for services, server starts, sign-ins and other CLI operations. `--config FILE` remains a first-bootstrap compatibility import selector only: it is not a watched runtime config. Without an explicit database path, the default is `cook.db` beside `--config` (`config.yaml` by default). A fresh ordinary startup needs its import YAML; cloud/Home can initialize without it. Once initialized, later startup never reads that YAML, even if it changes, is missing or is invalid.
 
-Do not run Go and cook-router with credentials for the same account at the same time, even from separate copies of the auth directory. Both refresh OAuth tokens. A provider that rotates refresh tokens can invalidate the token held by the other server and force a new sign-in. A copied auth directory is not an isolated test. To try both servers side by side, use a separate test account and a different port. Keep the backup private, and do not assume its refresh tokens remain usable after either server refreshes them.
+The first local server start or credential/plugin CLI operation imports raw JSON credentials from the configured legacy `oauth.auth-dir` exactly once. This migration has its own durable marker, so it still runs after the separate `config import` above initialized configuration. Later starts load SQLite only: leftover files cannot resurrect deleted credentials. Legacy `.cds` cooldown files are imported alongside that one-time migration; persisted cooldowns then use SQLite's credential state. OAuth login, refresh, account edits, disables and revocations are stored separately from config revisions and excluded from config exports. Keep the original credential backup offline and private; never leave another server refreshing it. The private `<canonical-db-path>.credentials` directory is an internal materialized cache/refresh-lock domain, not a new editable auth directory; edits are reverted to DB state. Home-dispatched credentials are not persisted locally. See [Installation](INSTALL.md) for deployment and volume ownership.
 
-## Command-line flags
+Open `/management.html`, check the account list and send a request through `/v1/models` with a client key. The client routes remain the tool-facing interface; point clients at the new address/port if those changed.
 
-cook-router accepts every CLIProxyAPI flag, in Go's single-dash spelling (`-config`) or with two dashes. These work as in Go: `-config`, `-claude-login`, `-codex-login`, `-codex-device-login`, `-antigravity-login`, `-kimi-login`, `-kimi-ai-login`, `-xai-login`, `-meta-login`, `-devin-login`, `-vertex-import` (with `-vertex-import-prefix`), `-no-browser`, `-oauth-callback-port`, `-password`, `--local-model`, `-home-jwt` (or `HOME_JWT`), and LAN discovery with `-discover` (or the `discover` subcommand) and its `-discover-*` options.
+Credential `auth_index` values change on the first import because local credential paths move into the database's working directory. Refresh account lists and cached selections after migration; historical usage/log records retain their old indexes and do not automatically join to new records. Ordinary credential names remain usable, and cooldown state uses credential IDs rather than `auth_index`. Indexes remain stable across restarts at the same canonical database path, but moving the database changes local credential indexes again. Home-assigned indexes are unaffected; plugin-generated IDs may also depend on the source path.
 
-`-tui` and `-tui -standalone` open the terminal UI as in Go, with the differences listed in [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md).
+## Administration changes
 
-## Not available yet
+- Configuration now uses `/admin/v1/r/{kind}/{id}` resources with stable IDs and revisions. The old `/v0/management` and `/v8/management` config reads/writes, raw YAML upload and per-setting routes are deleted, not aliased. Migrate external scripts as well as dashboard/TUI callers.
+- `POST /admin/v1/apply` validates and commits multiple operations atomically. `?dry_run=true` checks the whole candidate without writing or publishing.
+- Use strong revision ETags and `If-Match` to prevent overwriting another administrator's work. Failed preconditions return 412; schema validation returns structured 422 errors. Import and restore require a global `If-Match` (428 if absent).
+- `/admin/v1/revisions` records configuration history; restoring a revision creates a new config revision. Credential state is not in those revisions, so restore never resurrects a revoked token.
+- `/admin/v1/export` and `config export` redact secrets by default. Explicit secret export is sensitive. Configuration export is not a full credential backup.
+- Non-config credential and OAuth management operations remain separate and use database-backed credential persistence.
 
-These settings are accepted in `config.yaml` and kept on save, but cook-router does not act on them yet, or only in part:
+See [Configuration](CONFIGURATION.md#administration-api) for routes, preconditions and response headers. YAML comments/formatting are not a runtime contract; the server never rewrites or mirrors a watched YAML file.
 
-| Go setting or feature | In cook-router |
-| --- | --- |
-| `pprof` | No profiling endpoint. |
-| Plugins on the request path | Frontend auth, model routers, plugin catalogs and executors (with or without a router), plugin schedulers, request and response translators and normalizers, thinking appliers, request, response and stream-chunk interceptors, the WebSocket response observer, the request lifecycle and usage plugins run as in Go, and so do the `host.http.*`, `host.auth.*`, `host.model.*` and `host.affinity.lookup` callbacks. Auth files go to the plugin auth provider owning their type before the built-in loader (`auth.parse`), as in Go; plugins are trusted code, and an auth provider sees every auth file with no `type`. Not called yet: per-credential model discovery (`model.for_auth`), and the plugin response hooks on a Claude client's buffered Claude answer. |
-| Home-managed plugins | With `-home-jwt`, bootstrap, config updates, dispatch, usage, process and request logs, in-flight reporting and shared KV state work. Plugin binaries must already be installed locally; Home-supplied configuration can configure them, but Home-managed plugin sync, tasks and status reports are unavailable. |
-| `management.panel-github-repository`, `management.disable-auto-update-panel`, `MANAGEMENT_STATIC_PATH` | The dashboard is built into the binary and never downloaded or read from disk. `management.disable-control-panel` is honoured. |
-| Config reload log summaries | The config is reloaded, but the changes are not summarised in the log. |
+## Services and containers
 
-`.env` in the working directory is loaded as in Go, and the `PGSTORE_*`, `OBJECTSTORE_*` and `GITSTORE_*` storage backends and `WRITABLE_PATH` work as in Go. `RUST_LOG`, when set, overrides the log level from `debug`.
+Update a service to use an explicit `--db /var/lib/cook-router/cook.db`, with a writable private database directory. If bootstrapping through `--config`, use it only to select the initial import. Changes made later through the dashboard do not update that file; service health probes must not treat stale YAML as the effective configuration.
 
-## Management API differences
+Mount a **directory** for SQLite, not only a config file, so the main database and `-wal`/`-shm` sidecars persist together. The default Docker image runs as UID/GID 10001: give it ownership of the mounted directory. A remote bucket, PostgreSQL database or git repository is not a substitute for this persistent volume. See [Docker](INSTALL.md#docker).
 
-The v8 routes for config, credentials, OAuth sign-in, `requests/api-call`, cooldown reset, usage, logs, model definitions and plugins behave as in Go, and so do the older `/v0/management` routes, apart from those listed below. OAuth sign-in through the API works for Claude, Codex, Antigravity, Kimi, Meta, xAI and Devin, and `oauth/import?provider=vertex` (or `/v0/management/vertex/import`) imports a Vertex service account as in Go.
+## Backup and recovery
 
-Not available on cook-router:
+```sh
+cook-router --db /var/lib/cook-router/cook.db config backup /private/cook-router-backup.db
+```
 
-- `server/latest-version` answers `502` with "no release repository is configured" because cook-router doesn't check for its own releases yet. Go asks GitHub for the latest CLIProxyAPI release.
-
-The bundled dashboard checks which server it is talking to and marks these features as not available instead of failing.
-
-## Differences from Go
-
-A few behaviours differ from Go on purpose, for example config writes keep the rest of `config.yaml` byte for byte and the dashboard is never downloaded. [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md) lists all of them.
-
-### Additions
-
-Features Go does not have. Reset-first routing is the default; the others are opt-in.
-
-- Reset-first routing: `routing.strategy: soonest-reset` (alias `reset-first`), the default when `routing.strategy` is unset. Go reads an unset strategy as `round-robin`, so a Go config without the key behaves differently here; add `routing.strategy: round-robin` to keep Go's rotation. Among ready accounts, it selects the one whose weekly window resets soonest. It stays there until the account cools down or reaches a usage limit, then moves to the next. Reset times come from each account's latest response headers (`anthropic-ratelimit-unified-*` for Claude, `x-codex-*` for Codex). An account without a known future reset gets one request to learn it. Accounts without reset headers come after those with a known reset; equally ranked accounts take turns, so API keys rotate as with `round-robin` once each has had its probe request. Session affinity takes precedence. With several providers for one model, the first provider is selected, as with `fill-first`. Go reads `soonest-reset` as `round-robin`.
-- Codex connection reuse: `oauth.providers.codex.chatgpt-keep-alive: true` keeps up to 2 idle connections to `chatgpt.com` per proxy for 90 seconds instead of opening one per request. Off by default.
+This uses SQLite's `VACUUM INTO` for a consistent snapshot and includes configuration, revision history and credential secrets. Do not raw-copy only the main database while WAL is open; committed data can still be in the WAL. Keep backups private, stop the server before replacing its database, and treat old refresh tokens as potentially invalid. Config-history restore is not credential recovery. Logical deletion or secure-delete settings do not guarantee physical disk erasure, especially on SSDs, snapshots or retained backups.
 
 ## Switching back
 
-Stop cook-router and start Go on the same config and credential directory. Credentials that cook-router connected or refreshed stay valid for Go, and the management key keeps working. The config needs no changes: Go treats `routing.strategy: soonest-reset`, and an unset strategy, as `round-robin`. Go also starts with `oauth.providers.codex.chatgpt-keep-alive` set and ignores it; a config edit through Go's v8 Management API moves the key into a comment, so keep-alive is off again when you come back to cook-router.
-
-## Details
-
-[PARITY.md](PARITY.md) sums up what works and links the item-by-item audit of every route, setting, flag and Go test suite.
+This is no longer a shared-file switch. Stop cook-router and restore a separately managed Go installation from your private migration backup, or reconfigure Go manually. A cook-router resource export is not Go YAML, and a redacted export lacks secrets. Do not expect Go to understand SQLite or assume old OAuth refresh tokens are still valid; sign in again when necessary. Never start both servers on the same account to test rollback.

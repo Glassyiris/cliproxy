@@ -6,7 +6,7 @@ export default {
 
     "app.signIn.managementKey": "管理金鑰",
     "app.signIn.help":
-      "為 {setting} 設定的明文，或 MANAGEMENT_PASSWORD。伺服器首次啟動時會把 config.yaml 中的明文換成雜湊。",
+      "為 {setting} 設定的明文，或 MANAGEMENT_PASSWORD。管理金鑰以雜湊形式儲存在設定資料庫中。",
     "app.signIn.heading": "連線到此伺服器",
     "app.signIn.checking": "正在檢查 {host}…",
     "app.signIn.restoring": "正在連線到 {host}…",
@@ -21,11 +21,11 @@ export default {
     "app.signIn.connecting": "正在連線…",
     "app.signIn.remember": "在這台裝置記住我",
     "app.signIn.apiOff":
-      "管理 API 未開啟。請在 config.yaml 中設定 management.secret-key，然後重新啟動伺服器。也可以用 MANAGEMENT_PASSWORD 啟動。",
+      "管理 API 未開啟。請在設定資料庫中設定 management.secret-key，或用 MANAGEMENT_PASSWORD 啟動伺服器。",
     "app.signIn.remoteDisabled":
-      "此伺服器只接受本機開啟的面板。請在伺服器所在的機器上開啟，或在 config.yaml 中設定 management.allow-remote: true 並使用強金鑰。",
+      "此伺服器只接受本機開啟的面板。請在伺服器所在的機器上開啟，或在設定資料庫中啟用 management.allow-remote 並使用強金鑰。",
     "app.signIn.banned": "{message}。此位址輸錯金鑰的次數過多。",
-    "app.signIn.wrongKey": "金鑰不正確。請填寫明文，而不是 config.yaml 中現在的雜湊。",
+    "app.signIn.wrongKey": "金鑰不正確。請填寫明文，而不是資料庫中儲存的雜湊。",
     "app.connection.unreachable": "伺服器沒有回應。請確認伺服器正在執行，且此位址可以連到它。",
     "app.connection.timeout": "伺服器在 30 秒內沒有回應。請重試。",
     "app.signIn.rejected": "管理金鑰已被拒絕。請重新登入。",
@@ -156,6 +156,8 @@ export default {
     "app.editor.review": "檢查變更",
     "app.editor.save": "儲存",
     "app.editor.saved": "已儲存。",
+    "app.editor.reenterSecrets":
+      "若要變更密鑰的傳送位置，請在 {resource} 中重新輸入下列各欄位的密鑰：{pointers}。已保留你的 JSON 修改。",
     "app.editor.noChanges": "尚未做任何變更。",
     "app.editor.invalidJson": "JSON 無效。請先修正再檢查。",
     "app.editor.discardDescription": "關閉編輯器會遺失所做的變更。",

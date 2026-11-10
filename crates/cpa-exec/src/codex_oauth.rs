@@ -862,21 +862,27 @@ pub fn encode_go_json(value: &Value) -> String {
 
 /// Writes a login record into `auth_dir` (atomic, 0600), merging an existing file the way
 /// Go's login manager does. Blocking.
-pub fn write_login(auth_dir: &Path, tokens: &Tokens) -> Result<PathBuf, ExecError> {
+pub fn write_login(
+    auth_dir: &Path,
+    tokens: &Tokens,
+    save: Option<&crate::login_store::LoginSave>,
+) -> Result<PathBuf, ExecError> {
     let (name, mut record) = login_record(tokens, &rfc3339(Local::now()))?;
     if name.contains(['/', '\\']) {
         return Err(oauth_error(400, "invalid credential email filename"));
     }
     let path = auth_dir.join(&name);
-    if let Ok(raw) = std::fs::read(&path)
-        && let Ok(existing) = serde_json::from_slice::<Map<String, Value>>(&raw)
-    {
-        merge_existing(&mut record, existing);
-    }
-    let text = encode_go_json(&Value::Object(record));
-    // ponytail: Go truncates in place with default permissions; this writes a 0600 temp
-    // file and renames it, like the Claude login.
-    publish(auth_dir, &path, text.as_bytes()).map_err(|_| oauth_error(500, "cannot publish codex credential"))?;
+    crate::login_store::save_login(save, std::slice::from_ref(&path), || {
+        if let Ok(raw) = std::fs::read(&path)
+            && let Ok(existing) = serde_json::from_slice::<Map<String, Value>>(&raw)
+        {
+            merge_existing(&mut record, existing);
+        }
+        let text = encode_go_json(&Value::Object(record));
+        // Keep the private atomic writer; the durable owner holds the stable lock.
+        publish(auth_dir, &path, text.as_bytes()).map_err(|_| "cannot publish codex credential".to_owned())
+    })
+    .map_err(|error| oauth_error(500, &error))?;
     Ok(path)
 }
 
@@ -973,7 +979,11 @@ fn open_browser(url: &str) {
 }
 
 /// Browser PKCE login (`-codex-login`). Only the explicit CLI flag calls this.
-pub async fn login(auth_dir: &Path, options: &LoginOptions) -> Result<PathBuf, ExecError> {
+pub async fn login(
+    auth_dir: &Path,
+    options: &LoginOptions,
+    save: Option<crate::login_store::LoginSave>,
+) -> Result<PathBuf, ExecError> {
     let port = options.callback_port;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await
@@ -1021,7 +1031,7 @@ pub async fn login(auth_dir: &Path, options: &LoginOptions) -> Result<PathBuf, E
         .exchange(&callback.code, &redirect_uri(port), &verifier)
         .await?;
     let dir = auth_dir.to_owned();
-    tokio::task::spawn_blocking(move || write_login(&dir, &tokens))
+    tokio::task::spawn_blocking(move || write_login(&dir, &tokens, save.as_ref()))
         .await
         .map_err(|_| oauth_error(500, "credential publication failed"))?
 }
@@ -1045,7 +1055,11 @@ async fn prompt_line(
 }
 
 /// Device-code login (`-codex-device-login`).
-pub async fn device_login(auth_dir: &Path, options: &LoginOptions) -> Result<PathBuf, ExecError> {
+pub async fn device_login(
+    auth_dir: &Path,
+    options: &LoginOptions,
+    save: Option<crate::login_store::LoginSave>,
+) -> Result<PathBuf, ExecError> {
     let oauth = CodexOAuth::new(plain_client()?);
     let code = oauth.device_code().await?;
     println!("Starting Codex device authentication...");
@@ -1056,7 +1070,7 @@ pub async fn device_login(auth_dir: &Path, options: &LoginOptions) -> Result<Pat
     }
     let tokens = oauth.device_poll(&code, Duration::from_secs(15 * 60)).await?;
     let dir = auth_dir.to_owned();
-    tokio::task::spawn_blocking(move || write_login(&dir, &tokens))
+    tokio::task::spawn_blocking(move || write_login(&dir, &tokens, save.as_ref()))
         .await
         .map_err(|_| oauth_error(500, "credential publication failed"))?
 }

@@ -96,7 +96,7 @@ start_server() { # name scenario round
   # -local-model on both: no remote model catalog download during the run.
   local bin=$GO_BIN
   [[ $1 == rust ]] && bin=$RUST_BIN
-  taskset -c 0 "$bin" -config "$dir/config.yaml" -local-model > "$OUT/logs/$1-$2-$3.log" 2>&1 &
+  COOK_DB="$dir/cook.db" taskset -c 0 "$bin" -config "$dir/config.yaml" -local-model > "$OUT/logs/$1-$2-$3.log" 2>&1 &
   SRV_PID=$!
   for _ in $(seq 1 400); do
     if curl -sf -H "Authorization: Bearer $KEY" "http://127.0.0.1:$PORT/v1/models" | grep -q bench-model; then

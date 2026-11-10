@@ -6,7 +6,7 @@ export default {
 
     "app.signIn.managementKey": "管理密钥",
     "app.signIn.help":
-      "为 {setting} 设置的明文，或 MANAGEMENT_PASSWORD。服务器首次启动时会把 config.yaml 中的明文换成哈希。",
+      "为 {setting} 设置的明文，或 MANAGEMENT_PASSWORD。管理密钥以哈希形式存储在设置数据库中。",
     "app.signIn.heading": "连接到此服务器",
     "app.signIn.checking": "正在检查 {host}…",
     "app.signIn.restoring": "正在连接到 {host}…",
@@ -21,11 +21,11 @@ export default {
     "app.signIn.connecting": "正在连接…",
     "app.signIn.remember": "在这台设备上记住我",
     "app.signIn.apiOff":
-      "管理 API 未开启。请在 config.yaml 中设置 management.secret-key，然后重启服务器。也可以用 MANAGEMENT_PASSWORD 启动。",
+      "管理 API 未开启。请在设置数据库中配置 management.secret-key，或用 MANAGEMENT_PASSWORD 启动服务器。",
     "app.signIn.remoteDisabled":
-      "此服务器只接受本机打开的面板。请在服务器所在的机器上打开，或在 config.yaml 中设置 management.allow-remote: true 并使用强密钥。",
+      "此服务器只接受本机打开的面板。请在服务器所在的机器上打开，或在设置数据库中启用 management.allow-remote 并使用强密钥。",
     "app.signIn.banned": "{message}。此地址输错密钥的次数过多。",
-    "app.signIn.wrongKey": "密钥不正确。请填写明文，而不是 config.yaml 中现在的哈希。",
+    "app.signIn.wrongKey": "密钥不正确。请填写明文，而不是数据库中存储的哈希。",
     "app.connection.unreachable": "服务器没有响应。请确认服务器正在运行，并且此地址可以访问它。",
     "app.connection.timeout": "服务器在 30 秒内没有响应。请重试。",
     "app.signIn.rejected": "管理密钥已被拒绝。请重新登录。",
@@ -156,6 +156,8 @@ export default {
     "app.editor.review": "检查更改",
     "app.editor.save": "保存",
     "app.editor.saved": "已保存。",
+    "app.editor.reenterSecrets":
+      "要更改密钥的发送位置，请在 {resource} 中重新输入以下各字段的密钥：{pointers}。已保留你的 JSON 修改。",
     "app.editor.noChanges": "尚未做任何更改。",
     "app.editor.invalidJson": "JSON 无效。请先修正再检查。",
     "app.editor.discardDescription": "关闭编辑器会丢失所做的更改。",

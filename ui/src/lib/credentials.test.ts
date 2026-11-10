@@ -117,9 +117,8 @@ test("account rows: status words, honest unknowns, low, last used and weekly ord
   assert.deepEqual(used(refused.session), [41, 3 * 3_600_000]);
 });
 
-test("credential name: a provider key is masked, never shown in full", () => {
-  const key = "sk-ant-api03-0123456789abcdef";
-  assert.equal(credName({ account_type: "api_key", account: key, name: "claude-key.json" }), "sk-…cdef");
+test("credential name: server-masked accounts stay intact and labels take precedence", () => {
+  assert.equal(credName({ account_type: "api_key", account: "$secret", name: "claude-key.json" }), "$secret");
   assert.equal(credName({ account_type: "oauth", account: "me@example.com", name: "x.json" }), "me@example.com");
-  assert.equal(credName({ account_type: "api_key", label: "Team key", account: key }), "Team key");
+  assert.equal(credName({ account_type: "api_key", label: "Team key", account: "$secret" }), "Team key");
 });

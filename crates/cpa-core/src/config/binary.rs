@@ -174,32 +174,6 @@ fn scalar_literal_field<'a>(value: &'a Value, keys: &mut Vec<Option<&'a str>>) -
     }
 }
 
-/// `value` as [`decode`] with literals reads it back once written: a number or boolean
-/// in a [`literal_field`] is its text. For a document a JSON body edited.
-pub(super) fn as_reread(value: &mut Value) {
-    fn walk(value: &mut Value, keys: &mut Vec<Option<String>>) {
-        match value {
-            Value::Mapping(m) => {
-                for (k, v) in m.iter_mut() {
-                    keys.push(Some(k.as_str().unwrap_or("").to_owned()));
-                    walk(v, keys);
-                    keys.pop();
-                }
-            }
-            Value::Sequence(items) => {
-                for v in items {
-                    keys.push(None);
-                    walk(v, keys);
-                    keys.pop();
-                }
-            }
-            Value::Number(_) | Value::Bool(_) if literal_field(keys) => *value = Value::String(super::go_string(value)),
-            _ => {}
-        }
-    }
-    walk(value, &mut Vec::new());
-}
-
 /// `keys` (a mapping key, or `None` for a list item, per step) without merge keys and
 /// the list items of a `<<: [...]`.
 fn named<K: AsRef<str>>(keys: &[Option<K>]) -> Vec<Option<&str>> {
@@ -530,8 +504,6 @@ struct Walk {
 pub(super) enum Mode {
     /// A config file: literals are its string settings.
     File,
-    /// A JSON management body, whose `<<` keys are merges: Go saves its keys plain.
-    Body,
     /// Literals are the scalars of plugin configs, as Go hands a plugin its raw node,
     /// tagged [`PLAIN`]: `007` is a string to serde_yaml_ng too, but quoted it is another.
     Plugins,
@@ -736,7 +708,7 @@ impl Walk {
                         // quoted one is refused here, a tagged one below.
                         let merge = matches!(&event, Event::Scalar { tag: None, value, .. } if value == b"<<");
                         ensure!(
-                            !merge || self.mode == Mode::Body || matches!(event, Event::Scalar { plain: true, .. }),
+                            !merge || matches!(event, Event::Scalar { plain: true, .. }),
                             QUOTED_MERGE_KEY
                         );
                         let name: Rc<str> = match &event {

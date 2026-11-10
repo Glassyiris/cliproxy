@@ -4,7 +4,7 @@ This guide covers routing across your own accounts and API keys, for use on your
 
 ## Add the accounts
 
-Sign in to each account once, from the dashboard (Connect account) or the command line (`--claude-login`, `--codex-login`). Every sign-in becomes one file in `auth-dir`, and every file is one account in the rotation.
+Sign in to each account once, from the dashboard (Connect account) or the command line (`cook-router --db /path/to/cook.db --claude-login`, or `--codex-login`). Every sign-in becomes a credential in SQLite. Use the same database path as the server; `auth-dir` is a legacy import source, not a watched account directory.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/credentials-dark.png">
@@ -46,13 +46,13 @@ CLIProxyAPI has no `soonest-reset`: it reads that value, and an unset strategy, 
 
 `soonest-reset` ranks accounts by the usage headers of their last responses. An account whose one-hour rest after a stated reset has ended (see [Cooldowns and limits](#cooldowns-and-limits)) still reports its window as used up, so it sorts last and is checked only when the other accounts are used up or cooling.
 
-You can change the strategy on the dashboard's Configuration page, or in `config.yaml`.
+Change strategy on the dashboard's Configuration page or through `/admin/v1`. YAML examples here describe initial import/runtime projection shapes only; editing an imported YAML file does not change the running server.
 
-Each account can also have a `priority` (default 0). The proxy only uses the accounts with the highest priority among those that are ready, and falls back to lower ones when all of those are cooling down or disabled. Set Priority and Weight per account in its panel on the dashboard's Accounts page, or as top-level `"priority"` and `"weight"` fields in the account's file.
+Each account can also have a `priority` (default 0). The proxy only uses the accounts with the highest priority among those ready, then lower ones when all higher-priority accounts are cooling down or disabled. Set Priority and Weight in the account's dashboard panel. The corresponding legacy import fields are top-level `"priority"` and `"weight"`; ongoing edits are persisted in SQLite separately from config revisions.
 
 ## Session affinity
 
-The installer enables affinity for new configs. It leaves an existing config unchanged. To enable it by hand:
+Enable affinity on the Configuration page. The equivalent initial import/runtime projection is:
 
 ```yaml
 routing:
@@ -95,7 +95,7 @@ Each row shows how much is used and when it resets. Codex accounts show their 5-
 
 ## Per-account proxies and request shaping
 
-These settings go in the account's file in `auth-dir` (the server reloads it when the file changes):
+Edit these credential metadata fields through the account's dashboard panel/credential management operations. The JSON below is the legacy credential import shape, not a file to edit after import:
 
 ```json
 {
@@ -103,13 +103,13 @@ These settings go in the account's file in `auth-dir` (the server reloads it whe
 }
 ```
 
-`proxy_url` sends that account's requests through its own proxy (`http://`, `https://`, `socks5://` or `socks5h://`); `"direct"` skips every proxy. Without it, the account uses `requests.proxy-url` from `config.yaml`. When neither is set, most providers follow the `HTTPS_PROXY` environment variables, while Claude accounts connect directly. For an API key in `config.yaml`, the same setting is `proxy-url` on the key's entry.
+`proxy_url` sends that account's requests through its own proxy (`http://`, `https://`, `socks5://` or `socks5h://`); `"direct"` skips every proxy. Without it, the account uses the configured `requests.proxy-url`. When neither is set, most providers follow the `HTTPS_PROXY` environment variables, while Claude accounts connect directly. For a provider API-key resource, the corresponding field is `proxy-url` on the key's entry.
 
-Claude request shaping follows CLIProxyAPI's rules. Its default `auto` mode can rewrite system prompts for non-native clients. To turn it off, set `"cloak_mode": "never"` in the account's file, or `oauth.providers.claude.disable-claude-cloak-mode: true` in `config.yaml`. The rewrite does not make using a Claude subscription in another tool permitted; use an API key or a supported cloud provider there.
+Claude's default `auto` shaping mode can rewrite system prompts for non-native clients. Turn it off with credential metadata `"cloak_mode": "never"`, or the OAuth-scoped setting `oauth.providers.claude.disable-claude-cloak-mode: true`. The rewrite does not make using a Claude subscription in another tool permitted; use an API key or supported cloud provider there.
 
 ## Codex over WebSocket
 
-Codex accounts can talk to OpenAI over a WebSocket, the transport the Codex CLI itself uses, instead of one HTTPS request per turn. Turn it on per account with a top-level field in the account's file:
+Codex accounts can talk to OpenAI over a WebSocket, the transport the Codex CLI itself uses, instead of one HTTPS request per turn. Enable it per account with the credential metadata field (shown in its legacy import shape):
 
 ```json
 {
@@ -124,7 +124,7 @@ For a Codex API key, set `websockets: true` on the key's entry under `api-keys.c
 The simplest safe way is [Tailscale](https://tailscale.com/), which puts your machines on a private network:
 
 1. Install Tailscale on the machine running the proxy and on the machines that use it.
-2. In `config.yaml`, set `server.host` to the proxy machine's Tailscale address (the `100.x.y.z` address from `tailscale ip -4`), so only your tailnet can connect, and restart. Keep `access.api-keys` set.
+2. Through the dashboard or `/admin/v1`, set `server.host` to the proxy machine's Tailscale address (the `100.x.y.z` address from `tailscale ip -4`), so only your tailnet can connect, and restart. Keep `access.api-keys` set.
 3. On the other machines, use `http://<machine-name>:8317` (or the `100.x.y.z` address) as the base URL.
 
 If you use `tailscale serve` to add HTTPS, it forwards from `127.0.0.1`, so also set `server.trusted-proxies: [127.0.0.1, "::1"]`. To open the dashboard from another machine, set `management.allow-remote: true`. Never expose the proxy to the internet, with Tailscale Funnel or any other tunnel, unless `access.api-keys` is set: without client keys anyone who finds the address can use your accounts.
@@ -133,7 +133,7 @@ If you use `tailscale serve` to add HTTPS, it forwards from `127.0.0.1`, so also
 
 This example is for one person using their own accounts on their own machines. The Claude Max account takes requests first. Two Claude Pro accounts take over while it cools down. Conversations stay on one account while it is ready, and both Codex accounts use WebSocket. Use Claude subscriptions only in native Anthropic applications, as described in [Accounts and provider terms](../README.md#accounts-and-provider-terms).
 
-`config.yaml`:
+Initial import/runtime projection example (not the persisted SQLite schema):
 
 ```yaml
 config-version: 8
@@ -145,8 +145,6 @@ access:
     - "your-client-key"
 management:
   secret-key: "your-management-key"
-oauth:
-  auth-dir: "~/.cook-router/auth"
 routing:
   strategy: fill-first
   session-affinity: true
@@ -156,9 +154,9 @@ routing:
     max-retry-interval: 30
 ```
 
-Sign in five times (three Claude accounts, two Codex accounts), then set these fields in each account's panel on the Accounts page, or add them to the files in `~/.cook-router/auth`:
+Sign in five times (three Claude accounts, two Codex accounts), then set these fields in each account's panel on the Accounts page. SQLite persists these account edits; do not change old files in `~/.cook-router/auth`.
 
-| Account file | Fields | Why |
+| Account | Fields | Why |
 |---|---|---|
 | Claude Max | `"priority": 10` | Used first. |
 | Claude Pro, first | `"priority": 0` | Used when the Max account is cooling down. |
@@ -167,3 +165,5 @@ Sign in five times (three Claude accounts, two Codex accounts), then set these f
 | Codex, second | `"websockets": true` | WebSocket transport. |
 
 With `fill-first`, each provider's top-priority account serves requests until it cools down, then the next ready account takes over. A bound conversation stays on its account while that account is ready. Swap `fill-first` for `soonest-reset` to order accounts by reset time, or for `weighted-round-robin` with `weight` fields to split requests by plan size.
+
+Account state is separate from configuration revisions. Disabling/deleting a credential or revoking its token cannot be undone by restoring an old config revision. A full SQLite backup contains sensitive credential state; keep it private and do not assume an old refresh token is still valid. See [safe backup](CONFIGURATION.md#database-safety-and-backup).

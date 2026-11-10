@@ -1,5 +1,5 @@
 # Published Unix releases retain the login-service smoke tests. Candidate binaries
-# on all three systems exercise local checksummed releases, no-op checks, upgrades,
+# on all three systems exercise local checksummed releases, version checks, upgrades,
 # rollback, direct Windows startup and the embedded dashboard files without waiting
 # for the next release.
 name: Installers
@@ -70,13 +70,13 @@ jobs:
           . ~/.cook-router/keys.env
           code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
           test "$COOK_ROUTER_PORT" = 8317
-          test "$(find ~/.cook-router/keys.env ~/.cook-router/config.yaml -perm 600 | wc -l)" -eq 2
+          test "$(find ~/.cook-router/keys.env ~/.cook-router/config.yaml ~/.cook-router/cook.db -perm 600 | wc -l)" -eq 3
           test "$(code http://127.0.0.1:8317/healthz)" = 200
           test "$(code -H "Authorization: Bearer $COOK_ROUTER_CLIENT_KEY" http://127.0.0.1:8317/v1/models)" = 200
           test "$(code http://127.0.0.1:8317/v1/models)" = 401
-          test "$(code -H "Authorization: Bearer $COOK_ROUTER_MANAGEMENT_KEY" http://127.0.0.1:8317/v8/management/config)" = 200
+          test "$(code -H "Authorization: Bearer $COOK_ROUTER_MANAGEMENT_KEY" http://127.0.0.1:8317/admin/v1/effective/config)" = 200
           test "$(code http://127.0.0.1:8317/management.html)" = 200
-      - name: A current rerun keeps config, keys and the running server
+      - name: A current rerun keeps config and keys while refreshing DB startup
         run: |
           [ "$VERSION" = latest ] || export COOK_ROUTER_VERSION="$VERSION"
           before=$(cksum ~/.cook-router/config.yaml ~/.cook-router/keys.env)
@@ -84,8 +84,9 @@ jobs:
           sh install.sh
           test "$(cksum ~/.cook-router/config.yaml ~/.cook-router/keys.env)" = "$before"
           sh install.sh --check
-          test "$(cat ~/.cook-router/cook-router.pid)" = "$old"
-          kill -0 "$old"
+          new=$(cat ~/.cook-router/cook-router.pid)
+          test "$new" != "$old"
+          kill -0 "$new"
           curl -fsS http://127.0.0.1:8317/healthz
       - name: A second install moves to the next free port
         run: |
@@ -106,6 +107,7 @@ jobs:
           sh install.sh --service
           test ! -e ~/.cook-router/cook-router.pid
           test "$(systemctl --user is-enabled cook-router)$(systemctl --user is-active cook-router)" = enabledactive
+          systemctl --user cat cook-router | grep -q -- '--db'
           curl -fsS http://127.0.0.1:8317/healthz
           sh install.sh
           test "$(systemctl --user is-active cook-router)" = active
@@ -118,6 +120,7 @@ jobs:
           sh install.sh --service
           test ! -e ~/.cook-router/cook-router.pid
           launchctl print "$agent" | grep -q "state = running"
+          grep -q -- '--db' ~/Library/LaunchAgents/io.github.prep-cook.cook-router.plist
           curl -fsS http://127.0.0.1:8317/healthz
           sh install.sh
           launchctl print "$agent" | grep -q "state = running"
@@ -174,7 +177,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - name: Build the candidate, not a release lacking --log-file
+      - name: Build the candidate with SQLite config commands
         run: cargo build --locked -p cook-router
       - name: Build local release fixtures before network isolation
         run: |

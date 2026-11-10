@@ -52,7 +52,6 @@ export type Credential = {
   email?: string;
   project_id?: string;
   account_type?: "oauth" | "api_key";
-  /** For an api_key credential this is the raw key. */
   account?: string;
   created_at?: string;
   updated_at?: string;

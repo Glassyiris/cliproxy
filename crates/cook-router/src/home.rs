@@ -1293,7 +1293,7 @@ mod tests {
         local: Vec<Credential>,
     ) -> (String, Arc<Runtime>, CancellationToken, tokio::task::JoinHandle<()>) {
         let config = overlay(b"port: 0\n", None).unwrap();
-        node_on(home, Arc::new(cpa_server::testing::runtime(config, local, executors))).await
+        node_on(home, Arc::new(Runtime::home(config, local, executors))).await
     }
 
     /// [`node_full`] on a runtime the caller built.
@@ -1354,12 +1354,8 @@ mod tests {
         assert!(waited.is_ok(), "timed out waiting for {what}");
     }
 
-    /// Go `TestLoadConfigOptionalMissingFallbackAppliesCredentialInFlightDefaults`,
-    /// `…EmptyFallback…`, `…WhitespaceFallback…`, `…InvalidFallback…` and
-    /// `TestCredentialInFlightConfigContractFixture`: an optional config that is
-    /// missing, empty, blank or undecodable still carries the in-flight defaults, which
-    /// equal the shared contract fixture's config and validate, and no credential
-    /// concurrency settings.
+    /// Missing, empty and blank first imports carry the in-flight defaults.
+    /// Malformed first imports are rejected instead of initializing a fallback.
     #[test]
     fn optional_config_fallbacks_carry_the_in_flight_defaults() {
         use cpa_home::config::{CredentialConcurrency, CredentialInFlight};
@@ -1379,19 +1375,21 @@ mod tests {
             ("missing.yaml", None),
             ("empty.yaml", Some("")),
             ("blank.yaml", Some(" \t\n\r ")),
-            ("invalid.yaml", Some(":")),
         ] {
             let path = dir.join(name);
             if let Some(contents) = contents {
                 std::fs::write(&path, contents).unwrap();
             }
-            let cfg = crate::load_config(&path, true).unwrap();
+            let (_, cfg) = crate::load_config(&dir.join(format!("{name}.db")), &path, true).unwrap();
             let in_flight = CredentialInFlight::from_document(&cfg.document);
             assert_eq!(in_flight, CredentialInFlight::default(), "{name}");
             cpa_home::inflight::PublisherConfig::from_config(&in_flight).unwrap();
             let concurrency = CredentialConcurrency::from_document(&cfg.document).unwrap();
             assert_eq!(concurrency, CredentialConcurrency::default(), "{name}");
         }
+        let invalid = dir.join("invalid.yaml");
+        std::fs::write(&invalid, ":").unwrap();
+        assert!(crate::load_config(&dir.join("invalid.db"), &invalid, true).is_err());
         let _ = std::fs::rename(
             &dir,
             std::env::temp_dir().join(format!("cpa-trash-optional-{}", std::process::id())),
@@ -2127,7 +2125,7 @@ mod tests {
         let client = home.client();
         fake::set_heartbeat(&client, true);
         let config = overlay(b"port: 0\n", None).unwrap();
-        let rt = Arc::new(cpa_server::testing::runtime(
+        let rt = Arc::new(Runtime::home(
             config.clone(),
             vec![],
             cpa_exec::Executors {
@@ -2271,7 +2269,7 @@ mod tests {
     #[test]
     fn dispatch_sessions_follow_go() {
         let config = overlay(b"port: 0\n", None).unwrap();
-        let rt = Arc::new(cpa_server::testing::runtime(
+        let rt = Arc::new(Runtime::home(
             config,
             vec![],
             cpa_exec::Executors {
@@ -2339,7 +2337,7 @@ mod tests {
     }
 
     fn test_runtime() -> Arc<Runtime> {
-        Arc::new(cpa_server::testing::runtime(
+        Arc::new(Runtime::home(
             overlay(b"port: 0\n", None).unwrap(),
             vec![],
             cpa_exec::Executors {
@@ -3322,7 +3320,7 @@ mod tests {
             },
         )
         .await;
-        let rt = cpa_server::testing::runtime(
+        let rt = Runtime::home(
             overlay(b"port: 0\n", None).unwrap(),
             Vec::new(),
             cpa_exec::Executors {
@@ -5138,7 +5136,7 @@ mod tests {
                 google: Default::default(),
             };
             let config = overlay(b"port: 0\n", None).unwrap();
-            let rt = Arc::new(cpa_server::testing::runtime(config, vec![], executors));
+            let rt = Arc::new(Runtime::home(config, vec![], executors));
             let dispatcher = Dispatcher::new(&rt);
             let client = Client::new(home.config());
             fake::set_heartbeat(&client, true);
@@ -6014,7 +6012,7 @@ mod tests {
         let held = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let host = cpa_plugin::Host::with_loader(Arc::new(HeldLoader(held.clone())));
         let rt = Arc::new(
-            cpa_server::testing::runtime(
+            Runtime::home(
                 overlay(b"port: 0\n", None).unwrap(),
                 vec![],
                 cpa_exec::Executors {

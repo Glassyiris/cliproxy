@@ -35,55 +35,63 @@ class CliproxyRs < Formula
   def post_install
     config_dir = etc/"cliproxy-rs"
     config = config_dir/"config.yaml"
-    return if config.exist?
+    db = config_dir/"cook.db"
+    return if db.exist?
 
     config_dir.mkpath
     config_dir.chmod 0700
     (config_dir/"auth").mkpath
-    keys_file = config_dir/"keys.env"
-    unless keys_file.exist?
-      keys_file.write <<~EOS
-        CLIPROXY_CLIENT_KEY=#{SecureRandom.hex(24)}
-        CLIPROXY_MANAGEMENT_KEY=#{SecureRandom.hex(24)}
+    unless config.exist?
+      keys_file = config_dir/"keys.env"
+      unless keys_file.exist?
+        keys_file.write <<~EOS
+          CLIPROXY_CLIENT_KEY=#{SecureRandom.hex(24)}
+          CLIPROXY_MANAGEMENT_KEY=#{SecureRandom.hex(24)}
+        EOS
+        keys_file.chmod 0600
+      end
+      keys = keys_file.read.lines.reject { |line| line.strip.empty? || line.lstrip.start_with?("#") }
+                      .to_h { |line| line.strip.split("=", 2) }
+      client_key = keys.fetch("CLIPROXY_CLIENT_KEY")
+      management_key = keys.fetch("CLIPROXY_MANAGEMENT_KEY")
+      unless [client_key, management_key].all? { |key| key.match?(/\A[0-9a-f]{48}\z/) }
+        odie "Invalid keys in #{keys_file}; restore the keys or write config.yaml yourself."
+      end
+      config.write <<~EOS
+        server:
+          host: "127.0.0.1"
+          port: 8317
+        access:
+          api-keys:
+            - "#{client_key}"
+        management:
+          allow-remote: false
+          secret-key: "#{management_key}"
+        oauth:
+          auth-dir: "#{config_dir}/auth"
       EOS
-      keys_file.chmod 0600
+      config.chmod 0600
     end
-    keys = keys_file.read.lines.reject { |line| line.strip.empty? || line.lstrip.start_with?("#") }
-                    .to_h { |line| line.strip.split("=", 2) }
-    client_key = keys.fetch("CLIPROXY_CLIENT_KEY")
-    management_key = keys.fetch("CLIPROXY_MANAGEMENT_KEY")
-    unless [client_key, management_key].all? { |key| key.match?(/\A[0-9a-f]{48}\z/) }
-      odie "Invalid keys in #{keys_file}; restore the keys or write config.yaml yourself."
+    unless quiet_system bin/"cliproxy", "--db", db, "config", "import", config
+      odie "Could not import #{config} into #{db}. Keep config.yaml and retry with a current release."
     end
-    config.write <<~EOS
-      server:
-        host: "127.0.0.1"
-        port: 8317
-      access:
-        api-keys:
-          - "#{client_key}"
-      management:
-        allow-remote: false
-        secret-key: "#{management_key}"
-      oauth:
-        auth-dir: "#{config_dir}/auth"
-    EOS
-    config.chmod 0600
   end
 
   def caveats
     <<~EOS
-      Config and sign-in credentials are kept in #{etc}/cliproxy-rs.
-      Client and management keys are saved in #{etc}/cliproxy-rs/keys.env.
+      Configuration and sign-in credentials are stored in #{etc}/cliproxy-rs/cook.db.
+      Original client and management keys are saved in #{etc}/cliproxy-rs/keys.env.
+      config.yaml is retained as the one-time import backup; later edits have no effect.
+      Change settings in the dashboard, or export/edit/import with cliproxy --db #{etc}/cliproxy-rs/cook.db config.
       The default server listens only on 127.0.0.1:8317.
       Start it with brew services start cliproxy-rs, then open:
         http://127.0.0.1:8317/management.html
-      If port 8317 is already in use, change server.port in config.yaml first.
+      If port 8317 is already in use, export the database config, change server.port and import it before starting.
     EOS
   end
 
   service do
-    run [opt_bin/"cliproxy", "--config", etc/"cliproxy-rs/config.yaml"]
+    run [opt_bin/"cliproxy", "--db", etc/"cliproxy-rs/cook.db"]
     keep_alive true
     log_path var/"log/cliproxy-rs.log"
     error_log_path var/"log/cliproxy-rs.log"

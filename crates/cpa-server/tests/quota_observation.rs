@@ -11,7 +11,6 @@ use std::time::{Duration, SystemTime};
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use cpa_core::config::Config;
 use cpa_core::credential::Credential;
 use cpa_exec::Executors;
 use cpa_exec::claude::ClaudeExecutor;
@@ -66,13 +65,12 @@ async fn serve(app: axum::Router) -> String {
     url
 }
 
-fn credential(file: &str, meta: Value, attrs: &[(&str, &str)]) -> Credential {
-    let mut c = Credential::from_file(
-        Path::new("/fake"),
-        &Path::new("/fake").join(file),
-        meta.as_object().unwrap().clone(),
-    )
-    .unwrap();
+fn credential(auth_dir: &Path, file: &str, mut meta: Value, attrs: &[(&str, &str)]) -> Credential {
+    for (key, value) in attrs {
+        meta[*key] = (*value).into();
+    }
+    std::fs::write(auth_dir.join(file), meta.to_string()).unwrap();
+    let mut c = Credential::from_file(auth_dir, &auth_dir.join(file), meta.as_object().unwrap().clone()).unwrap();
     for (k, v) in attrs {
         c.attributes.insert((*k).into(), (*v).into());
     }
@@ -89,18 +87,26 @@ struct Proxy {
 async fn proxy(name: &str) -> Proxy {
     let seen: Seen = Arc::default();
     let upstream_url = serve(axum::Router::new().fallback(upstream).with_state(seen.clone())).await;
+    let dir = std::env::temp_dir().join(format!("cpa-quota-{name}-{}", std::process::id()));
+    let auth_dir = dir.join("auth");
+    std::fs::create_dir_all(&auth_dir).unwrap();
     let credentials = vec![
         credential(
+            &auth_dir,
             "claude-q.json",
             json!({"type":"claude"}),
             &[("api_key", "sk-fake-claude"), ("base_url", &upstream_url)],
         ),
-        credential("kimi-k.json", json!({"type":"kimi"}), &[]),
-        credential("devin-d.json", json!({"type":"devin"}), &[]),
+        credential(&auth_dir, "kimi-k.json", json!({"type":"kimi"}), &[]),
+        credential(&auth_dir, "devin-d.json", json!({"type":"devin"}), &[]),
     ];
-    let yaml = "api-keys:\n  - client-key\n";
+    let yaml = format!(
+        "access:\n  api-keys: [client-key]\noauth:\n  auth-dir: {}\n",
+        dir.join("auth").display()
+    );
+    let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&yaml));
     let rt = Arc::new(cpa_server::testing::runtime(
-        Config::parse(yaml).unwrap(),
+        store.load().unwrap().config,
         credentials,
         Executors {
             claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
@@ -110,15 +116,11 @@ async fn proxy(name: &str) -> Proxy {
             google: Default::default(),
         },
     ));
-    let dir = std::env::temp_dir().join(format!("cpa-quota-{name}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("config.yaml");
-    std::fs::write(&path, yaml).unwrap();
     let options = Options {
         management_password: Some(PASSWORD.into()),
         ..Default::default()
     };
-    let management = Management::with_options(rt.clone(), path, options);
+    let management = Management::with_options(rt.clone(), store, options);
     let app = cpa_server::app(rt.clone(), cpa_server::management::router(management));
     Proxy {
         url: serve(app).await,
@@ -212,19 +214,6 @@ async fn results_observe_the_credential_and_their_model_and_cooldowns_never_touc
     assert_eq!(cooled["model_quotas"], entry["model_quotas"]);
 }
 
-/// A cooldown backend holding records to restore (Go `CooldownStateStore`).
-struct Restore(Vec<Record>);
-
-impl Backend for Restore {
-    fn load(&self) -> Result<Vec<Record>, String> {
-        Ok(self.0.clone())
-    }
-
-    fn save(&self, _: Vec<Record>, _: SystemTime) -> Result<(), String> {
-        Ok(())
-    }
-}
-
 /// TestRestoreCooldownRecordDoesNotOverwriteNewerObservation: restoring a persisted
 /// cooldown, even one carrying an older observation time, cools the credential and
 /// leaves its live snapshot alone.
@@ -250,7 +239,13 @@ async fn restoring_a_cooldown_keeps_the_live_observation() {
         updated_at: Some(SystemTime::now()),
         ..Default::default()
     };
-    p.rt.set_cooldown_backend(Arc::new(Restore(vec![record])));
+    p.rt.shutdown_codex_refreshes().await;
+    Backend::save(
+        p.rt.store().credential_backend().as_ref(),
+        vec![record],
+        SystemTime::now(),
+    )
+    .unwrap();
     p.rt.store().configure_cooldown_store(Some(p._dir.join("cooldowns")));
     assert_ne!(p.message(OPUS, "hi").await, 200, "the cooldown was restored");
     assert_eq!(p.upstream_calls(OPUS), 1);

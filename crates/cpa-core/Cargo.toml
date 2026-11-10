@@ -28,6 +28,4 @@ serde_yaml_ng.workspace = true
 unsafe-libyaml = "0.2.11"
 tracing.workspace = true
 base64 = "0.22"
-bcrypt = "0.19"
 sha2 = "0.10"
-yaml-edit = "0.3.2"

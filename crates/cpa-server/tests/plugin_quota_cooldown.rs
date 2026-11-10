@@ -1,47 +1,17 @@
 //! A plugin quota reset clears the credential's routing cooldowns and persists the
-//! cleared state to the configured cooldown backend, as Go's `Manager.ResetQuota` does
-//! through `persistCooldownStates` (sdk/cliproxy/auth/conductor_cooldown.go). Without
-//! that save a restart would restore the cooldown from the backend.
+//! cleared state to SQLite, so a restart cannot restore the old cooldown.
 
 #![cfg(unix)]
 
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use cpa_core::config::Config;
 use cpa_exec::Executors;
 use cpa_exec::claude::ClaudeExecutor;
 use cpa_server::cooldown_store::{Backend, Quota, Record};
 use cpa_server::management::{self, Management, Options};
-
-/// Loads one cooldown for `claude.json` and keeps every save.
-struct FakeBackend {
-    saves: Mutex<Vec<Vec<Record>>>,
-}
-
-impl Backend for FakeBackend {
-    fn load(&self) -> Result<Vec<Record>, String> {
-        Ok(vec![Record {
-            provider: "claude".into(),
-            auth_id: "claude.json".into(),
-            status: "error".into(),
-            next_retry_after: Some(SystemTime::now() + Duration::from_secs(3600)),
-            reason: "quota".into(),
-            quota: Quota {
-                exceeded: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        }])
-    }
-
-    fn save(&self, records: Vec<Record>, _now: SystemTime) -> Result<(), String> {
-        self.saves.lock().unwrap().push(records);
-        Ok(())
-    }
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plugin_quota_reset_persists_cleared_cooldowns_to_the_backend() {
@@ -68,23 +38,16 @@ async fn plugin_quota_reset_persists_cleared_cooldowns_to_the_backend() {
     )
     .unwrap();
     let hash = bcrypt::hash("fake-secret", 4).unwrap();
-    let config_path = work.join("config.yaml");
-    std::fs::write(
-        &config_path,
-        format!(
-            "config-version: 8\nauth-dir: {auths}\nrouting:\n  cooldown:\n    save-cooldown-status: true\n\
-             management:\n  secret-key: {hash}\nplugins:\n  enabled: true\n  dir: {plugins}\n  configs:\n    \
-             recorder-a:\n      enabled: true\n      record: {records}\n      label: a\n      caps: quota_provider\n",
-            auths = auths.display(),
-            plugins = plugins.display(),
-            records = records.display(),
-        ),
-    )
-    .unwrap();
-    let config = Config::load(&config_path).unwrap();
+    let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&format!(
+        "config-version: 8\noauth:\n  auth-dir: {auths}\nrouting:\n  cooldown:\n    save-cooldown-status: true\n\
+         management:\n  secret-key: {hash}\nplugins:\n  enabled: true\n  dir: {plugins}\n  configs:\n    \
+         recorder-a:\n      enabled: true\n      record: {records}\n      label: a\n      caps: quota_provider\n",
+        auths = auths.display(),
+        plugins = plugins.display(),
+        records = records.display(),
+    )));
+    let config = store.load().unwrap().config;
     let credentials = cpa_core::config::credentials::load(&config);
-    let credential = credentials.iter().find(|c| c.id == "claude.json").unwrap().clone();
-    let index = cpa_core::config::credentials::auth_index(&credential);
     let rt = Arc::new(cpa_server::testing::runtime(
         config,
         credentials,
@@ -96,17 +59,34 @@ async fn plugin_quota_reset_persists_cleared_cooldowns_to_the_backend() {
             google: Default::default(),
         },
     ));
-    let backend = Arc::new(FakeBackend {
-        saves: Mutex::default(),
-    });
+    let credential = rt.store().get("claude.json").unwrap();
+    let index = cpa_core::config::credentials::auth_index(&credential);
+    rt.shutdown_codex_refreshes().await;
+    let backend = rt.store().credential_backend();
+    Backend::save(
+        backend.as_ref(),
+        vec![Record {
+            provider: "claude".into(),
+            auth_id: "claude.json".into(),
+            status: "error".into(),
+            next_retry_after: Some(SystemTime::now() + Duration::from_secs(3600)),
+            reason: "quota".into(),
+            quota: Quota {
+                exceeded: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }],
+        SystemTime::now(),
+    )
+    .unwrap();
     rt.set_cooldown_backend(backend.clone());
     assert!(
         !rt.store().cooldowns("claude.json").is_empty(),
         "the backend's cooldown was restored"
     );
-    let saves_before = backend.saves.lock().unwrap().len();
 
-    let state = Management::with_options(rt.clone(), config_path, Options::default());
+    let state = Management::with_options(rt.clone(), store, Options::default());
     cpa_server::plugins::start(&rt).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -133,14 +113,14 @@ async fn plugin_quota_reset_persists_cleared_cooldowns_to_the_backend() {
         rt.store().cooldowns("claude.json").is_empty(),
         "the reset cleared the cooldown"
     );
-    {
-        let saves = backend.saves.lock().unwrap();
-        assert!(saves.len() > saves_before, "the cleared state was saved to the backend");
-        assert!(
-            saves.last().unwrap().iter().all(|r| r.auth_id != "claude.json"),
-            "the last save no longer holds the credential's cooldown"
-        );
-    }
+    rt.shutdown_codex_refreshes().await;
+    assert!(
+        Backend::load(backend.as_ref())
+            .unwrap()
+            .iter()
+            .all(|r| r.auth_id != "claude.json"),
+        "SQLite no longer holds the credential's cooldown"
+    );
     rt.plugins().shutdown_all(None).await;
     let _ = std::fs::remove_dir_all(&work);
 }

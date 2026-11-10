@@ -203,7 +203,7 @@ async fn login_matches_go_manager_and_file_store() {
         if let Some(existing) = case["existing"].as_str() {
             std::fs::write(dir.join(case["existing_name"].as_str().unwrap()), existing).unwrap();
         }
-        let result = login_with(mock.auth(), &dir, true).await;
+        let result = login_with(mock.auth(), &dir, true, None).await;
         let want_requests: Vec<String> = case["requests"]
             .as_array()
             .unwrap()

@@ -7,9 +7,6 @@ import { strategies } from "../../lib/routing.ts";
 export const groups = ["routing", "access", "network", "requests", "logging", "advanced"] as const;
 export type Group = (typeof groups)[number];
 
-/** `?key=` that opens the whole file in Advanced; any other value is a config key path. */
-export const YAML_KEY = "config.yaml";
-
 type Unit = "seconds" | "megabytes" | "bytes";
 
 type Base = {
@@ -33,8 +30,8 @@ export type Setting = Base &
 const DURATION = /^(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+$/;
 
 /**
- * Every setting with a control, with the value the server uses when the file does not set it
- * (docs/CONFIGURATION.md). The rest of the file is edited as YAML under Advanced.
+ * Every setting with a control, with the value the server uses when it is absent
+ * (docs/CONFIGURATION.md). Other sections are edited as JSON under Advanced.
  */
 export const settings: readonly Setting[] = [
   {
@@ -155,7 +152,7 @@ export const settingId = (setting: Setting) =>
 /** A draft holds only the settings the operator changed, by path. */
 export type Draft = Readonly<Record<string, unknown>>;
 
-/** The value a control shows: the draft's, else the file's, else the server default. */
+/** The value a control shows: the draft's, else the stored value, else the server default. */
 export function shown(config: Config, setting: Setting, draft: Draft): unknown {
   if (Object.hasOwn(draft, setting.path)) return draft[setting.path];
   const stored = storedValue(config, setting.path);
@@ -170,7 +167,7 @@ export function isValid(setting: Setting, value: unknown): boolean {
 }
 
 /**
- * The settings whose drafted value differs from what the file holds; drafting a value back to
+ * The settings whose drafted value differs from the stored value; drafting a value back to
  * what is saved is no change. An unset key counts as its default, so choosing the default writes
  * nothing.
  */

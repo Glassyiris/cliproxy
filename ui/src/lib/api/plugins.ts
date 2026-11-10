@@ -1,4 +1,11 @@
 import { request } from "./client.ts";
+import {
+  ConfigChangedError,
+  readResource,
+  replaceResource,
+  revealResource,
+  type ConfigResource,
+} from "./config.ts";
 import { routes } from "./routes.ts";
 
 type ConfigField = { name: string; type: string; enum_values: string[]; description: string };
@@ -33,6 +40,25 @@ export type PluginList = { plugins_enabled: boolean; plugins_dir: string; plugin
 
 export const listPlugins = (signal?: AbortSignal) =>
   request<PluginList>(routes.listPlugins, { signal });
+
+/** Lossless YAML metadata belongs in exports, never in an editable replacement. */
+function editablePluginConfig(spec: unknown) {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return spec;
+  return Object.fromEntries(Object.entries(spec).filter(([field]) => field !== "@raw-yaml"));
+}
+
+/** Explicit reveal binds the editable projection to one checked resource revision. */
+export async function revealPluginConfig(id: string) {
+  const resource = await readResource("plugin", id);
+  const exported = await revealResource("plugin", id);
+  const current = await readResource("plugin", id);
+  if (resource.rev !== current.rev || exported.spec === "$secret")
+    throw new ConfigChangedError(`plugins/configs/${id}`);
+  return { ...resource, spec: editablePluginConfig(exported.spec) };
+}
+
+export const replacePluginConfig = (resource: ConfigResource, spec: unknown) =>
+  replaceResource(resource, editablePluginConfig(spec));
 
 export const deletePlugin = (id: string) =>
   request<{

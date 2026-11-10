@@ -9,7 +9,7 @@ const { onNotice } = await import("../lib/notify.ts");
 const { t } = await import("../lib/i18n.ts");
 const { createAction, failureNotice } = await import("./useAction.ts");
 
-const route = { method: "PUT", path: "/config/{*path}" } as const;
+const route = { method: "POST", path: "/admin/v1/apply" } as const;
 
 function recorder() {
   const seen: string[] = [];

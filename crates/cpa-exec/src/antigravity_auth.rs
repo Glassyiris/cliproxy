@@ -921,7 +921,12 @@ async fn respond(
 
 /// `-antigravity-login`: the browser flow, then `Manager.Login`'s save. Returns the
 /// credential path and the account label.
-pub async fn login(auth_dir: &Path, cfg: &Config, options: &LoginOptions) -> Result<(PathBuf, String), String> {
+pub async fn login(
+    auth_dir: &Path,
+    cfg: &Config,
+    options: &LoginOptions,
+    save: Option<crate::login_store::LoginSave>,
+) -> Result<(PathBuf, String), String> {
     let port = if options.callback_port == 0 {
         DEFAULT_CALLBACK_PORT
     } else {
@@ -977,7 +982,6 @@ pub async fn login(auth_dir: &Path, cfg: &Config, options: &LoginOptions) -> Res
             .map_err(|e| e.message)?;
         if let Some(project) = metadata.get("project_id").and_then(Value::as_str) {
             tracing::info!("antigravity: obtained project ID {}", hide(project));
-            println!("Antigravity authentication successful");
             println!("Using GCP project: {}", hide(project));
         }
         let label = metadata
@@ -985,7 +989,9 @@ pub async fn login(auth_dir: &Path, cfg: &Config, options: &LoginOptions) -> Res
             .and_then(Value::as_str)
             .unwrap_or("antigravity")
             .to_owned();
-        let path = write_login(auth_dir, &file_name, &metadata)?;
+        let path = auth_dir.join(&file_name);
+        let path =
+            crate::login_store::save_login(save.as_ref(), &[path], || write_login(auth_dir, &file_name, &metadata))?;
         Ok((path, label))
     }
     .await;

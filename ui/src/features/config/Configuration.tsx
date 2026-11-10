@@ -25,7 +25,7 @@ import { useAction } from "../../app/useAction.ts";
 import { useHashParams, useHashRoute, useUnsavedChanges } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
 import { hinted } from "../../i18n/config.ts";
-import { replaceConfigValue, type Config } from "../../lib/api/config.ts";
+import { replaceConfigValues, type Config } from "../../lib/api/config.ts";
 import { absent } from "../../lib/configPath.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
@@ -125,15 +125,21 @@ function GroupRows({
   );
 }
 
-/** Write each change in turn, each compared with the file first; the first refusal stops. */
+/** Apply all pending changes atomically against their original stored values. */
 function useSaveChanges(onSaved: () => void) {
   const action = useAction();
   const queryClient = useQueryClient();
   const save = async (pending: readonly Change[]) => {
     const ok = await action.run(async () => {
       try {
-        for (const { setting, before, after } of pending)
-          await replaceConfigValue(setting.path, before, after, absent);
+        await replaceConfigValues(
+          pending.map(({ setting, before, after }) => ({
+            path: setting.path,
+            before,
+            next: after,
+            unset: absent,
+          })),
+        );
       } finally {
         await queryClient.invalidateQueries({ queryKey: serverKeys.config });
       }
@@ -170,8 +176,8 @@ function useDraft(config: Config | undefined) {
 }
 
 /**
- * The open group, `?section=` in the hash; the first by default. An old `#config/<section>` or
- * `#config/config.yaml` link lands on Advanced with that section's editor open (`?key=`).
+ * The open group, `?section=` in the hash; the first by default. An old `#config/<section>`
+ * link lands on Advanced with that section's editor open (`?key=`).
  */
 function useGroup() {
   const [params, setParams] = useHashParams();

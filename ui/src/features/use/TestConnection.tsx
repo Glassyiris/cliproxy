@@ -7,6 +7,7 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { icons } from "../../components/icons.ts";
 import { useKeyTest, type KeyTest } from "../../app/useKeyTest.ts";
 import { Identifier } from "../../components/Identifier.tsx";
+import { isUsableSecret } from "../../lib/api/config.ts";
 import { mask } from "../../lib/clientKeys.ts";
 import { flag } from "../../lib/firstRun.ts";
 import { t } from "../../lib/i18n.ts";
@@ -45,7 +46,7 @@ function Result({ result }: { result: KeyTest }) {
 export function TestConnection({ base, clientKey }: { base: string; clientKey: string }) {
   const { result, test } = useKeyTest();
   useEffect(() => {
-    void test(clientKey);
+    if (isUsableSecret(clientKey)) void test(clientKey);
   }, [clientKey, test]);
   // Overview's first run counts its test step done once a test here has served models.
   useEffect(() => {
@@ -69,7 +70,7 @@ export function TestConnection({ base, clientKey }: { base: string; clientKey: s
           variant="secondary"
           icon={<Icon icon={icons.test} />}
           isLoading={result.status === "testing"}
-          onClick={() => void test(clientKey)}
+          onClick={() => isUsableSecret(clientKey) && void test(clientKey)}
         />
       </HStack>
     </VStack>

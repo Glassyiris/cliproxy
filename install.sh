@@ -4,11 +4,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/prep-cook/cook-router/master/install.sh | sh
 #
 # The first run downloads the release for this machine, checks it against the release's
-# SHA256SUMS and installs ~/.local/bin/cook-router. It writes ~/.cook-router/config.yaml with
-# a free port (8317, or the next free one) and new keys, which it saves in
-# ~/.cook-router/keys.env (mode 600) and never prints. Then it starts the server in the
-# background and checks that it answers. Running it again upgrades the binary and
-# restarts the server; an existing config.yaml or keys.env is never changed.
+# SHA256SUMS and installs ~/.local/bin/cook-router. It imports a private config.yaml
+# into cook.db once, with a free port (8317, or the next free one) and new keys in
+# keys.env (mode 600), which it never prints. Later runs use the database, preserving
+# config.yaml as an import backup and keys.env as the original key record.
 #
 # An install from before the rename to cook-router keeps working: without ~/.cook-router, an
 # existing ~/.cliproxy-rs is used as it is, and a cliproxy service or background server
@@ -26,6 +25,7 @@
 #   COOK_ROUTER_NO_OPEN=1    never open a browser
 #   COOK_ROUTER_RELEASES     release page base URL, for mirrors and tests
 #                        (default: https://github.com/prep-cook/cook-router/releases)
+#   COOK_DB                  database path (default: <selected home>/cook.db)
 set -eu
 
 fail() {
@@ -47,6 +47,8 @@ main() {
   fi
   bin="$dir/cook-router"
   config="$home/config.yaml" keys="$home/keys.env" log="$home/cook-router.log" pidfile="$home/cook-router.pid"
+  db="${COOK_DB:-$home/cook.db}"
+  case "$db" in /*) ;; *) db="$PWD/$db" ;; esac
   # The server and service an install from before the rename started.
   old_pidfile="$home/cliproxy.pid"
   label=io.github.prep-cook.cook-router old_label=io.github.vayungodara.cliproxy-rs
@@ -59,10 +61,10 @@ main() {
     old_unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/cliproxy.service"
   fi
 
-  setup=1 service='' check='' requested_service=''
+  setup=1 service='' check=''
   for arg in "$@"; do
     case "$arg" in
-      --service) service=1 requested_service=1 ;;
+      --service) service=1 ;;
       --binary-only) setup= ;;
       --check) check=1 ;;
       *) fail "unknown option $arg; the options are --service, --binary-only and --check" ;;
@@ -98,23 +100,6 @@ main() {
     printf 'Installed: %s; available: cook-router %s\n' "${installed:-not installed}" "${tag#v}"
   fi
   [ -z "$check" ] || return 0
-  # A current file is not enough after --binary-only or an interrupted upgrade.
-  if [ -n "$current" ]; then
-    [ -n "$setup" ] || return 0
-    if [ -z "$requested_service" ] && [ -f "$config" ] && [ ! -f "$old_unit" ]; then
-      # -nt is supported by both Linux /bin/sh and macOS /bin/sh.
-      # shellcheck disable=SC3013
-      if [ -z "$service" ]; then
-        if managed_pid && pid_running "$pid" && [ ! "$bin" -nt "$pidfile" ]; then return 0; fi
-      elif [ ! "$bin" -nt "$unit" ]; then
-        if [ "$os" = Darwin ]; then
-          if launchctl print "gui/$(id -u)/$label" 2>/dev/null | grep -q 'state = running'; then return 0; fi
-        elif systemctl --user is-active --quiet cook-router.service; then
-          return 0
-        fi
-      fi
-    fi
-  fi
   if [ -n "$setup" ] && [ -n "$service" ] && [ "$os" != Darwin ]; then
     systemctl --user show-environment >/dev/null 2>&1 ||
       fail "systemd user services are not available here; run this without --service"
@@ -152,9 +137,12 @@ main() {
     return 0
   fi
 
+  candidate="$bin"
+  [ -z "$staged" ] || candidate="$dir/.cook-router.new"
+  "$candidate" --help 2>/dev/null | grep -q -- '--db' || fail "this release cannot use cook.db; install a newer release (unset COOK_ROUTER_VERSION)"
   umask 077
   mkdir -p "$home/auth"
-  if [ ! -f "$config" ]; then
+  if [ ! -f "$db" ] && [ ! -f "$config" ]; then
     [ ! -f "$keys" ] || fail "$keys exists but $config does not; restore config.yaml, or move keys.env away to make new keys"
     port=8317
     until port_free "$port"; do
@@ -187,14 +175,18 @@ routing:
 EOF
     printf 'Wrote %s, with new keys in %s\n' "$config" "$keys"
   fi
-  read_probe
+  if [ ! -f "$db" ]; then
+    "$candidate" --db "$db" config import "$config" >>"$log" 2>&1 || fail "could not import $config into $db; see $log; keep config.yaml and retry with a current release"
+    printf 'Imported %s into %s; YAML is now a backup.\n' "$config" "$db"
+  fi
+  read_probe "$candidate" || fail "could not read committed listener settings from $db; see $log"
 
   start_server() {
     stop_pidfile || return 1
     stop_pidfile "$old_pidfile" || return 1
     stop_old_service
     if [ -z "$service" ]; then
-      (cd "$home" && exec nohup "$bin" --config "$config" </dev/null >>"$log" 2>&1) &
+      (cd "$home" && exec nohup "$bin" --db "$db" </dev/null >>"$log" 2>&1) &
       echo $! >"$pidfile" || return 1
       how="kill \$(cat '$pidfile')"
     elif [ "$os" = Darwin ]; then
@@ -205,7 +197,7 @@ EOF
 <plist version="1.0">
 <dict>
   <key>Label</key><string>$label</string>
-  <key>ProgramArguments</key><array><string>$bin</string><string>--config</string><string>$config</string></array>
+  <key>ProgramArguments</key><array><string>$bin</string><string>--db</string><string>$db</string></array>
   <key>WorkingDirectory</key><string>$home</string>
   <key>StandardOutPath</key><string>$log</string>
   <key>StandardErrorPath</key><string>$log</string>
@@ -216,10 +208,9 @@ EOF
 EOF
       domain="gui/$(id -u)"
       if launchctl print "$domain/$label" >/dev/null 2>&1; then
-        launchctl kickstart -k "$domain/$label" || return 1
-      else
-        launchctl bootstrap "$domain" "$unit" || return 1
+        launchctl bootout "$domain/$label" || return 1
       fi
+      launchctl bootstrap "$domain" "$unit" || return 1
       how="launchctl bootout $domain/$label (and delete $unit to stop starting it at login)"
     else
       mkdir -p "$(dirname "$unit")" || return 1
@@ -228,7 +219,7 @@ EOF
 Description=cook-router
 
 [Service]
-ExecStart="$bin" --config "$config"
+ExecStart="$bin" --db "$db"
 WorkingDirectory=$home
 StandardOutput=append:$log
 StandardError=inherit
@@ -254,7 +245,7 @@ EOF
   printf '\ncook-router is running at %s\n' "$base"
   printf '  Dashboard  %s\n' "$url"
   [ ! -f "$keys" ] || printf '  Keys       %s (show them with: cat %s)\n' "$keys" "$keys"
-  printf '  Config     %s\n  Log        %s\n  Stop       %s\n' "$config" "$log" "$how"
+  printf '  Database   %s\n  Log        %s\n  Stop       %s\n' "$db" "$log" "$how"
   [ -n "$service" ] || printf 'It runs until this computer restarts. Run this again with --service to start it at login.\n'
 
   opened=
@@ -306,13 +297,13 @@ old_binary_note() {
   [ ! -e "$dir/cliproxy" ] || printf '%s from before the rename is no longer used; you can delete it.\n' "$dir/cliproxy"
 }
 
-# Restore the same inode the old server used, then restart using its unchanged config.
+# Restore the previous binary only when it can keep using the authoritative DB.
 upgrade_failed() {
   if [ -n "$backup" ]; then
-    if mv -f "$dir/cook-router.prev" "$bin" && start_server && wait_healthy; then
+    if mv -f "$dir/cook-router.prev" "$bin" && "$bin" --help 2>/dev/null | grep -q -- '--db' && read_probe "$bin" && start_server && wait_healthy; then
       printf 'Upgrade failed; restored the previous binary and verified it is healthy.\n' >&2
     else
-      printf 'Upgrade failed; rollback failed too. The server may not be running; see %s.\n' "$log" >&2
+      printf 'Upgrade failed; the previous binary could not restart with %s. Install a current release; do not start from the stale config.yaml backup. See %s.\n' "$db" "$log" >&2
     fi
   fi
   fail "$1"
@@ -330,31 +321,16 @@ swap_binary() {
   printf 'Installed %s at %s\n' "$("$bin" --version 2>/dev/null | tail -n 1)" "$bin"
 }
 
-# ponytail: block-style YAML scalar keys, like the existing port reader; use a
-# binary config-inspection command if flow-style mappings need installer support.
+# The binary reads committed settings and emits only listener fields, never secrets.
 read_probe() {
-  settings=$(awk '
-    /^[ ]*[A-Za-z0-9_-]+[ ]*:/ {
-      indent = match($0, /[^ ]/) - 1
-      while (depth && levels[depth] >= indent) depth--
-      line = substr($0, indent + 1); key = line; sub(/[ ]*:.*$/, "", key)
-      value = line; sub(/^[^:]*:[ ]*/, "", value); sub(/(^|[ ]+)#.*$/, "", value)
-      gsub(/^[ ]+|[ ]+$/, "", value); gsub(/^[\047\042]|[\047\042]$/, "", value)
-      path = ""; for (j = 1; j <= depth; j++) path = path names[j] "."
-      values[path key] = value
-      if (value == "") { depth++; levels[depth] = indent; names[depth] = key }
-    }
-    END {
-      print ("server.port" in values ? values["server.port"] : values["port"])
-      print ("server.host" in values ? values["server.host"] : values["host"])
-      print ("server.tls.enable" in values ? values["server.tls.enable"] : values["tls.enable"])
-    }' "$config")
-  port=$(printf '%s\n' "$settings" | sed -n '1p')
-  port=${port:-8317}
-  host=$(printf '%s\n' "$settings" | sed -n '2p')
+  settings=$("${1:-$bin}" --db "$db" config listener 2>>"$log") || return 1
+  host=$(printf '%s\n' "$settings" | sed -n '1p')
+  port=$(printf '%s\n' "$settings" | sed -n '2p')
+  case "$port" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$port" -gt 0 ] && [ "$port" -le 65535 ] || return 1
   case "$host" in '' | 0.0.0.0) host=127.0.0.1 ;; :: | '[::]') host=::1 ;; esac
   scheme=http
-  case "$(printf '%s\n' "$settings" | sed -n '3p' | tr '[:upper:]' '[:lower:]')" in true | y | yes | on) scheme=https ;; esac
+  case "$(printf '%s\n' "$settings" | sed -n '3p')" in true) scheme=https ;; esac
   case "$host" in *:*)
     host="[${host#[}]"
     host="${host%]}]"

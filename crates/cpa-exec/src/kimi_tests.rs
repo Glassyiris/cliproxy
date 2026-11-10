@@ -376,7 +376,7 @@ async fn login_writes_go_identical_credential_file() {
         let flow = DeviceFlow::new(wreq::Client::new(), domain, "")
             .with_oauth_host(&mock.url)
             .with_min_interval(std::time::Duration::from_millis(1));
-        let path = kimi_auth::login_with(flow, provider, &dir, true).await.unwrap();
+        let path = kimi_auth::login_with(flow, provider, &dir, true, None).await.unwrap();
         let captured = mock.captured();
         let go: Vec<Captured> = fx["upstream"]
             .as_array()

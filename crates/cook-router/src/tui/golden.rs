@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 
 use super::app::{self, App};
 use super::client::{Client, Object};
-use super::{Msg, auth, config, dashboard, i18n, keys, logs, oauth};
+use super::{Msg, auth, dashboard, i18n, keys, logs, oauth};
 
 fn fixture() -> Value {
     serde_json::from_str(include_str!("../../tests/fixtures/tui_go.json")).expect("fixture JSON")
@@ -59,9 +59,13 @@ fn render(case: &Map<String, Value>) -> Vec<String> {
             tab.fit_cards = false;
             tab.set_size(width, 1000);
             tab.data(dashboard::Data {
-                config: input["config"].as_object().cloned(),
+                config: Some(serde_json::json!({
+                    "observability": {"logs": {"debug": input["config"]["debug"], "logging-to-file": input["config"]["logging-to-file"]}, "usage": {"usage-statistics-enabled": input["config"]["usage-statistics-enabled"]}},
+                    "routing": {"strategy": input["config"]["routing"]["strategy"], "retry": {"request-retry": input["config"]["request-retry"]}},
+                    "requests": {"proxy-url": input["config"]["proxy-url"]}
+                }).as_object().unwrap().clone()),
                 auth_files: objects(&input["files"]),
-                api_keys: strings(&input["keys"]),
+                api_keys: strings(&input["keys"]).into_iter().map(|id| super::client::ClientKey { id, rev: 1 }).collect(),
                 // What cook-router answers for an unset strategy; a configured one is
                 // shown as configured, as in Go.
                 strategy: Some("soonest-reset".into()),
@@ -75,26 +79,6 @@ fn render(case: &Map<String, Value>) -> Vec<String> {
                     strategy: None,
                     err: Some(e.into()),
                 });
-            }
-            tab.vp.text()
-        }
-        "config" => {
-            let mut tab = config::ConfigTab::new(client);
-            tab.set_size(width, 1000);
-            tab.data(Ok(input["config"].as_object().cloned().unwrap_or_default()));
-            for _ in 0..presses(input.get("down")) {
-                tab.key("down");
-            }
-            if let Some(e) = input.get("update_error").and_then(Value::as_str) {
-                tab.updated(Some(e.into()));
-            }
-            if has("update_ok") {
-                tab.updated(None);
-            }
-            if let Some(v) = input.get("edit").and_then(Value::as_str) {
-                tab.key("enter");
-                tab.input.set_value(v);
-                tab.key("end");
             }
             tab.vp.text()
         }
@@ -124,10 +108,13 @@ fn render(case: &Map<String, Value>) -> Vec<String> {
             tab.set_size(width, 1000);
             let providers = keys::PROVIDERS
                 .iter()
-                .map(|(_, route)| objects(&input.get(*route).cloned().unwrap_or_default()))
+                .map(|(_, family)| objects(&input.get(&format!("{family}-api-key")).cloned().unwrap_or_default()))
                 .collect();
             tab.data(Ok(keys::Data {
-                api_keys: strings(&input["keys"]),
+                api_keys: strings(&input["keys"])
+                    .into_iter()
+                    .map(|id| super::client::ClientKey { id, rev: 1 })
+                    .collect(),
                 providers,
                 openai: objects(&input.get("openai-compatibility").cloned().unwrap_or_default()),
             }));
@@ -220,6 +207,10 @@ fn tabs_render_like_go() {
     for case in cases {
         let case = case.as_object().unwrap();
         let name = case["name"].as_str().unwrap();
+        // Flat-config Go rendering pinned the removed v0 API, not the effective tree.
+        if case["tab"] == "config" {
+            continue;
+        }
         i18n::set_chinese(case["locale"] == "zh");
         let got = std::panic::catch_unwind(|| render(case));
         i18n::set_chinese(false);
@@ -231,6 +222,32 @@ fn tabs_render_like_go() {
             }
         };
         let mut want = strings(&case["lines"]);
+        if case["tab"] == "keys" {
+            for line in &mut want {
+                *line = line
+                    .replace("[c] Copy", "[c] Reveal & Copy")
+                    .replace("[c] 复制", "[c] 显示并复制");
+            }
+            // Resource reads no longer disclose any prefix or suffix of key material.
+            let mut raw_keys = strings(&case["input"]["keys"]);
+            for (_, family) in keys::PROVIDERS {
+                for entry in objects(&case["input"][format!("{family}-api-key")]) {
+                    if let Some(key) = entry.get("api-key").and_then(Value::as_str) {
+                        raw_keys.push(key.to_owned());
+                    }
+                }
+            }
+            // Longest mask first, through a star-free placeholder: a short key's mask
+            // (`*****`) must not match inside a longer mask or an earlier replacement.
+            let mut masks: Vec<String> = raw_keys.iter().map(|k| super::style::mask_key(k)).collect();
+            masks.sort_by_key(|m| std::cmp::Reverse(m.len()));
+            for line in &mut want {
+                for mask in &masks {
+                    *line = line.replace(mask, "\u{0}");
+                }
+                *line = line.replace('\u{0}', "********");
+            }
+        }
         if case["tab"] == "bars" && want[0].contains('\n') {
             // Go's lipgloss wraps a tab bar wider than the screen; this port cuts it.
             want[0] = got[0].clone();

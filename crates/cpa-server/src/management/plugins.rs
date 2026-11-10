@@ -9,9 +9,8 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Path as UrlPath, Request, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use cpa_core::config::{Config, ConfigDocument, archive_comments};
+use cpa_core::config::{Config, ConfigDocument};
 use cpa_plugin::config::{self as pcfg, ItemConfig};
-use cpa_plugin::gojson::{self as pjson, Node};
 use serde_json::{Value, json};
 use serde_yaml_ng::{Mapping, Value as Yaml};
 use tower::ServiceExt as _;
@@ -354,8 +353,6 @@ pub(crate) async fn list(State(state): State<Arc<Management>>) -> Response {
     )
 }
 
-// ---- GET /plugins/:id/config ---------------------------------------------------------
-
 /// Go `pluginConfigNode`: the raw subtree when it is a mapping, else one built from the
 /// host-owned fields. yaml.v3 skips `UnmarshalYAML` for a null entry, which therefore
 /// has no `enabled` either.
@@ -373,44 +370,6 @@ fn config_node(item: &ItemConfig, raw: &Yaml) -> Mapping {
     node
 }
 
-/// Go `yamlNodeToJSONValue` (gin then sorts the keys).
-fn yaml_to_json(v: &Yaml) -> Value {
-    match v {
-        Yaml::Null => Value::Null,
-        Yaml::Bool(b) => (*b).into(),
-        Yaml::Number(n) => serde_json::to_value(n).unwrap_or(Value::Null),
-        Yaml::String(s) => s.clone().into(),
-        Yaml::Sequence(items) => items.iter().map(yaml_to_json).collect(),
-        Yaml::Mapping(m) => Value::Object(m.iter().map(|(k, v)| (pcfg::yaml_string(k), yaml_to_json(v))).collect()),
-        Yaml::Tagged(t) => yaml_to_json(&t.value),
-    }
-}
-
-pub(crate) async fn get_config(State(state): State<Arc<Management>>, UrlPath(raw): UrlPath<String>) -> Response {
-    let id = match plugin_id(&raw) {
-        Ok(id) => id,
-        Err(r) => return *r,
-    };
-    let cfg = state.rt.config();
-    let view = PluginsView::of(&cfg);
-    if let Some((item, raw)) = view.configs.get(&id) {
-        return map_json(StatusCode::OK, &yaml_to_json(&Yaml::Mapping(config_node(item, raw))));
-    }
-    if state.rt.plugins().registered_plugins().iter().any(|p| p.id == id) {
-        return map_json(StatusCode::OK, &json!({}));
-    }
-    let dir = match resolved_dir(&view.dir) {
-        Ok(d) => d,
-        Err(r) => return *r,
-    };
-    // Go `pluginDiscovered` asks without desired versions.
-    match discover(&dir, &BTreeMap::new()) {
-        Ok(files) if files.iter().any(|f| f.id == id) => map_json(StatusCode::OK, &json!({})),
-        Ok(_) => not_found_plugin(),
-        Err(r) => *r,
-    }
-}
-
 // ---- config writes -------------------------------------------------------------------
 
 /// Why a plugin config write failed.
@@ -425,59 +384,60 @@ impl Fail {
     fn into_response(self) -> Response {
         match self {
             Fail::Response(r) => *r,
-            Fail::Save(e) => map_json(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &json!({"error": format!("failed to save config: {e}")}),
-            ),
+            Fail::Save(_) => {
+                tracing::error!(code = "config_save_failed", "plugin config operation failed");
+                map_json(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &json!({"error": "failed to save config"}),
+                )
+            }
         }
     }
 }
 
-/// Reads, edits and saves the config file the way `config_sync` does, then publishes
-/// it. Go's typed saver also writes `plugins.dir` resolved and cleaned (it was resolved
-/// at load), so the edit does the same.
+/// Edits the stored config the way the plugin endpoints change it, then publishes it.
+/// The saved `plugins.dir` is resolved and cleaned, as at load, so the edit does the
+/// same.
 pub(super) fn save(state: &Management, edit: impl FnOnce(&mut ConfigDocument) -> Res<()>) -> Result<(), Fail> {
     let failed = |e: &dyn std::fmt::Display| Fail::Save(e.to_string());
-    let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-    let original = std::fs::read_to_string(&state.path).map_err(|e| failed(&e))?;
-    let mut doc = ConfigDocument::parse(&original).map_err(|e| failed(&e))?;
-    let basis = doc.migrated_text(&original).unwrap_or_else(|| original.clone());
-    let archived = doc.archive_unknown();
-    // Go `NormalizePluginsConfig` gives a nil configs map a value before the edit.
-    for path in [&["plugins"][..], &["plugins", "configs"][..]] {
-        if doc.get(path).is_some_and(Yaml::is_null) {
-            doc.update(path, Yaml::Mapping(Mapping::new()), false)
+    let disk = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+    let done = state.edit_document(&disk, "plugins-api", "", |doc| {
+        // A null `plugins` or `configs` map gets a value before the edit.
+        for path in [&["plugins"][..], &["plugins", "configs"][..]] {
+            if doc.get(path).is_some_and(Yaml::is_null) {
+                doc.update(path, Yaml::Mapping(Mapping::new()), false)
+                    .map_err(|e| failed(&e))?;
+            }
+        }
+        edit(doc).map_err(Fail::Response)?;
+        // A null entry (never unmarshalled) is saved as an empty mapping.
+        let nulls: Vec<String> = match doc.get(&["plugins", "configs"]) {
+            Some(Yaml::Mapping(items)) => items
+                .iter()
+                .filter(|(_, v)| v.is_null())
+                .map(|(k, _)| pcfg::yaml_string(k))
+                .collect(),
+            _ => Vec::new(),
+        };
+        for id in nulls {
+            doc.update(&["plugins", "configs", &id], Yaml::Mapping(Mapping::new()), false)
                 .map_err(|e| failed(&e))?;
         }
-    }
-    edit(&mut doc).map_err(Fail::Response)?;
-    // Go's saver writes each plugin config through `MarshalYAML`: a null entry (never
-    // unmarshalled) becomes an empty mapping.
-    let nulls: Vec<String> = match doc.get(&["plugins", "configs"]) {
-        Some(Yaml::Mapping(items)) => items
-            .iter()
-            .filter(|(_, v)| v.is_null())
-            .map(|(k, _)| pcfg::yaml_string(k))
-            .collect(),
-        _ => Vec::new(),
-    };
-    for id in nulls {
-        doc.update(&["plugins", "configs", &id], Yaml::Mapping(Mapping::new()), false)
-            .map_err(|e| failed(&e))?;
-    }
-    let dir = doc.get(&["plugins", "dir"]).map(pcfg::yaml_string).unwrap_or_default();
-    if let Ok(resolved) = pcfg::resolve_dir(&dir) {
-        let resolved = resolved.to_string_lossy().into_owned();
-        if doc.get(&["plugins", "dir"]).and_then(Yaml::as_str) != Some(resolved.as_str()) {
-            doc.update(&["plugins", "dir"], resolved.into(), false)
-                .map_err(|e| failed(&e))?;
+        let dir = doc.get(&["plugins", "dir"]).map(pcfg::yaml_string).unwrap_or_default();
+        if let Ok(resolved) = pcfg::resolve_dir(&dir) {
+            let resolved = resolved.to_string_lossy().into_owned();
+            if doc.get(&["plugins", "dir"]).and_then(Yaml::as_str) != Some(resolved.as_str()) {
+                doc.update(&["plugins", "dir"], resolved.into(), false)
+                    .map_err(|e| failed(&e))?;
+            }
         }
+        Ok(())
+    });
+    match done {
+        Ok(_) => Ok(()),
+        Err(Ok(fail)) => Err(fail),
+        Err(Err(e)) => Err(Fail::Save(e.to_string())),
     }
-    let text = doc.render_preserving(&basis).map_err(|e| failed(&e))? + &archive_comments(&archived);
-    let cfg = Config::parse(&text).map_err(|e| failed(&e))?;
-    ConfigDocument::write(&state.path, &text).map_err(|e| failed(&e))?;
-    state.publish(cfg, None);
-    Ok(())
 }
 
 /// Runs a [`save`] off the async runtime and answers Go's `{"status":"ok"}`.
@@ -505,67 +465,6 @@ pub(super) fn current_node(doc: &ConfigDocument, id: &str) -> Mapping {
 pub(super) fn set_node(doc: &mut ConfigDocument, id: &str, node: Mapping) -> Res<()> {
     doc.update(&["plugins", "configs", id], Yaml::Mapping(node), false)
         .map_err(|e| Box::new(Fail::Save(e.to_string()).into_response()))
-}
-
-/// Go `readPluginConfigObject`: a JSON object with numbers kept as written, read with
-/// `json.Decoder.Decode` (the first value; anything after it is never read).
-fn config_object(body: &[u8]) -> Res<Vec<(String, Node)>> {
-    let invalid = |message: &str| Err(Box::new(error(StatusCode::BAD_REQUEST, "invalid_body", message)));
-    let kind = match pjson::parse_first(body) {
-        Ok(mut node) => match &mut node {
-            Node::Object(fields) => return Ok(std::mem::take(fields)),
-            Node::Null => return invalid("body must be a JSON object"),
-            Node::Array(_) => "array",
-            Node::String(_) => "string",
-            Node::Number(_) => "number",
-            Node::Bool(_) => "bool",
-        },
-        Err(e) => return invalid(&e.to_string()),
-    };
-    invalid(&format!(
-        "json: cannot unmarshal {kind} into Go value of type map[string]interface {{}}"
-    ))
-}
-
-/// Go `yamlNodeFromJSONValue`: numbers stay integers when `ParseInt` takes them, else
-/// floats; a float out of range is `invalid number`.
-fn json_to_yaml(v: &Node) -> Result<Yaml, String> {
-    Ok(match v {
-        Node::Null => Yaml::Null,
-        Node::Bool(b) => (*b).into(),
-        Node::Number(n) => match n.parse::<i64>() {
-            Ok(i) => i.into(),
-            // Go `json.Number.Float64` is `strconv.ParseFloat`: out of range fails.
-            Err(_) => match cpa_plugin::cli::parse_float(n) {
-                Some(f) => f.into(),
-                None => return Err(format!("invalid number {}", crate::gojson::string(n))),
-            },
-        },
-        Node::String(s) => s.clone().into(),
-        Node::Array(items) => Yaml::Sequence(items.iter().map(json_to_yaml).collect::<Result<_, _>>()?),
-        Node::Object(fields) => Yaml::Mapping(object_to_yaml(fields)?),
-    })
-}
-
-/// Go's `map[string]any` of an object: the last duplicate wins.
-fn collapse(fields: &[(String, Node)]) -> BTreeMap<&str, &Node> {
-    fields.iter().map(|(k, v)| (k.as_str(), v)).collect()
-}
-
-/// Go `yamlNodeFromJSONObject`: keys sorted; an error names its key.
-fn object_to_yaml(fields: &[(String, Node)]) -> Result<Mapping, String> {
-    collapse(fields)
-        .into_iter()
-        .map(|(k, v)| Ok((Yaml::from(k), json_to_yaml(v).map_err(|e| format!("{k}: {e}"))?)))
-        .collect()
-}
-
-fn invalid_body(e: &str) -> Response {
-    error(StatusCode::BAD_REQUEST, "invalid_body", e)
-}
-
-fn invalid_config(e: String) -> Response {
-    error(StatusCode::BAD_REQUEST, "invalid_config", &e)
 }
 
 /// Go `PatchPluginEnabled`.
@@ -602,80 +501,6 @@ pub(crate) async fn patch_enabled(
 /// Go `setYAMLMappingValue`: replace in place, else append.
 pub(super) fn set_key(node: &mut Mapping, key: &str, value: Yaml) {
     node.insert(Yaml::from(key), value);
-}
-
-/// Go `PutPluginConfig`: replaces the subtree.
-pub(crate) async fn put_config(
-    State(state): State<Arc<Management>>,
-    UrlPath(raw): UrlPath<String>,
-    crate::body_limit::FirstJson(body): crate::body_limit::FirstJson,
-) -> Response {
-    let id = match plugin_id(&raw) {
-        Ok(id) => id,
-        Err(r) => return *r,
-    };
-    let fields = match config_object(&body) {
-        Ok(f) => f,
-        Err(r) => return *r,
-    };
-    let node = match object_to_yaml(&fields) {
-        Ok(node) => node,
-        Err(e) => return invalid_body(&e),
-    };
-    if let Err(e) = pcfg::check_json_item(&fields) {
-        return invalid_config(e);
-    }
-    save_and_answer(state, move |doc| set_node(doc, &id, node)).await
-}
-
-/// Go `PatchPluginConfig`: shallow merge; `null` deletes a key.
-pub(crate) async fn patch_config(
-    State(state): State<Arc<Management>>,
-    UrlPath(raw): UrlPath<String>,
-    crate::body_limit::FirstJson(body): crate::body_limit::FirstJson,
-) -> Response {
-    let id = match plugin_id(&raw) {
-        Ok(id) => id,
-        Err(r) => return *r,
-    };
-    let fields = match config_object(&body) {
-        Ok(f) => f,
-        Err(r) => return *r,
-    };
-    // Go decodes into a map (the last duplicate wins), then walks the sorted keys:
-    // `null` deletes, anything else converts or fails the request.
-    let mut changes: Vec<(String, Option<Yaml>)> = Vec::new();
-    for (key, value) in collapse(&fields) {
-        if value.is_null() {
-            changes.push((key.to_owned(), None));
-            continue;
-        }
-        match json_to_yaml(value) {
-            Ok(v) => changes.push((key.to_owned(), Some(v))),
-            Err(e) => return invalid_body(&e),
-        }
-    }
-    let set: Vec<(String, Node)> = collapse(&fields)
-        .into_iter()
-        .filter(|(_, v)| !v.is_null())
-        .map(|(k, v)| (k.to_owned(), v.clone()))
-        .collect();
-    if let Err(e) = pcfg::check_json_item(&set) {
-        return invalid_config(e);
-    }
-    save_and_answer(state, move |doc| {
-        let mut node = current_node(doc, &id);
-        for (key, value) in changes {
-            match value {
-                None => {
-                    node.remove(Yaml::from(key.as_str()));
-                }
-                Some(value) => set_key(&mut node, &key, value),
-            }
-        }
-        set_node(doc, &id, node)
-    })
-    .await
 }
 
 // ---- DELETE /plugins/:id -------------------------------------------------------------
@@ -870,4 +695,20 @@ fn reply(reply: Option<cpa_plugin::management::Reply>) -> Response {
         }
     }
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn config_save_failures_do_not_expose_diagnostics() {
+        let response = Fail::Save("SQLite diagnostic containing a submitted secret".into()).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap(),
+            json!({"error": "failed to save config"})
+        );
+    }
 }

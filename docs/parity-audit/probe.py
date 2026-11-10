@@ -110,9 +110,9 @@ def main():
                 writes.append((item, method, path))
             else:
                 record(shared, item, method, path)
-        status, _ = shared.send("GET", "/v0/management/config", MANAGEMENT_KEY)
+        status, _ = shared.send("GET", "/admin/v1/effective/config", MANAGEMENT_KEY)
         if status != 200:
-            raise SystemExit(f"the management key stopped working on the shared server (GET /v0/management/config -> {status})")
+            raise SystemExit(f"the management key stopped working on the shared server (GET /admin/v1/effective/config -> {status})")
     finally:
         shared.close()
     for item, method, path in writes:

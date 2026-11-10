@@ -57,9 +57,10 @@ webrtc = { version = "0.21", default-features = false, features = ["runtime-toki
 # The relay names webrtc's codec and RTP types, which live in its private `rtc` core.
 rtc = { version = "0.21", default-features = false, features = ["crypto-ring"], optional = true }
 async-trait = { version = "0.1", optional = true }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
-# File change notifications (fs_events.rs): inotify and kqueue through libc, and
-# ReadDirectoryChangesW on Windows. Both crates are already in the dependency tree.
+# libc: listener socket options, pprof and runtime on Unix; windows-sys: the Codex
+# credential file lock on Windows (management/siwc.rs).
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 # CPU sampling is never linked into default builds or published release binaries.

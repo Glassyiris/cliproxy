@@ -535,7 +535,8 @@ mod tests {
             )
             .unwrap()
         };
-        let store = crate::runtime::CredentialStore::new(vec![credential("a.json")]);
+        let store =
+            crate::runtime::CredentialStore::new(vec![credential("a.json")], crate::runtime::CredentialAuthority::Home);
         store.end_bootstrap();
         let now = Utc::now();
         let schedule = |id: &str| lock(store.refresh_schedules()).get(id).copied();
@@ -586,14 +587,22 @@ mod tests {
     fn a_refresh_commit_publishes_its_schedule_with_the_credential() {
         let dir = std::env::temp_dir().join(format!("cpa-refresh-commit-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(
+            Arc::new(crate::config_store::ConfigStore::open(&dir.join("test.db")).unwrap()),
+            &dir.join("legacy"),
+        )
+        .unwrap();
         let credential = |token: &str, disabled: bool| {
             let metadata =
                 serde_json::json!({"type":"pp","access_token":token,"refresh_interval":"1h","disabled":disabled});
             let path = dir.join("a.json");
-            std::fs::write(&path, metadata.to_string()).unwrap();
+            db.save(&path, metadata.to_string().as_bytes()).unwrap();
             Credential::from_file(&dir, &path, metadata.as_object().cloned().unwrap()).unwrap()
         };
-        let store = crate::runtime::CredentialStore::new(vec![credential("q", false)]);
+        let store = crate::runtime::CredentialStore::new(
+            vec![credential("q", false)],
+            crate::runtime::CredentialAuthority::Local(db.clone()),
+        );
         store.end_bootstrap();
         let schedule = || lock(store.refresh_schedules()).get("a.json").copied().unwrap();
         let mut patch = MetadataPatch::default();

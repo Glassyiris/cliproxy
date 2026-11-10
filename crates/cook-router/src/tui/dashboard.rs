@@ -6,7 +6,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
-use super::client::{Client, Object};
+use super::client::{Client, ClientKey, Object};
 use super::i18n::t;
 use super::style::{self as s, Doc, plain, span};
 use super::widgets::Viewport;
@@ -16,10 +16,8 @@ use super::{Cmd, Msg, cmd};
 pub struct Data {
     pub(super) config: Option<Object>,
     pub(super) auth_files: Vec<Object>,
-    pub(super) api_keys: Vec<String>,
-    /// The server's effective strategy (`GET /v0/management/routing/strategy`), shown
-    /// when the config leaves it unset: cook-router reads that as soonest-reset, Go as
-    /// round-robin. `None` when the server did not answer it.
+    pub(super) api_keys: Vec<ClientKey>,
+    /// Strategy from the effective document, with the runtime default when unset.
     pub(super) strategy: Option<String>,
     pub(super) err: Option<String>,
 }
@@ -52,17 +50,14 @@ impl Dashboard {
         cmd(async move {
             let config = client.get_config().await;
             let files = client.get_auth_files().await;
-            let keys = client.get_api_keys().await;
-            // Not part of Go's fetch: a failure only drops the value.
-            let strategy = client
-                .get_json("/v0/management/routing/strategy")
-                .await
-                .ok()
-                .and_then(|o| {
-                    o.get("strategy")
-                        .and_then(serde_json::Value::as_str)
-                        .map(|v| v.trim().to_owned())
-                });
+            let keys = client.get_client_keys().await;
+            let strategy = config.as_ref().ok().map(|cfg| {
+                super::client::value_at(cfg, "routing/strategy")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or("soonest-reset")
+                    .to_owned()
+            });
             let err = [config.as_ref().err(), files.as_ref().err(), keys.as_ref().err()]
                 .into_iter()
                 .flatten()
@@ -191,17 +186,43 @@ impl Dashboard {
         if let Some(cfg) = cfg {
             // A missing or non-bool usage-statistics-enabled counts as on.
             let usage = cfg
-                .get("usage-statistics-enabled")
+                .get("observability")
+                .and_then(|v| v.get("usage"))
+                .and_then(|v| v.get("usage-statistics-enabled"))
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(true);
             let bool_text = |b: bool| if b { t("bool_yes") } else { t("bool_no") }.to_owned();
             let mut items = vec![
-                (t("debug_mode"), bool_text(s::get_bool(cfg, "debug"))),
+                (
+                    t("debug_mode"),
+                    bool_text(
+                        super::client::value_at(cfg, "observability/logs/debug")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false),
+                    ),
+                ),
                 (t("usage_stats"), bool_text(usage)),
-                (t("log_to_file"), bool_text(s::get_bool(cfg, "logging-to-file"))),
-                (t("retry_count"), s::int_text(s::get_float(cfg, "request-retry"))),
+                (
+                    t("log_to_file"),
+                    bool_text(
+                        super::client::value_at(cfg, "observability/logs/logging-to-file")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false),
+                    ),
+                ),
+                (
+                    t("retry_count"),
+                    s::int_text(
+                        super::client::value_at(cfg, "routing/retry/request-retry")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0),
+                    ),
+                ),
             ];
-            let proxy = s::get_string(cfg, "proxy-url");
+            let proxy = super::client::value_at(cfg, "requests/proxy-url")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
             if !proxy.is_empty() {
                 items.push((t("proxy_url"), proxy));
             }
@@ -211,7 +232,7 @@ impl Dashboard {
                 .map(|r| s::get_string(r, "strategy"))
                 .filter(|v| !v.trim().is_empty())
                 .or_else(|| effective.filter(|v| !v.is_empty()).map(str::to_owned))
-                .unwrap_or_else(|| "round-robin".into());
+                .unwrap_or_else(|| "soonest-reset".into());
             items.push((t("routing_strategy"), strategy));
             for (label, value) in items {
                 doc.line(vec![
@@ -262,7 +283,7 @@ mod tests {
         for (configured, effective, shown) in [
             ("", Some("soonest-reset"), "soonest-reset"),
             ("  ", Some("soonest-reset"), "soonest-reset"),
-            ("", None, "round-robin"),
+            ("", None, "soonest-reset"),
             ("fill-first", Some("soonest-reset"), "fill-first"),
         ] {
             let config = serde_json::json!({"routing": {"strategy": configured}});

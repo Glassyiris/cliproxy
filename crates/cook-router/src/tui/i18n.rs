@@ -143,7 +143,7 @@ const ZH: &[(&str, &str)] = &[
     ("keys_title", "🔐 API 密钥"),
     (
         "keys_help",
-        " [↑↓/jk] 导航 • [a] 添加 • [e] 编辑 • [d] 删除 • [c] 复制 • [r] 刷新",
+        " [↑↓/jk] 导航 • [a] 添加 • [e] 编辑 • [d] 删除 • [c] 显示并复制 • [r] 刷新",
     ),
     ("no_keys", "  无 API Key，按 [a] 添加"),
     ("access_keys", "Access API Keys"),
@@ -308,7 +308,7 @@ const EN: &[(&str, &str)] = &[
     ("keys_title", "🔐 API Keys"),
     (
         "keys_help",
-        " [↑↓/jk] Navigate • [a] Add • [e] Edit • [d] Delete • [c] Copy • [r] Refresh",
+        " [↑↓/jk] Navigate • [a] Add • [e] Edit • [d] Delete • [c] Reveal & Copy • [r] Refresh",
     ),
     ("no_keys", "  No API Keys. Press [a] to add"),
     ("access_keys", "Access API Keys"),

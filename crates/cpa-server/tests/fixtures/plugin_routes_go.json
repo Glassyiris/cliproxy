@@ -125,58 +125,6 @@
     {
       "op": "http",
       "args": {
-        "method": "GET",
-        "path": "/v0/management/plugins/recorder-a/config"
-      },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"caps\":\"management_api,quota_provider,auth_provider\",\"enabled\":true,\"label\":\"a\",\"nested\":{\"flag\":\"yes\",\"list\":[1,\"two\"]},\"priority\":5,\"record\":\"RECORDDIR\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "GET",
-        "path": "/v0/management/plugins/recorder-c/config"
-      },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "GET",
-        "path": "/v0/management/plugins/nope/config"
-      },
-      "result": {
-        "status": 404,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"plugin_not_found\",\"message\":\"plugin not found\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "GET",
-        "path": "/v0/management/plugins/bad!id/config"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_plugin_id\",\"message\":\"invalid plugin id\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
         "method": "PATCH",
         "path": "/v0/management/plugins/recorder-b/enabled",
         "body": "{\"enabled\":\"false\"}"
@@ -310,157 +258,28 @@
       }
     },
     {
-      "op": "http",
+      "op": "plugin_config",
       "args": {
         "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": "{\"enabled\":\"maybe\"}"
+        "id": "recorder-c",
+        "spec": {
+          "big": 12345678901,
+          "caps": "management_api",
+          "enabled": true,
+          "label": "c",
+          "n": 1.5,
+          "record": "RECORDDIR",
+          "z": {
+            "a": [
+              true,
+              null,
+              "s"
+            ],
+            "b": 1
+          }
+        }
       },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_config\",\"message\":\"parse plugin enabled: yaml: unmarshal errors:\\n  line 0: cannot unmarshal !!str `maybe` into bool\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": "{\"priority\":\"5\"}"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_config\",\"message\":\"parse plugin priority: yaml: unmarshal errors:\\n  line 0: cannot unmarshal !!str `5` into int\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": "[1]"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"json: cannot unmarshal array into Go value of type map[string]interface {}\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": "null"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"body must be a JSON object\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": "{bad"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"invalid character 'b' looking for beginning of object key string\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"EOF\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": " "
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"EOF\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": "\"x\""
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"json: cannot unmarshal string into Go value of type map[string]interface {}\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": "true"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"json: cannot unmarshal bool into Go value of type map[string]interface {}\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": "{\"a\":"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"unexpected EOF\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/recorder-c/config",
-        "body": "{\"label\":\"c\",\"enabled\":true,\"record\":\"RECORDDIR\",\"caps\":\"management_api\",\"n\":1.50,\"big\":12345678901,\"z\":{\"b\":1,\"a\":[true,null,\"s\"]}}"
-      },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"status\":\"ok\"}",
-        "version_headers": true
-      }
+      "result": null
     },
     {
       "op": "settle",
@@ -535,19 +354,6 @@
       "op": "http",
       "args": {
         "method": "GET",
-        "path": "/v0/management/plugins/recorder-c/config"
-      },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"big\":12345678901,\"caps\":\"management_api\",\"enabled\":true,\"label\":\"c\",\"n\":1.5,\"record\":\"RECORDDIR\",\"z\":{\"a\":[true,null,\"s\"],\"b\":1}}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "GET",
         "path": "/v0/management/plugins"
       },
       "result": {
@@ -558,32 +364,19 @@
       }
     },
     {
-      "op": "http",
+      "op": "plugin_config",
       "args": {
-        "method": "PATCH",
-        "path": "/v0/management/plugins/recorder-a/config",
-        "body": "{\"enabled\":1}"
+        "method": "PUT",
+        "id": "recorder-a",
+        "spec": {
+          "caps": "management_api,quota_provider,auth_provider",
+          "extra": "x",
+          "label": "a",
+          "priority": 7,
+          "record": "RECORDDIR"
+        }
       },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_config\",\"message\":\"parse plugin enabled: yaml: unmarshal errors:\\n  line 0: cannot unmarshal !!int `1` into bool\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PATCH",
-        "path": "/v0/management/plugins/recorder-a/config",
-        "body": "{\"priority\":7,\"nested\":null,\"extra\":\"x\",\"enabled\":null}"
-      },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"status\":\"ok\"}",
-        "version_headers": true
-      }
+      "result": null
     },
     {
       "op": "settle",
@@ -648,31 +441,15 @@
       }
     },
     {
-      "op": "http",
+      "op": "plugin_config",
       "args": {
-        "method": "GET",
-        "path": "/v0/management/plugins/recorder-a/config"
+        "method": "PUT",
+        "id": "new-one",
+        "spec": {
+          "priority": -2
+        }
       },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"caps\":\"management_api,quota_provider,auth_provider\",\"extra\":\"x\",\"label\":\"a\",\"priority\":7,\"record\":\"RECORDDIR\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PATCH",
-        "path": "/v0/management/plugins/new-one/config",
-        "body": "{\"priority\":-2}"
-      },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"status\":\"ok\"}",
-        "version_headers": true
-      }
+      "result": null
     },
     {
       "op": "settle",
@@ -740,60 +517,16 @@
       }
     },
     {
-      "op": "http",
+      "op": "plugin_config",
       "args": {
         "method": "PUT",
-        "path": "/v0/management/plugins/new-one/config",
-        "body": "{\"z\":{\"x\":1e400},\"a\":1}"
+        "id": "new-one",
+        "spec": {
+          "p": 1e+300,
+          "priority": -2
+        }
       },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"z: x: invalid number \\\"1e400\\\"\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PUT",
-        "path": "/v0/management/plugins/new-one/config",
-        "body": "{\"a\":[1,1e400]}"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"a: invalid number \\\"1e400\\\"\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PATCH",
-        "path": "/v0/management/plugins/new-one/config",
-        "body": "{\"q\":-1e400,\"enabled\":\"bad\"}"
-      },
-      "result": {
-        "status": 400,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"error\":\"invalid_body\",\"message\":\"invalid number \\\"-1e400\\\"\"}",
-        "version_headers": true
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "PATCH",
-        "path": "/v0/management/plugins/new-one/config",
-        "body": "{\"enabled\":\"bad\",\"enabled\":null,\"p\":1e300}"
-      },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"status\":\"ok\"}",
-        "version_headers": true
-      }
+      "result": null
     },
     {
       "op": "settle",
@@ -859,19 +592,6 @@
         "store-sources": [
           "https://third.example/registry.json"
         ]
-      }
-    },
-    {
-      "op": "http",
-      "args": {
-        "method": "GET",
-        "path": "/v0/management/plugins/new-one/config"
-      },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"p\":1e+300,\"priority\":-2}",
-        "version_headers": true
       }
     },
     {
@@ -1810,7 +1530,7 @@
       "op": "http",
       "args": {
         "method": "GET",
-        "path": "/v0/management/plugins/recorder-a/quota?auth_index=%ZZ\u0026authIndex=AUTHINDEX(claude.json)"
+        "path": "/v0/management/plugins/recorder-a/quota?auth_index=%ZZ&authIndex=AUTHINDEX(claude.json)"
       },
       "result": {
         "status": 200,
@@ -1823,7 +1543,7 @@
       "op": "http",
       "args": {
         "method": "GET",
-        "path": "/v0/management/plugins/recorder-a/quota?auth_index=x;y\u0026authIndex=AUTHINDEX(claude.json)"
+        "path": "/v0/management/plugins/recorder-a/quota?auth_index=x;y&authIndex=AUTHINDEX(claude.json)"
       },
       "result": {
         "status": 200,
@@ -2533,7 +2253,7 @@
       "op": "http",
       "args": {
         "method": "GET",
-        "path": "/v0/management/a-auth-url?foo=1\u0026foo=2\u0026bar=3"
+        "path": "/v0/management/a-auth-url?foo=1&foo=2&bar=3"
       },
       "result": {
         "status": 200,
@@ -2578,7 +2298,7 @@
       "op": "http",
       "args": {
         "method": "GET",
-        "path": "/v8/management/oauth/auth-url?provider=A\u0026x=1"
+        "path": "/v8/management/oauth/auth-url?provider=A&x=1"
       },
       "result": {
         "status": 200,
@@ -2805,7 +2525,7 @@
       "op": "http",
       "args": {
         "method": "GET",
-        "path": "/v0/management/oauth-callback?state=st-2\u0026error=denied"
+        "path": "/v0/management/oauth-callback?state=st-2&error=denied"
       },
       "result": {
         "status": 200,
@@ -3394,7 +3114,7 @@
         },
         "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI-Plugins-Store/main/registry.json": {
           "status": 200,
-          "body": "{\"schema_version\":2,\"plugins\":[{\"id\":\"store-rec\",\"name\":\"Store \u003cRec\u003e\",\"description\":\"Records \u0026 replays\",\"author\":\"a\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"homepage\":\"https://h.example\",\"tags\":[\"x\",\"\u003cy\u003e\"],\"install\":{\"type\":\"direct\",\"artifacts\":[{\"goos\":\"linux\",\"goarch\":\"amd64\",\"url\":\"https://dl.example/store-rec.zip\",\"sha256\":\"ZIPSHA(https://dl.example/store-rec.zip)\"},{\"goos\":\"darwin\",\"goarch\":\"arm64\",\"url\":\"https://dl.example/mac.zip\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}},{\"id\":\"gh-rec\",\"name\":\"GH\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-rec\",\"logo\":\"https://l.example/x.png\"},{\"id\":\"recorder-a\",\"name\":\"A\",\"description\":\"d\",\"author\":\"a\",\"version\":\"0.9\",\"repository\":\"https://github.com/o/recorder-a\"},{\"id\":\"gh-limited\",\"name\":\"L\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-limited\"}]}"
+          "body": "{\"schema_version\":2,\"plugins\":[{\"id\":\"store-rec\",\"name\":\"Store <Rec>\",\"description\":\"Records & replays\",\"author\":\"a\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"homepage\":\"https://h.example\",\"tags\":[\"x\",\"<y>\"],\"install\":{\"type\":\"direct\",\"artifacts\":[{\"goos\":\"linux\",\"goarch\":\"amd64\",\"url\":\"https://dl.example/store-rec.zip\",\"sha256\":\"ZIPSHA(https://dl.example/store-rec.zip)\"},{\"goos\":\"darwin\",\"goarch\":\"arm64\",\"url\":\"https://dl.example/mac.zip\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}},{\"id\":\"gh-rec\",\"name\":\"GH\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-rec\",\"logo\":\"https://l.example/x.png\"},{\"id\":\"recorder-a\",\"name\":\"A\",\"description\":\"d\",\"author\":\"a\",\"version\":\"0.9\",\"repository\":\"https://github.com/o/recorder-a\"},{\"id\":\"gh-limited\",\"name\":\"L\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-limited\"}]}"
         },
         "https://third.example/registry.json": {
           "status": 200,
@@ -3569,7 +3289,7 @@
       "op": "http",
       "args": {
         "method": "POST",
-        "path": "/v8/management/plugins/store/store-rec/install?source=official\u0026version=1.0.0",
+        "path": "/v8/management/plugins/store/store-rec/install?source=official&version=1.0.0",
         "body": "{\"version\":\"2.0\"}"
       },
       "result": {
@@ -3597,7 +3317,7 @@
       "op": "http",
       "args": {
         "method": "POST",
-        "path": "/v8/management/plugins/store/store-rec/install?source=official\u0026version=v9",
+        "path": "/v8/management/plugins/store/store-rec/install?source=official&version=v9",
         "body": " "
       },
       "result": {
@@ -3762,7 +3482,7 @@
             "enabled": true,
             "store": {
               "author": "a",
-              "description": "Records \u0026 replays",
+              "description": "Records & replays",
               "homepage": "https://h.example",
               "id": "store-rec",
               "install": {
@@ -3783,14 +3503,14 @@
                 "type": "direct"
               },
               "license": "MIT",
-              "name": "Store \u003cRec\u003e",
+              "name": "Store <Rec>",
               "schema-version": 2,
               "source-id": "official",
               "source-name": "Official",
               "source-url": "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI-Plugins-Store/main/registry.json",
               "tags": [
                 "x",
-                "\u003cy\u003e"
+                "<y>"
               ],
               "version": "1.0.0"
             }
@@ -3940,7 +3660,7 @@
         },
         "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI-Plugins-Store/main/registry.json": {
           "status": 200,
-          "body": "{\"schema_version\":2,\"plugins\":[{\"id\":\"store-rec\",\"name\":\"Store \u003cRec\u003e\",\"description\":\"Records \u0026 replays\",\"author\":\"a\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"homepage\":\"https://h.example\",\"tags\":[\"x\",\"\u003cy\u003e\"],\"install\":{\"type\":\"direct\",\"artifacts\":[{\"goos\":\"linux\",\"goarch\":\"amd64\",\"url\":\"https://dl.example/store-rec.zip\",\"sha256\":\"ZIPSHA(https://dl.example/store-rec.zip)\"},{\"goos\":\"darwin\",\"goarch\":\"arm64\",\"url\":\"https://dl.example/mac.zip\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}},{\"id\":\"gh-rec\",\"name\":\"GH\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-rec\",\"logo\":\"https://l.example/x.png\"},{\"id\":\"recorder-a\",\"name\":\"A\",\"description\":\"d\",\"author\":\"a\",\"version\":\"0.9\",\"repository\":\"https://github.com/o/recorder-a\"},{\"id\":\"gh-limited\",\"name\":\"L\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-limited\"}]}"
+          "body": "{\"schema_version\":2,\"plugins\":[{\"id\":\"store-rec\",\"name\":\"Store <Rec>\",\"description\":\"Records & replays\",\"author\":\"a\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"homepage\":\"https://h.example\",\"tags\":[\"x\",\"<y>\"],\"install\":{\"type\":\"direct\",\"artifacts\":[{\"goos\":\"linux\",\"goarch\":\"amd64\",\"url\":\"https://dl.example/store-rec.zip\",\"sha256\":\"ZIPSHA(https://dl.example/store-rec.zip)\"},{\"goos\":\"darwin\",\"goarch\":\"arm64\",\"url\":\"https://dl.example/mac.zip\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}},{\"id\":\"gh-rec\",\"name\":\"GH\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-rec\",\"logo\":\"https://l.example/x.png\"},{\"id\":\"recorder-a\",\"name\":\"A\",\"description\":\"d\",\"author\":\"a\",\"version\":\"0.9\",\"repository\":\"https://github.com/o/recorder-a\"},{\"id\":\"gh-limited\",\"name\":\"L\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-limited\"}]}"
         },
         "https://third.example/registry.json": {
           "status": 200,
@@ -3953,7 +3673,7 @@
       "op": "http",
       "args": {
         "method": "POST",
-        "path": "/v0/management/plugin-store/gh-rec/install?source=official\u0026version=1.2.0"
+        "path": "/v0/management/plugin-store/gh-rec/install?source=official&version=1.2.0"
       },
       "result": {
         "status": 200,
@@ -4078,7 +3798,7 @@
             "enabled": true,
             "store": {
               "author": "a",
-              "description": "Records \u0026 replays",
+              "description": "Records & replays",
               "homepage": "https://h.example",
               "id": "store-rec",
               "install": {
@@ -4099,14 +3819,14 @@
                 "type": "direct"
               },
               "license": "MIT",
-              "name": "Store \u003cRec\u003e",
+              "name": "Store <Rec>",
               "schema-version": 2,
               "source-id": "official",
               "source-name": "Official",
               "source-url": "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI-Plugins-Store/main/registry.json",
               "tags": [
                 "x",
-                "\u003cy\u003e"
+                "<y>"
               ],
               "version": "1.0.0"
             }
@@ -4235,7 +3955,7 @@
         },
         "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI-Plugins-Store/main/registry.json": {
           "status": 200,
-          "body": "{\"schema_version\":2,\"plugins\":[{\"id\":\"store-rec\",\"name\":\"Store \u003cRec\u003e\",\"description\":\"Records \u0026 replays\",\"author\":\"a\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"homepage\":\"https://h.example\",\"tags\":[\"x\",\"\u003cy\u003e\"],\"install\":{\"type\":\"direct\",\"artifacts\":[{\"goos\":\"linux\",\"goarch\":\"amd64\",\"url\":\"https://dl.example/store-rec.zip\",\"sha256\":\"ZIPSHA(https://dl.example/store-rec.zip)\"},{\"goos\":\"darwin\",\"goarch\":\"arm64\",\"url\":\"https://dl.example/mac.zip\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}},{\"id\":\"gh-rec\",\"name\":\"GH\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-rec\",\"logo\":\"https://l.example/x.png\"},{\"id\":\"recorder-a\",\"name\":\"A\",\"description\":\"d\",\"author\":\"a\",\"version\":\"0.9\",\"repository\":\"https://github.com/o/recorder-a\"},{\"id\":\"gh-limited\",\"name\":\"L\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-limited\"}]}"
+          "body": "{\"schema_version\":2,\"plugins\":[{\"id\":\"store-rec\",\"name\":\"Store <Rec>\",\"description\":\"Records & replays\",\"author\":\"a\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"homepage\":\"https://h.example\",\"tags\":[\"x\",\"<y>\"],\"install\":{\"type\":\"direct\",\"artifacts\":[{\"goos\":\"linux\",\"goarch\":\"amd64\",\"url\":\"https://dl.example/store-rec.zip\",\"sha256\":\"ZIPSHA(https://dl.example/store-rec.zip)\"},{\"goos\":\"darwin\",\"goarch\":\"arm64\",\"url\":\"https://dl.example/mac.zip\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}},{\"id\":\"gh-rec\",\"name\":\"GH\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-rec\",\"logo\":\"https://l.example/x.png\"},{\"id\":\"recorder-a\",\"name\":\"A\",\"description\":\"d\",\"author\":\"a\",\"version\":\"0.9\",\"repository\":\"https://github.com/o/recorder-a\"},{\"id\":\"gh-limited\",\"name\":\"L\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-limited\"}]}"
         },
         "https://third.example/registry.json": {
           "status": 200,
@@ -4363,7 +4083,7 @@
         },
         "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI-Plugins-Store/main/registry.json": {
           "status": 200,
-          "body": "{\"schema_version\":2,\"plugins\":[{\"id\":\"store-rec\",\"name\":\"Store \u003cRec\u003e\",\"description\":\"Records \u0026 replays\",\"author\":\"a\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"homepage\":\"https://h.example\",\"tags\":[\"x\",\"\u003cy\u003e\"],\"install\":{\"type\":\"direct\",\"artifacts\":[{\"goos\":\"linux\",\"goarch\":\"amd64\",\"url\":\"https://dl.example/store-rec.zip\",\"sha256\":\"ZIPSHA(https://dl.example/store-rec.zip)\"},{\"goos\":\"darwin\",\"goarch\":\"arm64\",\"url\":\"https://dl.example/mac.zip\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}},{\"id\":\"gh-rec\",\"name\":\"GH\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-rec\",\"logo\":\"https://l.example/x.png\"},{\"id\":\"recorder-a\",\"name\":\"A\",\"description\":\"d\",\"author\":\"a\",\"version\":\"0.9\",\"repository\":\"https://github.com/o/recorder-a\"},{\"id\":\"gh-limited\",\"name\":\"L\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-limited\"}]}"
+          "body": "{\"schema_version\":2,\"plugins\":[{\"id\":\"store-rec\",\"name\":\"Store <Rec>\",\"description\":\"Records & replays\",\"author\":\"a\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"homepage\":\"https://h.example\",\"tags\":[\"x\",\"<y>\"],\"install\":{\"type\":\"direct\",\"artifacts\":[{\"goos\":\"linux\",\"goarch\":\"amd64\",\"url\":\"https://dl.example/store-rec.zip\",\"sha256\":\"ZIPSHA(https://dl.example/store-rec.zip)\"},{\"goos\":\"darwin\",\"goarch\":\"arm64\",\"url\":\"https://dl.example/mac.zip\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}},{\"id\":\"gh-rec\",\"name\":\"GH\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-rec\",\"logo\":\"https://l.example/x.png\"},{\"id\":\"recorder-a\",\"name\":\"A\",\"description\":\"d\",\"author\":\"a\",\"version\":\"0.9\",\"repository\":\"https://github.com/o/recorder-a\"},{\"id\":\"gh-limited\",\"name\":\"L\",\"description\":\"d\",\"author\":\"a\",\"repository\":\"https://github.com/o/gh-limited\"}]}"
         },
         "https://third.example/registry.json": {
           "status": 500,
@@ -4607,18 +4327,18 @@
       }
     },
     {
-      "op": "http",
+      "op": "plugin_config",
       "args": {
-        "method": "PATCH",
-        "path": "/v0/management/plugins/recorder-b/config",
-        "body": "{\"label\":\"b2\"} trailing"
+        "method": "PUT",
+        "id": "recorder-b",
+        "spec": {
+          "caps": "management_api",
+          "enabled": false,
+          "label": "b2",
+          "record": "RECORDDIR"
+        }
       },
-      "result": {
-        "status": 200,
-        "content_type": "application/json; charset=utf-8",
-        "body": "{\"status\":\"ok\"}",
-        "version_headers": true
-      }
+      "result": null
     },
     {
       "op": "settle",
@@ -4676,7 +4396,7 @@
             "enabled": true,
             "store": {
               "author": "a",
-              "description": "Records \u0026 replays",
+              "description": "Records & replays",
               "homepage": "https://h.example",
               "id": "store-rec",
               "install": {
@@ -4697,14 +4417,14 @@
                 "type": "direct"
               },
               "license": "MIT",
-              "name": "Store \u003cRec\u003e",
+              "name": "Store <Rec>",
               "schema-version": 2,
               "source-id": "official",
               "source-name": "Official",
               "source-url": "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI-Plugins-Store/main/registry.json",
               "tags": [
                 "x",
-                "\u003cy\u003e"
+                "<y>"
               ],
               "version": "1.0.0"
             }

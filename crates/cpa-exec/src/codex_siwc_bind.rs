@@ -126,21 +126,23 @@ pub fn device_id(path: &Path) -> Result<String, String> {
 /// of the decoded map (sorted keys, numbers through float64), written atomically.
 /// Blocking.
 pub fn save(path: &Path, tokens: &Tokens) -> Result<(), String> {
-    with_file_lock(path, || {
-        let data = std::fs::read(path).map_err(|e| format!("failed to read existing credential file: {e}"))?;
-        let meta = decode(&data).map_err(|e| format!("failed to parse existing credential file: {e}"))?;
-        validate(meta.as_ref())?;
-        let mut meta = meta.unwrap_or_default();
-        // Binding is an explicit SIWC replacement, not a stale snapshot merge.
-        meta.insert("use_siwc".into(), GoValue::Bool(true));
-        meta.insert(
-            "siwc".into(),
-            GoValue::from_json(&serde_json::Value::Object(tokens.to_map())),
-        );
-        let bytes = GoValue::Object(meta).marshal();
-        let dir = path.parent().unwrap_or(Path::new("."));
-        crate::codex_oauth::publish(dir, path, &bytes).map_err(|e| format!("failed to replace credential file: {e}"))
-    })
+    with_file_lock(path, || save_unlocked(path, tokens))
+}
+
+fn save_unlocked(path: &Path, tokens: &Tokens) -> Result<(), String> {
+    let data = std::fs::read(path).map_err(|e| format!("failed to read existing credential file: {e}"))?;
+    let meta = decode(&data).map_err(|e| format!("failed to parse existing credential file: {e}"))?;
+    validate(meta.as_ref())?;
+    let mut meta = meta.unwrap_or_default();
+    // Binding is an explicit SIWC replacement, not a stale snapshot merge.
+    meta.insert("use_siwc".into(), GoValue::Bool(true));
+    meta.insert(
+        "siwc".into(),
+        GoValue::from_json(&serde_json::Value::Object(tokens.to_map())),
+    );
+    let bytes = GoValue::Object(meta).marshal();
+    let dir = path.parent().unwrap_or(Path::new("."));
+    crate::codex_oauth::publish(dir, path, &bytes).map_err(|e| format!("failed to replace credential file: {e}"))
 }
 
 /// Go `WithFileLock`'s inter-process half: an exclusive lock on `<path>.lock` for the
@@ -320,7 +322,12 @@ fn lock_base(path: &Path) -> PathBuf {
 
 /// `-siwc-bind <file>`: the browser flow on the callback port (`-oauth-callback-port`,
 /// else 1455), then [`save`]. Returns the bound file.
-pub async fn bind(cfg: &Config, target: &str, options: &LoginOptions) -> Result<PathBuf, BindError> {
+pub async fn bind(
+    cfg: &Config,
+    target: &str,
+    options: &LoginOptions,
+    save: Option<crate::login_store::LoginSave>,
+) -> Result<PathBuf, BindError> {
     let port = match options.callback_port {
         0 => CALLBACK_PORT,
         port => port,
@@ -352,7 +359,7 @@ pub async fn bind(cfg: &Config, target: &str, options: &LoginOptions) -> Result<
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     let client = crate::proxy::GoClients::new(Default::default()).get(&crate::proxy::Proxy::parse(proxy));
-    bind_with(cfg, target, port, CodexOAuth::new(client), interaction).await
+    bind_with(cfg, target, port, CodexOAuth::new(client), interaction, save).await
 }
 
 fn show_url(url: &str, port: u16, no_browser: bool) {
@@ -376,6 +383,7 @@ pub(crate) async fn bind_with(
     port: u16,
     oauth: CodexOAuth,
     interaction: Interaction,
+    save: Option<crate::login_store::LoginSave>,
 ) -> Result<PathBuf, BindError> {
     let path = resolve(&cfg.auth_dir, target).map_err(BindError::Log)?;
     let device = {
@@ -447,11 +455,16 @@ pub(crate) async fn bind_with(
         // Go `misc.LogSavingCredentials`.
         println!("Saving credentials to {}", path.display());
         let target = path.clone();
-        tokio::task::spawn_blocking(move || save(&target, &tokens))
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|r| r)
-            .map_err(|e| BindError::Print(format!("Failed to save SIWC credentials: {e}")))?;
+        tokio::task::spawn_blocking(move || match save {
+            Some(save) => crate::login_store::save_login(Some(&save), std::slice::from_ref(&target), || {
+                save_unlocked(&target, &tokens)
+            }),
+            None => self::save(&target, &tokens),
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r)
+        .map_err(|e| BindError::Print(format!("Failed to save SIWC credentials: {e}")))?;
         Ok(path)
     }
     .await;

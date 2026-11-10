@@ -107,7 +107,7 @@ async fn existing_file_keeps_user_fields_but_never_old_tokens() {
         r#"{"access_token":"at-old","prefix":"team","disabled":true,"note":"mine"}"#,
     )
     .unwrap();
-    let written = write_login(&dir, &tokens).unwrap();
+    let written = write_login(&dir, &tokens, None).unwrap();
     assert_eq!(written, path);
     let saved: Map<String, Value> = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(saved["access_token"], "at-new");
@@ -405,7 +405,7 @@ async fn existing_non_boolean_disabled_is_reset_like_go() {
         plan_type: String::new(),
         expired: "2026-10-12T12:00:00Z".into(),
     };
-    write_login(&dir, &tokens).unwrap();
+    write_login(&dir, &tokens, None).unwrap();
     let saved: Map<String, Value> = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(saved["disabled"], false);
     std::fs::remove_dir_all(dir).unwrap();

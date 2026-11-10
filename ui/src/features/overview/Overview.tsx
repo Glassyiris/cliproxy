@@ -55,9 +55,8 @@ function useOverviewData() {
   const config = useConfig();
   const files = credentials.data?.files;
   const now = credentials.dataUpdatedAt;
-  const keys = config.data
-    ? (readPath(config.data, "access/api-keys", []) as string[]).length
-    : undefined;
+  const clients = config.data && readPath(config.data, "access/api-keys", []);
+  const keys = config.data ? (Array.isArray(clients) ? clients.length : 0) : undefined;
   // Key usage counts in every total, so the totals wait for it; a failed read leaves it out.
   const usage = keyUsage.isError ? null : keyUsage.data;
   const summary = useMemo(() => files && summarize(files, keys, now), [files, keys, now]);

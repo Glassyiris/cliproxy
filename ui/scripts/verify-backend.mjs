@@ -4,23 +4,18 @@ import assert from "node:assert/strict";
 const base = "http://127.0.0.1:8317";
 const key = "orb-dashboard-test-only";
 let checks = 0;
-async function call(path, method = "GET", body, expected = 200, text = false) {
-  const yaml = path === "/config.yaml";
-  const headers = { Authorization: `Bearer ${key}` };
-  if (body !== undefined && !(body instanceof FormData))
-    headers["Content-Type"] = yaml ? "application/yaml" : "application/json";
-  const response = await fetch(base + "/v8/management" + path, {
+let lastEtag;
+async function call(path, method = "GET", body, expected = 200, extraHeaders = {}) {
+  const headers = { Authorization: `Bearer ${key}`, ...extraHeaders };
+  if (body !== undefined && !(body instanceof FormData)) headers["Content-Type"] = "application/json";
+  const response = await fetch(base + (path.startsWith("/admin/v1/") ? path : "/v8/management" + path), {
     method,
     headers,
-    body:
-      body === undefined
-        ? undefined
-        : body instanceof FormData || yaml
-          ? body
-          : JSON.stringify(body),
+    body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
     signal: AbortSignal.timeout(45000),
   });
   const content = await response.text();
+  lastEtag = response.headers.get("etag");
   assert.equal(
     response.status,
     expected,
@@ -28,16 +23,19 @@ async function call(path, method = "GET", body, expected = 200, text = false) {
   );
   console.log(`${response.status} ${method} ${path.split("?")[0]}`);
   checks++;
-  return text ? content : content ? JSON.parse(content) : {};
+  return content ? JSON.parse(content) : {};
 }
 
-const config = await call("/config");
+const readConfig = async (path = "") => path.split("/").filter(Boolean).reduce((value, key) => value?.[key], await call("/admin/v1/effective/config"));
+const apply = (ops, expected = 200) => call("/admin/v1/apply", "POST", { ops }, expected);
+const setConfig = async (path, value, expected = 200) => apply([{ op: "set", path, value, expect: (await readConfig(path)) ?? null }], expected);
+const config = await readConfig();
 assert.equal(
   config.oauth?.["auth-dir"],
   "/tmp/cook-router-backend/auth",
   "Not the disposable backend. Refusing mutations.",
 );
-const yaml = await call("/config.yaml", "GET", undefined, 200, true);
+const backup = await call("/admin/v1/export?include_secrets=true");
 let uploaded = false;
 try {
   await call("/credentials");
@@ -53,25 +51,38 @@ try {
   assert.equal(upstream.status_code, 200);
   assert.equal(JSON.parse(upstream.body).status, "ok");
 
-  await call("/config/routing/retry/request-retry", "PUT", 0);
-  assert.equal(await call("/config/routing/retry/request-retry"), 0);
-  await call("/config/routing/strategy", "PUT", "fill-first");
-  assert.equal(await call("/config/routing/strategy"), "fill-first");
-  await call("/config", "PATCH", { routing: { "session-affinity": true } });
-  assert.equal((await call("/config")).routing["session-affinity"], true);
-  await call("/config/routing/session-affinity", "DELETE");
-  await call("/config/routing/retry/request-retry", "PUT", { value: 4 }, 422);
+  await setConfig("routing/retry/request-retry", 0);
+  assert.equal(await readConfig("routing/retry/request-retry"), 0);
+  await setConfig("routing/strategy", "fill-first");
+  assert.equal(await readConfig("routing/strategy"), "fill-first");
+  await setConfig("routing/session-affinity", true);
+  assert.equal((await readConfig()).routing["session-affinity"], true);
+  await apply([{ op: "unset", path: "routing/session-affinity", expect: true }]);
+  await setConfig("routing/retry/request-retry", { value: 4 }, 422);
   assert.equal(
-    await call("/config/routing/retry/request-retry"),
+    await readConfig("routing/retry/request-retry"),
     0,
     "Rejected write changed state.",
   );
 
-  await call("/config/access/api-keys", "PUT", [
-    "orb-client-test-only",
-    "second-disposable-client",
-  ]);
-  assert.equal((await call("/config/access/api-keys")).length, 2);
+  await setConfig("access/api-keys", []);
+  const clientId = "dashboard-disposable-client";
+  const createClient = { op: "put", kind: "client-key", id: clientId, spec: { key: "orb-client-test-only" }, if_absent: true };
+  await apply([createClient]);
+  await apply([createClient], 412);
+  const clients = (await call("/admin/v1/r/client-key")).items;
+  const client = clients.find(({ id }) => id === clientId);
+  assert.ok(client?.rev);
+  assert.equal(client.spec.key, "$secret");
+  assert.deepEqual(await readConfig("access/api-keys"), [{ "@id": clientId, key: "$secret" }]);
+  assert.deepEqual(await call(`/admin/v1/r/client-key/${clientId}`), client);
+  const maskedExport = await call("/admin/v1/export");
+  assert.equal(maskedExport.resources.find(({ kind, id }) => kind === "client-key" && id === clientId).spec.key, "$secret");
+  const revealedExport = await call("/admin/v1/export?include_secrets=true");
+  assert.equal(revealedExport.resources.find(({ kind, id }) => kind === "client-key" && id === clientId).spec.key, "orb-client-test-only");
+  await apply([{ op: "delete", kind: "client-key", id: clientId, if_rev: client.rev - 1 }], 412);
+  await apply([{ op: "delete", kind: "client-key", id: clientId, if_rev: client.rev }]);
+  await call(`/admin/v1/r/client-key/${clientId}`, "GET", undefined, 404);
   for (const family of [
     "claude",
     "codex",
@@ -93,21 +104,21 @@ try {
       group.disabled = true;
       group.models = [{ name: "test-model", alias: "test-model" }];
     }
-    await call(`/config/api-keys/${family}`, "PUT", [group]);
+    await setConfig(`api-keys/${family}`, [group]);
     assert.equal(
-      (await call(`/config/api-keys/${family}`))[0].name,
+      (await readConfig(`api-keys/${family}`))[0].name,
       "disposable",
     );
-    await call(`/config/api-keys/${family}`, "PUT", []);
+    await setConfig(`api-keys/${family}`, []);
   }
-  await call("/config/oauth/model-alias/claude", "PUT", [
+  await setConfig("oauth/model-alias/claude", [
     { name: "claude-sonnet-4-5", alias: "daily-driver", fork: true },
   ]);
   assert.equal(
-    (await call("/config/oauth/model-alias/claude"))[0].alias,
+    (await readConfig("oauth/model-alias/claude"))[0].alias,
     "daily-driver",
   );
-  await call("/config/oauth/excluded-models/claude", "PUT", ["*-preview"]);
+  await setConfig("oauth/excluded-models/claude", ["*-preview"]);
   await call("/routing/model-definitions/claude");
   for (const kind of [
     "default",
@@ -116,7 +127,7 @@ try {
     "override-raw",
     "filter",
   ]) {
-    await call(`/config/requests/payload/${kind}`, "PUT", [
+    await setConfig(`requests/payload/${kind}`, [
       {
         models: [{ name: "*", protocol: "openai" }],
         params:
@@ -125,7 +136,7 @@ try {
             : { temperature: kind.endsWith("-raw") ? "0.7" : 0.7 },
       },
     ]);
-    assert.equal((await call(`/config/requests/payload/${kind}`)).length, 1);
+    assert.equal((await readConfig(`requests/payload/${kind}`)).length, 1);
   }
 
   const form = new FormData();
@@ -231,9 +242,10 @@ try {
 } finally {
   if (uploaded)
     await call("/credentials", "DELETE", { names: ["dashboard-test.json"] });
-  await call("/config.yaml", "PUT", yaml);
-  // YAML PUT normalizes and materializes defaults. Verify the actual original settings.
-  const restored = await call("/config");
+  await readConfig();
+  assert.match(lastEtag ?? "", /^"\d+"$/, "restore needs the current global ETag");
+  await call("/admin/v1/import", "POST", backup, 200, { "If-Match": lastEtag });
+  const restored = await readConfig();
   for (const section of [
     "server",
     "management",
@@ -257,6 +269,6 @@ try {
   }
   assert.equal(Object.values(restored["api-keys"] || {}).flat().length, 0);
   console.log(
-    "PASS: original disposable settings restored (YAML normalization allowed).",
+    "PASS: original disposable settings restored from the admin export.",
   );
 }

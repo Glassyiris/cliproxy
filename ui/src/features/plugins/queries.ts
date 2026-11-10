@@ -3,7 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { serverKeys, useConfigWrite } from "../../app/serverQueries.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import type { Action } from "../../app/useAction.ts";
-import type { Config } from "../../lib/api/config.ts";
+import { ApiError } from "../../lib/api/client.ts";
+import {
+  applyResourceOperations,
+  patchResource,
+  readResource,
+  type Config,
+} from "../../lib/api/config.ts";
 import {
   deletePlugin,
   installPlugin,
@@ -32,6 +38,20 @@ export function useStore() {
   };
 }
 
+async function setPluginEnabled(id: string, enabled: boolean) {
+  const resource = await readResource("plugin", id).catch((error: unknown) => {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  });
+  if (resource) {
+    await patchResource(resource, { enabled });
+  } else {
+    await applyResourceOperations([
+      { op: "put", kind: "plugin", id, spec: { enabled }, if_absent: true },
+    ]);
+  }
+}
+
 /**
  * Every write of the page, one at a time through `action`. `pending` names the switch whose write
  * is on its way (the header's, or one plugin's), so only that switch shows busy. A press while another
@@ -52,7 +72,17 @@ export function usePluginWrites(action: Action, config: Config | undefined) {
     inFlight.current = true;
     setPending({ id });
     try {
-      await writeConfig(path, next, ok);
+      if (id === undefined) {
+        await writeConfig(path, next, ok);
+      } else {
+        await action.run(async () => {
+          try {
+            await setPluginEnabled(id, next);
+          } finally {
+            await reload(serverKeys.config);
+          }
+        }, ok);
+      }
     } finally {
       await reload(serverKeys.plugins);
       setPending(null);

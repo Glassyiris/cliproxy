@@ -432,6 +432,7 @@ fn vertex_import_matches_go() {
             std::path::Path::new(&auth_dir),
             key.to_str().unwrap(),
             case["prefix"].as_str().unwrap_or_default(),
+            None,
         );
         // Files are listed where the import wrote (Go lists the cleaned auth dir).
         let written = result

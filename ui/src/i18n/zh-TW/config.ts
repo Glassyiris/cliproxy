@@ -18,7 +18,6 @@ export default {
     "config.access.count": "{count} 把金鑰",
     "config.access.providers": "供應商金鑰",
     "config.access.manage": "管理{what}",
-    "config.yaml.label": "設定檔",
     "config.sections.client": "依用戶端調整請求",
     "config.sections.multimedia": "圖片和影片生成",
     "config.sections.upstream": "各供應商的請求行為",

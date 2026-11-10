@@ -852,12 +852,13 @@ async fn expired_token_is_used_then_refreshed_once_after_401() {
         "{calls:?}"
     );
     assert!(calls[0].ends_with("sk-ant-oat-old-fake") && calls[3].ends_with("sk-ant-oat-new-fake"));
-    let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let saved: Value = serde_json::from_slice(&rt.store().credential_backend().read(&path).unwrap().unwrap()).unwrap();
     assert_eq!(
         saved["access_token"], "sk-ant-oat-new-fake",
         "the rotated token is persisted"
     );
     assert_eq!(rt.store().stats().success, 1);
+    rt.shutdown_codex_refreshes().await;
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -911,6 +912,7 @@ async fn a_siwc_map_never_refreshes_a_claude_credential_after_401() {
         revision,
         "no credential write"
     );
+    rt.shutdown_codex_refreshes().await;
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

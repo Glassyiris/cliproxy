@@ -77,7 +77,7 @@ for i in $(seq 1 "$FILES"); do
     "$i" "$i" "$i" "$expiry" > "$DIR/auth/claude-idle$i.json"
 done
 
-"$BIN" -config "$DIR/config.yaml" > "$DIR/server.log" 2>&1 &
+COOK_DB="$DIR/cook.db" "$BIN" -config "$DIR/config.yaml" > "$DIR/server.log" 2>&1 &
 PID=$!
 ready=false
 for _ in $(seq 1 400); do

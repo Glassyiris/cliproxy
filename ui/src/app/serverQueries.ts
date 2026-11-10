@@ -2,6 +2,7 @@
 // refreshes it for every other page, and a page switch shows the cached answer while it rereads.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { readConfig, replaceConfigValue } from "../lib/api/config.ts";
+import { listClientKeys } from "../lib/api/clientKeys.ts";
 import { listCredentials, type Credential, type CredentialList } from "../lib/api/credentials.ts";
 import { apiKeyUsage } from "../lib/api/observability.ts";
 import { listPlugins } from "../lib/api/plugins.ts";
@@ -11,6 +12,7 @@ import type { Action } from "./useAction.ts";
 
 export const serverKeys = {
   config: ["server", "config"] as const,
+  clientKeys: ["server", "client-keys"] as const,
   credentials: ["server", "credentials"] as const,
   plugins: ["server", "plugins"] as const,
   apiKeyUsage: ["server", "api-key-usage"] as const,
@@ -35,6 +37,27 @@ const polling = (poll = false) =>
 
 export const useConfig = () =>
   useQuery({ queryKey: serverKeys.config, queryFn: ({ signal }) => readConfig(signal) });
+
+export const useClientKeys = () =>
+  useQuery({
+    queryKey: serverKeys.clientKeys,
+    queryFn: ({ signal }) => listClientKeys(signal),
+  });
+
+export function useClientKeyWrite(action: Action) {
+  const queryClient = useQueryClient();
+  return (work: () => Promise<unknown>, success?: string) =>
+    action.run(async () => {
+      try {
+        await work();
+      } finally {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: serverKeys.clientKeys }),
+          queryClient.invalidateQueries({ queryKey: serverKeys.config }),
+        ]);
+      }
+    }, success);
+}
 
 // One file can hold several accounts, so a row is its file and its auth index.
 const credentialKey = (a: Credential) => `${a.name}\u0000${a.auth_index}`;
@@ -65,12 +88,10 @@ export const useApiKeyUsage = ({ poll }: { poll?: boolean } = {}) =>
   });
 
 /**
- * Replace one config value through the page's action: reread and compare first, refuse when the
- * server copy changed (REQUIREMENTS intentional design), and reread the config either way, so a
- * refused write leaves the page showing the server copy. The compare baseline is the value at
- * `path` in the config this render shows, `null` and an absent key kept apart, so no page can
- * hand in a baseline that a read with a fallback has collapsed. `next` may be a function, run
- * inside the action, so a removal that finds its target gone fails as a refused write.
+ * Replace one value with a server-checked precondition, then reread the config either way so a
+ * refused write leaves the page showing the server copy. The baseline is the value this render
+ * shows. `next` may be a function, run inside the action, so a removal that finds its target gone
+ * fails as a refused write.
  */
 export function useConfigWrite(action: Action) {
   const queryClient = useQueryClient();

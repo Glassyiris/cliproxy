@@ -2,7 +2,7 @@ import type { RequestBucket } from "./credentials.ts";
 import { request } from "./client.ts";
 import { routes } from "./routes.ts";
 
-/** Per provider, then per "<base_url>|<api_key>" (the raw key), lifetime and recent counts. */
+/** Per provider, then per runtime auth_index, lifetime and recent counts. */
 export type ApiKeyUsage = Record<
   string,
   Record<string, { success: number; failed: number; recent_requests: RequestBucket[] }>

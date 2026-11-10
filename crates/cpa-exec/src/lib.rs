@@ -66,6 +66,7 @@ pub mod kimi_auth;
 mod kimi_fixture;
 mod kimi_http;
 mod kimi_replay;
+pub mod login_store;
 pub mod meta;
 pub mod meta_auth;
 mod meta_codex;

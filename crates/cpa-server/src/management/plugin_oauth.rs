@@ -180,7 +180,22 @@ pub(super) async fn poll(state: &Arc<Management>, sid: &str, provider: &str, met
                 tokio::task::spawn_blocking(move || save_records(&state, records)).await
             };
             match saved {
-                Ok(Ok(())) => {
+                Ok(Ok(external)) => {
+                    crate::plugins::reload_plugin_auth_files(&state.rt).await;
+                    if !external.is_empty() {
+                        let state = state.clone();
+                        if tokio::task::spawn_blocking(move || {
+                            let _guard = state.disk.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            for (path, credentials) in external {
+                                state.rt.store().upsert_file(Some(&path), credentials, &[]);
+                            }
+                        })
+                        .await
+                        .is_err()
+                        {
+                            return Some(failed("Failed to publish authentication tokens"));
+                        }
+                    }
                     state.oauth.complete(sid);
                     status("ok")
                 }
@@ -196,80 +211,59 @@ pub(super) async fn poll(state: &Arc<Management>, sid: &str, provider: &str, met
     })
 }
 
-/// Go `savePluginLoginRecords`: each auth saved as `saveTokenRecord` saves it (existing
-/// file metadata merged, written with creation intent). On a failure the batch is
-/// undone, newest first: a file it created is removed (locally and from the store),
-/// a file that existed before gets its earlier bytes back, which the watcher syncs
-/// to the store. Go removes both kinds.
-// ponytail: Go's auth-manager metadata fallback, legacy Claude credential migration and
-// post-auth hooks (SDK embedders only) are not ported; the watcher loads the new files.
-fn save_records(state: &Management, records: Vec<PluginAuth>) -> Result<(), String> {
+/// Saves the working batch under the disk lock, then commits every source document
+/// in one SQLite transaction before the OAuth session can complete. A failed write
+/// or commit restores the earlier documents without publishing the batch.
+fn save_records(
+    state: &Management,
+    records: Vec<PluginAuth>,
+) -> Result<Vec<(std::path::PathBuf, Vec<cpa_core::credential::Credential>)>, String> {
+    if state.rt.store().is_home() {
+        return Err("credential saves unavailable in Home mode".into());
+    }
     let _guard = state.disk.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let auth_dir = state.rt.config().auth_dir.clone();
-    // Each saved path with what it held before the batch (`None`: it did not exist).
-    let mut saved: Vec<(String, Option<Vec<u8>>)> = Vec::new();
-    for mut record in records {
-        // Go `mergeExistingAuthFileMetadata`.
-        let target = if record.file_name.is_empty() {
-            &record.id
-        } else {
-            &record.file_name
-        };
-        if !auth_dir.as_os_str().is_empty()
-            && !target.is_empty()
-            && let Ok(raw) = std::fs::read(go_join(&auth_dir, target))
-            && let Ok(Value::Object(existing)) = serde_json::from_slice::<Value>(&raw)
-        {
-            record.merge_existing(&existing);
-        }
-        let base = auth_dir.to_string_lossy();
-        // A file that exists but cannot be read is not tracked: it is never removed.
-        let prior = record
-            .file_path(&base)
-            .ok()
-            .and_then(|path| match std::fs::read(&path) {
-                Ok(bytes) => Some(Some(bytes)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(None),
-                Err(_) => None,
-            });
-        match record.save_file(&base, true) {
-            Ok(path) => {
-                if let Some(prior) = prior
-                    && !path.trim().is_empty()
-                {
-                    saved.push((path, prior));
-                }
+    let cfg = state.rt.config();
+    let auth_dir = &cfg.auth_dir;
+    let base = auth_dir.to_string_lossy();
+    let backend = state.rt.store().credential_backend();
+    let root = cpa_plugin::platform::clean(auth_dir);
+    let paths: Vec<_> = records
+        .iter()
+        .map(|record| record.file_path(&base).map(std::path::PathBuf::from))
+        .collect::<Result<_, _>>()?;
+    let write_batch = || {
+        let mut external = Vec::new();
+        for (mut record, path) in records.into_iter().zip(&paths) {
+            if let Ok(raw) = std::fs::read(path)
+                && let Ok(Value::Object(existing)) = serde_json::from_slice::<Value>(&raw)
+            {
+                record.merge_existing(&existing);
             }
-            Err(e) => {
-                rollback(state, &saved);
-                return Err(e);
+            let parsed = (cpa_plugin::platform::clean(path).parent() != Some(root.as_path()))
+                .then(|| record.clone().into_parsed());
+            record.save_file(&base, true)?;
+            // Directory reloads cannot discover an explicit path outside the root
+            // (or a nested path). Return its validated credentials to the poll.
+            if let Some(parsed) = parsed {
+                let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+                let metadata = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+                let credentials =
+                    cpa_core::config::credentials::plugin_save_credentials(path, &metadata, vec![parsed])?;
+                external.retain(|(existing, _)| existing != path);
+                external.push((path.clone(), credentials));
             }
         }
+        Ok::<_, String>(external)
+    };
+    let result = backend
+        .write_files(&paths, || write_batch().map_err(anyhow::Error::msg))
+        .map_err(|e| format!("persist plugin auth batch: {e}"));
+    if result.is_ok() {
+        // Credentials only: the watcher rescans SQLite, as Go's watcher registers saved
+        // tokens. Republishing the config here would restart plugins.
+        state.credential_changes.notify_one();
     }
-    Ok(())
-}
-
-/// Go `rollbackSavedTokenRecords`, newest first, keeping what existed before.
-fn rollback(state: &Management, saved: &[(String, Option<Vec<u8>>)]) {
-    for (path, prior) in saved.iter().rev() {
-        let result = match prior {
-            Some(bytes) => cpa_plugin::auth::atomic_write(Path::new(path), bytes),
-            None => {
-                let _ = std::fs::remove_file(path);
-                state.store_delete(Path::new(path))
-            }
-        };
-        if let Err(e) = result {
-            tracing::warn!(error = %e, path = %path, "failed to roll back plugin auth token");
-        }
-    }
-}
-
-/// Go `filepath.Join(dir, name)`: lexical, so an absolute name still lands under
-/// `dir`.
-fn go_join(dir: &Path, name: &str) -> std::path::PathBuf {
-    let joined = format!("{}/{name}", dir.to_string_lossy());
-    cpa_plugin::platform::clean(Path::new(&joined))
+    result
 }
 
 /// Go `writeOAuthCallbackFile` for a plugin session: `.oauth-<provider>-<state>.oauth`
@@ -323,45 +317,12 @@ pub(super) fn write_callback_file(
 mod tests {
     use super::*;
 
-    /// Records the store deletes a rollback asks for.
-    struct Store {
-        dir: std::path::PathBuf,
-        deleted: std::sync::Mutex<Vec<std::path::PathBuf>>,
-    }
-
-    impl crate::persist::StorePersister for Store {
-        fn persist_config(&self) -> futures_util::future::BoxFuture<'_, anyhow::Result<()>> {
-            Box::pin(async { Ok(()) })
-        }
-        fn persist_auth_files(
-            &self,
-            _: String,
-            _: Vec<std::path::PathBuf>,
-        ) -> futures_util::future::BoxFuture<'_, anyhow::Result<()>> {
-            Box::pin(async { Ok(()) })
-        }
-        fn delete_auth(&self, path: std::path::PathBuf) -> anyhow::Result<()> {
-            self.deleted.lock().unwrap().push(path);
-            Ok(())
-        }
-        fn auth_dir(&self) -> std::path::PathBuf {
-            self.dir.clone()
-        }
-    }
-
-    /// A batch that fails on a later record gives an overwritten file its earlier
-    /// bytes back and leaves its store copy alone; only the file it created goes.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_failed_batch_keeps_files_that_existed() {
-        let work = cpa_plugin::testing::scratch(&std::env::temp_dir(), "plugin-oauth-rollback");
-        let auths = work.join("auths");
-        std::fs::create_dir_all(&auths).unwrap();
-        let existing = br#"{"type":"rec","access_token":"old"}"#;
-        std::fs::write(auths.join("existing.json"), existing).unwrap();
-        let config_path = work.join("config.yaml");
-        std::fs::write(&config_path, format!("auth-dir: {}\n", auths.display())).unwrap();
-        let cfg = cpa_core::config::Config::load(&config_path).unwrap();
-        let rt = std::sync::Arc::new(crate::testing::runtime(
+    fn sqlite_state(work: &Path) -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>) {
+        let store = Arc::new(crate::config_store::ConfigStore::open(&work.join("config.db")).unwrap());
+        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &work.join("legacy")).unwrap();
+        let mut cfg = store.load().unwrap().config;
+        cfg.auth_dir = db.auth_dir();
+        let rt = Arc::new(crate::testing::runtime_with_db(
             cfg,
             Vec::new(),
             cpa_exec::Executors {
@@ -371,62 +332,101 @@ mod tests {
                 openai: Default::default(),
                 google: Default::default(),
             },
+            db.clone(),
         ));
-        let store = std::sync::Arc::new(Store {
-            dir: auths.clone(),
-            deleted: Default::default(),
-        });
-        let state = Management::with_options(
-            rt,
-            config_path,
-            super::super::Options {
-                store: Some(store.clone()),
-                ..Default::default()
-            },
-        );
-        let base = auths.to_string_lossy().into_owned();
-        let record = |file: &str, json: &'static [u8]| {
-            let data = cpa_plugin::api::AuthData {
+        (Management::new(rt, store), db)
+    }
+
+    fn record(base: &Path, file: &str, raw: &'static [u8]) -> PluginAuth {
+        PluginAuth::from_auth_data(
+            cpa_plugin::api::AuthData {
                 provider: "rec".into(),
                 file_name: file.into(),
-                storage_json: bytes::Bytes::from_static(json),
+                storage_json: bytes::Bytes::from_static(raw),
                 ..Default::default()
-            };
-            PluginAuth::from_auth_data(data, "", "", &base).unwrap()
-        };
-        let records = vec![
-            record("existing.json", br#"{"type":"rec","access_token":"new"}"#),
-            record("created.json", br#"{"type":"rec","access_token":"c"}"#),
-            {
-                let mut bad = record("bad.json", br#"{"type":"rec"}"#);
-                bad.attributes.insert("weight".into(), "1.5".into());
-                bad
             },
-        ];
-        let err = tokio::task::spawn_blocking({
-            let state = state.clone();
-            move || save_records(&state, records)
-        })
-        .await
+            "",
+            "",
+            &base.to_string_lossy(),
+        )
         .unwrap()
-        .unwrap_err();
-        assert!(err.contains("weight"), "{err}");
-        assert_eq!(std::fs::read(auths.join("existing.json")).unwrap(), existing);
-        assert!(!auths.join("created.json").exists());
-        assert!(!auths.join("bad.json").exists());
-        let deleted = store.deleted.lock().unwrap().clone();
-        assert_eq!(deleted, [std::path::absolute(auths.join("created.json")).unwrap()]);
-        let _ = std::fs::remove_dir_all(&work);
     }
 
     #[test]
-    fn existing_metadata_is_read_where_go_joins() {
-        let dir = Path::new("/auth");
-        assert_eq!(go_join(dir, "a.json"), Path::new("/auth/a.json"));
-        // Go joins lexically: an absolute file name is looked up under the auth dir.
-        assert_eq!(go_join(dir, "/tmp/a.json"), Path::new("/auth/tmp/a.json"));
-        assert_eq!(go_join(dir, "../x.json"), Path::new("/x.json"));
-        assert_eq!(go_join(dir, "sub/./b.json"), Path::new("/auth/sub/b.json"));
+    fn sqlite_batch_restores_every_file_on_later_record_or_sql_failure() {
+        for sql_failure in [false, true] {
+            let work = cpa_plugin::testing::scratch(&std::env::temp_dir(), "plugin-oauth-sqlite-rollback");
+            let (state, db) = sqlite_state(&work);
+            let auths = db.auth_dir();
+            let existing = auths.join("existing.json");
+            let prior = br#"{"type":"rec","access_token":"old","plugin_extra":{"keep":true}}"#;
+            db.save(&existing, prior).unwrap();
+            if sql_failure {
+                rusqlite::Connection::open(work.join("config.db"))
+                    .unwrap()
+                    .execute_batch(
+                        "CREATE TRIGGER reject_plugin BEFORE INSERT ON credential_document
+                         WHEN instr(CAST(NEW.bytes AS TEXT), 'reject') > 0
+                         BEGIN SELECT RAISE(ABORT, 'reject plugin batch'); END;",
+                    )
+                    .unwrap();
+            }
+            let outside = work.join("explicit.json");
+            let mut explicit = record(&auths, "unused.json", br#"{"type":"rec","access_token":"created"}"#);
+            explicit
+                .attributes
+                .insert("path".into(), outside.to_string_lossy().into_owned());
+            let mut bad = record(&auths, "bad.json", br#"{"type":"rec","access_token":"reject"}"#);
+            if !sql_failure {
+                bad.attributes.insert("weight".into(), "1.5".into());
+            }
+            let result = save_records(
+                &state,
+                vec![
+                    record(&auths, "existing.json", br#"{"type":"rec","access_token":"new"}"#),
+                    explicit,
+                    bad,
+                ],
+            );
+            assert!(result.is_err());
+            assert_eq!(db.read(&existing).unwrap().unwrap(), prior);
+            assert_eq!(std::fs::read(&existing).unwrap(), prior);
+            assert_eq!(db.documents().unwrap().len(), 1);
+            assert!(!outside.exists());
+            assert!(db.read(&outside).unwrap().is_none());
+            assert!(!auths.join("bad.json").exists());
+            assert!(state.rt.store().snapshot().is_empty());
+            let _ = std::fs::remove_dir_all(work);
+        }
+    }
+
+    #[test]
+    fn sqlite_batch_preserves_unknown_fields_at_explicit_paths() {
+        let work = cpa_plugin::testing::scratch(&std::env::temp_dir(), "plugin-oauth-sqlite-explicit");
+        let (state, db) = sqlite_state(&work);
+        let outside = work.join("explicit.json");
+        db.save(
+            &outside,
+            br#"{"type":"rec","access_token":"old","plugin_extra":{"keep":true}}"#,
+        )
+        .unwrap();
+        // A stale workspace must not override the canonical plugin fields.
+        std::fs::write(&outside, br#"{"type":"rec","plugin_extra":"stale"}"#).unwrap();
+        let mut auth = record(&db.auth_dir(), "unused.json", br#"{"type":"rec","access_token":"new"}"#);
+        auth.attributes
+            .insert("path".into(), outside.to_string_lossy().into_owned());
+        let external = save_records(&state, vec![auth]).unwrap();
+        assert_eq!(external.len(), 1);
+        assert_eq!(external[0].0, outside);
+        assert_eq!(external[0].1[0].metadata["plugin_extra"], json!({"keep": true}));
+        let bytes = db.read(&outside).unwrap().unwrap();
+        let saved: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved["access_token"], "new");
+        assert_eq!(saved["plugin_extra"], json!({"keep": true}));
+        std::fs::remove_file(&outside).unwrap();
+        db.restore(&outside).unwrap();
+        assert_eq!(std::fs::read(&outside).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(work);
     }
 
     #[test]

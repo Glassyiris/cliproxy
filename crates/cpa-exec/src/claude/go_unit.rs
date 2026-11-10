@@ -249,72 +249,89 @@ macro_rules! go_file {
 
 go_file!(
     /// M1-0072.
-    m1_0072_cloaked_cache_repro, "claude_cloaked_cache_repro_test.go"
+    m1_0072_cloaked_cache_repro,
+    "claude_cloaked_cache_repro_test.go"
 );
 go_file!(
     /// M1-0074.
-    m1_0074_executor_auth, "claude_executor_auth_test.go"
+    m1_0074_executor_auth,
+    "claude_executor_auth_test.go"
 );
 go_file!(
     /// M1-0076.
-    m1_0076_beta_policy, "claude_executor_beta_policy_test.go"
+    m1_0076_beta_policy,
+    "claude_executor_beta_policy_test.go"
 );
 go_file!(
     /// M1-0078.
-    m1_0078_diagnostics, "claude_executor_diagnostics_test.go"
+    m1_0078_diagnostics,
+    "claude_executor_diagnostics_test.go"
 );
 go_file!(
     /// M1-0079.
-    m1_0079_fable_ratelimit, "claude_executor_fable_ratelimit_test.go"
+    m1_0079_fable_ratelimit,
+    "claude_executor_fable_ratelimit_test.go"
 );
 go_file!(
     /// M1-0080.
-    m1_0080_fast_error, "claude_executor_fast_error_test.go"
+    m1_0080_fast_error,
+    "claude_executor_fast_error_test.go"
 );
 go_file!(
     /// M1-0081.
-    m1_0081_native_helper, "claude_executor_native_helper_test.go"
+    m1_0081_native_helper,
+    "claude_executor_native_helper_test.go"
 );
 go_file!(
     /// M1-0082.
-    m1_0082_ratelimit, "claude_executor_ratelimit_test.go"
+    m1_0082_ratelimit,
+    "claude_executor_ratelimit_test.go"
 );
 go_file!(
     /// M1-0083: MCP aliasing, mangled-alias recovery, malformed-JSON fallback.
-    m1_0083_request_remap, "claude_executor_request_remap_test.go"
+    m1_0083_request_remap,
+    "claude_executor_request_remap_test.go"
 );
 go_file!(
     /// M1-0084.
-    m1_0084_stream_terminal, "claude_executor_stream_terminal_test.go"
+    m1_0084_stream_terminal,
+    "claude_executor_stream_terminal_test.go"
 );
 go_file!(
     /// M1-0085.
-    m1_0085_subagent_ttl, "claude_executor_subagent_ttl_regression_test.go"
+    m1_0085_subagent_ttl,
+    "claude_executor_subagent_ttl_regression_test.go"
 );
 go_file!(
     /// M1-0086.
-    m1_0086_executor, "claude_executor_test.go"
+    m1_0086_executor,
+    "claude_executor_test.go"
 );
 go_file!(
     /// M1-0087.
-    m1_0087_thinking_signature, "claude_executor_thinking_signature_test.go"
+    m1_0087_thinking_signature,
+    "claude_executor_thinking_signature_test.go"
 );
 go_file!(
     /// M1-0089.
-    m1_0089_fingerprint_policy, "claude_fingerprint_policy_test.go"
+    m1_0089_fingerprint_policy,
+    "claude_fingerprint_policy_test.go"
 );
 go_file!(
     /// M1-0093.
-    m1_0093_mid_system_model, "claude_mid_system_model_test.go"
+    m1_0093_mid_system_model,
+    "claude_mid_system_model_test.go"
 );
 go_file!(
     /// M1-0095.
-    m1_0095_thinking_replay, "claude_thinking_replay_test.go"
+    m1_0095_thinking_replay,
+    "claude_thinking_replay_test.go"
 );
 go_file!(
     /// The Claude executor's calls in Go's shared apply_patch integration suite (API key
     /// and OAuth; stream, non-stream, EOF, empty and scanner failures).
-    apply_patch_integration_claude, "apply_patch_integration_test.go"
+    apply_patch_integration_claude,
+    "apply_patch_integration_test.go"
 );
 
 macro_rules! go_file_v8_0_27 {

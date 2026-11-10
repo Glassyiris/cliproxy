@@ -1,7 +1,7 @@
 # Idle cost outside the per-PR Linux gate: once a week, by hand, and on a push to master
-# or a pull request that changes the file watcher or these gates.
+# or a pull request that changes the reload loop or these gates.
 #
-# - macOS (Apple silicon and Intel) and Windows: release build, the file-watch tests,
+# - macOS (Apple silicon and Intel) and Windows: release build, the reload-loop tests,
 #   then the idle gate (bench/gate.sh, bench/budgets.txt).
 # - Go comparison: CLIProxyAPI's release binary and this one on the same one-API-key
 #   config in a loopback-only network, 30 s of warm-up, then 300 s of samples. No OAuth
@@ -20,7 +20,6 @@ on:
   push:
     branches: [master]
     paths:
-      - crates/cpa-server/src/fs_events.rs
       - crates/cpa-server/src/watching.rs
       - bench/idle.sh
       - bench/idle-other.sh
@@ -30,7 +29,6 @@ on:
       - .github/scripts/apt-install.sh
   pull_request:
     paths:
-      - crates/cpa-server/src/fs_events.rs
       - crates/cpa-server/src/watching.rs
       - bench/idle.sh
       - bench/idle-other.sh
@@ -91,9 +89,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Build
         run: cargo build --release --locked -p cook-router --target ${{ matrix.target }}
-      # kqueue on macOS and ReadDirectoryChangesW on Windows are only exercised here.
-      - name: File-watch tests
-        run: cargo test --release --locked -p cpa-server --lib --target ${{ matrix.target }} -- fs_events watching
+      - name: Reload-loop tests
+        run: cargo test --release --locked -p cpa-server --lib --target ${{ matrix.target }} -- watching
       - name: Idle gate
         run: |
           exe=cook-router; os=macos

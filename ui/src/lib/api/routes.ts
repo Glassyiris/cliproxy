@@ -1,15 +1,15 @@
-// Every Management API route the dashboard calls, relative to /v8/management, in the
-// router's path syntax. tools/check-api.mjs compares this table with the Rust router,
-// so it must stay a plain object literal with no imports.
+// Every Management API route the dashboard calls, in the router's path syntax. Admin paths
+// start with /admin/v1; other paths are relative to /v8/management. tools/check-api.mjs compares
+// this table with the Rust router, so it must stay a plain object literal with no imports.
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type Route = { readonly method: Method; readonly path: string };
 
 export const routes = {
-  readConfig: { method: "GET", path: "/config" },
-  readConfigYaml: { method: "GET", path: "/config.yaml" },
-  writeConfigYaml: { method: "PUT", path: "/config.yaml" },
-  readConfigValue: { method: "GET", path: "/config/{*path}" },
-  writeConfigValue: { method: "PUT", path: "/config/{*path}" },
+  readConfig: { method: "GET", path: "/admin/v1/effective/config" },
+  applyConfig: { method: "POST", path: "/admin/v1/apply" },
+  listClientKeys: { method: "GET", path: "/admin/v1/r/client-key" },
+  exportConfig: { method: "GET", path: "/admin/v1/export" },
+  readResource: { method: "GET", path: "/admin/v1/r/{kind}/{id}" },
 
   listCredentials: { method: "GET", path: "/credentials" },
   uploadCredentials: { method: "POST", path: "/credentials" },

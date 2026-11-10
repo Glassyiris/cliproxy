@@ -7,6 +7,9 @@
 //! newer, looked up in `$HOME/sdk/go*/bin` first, then on `PATH`, then
 //! `/usr/local/go/bin`. Without one, each native test prints a SKIPPED line naming
 //! itself and returns, so a skip is visible in the test output.
+//! The C compiler defaults to `cc` (override with `CC`), matching Rust's linker rather
+//! than Go's `gcc` default. On NixOS those may select different glibc generations;
+//! a plugin linked to a newer glibc cannot be loaded into an older Rust host.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -24,6 +27,7 @@ pub fn go_command(go: &Path) -> Command {
     let _ = std::fs::create_dir_all(&telemetry);
     let _ = std::fs::write(telemetry.join("mode"), "off");
     let mut cmd = Command::new(go);
+    cmd.env("CC", std::env::var_os("CC").unwrap_or_else(|| "cc".into()));
     cmd.env("GOTOOLCHAIN", "local")
         .env("GOPROXY", "off")
         .env("GONOPROXY", "none")

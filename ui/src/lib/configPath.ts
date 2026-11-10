@@ -1,15 +1,10 @@
-export function fieldPath(path: string): string {
-  return (
-    "/config/" +
-    path
-      .split("/")
-      .map((part) => {
-        if (!part || part === "." || part === ".." || /[\\\x00-\x1f\x7f]/.test(part))
-          throw new Error("Invalid configuration path.");
-        return encodeURIComponent(part);
-      })
-      .join("/")
-  );
+/** Slash-separated keys in the effective config, passed as JSON rather than URL segments. */
+export function configPath(path: string): string {
+  for (const part of path.split("/")) {
+    if (!part || part === "." || part === ".." || /[\\\x00-\x1f\x7f]/.test(part))
+      throw new Error("Invalid configuration path.");
+  }
+  return path;
 }
 
 export function readPath(value: object, path: string, fallback: unknown = undefined): unknown {
@@ -21,12 +16,12 @@ export function readPath(value: object, path: string, fallback: unknown = undefi
   );
 }
 
-/** No value at a config path: the server answers 404 there. Distinct from a stored `null`. */
+/** No value at a config path. Distinct from a stored `null` in a read snapshot. */
 export const absent: unique symbol = Symbol("absent");
 
 /**
- * The value at `path` exactly as stored, the baseline a config write compares against: `null`
- * stays `null`, and a key the file lacks, or a parent that is not an object, is `absent`.
+ * The value at `path` in the effective config, the baseline a config write compares against:
+ * `null` stays `null`, and a missing key, or a parent that is not an object, is `absent`.
  */
 export function storedValue(value: object, path: string): unknown {
   let v: unknown = value;

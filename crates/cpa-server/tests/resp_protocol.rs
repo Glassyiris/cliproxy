@@ -6,7 +6,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cpa_core::config::Config;
 use cpa_exec::Executors;
 use cpa_exec::claude::ClaudeExecutor;
 use cpa_server::management::{Management, Options};
@@ -30,9 +29,11 @@ async fn server_with(management_password: Option<&str>, credentials: Vec<cpa_cor
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("cpa-resp-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("config.yaml");
-    let yaml = "observability:\n  usage:\n    usage-statistics-enabled: true\n";
-    std::fs::write(&path, yaml).unwrap();
+    let yaml = format!(
+        "oauth:\n  auth-dir: {}\nobservability:\n  usage:\n    usage-statistics-enabled: true\n",
+        dir.join("auth").display()
+    );
+    let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&yaml));
     let executors = Executors {
         claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
         codex: Default::default(),
@@ -41,7 +42,7 @@ async fn server_with(management_password: Option<&str>, credentials: Vec<cpa_cor
         google: Default::default(),
     };
     let rt = Arc::new(cpa_server::testing::runtime(
-        Config::parse(yaml).unwrap(),
+        store.load().unwrap().config,
         credentials,
         executors,
     ));
@@ -49,7 +50,7 @@ async fn server_with(management_password: Option<&str>, credentials: Vec<cpa_cor
         management_password: Some(management_password.unwrap_or_default().to_owned()),
         ..Default::default()
     };
-    let management = Management::with_options(rt.clone(), path, options);
+    let management = Management::with_options(rt.clone(), store, options);
     let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

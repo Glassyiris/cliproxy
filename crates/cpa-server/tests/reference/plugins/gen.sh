@@ -1,6 +1,9 @@
 #!/bin/sh
 # Regenerates ../../fixtures/plugin_routes_go.json from Go's management server.
 # Usage: gen.sh /absolute/path/to/CLIProxyAPI   (checkout at 6fecc6e; not modified)
+# The checked-in fixture omits retired v0 plugin-config reads/errors and replaces
+# successful config mutations with plugin_config admin-resource setup steps.
+# Preserve that migration after regenerating; Go only produces the legacy routes.
 set -eu
 # Offline: no toolchain download, modules from the local cache only. Run `go mod download`
 # in the reference checkout and in crates/cpa-plugin/tests/goplugins once beforehand.

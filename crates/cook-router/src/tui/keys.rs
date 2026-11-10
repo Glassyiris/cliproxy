@@ -6,7 +6,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
-use super::client::{Client, Object};
+use super::client::{Client, ClientKey, Object};
 use super::i18n::{t, tf};
 use super::style::{self as s, Doc, span};
 use super::widgets::{TextInput, Viewport};
@@ -14,17 +14,17 @@ use super::{Cmd, Msg, cmd};
 
 /// Go's provider sections, in its order (no Meta list, as in Go).
 pub(super) const PROVIDERS: [(&str, &str); 6] = [
-    ("Gemini API Keys", "gemini-api-key"),
-    ("Interactions API Keys", "interactions-api-key"),
-    ("Claude API Keys", "claude-api-key"),
-    ("Codex API Keys", "codex-api-key"),
-    ("xAI API Keys", "xai-api-key"),
-    ("Vertex API Keys", "vertex-api-key"),
+    ("Gemini API Keys", "gemini"),
+    ("Interactions API Keys", "interactions"),
+    ("Claude API Keys", "claude"),
+    ("Codex API Keys", "codex"),
+    ("xAI API Keys", "xai"),
+    ("Vertex API Keys", "vertex"),
 ];
 
 /// Go's `keysDataMsg`.
 pub struct Data {
-    pub(super) api_keys: Vec<String>,
+    pub(super) api_keys: Vec<ClientKey>,
     /// One list per [`PROVIDERS`] entry, in order.
     pub(super) providers: Vec<Vec<Object>>,
     pub(super) openai: Vec<Object>,
@@ -33,7 +33,7 @@ pub struct Data {
 pub struct KeysTab {
     client: Arc<Client>,
     pub vp: Viewport,
-    pub keys: Vec<String>,
+    pub keys: Vec<ClientKey>,
     providers: Vec<Vec<Object>>,
     openai: Vec<Object>,
     err: Option<String>,
@@ -44,9 +44,8 @@ pub struct KeysTab {
     pub editing: bool,
     pub adding: bool,
     edit_index: usize,
-    /// The key being edited or awaiting delete confirmation. The API addresses keys by
-    /// index, so a refresh that moves it cancels the action.
-    target: String,
+    /// Identity and revision of the resource selected before confirmation.
+    target: Option<ClientKey>,
     pub input: TextInput,
 }
 
@@ -68,7 +67,7 @@ impl KeysTab {
             editing: false,
             adding: false,
             edit_index: 0,
-            target: String::new(),
+            target: None,
             input,
         }
     }
@@ -77,7 +76,7 @@ impl KeysTab {
     pub fn fetch(&self) -> Cmd {
         let client = self.client.clone();
         cmd(async move {
-            let api_keys = match client.get_api_keys().await {
+            let api_keys = match client.get_client_keys().await {
                 Ok(keys) => keys,
                 Err(e) => return Msg::KeysData(Err(e)),
             };
@@ -120,7 +119,7 @@ impl KeysTab {
                     self.cursor = self.keys.len().saturating_sub(1);
                 }
                 let index = self.confirm.or(self.editing.then_some(self.edit_index));
-                if index.is_some_and(|i| self.keys.get(i) != Some(&self.target)) {
+                if index.is_some_and(|i| self.keys.get(i) != self.target.as_ref()) {
                     self.confirm = None;
                     self.editing = false;
                     self.input.blur();
@@ -161,14 +160,16 @@ impl KeysTab {
                         return Vec::new();
                     }
                     let client = self.client.clone();
+                    let target = self.keys.get(index).cloned();
                     return if adding {
                         self.act(async move {
-                            client.add_api_key(&value).await?;
+                            client.add_client_key(&value).await?;
                             Ok(t("key_added").to_owned())
                         })
                     } else {
                         self.act(async move {
-                            client.edit_api_key(index, &value).await?;
+                            let target = target.ok_or("client key no longer exists")?;
+                            client.edit_client_key(&target, &value).await?;
                             Ok(t("key_updated").to_owned())
                         })
                     };
@@ -188,8 +189,9 @@ impl KeysTab {
                 "y" | "Y" => {
                     self.confirm = None;
                     let client = self.client.clone();
+                    let target = self.keys[index].clone();
                     return self.act(async move {
-                        client.delete_api_key(index).await?;
+                        client.delete_client_key(&target).await?;
                         Ok(t("key_deleted").to_owned())
                     });
                 }
@@ -228,8 +230,8 @@ impl KeysTab {
                     self.editing = true;
                     self.adding = false;
                     self.edit_index = self.cursor;
-                    self.target = self.keys[self.cursor].clone();
-                    self.input.set_value(&self.target);
+                    self.target = Some(self.keys[self.cursor].clone());
+                    self.input.set_value("");
                     self.input.prompt = t("edit_key_prompt").to_owned();
                     self.input.focus();
                     self.refresh();
@@ -238,17 +240,18 @@ impl KeysTab {
             "d" => {
                 if self.cursor < count {
                     self.confirm = Some(self.cursor);
-                    self.target = self.keys[self.cursor].clone();
+                    self.target = Some(self.keys[self.cursor].clone());
                     self.refresh();
                 }
             }
             "c" => {
-                if let Some(key) = self.keys.get(self.cursor) {
-                    self.status = Some(match super::sys::write_clipboard(key) {
-                        Ok(()) => (t("copied").to_owned(), s::success()),
-                        Err(e) => (format!("{}: {e}", t("copy_failed")), s::error()),
+                if let Some(key) = self.keys.get(self.cursor).cloned() {
+                    let client = self.client.clone();
+                    return self.act(async move {
+                        let value = client.reveal_client_key(&key).await?;
+                        super::sys::write_clipboard(&value).map_err(|e| e.to_string())?;
+                        Ok(t("copied").to_owned())
                     });
-                    self.refresh();
                 }
             }
             "r" => {
@@ -285,19 +288,16 @@ impl KeysTab {
         if self.keys.is_empty() {
             doc.text(t("no_keys"), s::subtitle());
         }
-        for (i, key) in self.keys.iter().enumerate() {
+        for (i, _) in self.keys.iter().enumerate() {
             let style = if i == self.cursor {
                 Style::new().add_modifier(Modifier::BOLD)
             } else {
                 Style::new()
             };
             let cursor = if i == self.cursor { "▸ " } else { "  " };
-            doc.line(vec![span(format!("{cursor}{}. {}", i + 1, s::mask_key(key)), style)]);
+            doc.line(vec![span(format!("{cursor}{}. ********", i + 1), style)]);
             if self.confirm == Some(i) {
-                doc.text(
-                    format!("    {}", tf("confirm_delete_key", s::mask_key(key))),
-                    s::warning(),
-                );
+                doc.text(format!("    {}", tf("confirm_delete_key", "********")), s::warning());
             }
             if self.editing && self.edit_index == i {
                 doc.0.push(self.input.view());
@@ -316,7 +316,7 @@ impl KeysTab {
             }
             doc.table_header(format!("  {title} ({})", keys.len()));
             for (i, key) in keys.iter().enumerate() {
-                let mut info = s::mask_key(&s::get_string(key, "api-key"));
+                let mut info = "********".to_owned();
                 append_details(&mut info, key);
                 doc.text(format!("  {}. {info}", i + 1), Style::new());
             }
@@ -356,14 +356,43 @@ mod tests {
 
     fn data(keys: &[&str]) -> Result<Data, String> {
         Ok(Data {
-            api_keys: keys.iter().map(|k| (*k).to_owned()).collect(),
+            api_keys: keys
+                .iter()
+                .map(|k| ClientKey {
+                    id: (*k).to_owned(),
+                    rev: 1,
+                })
+                .collect(),
             providers: Vec::new(),
             openai: Vec::new(),
         })
     }
 
-    /// Keys are deleted and edited by index; a refresh that moves the chosen key
-    /// cancels the action instead of hitting its neighbour.
+    #[test]
+    fn masked_keys_edit_empty_and_revision_changes_cancel_confirmation() {
+        let mut tab = KeysTab::new(Arc::new(Client::new("http://127.0.0.1:1", "")));
+        let mut initial = data(&["client-one"]).unwrap();
+        initial.providers = vec![vec![
+            serde_json::json!({"api-key": "never-disclose-this-key"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        ]];
+        tab.data(Ok(initial));
+        let rendered = tab.vp.text().join("\n");
+        assert!(!rendered.contains("never-disclose"));
+        assert!(!rendered.contains("$secret"));
+        tab.key("e");
+        assert_eq!(tab.input.value(), "");
+        tab.key("esc");
+        tab.key("d");
+        let mut changed = data(&["client-one"]).unwrap();
+        changed.api_keys[0].rev = 2;
+        tab.data(Ok(changed));
+        assert_eq!(tab.confirm, None);
+    }
+
+    /// A refresh that moves or changes the selected resource cancels confirmation.
     #[test]
     fn a_refresh_that_moves_the_key_cancels_delete_and_edit() {
         let mut tab = KeysTab::new(Arc::new(Client::new("http://127.0.0.1:1", "")));

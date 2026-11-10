@@ -1,18 +1,17 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import type { ClientKey } from "../../lib/api/clientKeys.ts";
+import { isUsableSecret } from "../../lib/api/config.ts";
 import { listClientModels } from "../../lib/api/proxy.ts";
 
 const modelKeys = {
-  models: (key: string) => ["use", "models", key] as const,
+  models: (resource?: ClientKey) => ["use", "models", resource?.id, resource?.rev] as const,
 };
 
-/**
- * The models a client key reaches, cached per key. While another key's list loads, the previous
- * list stays as placeholder data, so the model control never empties and the snippet keeps a model.
- */
-export const useClientModels = (key: string) =>
+/** Model results are cached by resource identity, without retaining plaintext in query keys. */
+export const useClientModels = (key: string, resource: ClientKey | undefined) =>
   useQuery({
-    queryKey: modelKeys.models(key),
+    queryKey: modelKeys.models(resource),
     queryFn: ({ signal }) => listClientModels(key, signal),
-    enabled: key !== "",
-    placeholderData: keepPreviousData,
+    enabled: isUsableSecret(key),
+    gcTime: 0,
   });

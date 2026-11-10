@@ -1,3 +1,4 @@
+mod config_cli;
 mod discovery;
 mod dotenv;
 mod home;
@@ -5,7 +6,6 @@ mod home_plugins;
 mod plugin_cli;
 mod tui;
 
-use cpa_core::gostr::GoStr;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -18,7 +18,10 @@ use cpa_core::config::Config;
 use cpa_exec::Executors;
 use cpa_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL};
 use cpa_server::Runtime;
+use cpa_server::config_store::ConfigStore;
+use cpa_server::credential_store::CredentialDb;
 use cpa_server::listener::bind;
+use cpa_server::runtime::CredentialAuthority;
 
 /// Same strings as the management `X-CPA-*` headers.
 const VERSION: &str = concat!("cook-router-", env!("CARGO_PKG_VERSION"));
@@ -37,11 +40,19 @@ fn banner() -> String {
 
 /// Flags mirror CLIProxyAPI. Go's single-dash long flags (`-config`) are accepted.
 #[derive(Parser)]
-#[command(version, about)]
+#[command(
+    version,
+    about,
+    after_help = "Config commands: config import FILE | config export [--secrets] [-o FILE] | config validate [FILE] | config backup FILE | config listener\nUse config --help for details."
+)]
 struct Args {
-    /// Configure File Path
+    /// The config file a first start imports into the config database (default
+    /// ./config.yaml); later starts do not read it.
     #[arg(long, default_value = "")]
     config: String,
+    /// The config database (default: cook.db beside the config file, or COOK_DB).
+    #[arg(long, default_value = "")]
+    db: String,
     /// Write process logs to this file (10 MiB rotation), without a shell wrapper.
     #[arg(long)]
     log_file: Option<PathBuf>,
@@ -218,10 +229,10 @@ fn go_flags(
         }
         let known = cmd.get_arguments().find(|a| a.get_long() == Some(name));
         let Some(flag) = known.filter(|_| !name.is_empty() && !name.starts_with(['-', '='])) else {
-            tail = Some(if matches!(name, "h" | "help") {
-                "--help".to_owned()
-            } else {
-                format!("--{bare}")
+            tail = Some(match name {
+                "h" | "help" => "--help".to_owned(),
+                "V" | "version" => "--version".to_owned(),
+                _ => format!("--{bare}"),
             });
             break;
         };
@@ -491,23 +502,16 @@ fn discover_options(
 /// blocking pool keeps tokio's default ceiling (512): its threads start on demand and
 /// exit after 10 idle seconds, and a native plugin call holds one for the whole call
 /// while its HTTP callbacks need others (DNS), so a low ceiling could deadlock.
-fn runtime(config: Option<&Path>) -> io::Result<tokio::runtime::Runtime> {
+fn runtime(config: Option<&Config>) -> io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads(config))
         .enable_all()
         .build()
 }
 
-/// `worker-threads` as written in `path`, if any.
-fn configured_workers(path: &Path) -> Option<u64> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    let doc = cpa_core::config::parse_yaml(&raw).ok()?;
-    doc.get("worker-threads")?.as_u64()
-}
-
 /// `TOKIO_WORKER_THREADS`, else `worker-threads` in `config` (read once at start), else
 /// the smaller of the CPU count and 2.
-fn worker_threads(config: Option<&Path>) -> usize {
+fn worker_threads(config: Option<&Config>) -> usize {
     let positive = |n: u64| usize::try_from(n).ok().filter(|n| *n > 0);
     if let Ok(raw) = std::env::var("TOKIO_WORKER_THREADS") {
         match raw.trim().parse().ok().and_then(positive) {
@@ -515,7 +519,9 @@ fn worker_threads(config: Option<&Path>) -> usize {
             None => tracing::warn!("ignoring TOKIO_WORKER_THREADS={raw:?}: not a positive number"),
         }
     }
-    let configured = config.and_then(configured_workers).and_then(positive);
+    let configured = config
+        .and_then(|c| c.document.get("worker-threads")?.as_u64())
+        .and_then(positive);
     configured.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get().min(2)))
 }
 
@@ -534,41 +540,109 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-/// Go `LoadConfigOptional`: in cloud deploy mode a missing, empty or undecodable file
-/// is an empty config (the server then stands by).
-fn load_config(path: &Path, optional: bool) -> anyhow::Result<Config> {
-    let loaded = Config::load(path).with_context(|| format!("failed to load config {}", path.display()));
-    match loaded {
-        Err(e) if optional => {
-            let missing = std::fs::read(path).map_or(true, |b| String::from_utf8_lossy(&b).trim().is_empty());
-            if !missing {
-                // ponytail: Go stays fatal for its post-decode validations (trusted
-                // proxies, weights, in-flight); cpa-core reports both kinds alike, so
-                // cloud mode stands by on every load error and logs it.
-                tracing::error!("{e:#}");
-            }
-            Config::parse("")
-        }
-        other => other,
+/// The config database: `--db`, else `COOK_DB`, else `cook.db` beside the config file.
+fn db_path(flag: &str, config_file: &Path) -> PathBuf {
+    if !flag.trim().is_empty() {
+        return PathBuf::from(flag);
     }
+    if let Some(env) = std::env::var_os("COOK_DB").filter(|v| !v.is_empty()) {
+        return PathBuf::from(env);
+    }
+    config_file
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .join("cook.db")
 }
 
-/// Go's cloud-deploy check of the config file (main.go, `isCloudDeploy`).
-fn cloud_config_present(path: &Path, config: &Config) -> bool {
-    let (present, message) = match std::fs::metadata(path) {
-        Err(_) => (
+/// Opens the one config authority and imports YAML only before its first revision.
+/// Cloud and Home may initialize an empty config when the import file is absent or
+/// blank (Go `LoadConfigOptional`). A missing import fails before a new database file
+/// is created.
+fn load_config(db: &Path, config_file: &Path, optional: bool) -> anyhow::Result<(Arc<ConfigStore>, Config)> {
+    let read_import = || match std::fs::read_to_string(config_file) {
+        Ok(text) if optional && text.trim().is_empty() => Ok(String::new()),
+        Ok(text) => Ok(text),
+        Err(e) if optional && e.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e).with_context(|| format!("read first config import {}", config_file.display())),
+    };
+    let mut text = if db.exists() { None } else { Some(read_import()?) };
+    let store = Arc::new(ConfigStore::open(db)?);
+    if store.is_empty()? {
+        let text = match text.take() {
+            Some(text) => text,
+            None => read_import()?,
+        };
+        let done = store
+            .import_yaml(&text, "import", &format!("import {}", config_file.display()))
+            .with_context(|| format!("import config {} into {}", config_file.display(), db.display()))?;
+        tracing::info!(
+            revision = done.rev,
+            "initialized config database {}; later starts do not read YAML",
+            db.display()
+        );
+    }
+    let loaded = store
+        .load()
+        .map_err(|e| anyhow::anyhow!("load config database {}: {e}", db.display()))?;
+    Ok((store, loaded.config))
+}
+
+/// The settings that selected a remote config store before SQLite, upper and lower case.
+const REMOTE_STORE_KEYS: [&str; 6] = [
+    "PGSTORE_DSN",
+    "pgstore_dsn",
+    "OBJECTSTORE_ENDPOINT",
+    "objectstore_endpoint",
+    "GITSTORE_GIT_URL",
+    "gitstore_git_url",
+];
+
+fn reject_remote_store(env: &dyn Fn(&str) -> Option<String>) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !REMOTE_STORE_KEYS
+            .iter()
+            .any(|key| env(key).is_some_and(|v| !v.trim().is_empty())),
+        "PGSTORE/OBJECTSTORE/GITSTORE live storage is no longer supported. Export the old config with the previous release and import it with cook-router --db PATH config import FILE, migrate auths, then remove the remote-store environment variables. SQLite is the durable authority; mount a persistent volume for --db or COOK_DB in ephemeral containers. Remote data has not been changed."
+    );
+    Ok(())
+}
+
+/// Home owns runtime settings; only explicitly configured local listener settings
+/// replace its listener. The bootstrap's normalized Home port remains the default.
+fn home_listener_config(remote: Config, local: &Config) -> anyhow::Result<Config> {
+    let mut doc = remote.document.clone();
+    if let Some(server) = local.document.get("server") {
+        for key in ["host", "port", "tls"] {
+            if let Some(value) = server.get(key) {
+                doc["server"][key] = value.clone();
+            }
+        }
+    }
+    if let Some(value) = local.document.get("worker-threads") {
+        doc["worker-threads"] = value.clone();
+    }
+    let text = cpa_core::config::yaml_string(&doc)?;
+    let base = Config::parse(&text)?;
+    let mut config = home::overlay(text.as_bytes(), Some(&base))?;
+    config.plugin_configs = remote.plugin_configs;
+    Ok(config)
+}
+
+/// Go's cloud-deploy check, of the config database.
+fn cloud_config_present(store: &ConfigStore, config: &Config) -> bool {
+    let (present, message) = if store.is_empty().unwrap_or(true) {
+        (
             false,
-            "Cloud deploy mode: No configuration file detected; standing by for configuration",
-        ),
-        Ok(m) if m.is_dir() => (
+            "Cloud deploy mode: No configuration detected; standing by for configuration",
+        )
+    } else if config.port == 0 {
+        (
             false,
-            "Cloud deploy mode: Config path is a directory; standing by for configuration",
-        ),
-        Ok(_) if config.port == 0 => (
-            false,
-            "Cloud deploy mode: Configuration file is empty or invalid; standing by for valid configuration",
-        ),
-        Ok(_) => (true, "Cloud deploy mode: Configuration file detected; starting service"),
+            "Cloud deploy mode: Configuration is empty or invalid; standing by for valid configuration",
+        )
+    } else {
+        (true, "Cloud deploy mode: Configuration detected; starting service")
     };
     tracing::info!("{message}");
     present
@@ -593,6 +667,9 @@ fn flag_error(cmd: &mut clap::Command, message: &str) -> ! {
 fn main() -> anyhow::Result<()> {
     cpa_server::logging::init();
     let raw: Vec<String> = std::env::args().collect();
+    if config_cli::is_command(&raw[1..]) {
+        return config_cli::execute(raw);
+    }
     // First, so .env, plugins, the default config and relative paths resolve there.
     let working_dir = prescan_value(&raw[1..], "working-dir");
     if let Some(dir) = &working_dir {
@@ -628,12 +705,58 @@ fn main() -> anyhow::Result<()> {
     if !discover_mode {
         dotenv::load_from_working_dir();
     }
-    let runtime = runtime(Some(&plugin_cli::bootstrap_config_path(&raw[1..], "")))?;
-    // Go: plugins from the bootstrap config register their flags before the parse.
+    // Help and version never open a DB, import YAML or load native plugins.
+    if raw[1..]
+        .iter()
+        .any(|v| matches!(v.as_str(), "-h" | "--help" | "-help" | "-V" | "--version"))
+    {
+        let flags =
+            go_flags(&Args::command(), raw.clone(), &()).unwrap_or_else(|e| flag_error(&mut Args::command(), &e));
+        if let Err(error) = Args::try_parse_from(flags) {
+            error.exit();
+        }
+    }
+    let config_flag = prescan_value(&raw[1..], "config").unwrap_or_default();
+    let db_flag = prescan_value(&raw[1..], "db").unwrap_or_default();
+    let config_file = if config_flag.is_empty() {
+        PathBuf::from("config.yaml")
+    } else {
+        PathBuf::from(&config_flag)
+    };
+    let db = db_path(&db_flag, &config_file);
+    let home = prescan_value(&raw[1..], "home-jwt").is_some_and(|v| !v.trim().is_empty())
+        || ["HOME_JWT", "home_jwt"]
+            .iter()
+            .any(|k| std::env::var(k).is_ok_and(|v| !v.trim().is_empty()));
+    let remote_client = go_flags(&Args::command(), raw.clone(), &())
+        .ok()
+        .and_then(|flags| Args::try_parse_from(flags).ok())
+        .is_some_and(|args| {
+            args.tui && !args.standalone && !args.management_base_url.trim().is_empty() && !command_mode(&args)
+        });
+    let loaded = if discover_mode || remote_client {
+        None
+    } else {
+        let optional = home || std::env::var("DEPLOY").is_ok_and(|v| v == "cloud");
+        let loaded =
+            reject_remote_store(&|key| std::env::var(key).ok()).and_then(|()| load_config(&db, &config_file, optional));
+        // Like a failure inside `run`: the process log keeps why startup stopped.
+        if let Err(error) = &loaded
+            && log_file.as_deref().is_some_and(|p| !p.is_empty())
+        {
+            tracing::error!("{error:#}");
+        }
+        Some(loaded?)
+    };
+    let runtime = runtime(loaded.as_ref().map(|(_, config)| config))?;
     let builtin_cmd = Args::command();
     let plugins = (!discover_mode).then(|| {
         let builtin = |name: &str| builtin_cmd.get_arguments().any(|a| a.get_long() == Some(name));
-        runtime.block_on(plugin_cli::bootstrap(&raw[1..], &builtin))
+        let boot = loaded
+            .as_ref()
+            .map(|(_, config)| config.clone())
+            .unwrap_or_else(|| Config::parse("").expect("empty config"));
+        runtime.block_on(plugin_cli::bootstrap(boot, &builtin))
     });
     let mut cmd = match &plugins {
         Some((_, flags)) => plugin_cli::with_flags(Args::command(), flags),
@@ -662,6 +785,9 @@ fn main() -> anyhow::Result<()> {
             "-log-file must come before any plugin flag that takes a value",
         );
     }
+    if args.config != config_flag || args.db != db_flag {
+        flag_error(&mut cmd, "--config and --db must come before ambiguous plugin flags");
+    }
     if args.discover || args.discover_json {
         let cli = (csv_flags(&args.discover_include), csv_flags(&args.discover_exclude));
         let opts = discover_options(
@@ -678,7 +804,7 @@ fn main() -> anyhow::Result<()> {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     runtime.spawn(heap_trim::run());
     let file_log = args.log_file.is_some();
-    let result = runtime.block_on(run(args, host, builtin));
+    let result = runtime.block_on(run(args, host, builtin, loaded));
     if file_log && let Err(error) = &result {
         tracing::error!("{error:#}");
     }
@@ -777,7 +903,12 @@ mod heap_trim {
     }
 }
 
-async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String)>) -> anyhow::Result<()> {
+async fn run(
+    args: Args,
+    plugins: cpa_plugin::Host,
+    builtin: Vec<(String, String)>,
+    loaded: Option<(Arc<ConfigStore>, Config)>,
+) -> anyhow::Result<()> {
     // An explicit remote URL makes `-tui` a pure management client: it needs no local
     // config, store or Home bootstrap (Go loads them first and can fail or wait there).
     // Login, import and plugin flags still run first, as in Go.
@@ -790,7 +921,6 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
         remote_tui(args.management_base_url.trim().to_owned(), args.password).await;
         return Ok(());
     }
-    let wd = std::env::current_dir()?;
     let home_jwt = [
         args.home_jwt.clone(),
         std::env::var("HOME_JWT").unwrap_or_default(),
@@ -802,69 +932,32 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
         .map(|v| v.trim())
         .find(|v| !v.is_empty())
         .map(str::to_owned);
-    let home = home_jwt.is_some();
-    // Go main: PGSTORE_*, OBJECTSTORE_* or GITSTORE_* keep config and auth files in a
-    // remote store, served from its local mirror (never in Home mode).
-    let env = |key: &str| std::env::var(key).ok();
-    let store = match cpa_store::select(&env, &wd, home) {
-        Some(selection) => match cpa_store::bootstrap(selection, &wd).await {
-            Ok(store) => Some(store),
-            Err(line) => {
-                tracing::error!("{line}");
-                return Ok(());
-            }
-        },
-        None => None,
-    };
-    let config_path = match &store {
-        Some(store) => store.config_path.clone(),
-        None if args.config.is_empty() => wd.join("config.yaml"),
-        None => PathBuf::from(&args.config),
-    };
+    let (config_store, local_config) = loaded.context("local config was not initialized")?;
     let cloud = std::env::var("DEPLOY").is_ok_and(|v| v == "cloud");
-    // Go main: with a Home JWT the config comes from Home; the config path stays for
-    // downstream components but need not exist.
     let (mut config, home_config, home_plugins) = match &home_jwt {
-        Some(jwt) => match home::bootstrap(jwt, args.home_disable_cluster_discovery, &plugins).await {
-            Ok((home_config, config, home_plugins)) => (config, Some(home_config), Some(home_plugins)),
-            Err(line) => {
-                tracing::error!("{line}");
-                return Ok(());
-            }
-        },
-        None => (load_config(&config_path, cloud)?, None, None),
+        Some(jwt) => {
+            let (home_config, config, home_plugins) =
+                home::bootstrap(jwt, args.home_disable_cluster_discovery, &plugins)
+                    .await
+                    .map_err(anyhow::Error::msg)?;
+            (
+                home_listener_config(config, &local_config)?,
+                Some(home_config),
+                Some(home_plugins),
+            )
+        }
+        None => (local_config, None, None),
     };
-    if let Some(store) = &store {
-        config.auth_dir = store.auth_dir.clone();
-        tracing::info!("{}", store.enabled);
-    }
-    // The runtime was sized from -config (or ./config.yaml) before a store or Home
-    // supplied the config it now runs on.
-    if (store.is_some() || home_config.is_some())
-        && std::env::var_os("TOKIO_WORKER_THREADS").is_none()
-        && let Some(n) = config
-            .document
-            .get("worker-threads")
-            .and_then(serde_yaml_ng::Value::as_u64)
-        && usize::try_from(n).ok() != Some(tokio::runtime::Handle::current().metrics().num_workers())
-    {
-        let source = match &home_config {
-            Some(_) => "the config Home supplies".to_owned(),
-            None => config_path.display().to_string(),
-        };
-        tracing::warn!(
-            "worker-threads in {source} is ignored: it is read only from -config/./config.yaml; set TOKIO_WORKER_THREADS"
-        );
-    }
     let config_present = match &home_config {
         // Go: `configFileExists = cfg.Port != 0` for a config loaded from Home.
         Some(_) => !cloud || config.port != 0,
-        None => !cloud || cloud_config_present(&config_path, &config),
+        None => !cloud || cloud_config_present(&config_store, &config),
     };
+    let backend = initialize_credentials(config_store.clone(), &mut config, home_config.is_some())?;
+    plugin_cli::attach_credentials(&plugins, backend.clone());
     // Go ConfigureLogOutput and SetLogLevel, before any login command.
     cpa_server::logging::configure(&config);
     tracing::info!("{}", banner());
-    let before = store.as_ref().map(|store| auth_files(&store.auth_dir));
     // Go: the loaded config reaches the plugins (and Home learns which of its plugins
     // loaded), and a plugin flag hands the run to the plugins that own it.
     plugins.apply_config(Arc::new(config.clone())).await;
@@ -874,21 +967,17 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
         tracing::error!("{line}");
         return Ok(());
     }
-    if let Some(code) = plugin_cli::execute(&plugins, &config_path, &builtin).await {
-        if let (Some(store), Some(before)) = (&store, &before) {
-            persist_login(store, before).await;
-        }
+    if let Some(code) = plugin_cli::execute(&plugins, &builtin, &backend).await {
         if code != 0 {
             std::process::exit(code);
         }
         return Ok(());
     }
-    let ran = command(&args, &config).await;
-    if !matches!(ran, Ok(Ran::Nothing)) {
-        if let (Some(store), Some(before)) = (&store, &before) {
-            persist_command(store, before, &ran).await;
-        }
-        return ran.map(|_| ());
+    if command_mode(&args) {
+        let CredentialAuthority::Local(db) = backend else {
+            anyhow::bail!(plugin_cli::HOME_CREDENTIAL_ERROR);
+        };
+        return command(&args, &config, db).await.map(|_| ());
     }
     if !config_present {
         wait_for_cloud_deploy().await;
@@ -901,10 +990,10 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
         if args.standalone {
             standalone_tui(
                 config,
-                config_path,
+                config_store,
+                backend,
                 args.password,
                 args.local_model,
-                store,
                 home_config,
                 plugins,
             )
@@ -922,10 +1011,10 @@ async fn run(args: Args, plugins: cpa_plugin::Host, builtin: Vec<(String, String
     }
     serve(
         config,
-        config_path,
+        config_store,
+        backend,
         args.password,
         args.local_model,
-        store,
         home_config,
         plugins,
         shutdown_signal(),
@@ -1053,10 +1142,10 @@ impl QuietStdio {
 /// tab, and it stops after the TUI quits.
 async fn standalone_tui(
     config: Config,
-    config_path: PathBuf,
+    config_store: Arc<ConfigStore>,
+    backend: CredentialAuthority,
     password: String,
     local_model: bool,
-    store: Option<cpa_store::Store>,
     home_config: Option<cpa_home::HomeConfig>,
     plugins: cpa_plugin::Host,
 ) {
@@ -1080,10 +1169,10 @@ async fn standalone_tui(
     let (listening, listener) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(serve(
         config,
-        config_path,
+        config_store,
+        backend,
         password.clone(),
         local_model,
-        store,
         home_config,
         plugins,
         shutdown,
@@ -1117,94 +1206,89 @@ async fn standalone_tui(
     }
 }
 
-/// The top-level `*.json` files of the auth directory.
-fn auth_files(dir: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
-    std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().go_lower().ends_with(".json"))
-        .filter_map(|e| Some((e.path(), std::fs::read(e.path()).ok()?)))
-        .collect()
-}
-
-/// Go's token store `Save` after a login command: what the login wrote goes to the
-/// remote store, or the next bootstrap would not know it.
-async fn persist_login(store: &cpa_store::Store, before: &std::collections::BTreeMap<PathBuf, Vec<u8>>) {
-    for (path, data) in auth_files(&store.auth_dir) {
-        if before.get(&path) == Some(&data) {
-            continue;
-        }
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        if let Err(error) = store
-            .persister
-            .persist_auth_files(format!("Update auth {name}"), vec![path])
-            .await
-        {
-            tracing::error!("failed to save auth {name} to the token store: {error:#}");
-        }
+fn initialize_credentials(
+    store: Arc<ConfigStore>,
+    config: &mut Config,
+    home: bool,
+) -> anyhow::Result<CredentialAuthority> {
+    if home {
+        return Ok(CredentialAuthority::Home);
     }
+    let backend = CredentialDb::initialize(store, &config.auth_dir)?;
+    config.auth_dir = backend.auth_dir();
+    Ok(CredentialAuthority::Local(backend))
 }
 
-/// What a command flag did, for the remote token store.
+fn login_save(backend: Arc<CredentialDb>) -> (cpa_exec::login_store::LoginSave, Arc<std::sync::Mutex<Option<String>>>) {
+    let failure = Arc::new(std::sync::Mutex::new(None));
+    let failed = failure.clone();
+    let save: cpa_exec::login_store::LoginSave = Arc::new(move |paths, write| {
+        let committed = (|| -> anyhow::Result<()> {
+            let mut paths = paths
+                .iter()
+                .map(|path| cpa_server::credential_store::credential_path_key(path))
+                .collect::<io::Result<Vec<_>>>()?;
+            paths.sort();
+            paths.dedup();
+            let _locks = paths
+                .iter()
+                .map(|path| cpa_exec::codex_siwc_bind::lock_file(path).map_err(anyhow::Error::msg))
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            backend.write_files(&paths, || write().map_err(anyhow::Error::msg))
+        })();
+        committed.map_err(|error| {
+            let message = format!("commit CLI credentials to SQLite: {error:#}");
+            *failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(message.clone());
+            message
+        })
+    });
+    (save, failure)
+}
+
+/// Whether a command flag handled this invocation.
 enum Ran {
-    /// No command flag is set.
     Nothing,
-    /// A login or import: what it wrote into the auth directory is saved.
-    Login,
-    /// `-siwc-bind`: only the file it bound is saved, and nothing when it failed.
-    Bound(Option<PathBuf>),
+    Handled,
+    Login(PathBuf, &'static str),
+    Imported(PathBuf),
+    Bound(PathBuf),
 }
 
-/// Go's token store `Save` after a command: a login's or import's changes in the auth
-/// directory (even when it failed), only the file a `-siwc-bind` bound, and nothing for
-/// a failed one.
-async fn persist_command(
-    store: &cpa_store::Store,
-    before: &std::collections::BTreeMap<PathBuf, Vec<u8>>,
-    ran: &anyhow::Result<Ran>,
-) {
-    match ran {
-        Ok(Ran::Nothing | Ran::Bound(None)) => {}
-        Ok(Ran::Bound(Some(path))) => persist_bound(store, path).await,
-        Ok(Ran::Login) | Err(_) => persist_login(store, before).await,
+async fn command(args: &Args, config: &Config, backend: Arc<CredentialDb>) -> anyhow::Result<Ran> {
+    let (save, failure) = login_save(backend);
+    let result = command_inner(args, config, save).await;
+    if let Some(error) = failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+        anyhow::bail!(error);
     }
-}
-
-/// Saves the file `-siwc-bind` bound, under the store's spelling of the auth directory
-/// (the bound path has its symlinks resolved).
-async fn persist_bound(store: &cpa_store::Store, path: &Path) {
-    // resolve() spells the bound path without Windows' verbatim prefix; so does this.
-    let path = std::fs::canonicalize(&store.auth_dir)
-        .ok()
-        .map(cpa_exec::codex_siwc_bind::plain_path)
-        .and_then(|dir| path.strip_prefix(dir).ok().map(|rel| store.auth_dir.join(rel)))
-        .unwrap_or_else(|| path.to_owned());
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    if let Err(error) = store
-        .persister
-        .persist_auth_files(format!("Update auth {name}"), vec![path])
-        .await
-    {
-        tracing::error!("failed to save auth {name} to the token store: {error:#}");
+    match &result {
+        Ok(Ran::Login(path, provider)) => {
+            println!("Authentication saved to {}", path.display());
+            println!("{provider} authentication successful!");
+        }
+        Ok(Ran::Imported(path)) => println!("Vertex credentials imported: {}", path.display()),
+        Ok(Ran::Bound(path)) => {
+            println!("SIWC credentials bound and saved to {}", path.display());
+            println!("Sign in with ChatGPT authentication successful!");
+        }
+        _ => {}
     }
+    result
 }
 
 /// Go's command modes, in Go's order.
-async fn command(args: &Args, config: &Config) -> anyhow::Result<Ran> {
+async fn command_inner(args: &Args, config: &Config, save: cpa_exec::login_store::LoginSave) -> anyhow::Result<Ran> {
     // Go DoVertexImport: failures are logged and the command still exits normally.
     if !args.vertex_import.is_empty() {
-        match cpa_exec::vertex_auth::import(&config.auth_dir, &args.vertex_import, &args.vertex_import_prefix) {
-            Ok(path) => println!("Vertex credentials imported: {}", path.display()),
+        match cpa_exec::vertex_auth::import(
+            &config.auth_dir,
+            &args.vertex_import,
+            &args.vertex_import_prefix,
+            Some(&save),
+        ) {
+            Ok(path) => return Ok(Ran::Imported(path)),
             Err(error) => tracing::error!("{error}"),
         }
-        return Ok(Ran::Login);
+        return Ok(Ran::Handled);
     }
     if !args.siwc_bind.is_empty() {
         // Go DoSIWCBind: failures are reported and the command still exits normally,
@@ -1213,12 +1297,8 @@ async fn command(args: &Args, config: &Config) -> anyhow::Result<Ran> {
             no_browser: args.no_browser,
             callback_port: args.oauth_callback_port,
         };
-        match cpa_exec::codex_siwc_bind::bind(config, &args.siwc_bind, &options).await {
-            Ok(path) => {
-                println!("SIWC credentials bound and saved to {}", path.display());
-                println!("Sign in with ChatGPT authentication successful!");
-                return Ok(Ran::Bound(Some(path)));
-            }
+        match cpa_exec::codex_siwc_bind::bind(config, &args.siwc_bind, &options, Some(save)).await {
+            Ok(path) => return Ok(Ran::Bound(path)),
             Err(cpa_exec::codex_siwc_bind::BindError::Log(line)) => tracing::error!("{line}"),
             Err(cpa_exec::codex_siwc_bind::BindError::Print(line)) => println!("{line}"),
             Err(cpa_exec::codex_siwc_bind::BindError::PortInUse) => {
@@ -1228,7 +1308,7 @@ async fn command(args: &Args, config: &Config) -> anyhow::Result<Ran> {
                 std::process::exit(13);
             }
         }
-        return Ok(Ran::Bound(None));
+        return Ok(Ran::Handled);
     }
     if args.antigravity_login {
         // Go DoAntigravityLogin: a failure is logged and the command still exits normally.
@@ -1236,17 +1316,11 @@ async fn command(args: &Args, config: &Config) -> anyhow::Result<Ran> {
             no_browser: args.no_browser,
             callback_port: args.oauth_callback_port,
         };
-        match cpa_exec::antigravity_auth::login(&config.auth_dir, config, &options).await {
-            Ok((path, label)) => {
-                println!("Authentication saved to {}", path.display());
-                if !label.is_empty() {
-                    println!("Authenticated as {label}");
-                }
-                println!("Antigravity authentication successful!");
-            }
+        match cpa_exec::antigravity_auth::login(&config.auth_dir, config, &options, Some(save)).await {
+            Ok((path, _)) => return Ok(Ran::Login(path, "Antigravity")),
             Err(error) => tracing::error!("Antigravity authentication failed: {error}"),
         }
-        return Ok(Ran::Login);
+        return Ok(Ran::Handled);
     }
     if args.codex_login || args.codex_device_login {
         let options = cpa_exec::codex_oauth::LoginOptions {
@@ -1257,13 +1331,11 @@ async fn command(args: &Args, config: &Config) -> anyhow::Result<Ran> {
             },
         };
         let path = if args.codex_login {
-            cpa_exec::codex_oauth::login(&config.auth_dir, &options).await?
+            cpa_exec::codex_oauth::login(&config.auth_dir, &options, Some(save)).await?
         } else {
-            cpa_exec::codex_oauth::device_login(&config.auth_dir, &options).await?
+            cpa_exec::codex_oauth::device_login(&config.auth_dir, &options, Some(save)).await?
         };
-        println!("Authentication saved to {}", path.display());
-        println!("Codex authentication successful!");
-        return Ok(Ran::Login);
+        return Ok(Ran::Login(path, "Codex"));
     }
     if args.claude_login {
         let options = cpa_exec::claude_login::LoginOptions {
@@ -1273,39 +1345,46 @@ async fn command(args: &Args, config: &Config) -> anyhow::Result<Ran> {
                 port => port,
             },
         };
-        if let Err(error) = cpa_exec::claude_login::login(&config.auth_dir, &options).await {
-            let message = String::from_utf8_lossy(&error.body).into_owned();
-            // DoClaudeLogin: a busy callback port exits with ErrPortInUse's code 13.
-            if message.starts_with(cpa_exec::claude_login::PORT_IN_USE) {
-                tracing::error!(
-                    "The required port is already in use. Please close any applications using port 3000 and try again."
-                );
-                std::process::exit(13);
-            }
-            println!("Claude authentication failed: {message}");
+        let error = match cpa_exec::claude_login::login(&config.auth_dir, &options, Some(save)).await {
+            Ok(path) => return Ok(Ran::Login(path, "Claude")),
+            Err(error) => error,
+        };
+        let message = String::from_utf8_lossy(&error.body).into_owned();
+        // DoClaudeLogin: a busy callback port exits with ErrPortInUse's code 13.
+        if message.starts_with(cpa_exec::claude_login::PORT_IN_USE) {
+            tracing::error!(
+                "The required port is already in use. Please close any applications using port 3000 and try again."
+            );
+            std::process::exit(13);
         }
-        return Ok(Ran::Login);
+        println!("Claude authentication failed: {message}");
+        return Ok(Ran::Handled);
     }
     if args.kimi_login || args.kimi_ai_login {
         let provider = if args.kimi_login { "kimi" } else { "kimi-ai" };
-        cpa_exec::kimi_auth::login(provider, config, args.no_browser).await?;
-        return Ok(Ran::Login);
+        let path = cpa_exec::kimi_auth::login(provider, config, args.no_browser, Some(save)).await?;
+        return Ok(Ran::Login(path, if args.kimi_login { "Kimi" } else { "Kimi.ai" }));
     }
     if args.xai_login {
         // Go DoXAILogin: a failure is logged and the command still exits normally.
-        if let Err(error) = cpa_exec::xai_auth::login(config, args.no_browser).await {
-            tracing::error!("xAI authentication failed: {}", String::from_utf8_lossy(&error.body));
+        match cpa_exec::xai_auth::login(config, args.no_browser, Some(save)).await {
+            Ok(path) => return Ok(Ran::Login(path, "xAI")),
+            Err(error) => tracing::error!("xAI authentication failed: {}", String::from_utf8_lossy(&error.body)),
         }
-        return Ok(Ran::Login);
+        return Ok(Ran::Handled);
     }
     if args.devin_login {
         // Go DoDevinLogin: a failure is logged and the command still exits normally.
-        cpa_exec::devin_auth::login(config, args.no_browser, args.oauth_callback_port).await;
-        return Ok(Ran::Login);
+        return Ok(
+            match cpa_exec::devin_auth::login(config, args.no_browser, args.oauth_callback_port, Some(save)).await {
+                Some(path) => Ran::Login(path, "Devin"),
+                None => Ran::Handled,
+            },
+        );
     }
     if args.meta_login {
-        cpa_exec::meta_auth::login(config, args.no_browser).await?;
-        return Ok(Ran::Login);
+        let path = cpa_exec::meta_auth::login(config, args.no_browser, Some(save)).await?;
+        return Ok(Ran::Login(path, "Meta"));
     }
     Ok(Ran::Nothing)
 }
@@ -1373,10 +1452,10 @@ fn app(rt: &Arc<Runtime>, management: &Arc<cpa_server::management::Management>, 
 #[allow(clippy::too_many_arguments)]
 async fn serve(
     config: Config,
-    config_path: PathBuf,
+    config_store: Arc<ConfigStore>,
+    backend: CredentialAuthority,
     password: String,
     local_model: bool,
-    store: Option<cpa_store::Store>,
     home_config: Option<cpa_home::HomeConfig>,
     plugins: cpa_plugin::Host,
     shutdown: impl std::future::Future<Output = ()>,
@@ -1392,10 +1471,10 @@ async fn serve(
     }
     // Auth-dir files and config API keys, synthesized as Go's watcher does. Home mode
     // runs on credentials Home dispatches per request.
-    let (credentials, read) = match home_config {
-        Some(_) => Default::default(),
-        None => {
-            let scan = cpa_core::config::credentials::scan_auth_dir(&config);
+    let (credentials, read) = match &backend {
+        CredentialAuthority::Home => Default::default(),
+        CredentialAuthority::Local(db) => {
+            let scan = db.scan(&config)?;
             let mut all = scan.credentials;
             all.extend(cpa_core::config::credentials::from_config(&config));
             (all, scan.read)
@@ -1419,13 +1498,14 @@ async fn serve(
         openai: Default::default(),
         google: Default::default(),
     };
-    let rt = Arc::new(Runtime::new(config, credentials, executors).with_plugin_host(plugins));
+    let rt = match backend {
+        CredentialAuthority::Home => Runtime::home(config, credentials, executors),
+        CredentialAuthority::Local(db) => Runtime::new(config, credentials, executors, db),
+    };
+    let rt = Arc::new(rt.with_plugin_host(plugins));
     // What each file credential was loaded from, for Go-exact management saves.
     rt.store().note_loaded(&read);
     rt.set_local_model(local_model);
-    if let Some(cooldown) = store.as_ref().and_then(|store| store.cooldown.clone()) {
-        rt.set_cooldown_backend(cooldown);
-    }
     // Go `misc.StartAntigravityVersionUpdater` and `startModelCatalogUpdaters`.
     cpa_server::model_updater::start(&rt, home_config.is_some());
     // Model router benchmarks (cook-router only); idle without `artificial-analysis.api-key`.
@@ -1446,10 +1526,9 @@ async fn serve(
     let options = cpa_server::management::Options {
         local_password: password,
         standalone,
-        store: store.map(|store| store.persister),
         ..Default::default()
     };
-    let management = cpa_server::management::Management::with_options(rt.clone(), config_path, options);
+    let management = cpa_server::management::Management::with_options(rt.clone(), config_store, options);
     if home.is_some() {
         // Go enables the usage queue in Home mode whatever the management secret
         // (`redisqueue.SetEnabled(... || cfg.Home.Enabled)`); the forwarder drains it.
@@ -1538,94 +1617,161 @@ async fn serve(
 mod tests {
     use super::*;
 
-    /// After `-siwc-bind`, the remote store gets only the bound file, under the store's
-    /// spelling of the auth directory, and nothing when the bind failed; a login still
-    /// saves every file it changed. Another file written meanwhile is never uploaded
-    /// for a bind.
-    #[tokio::test]
-    async fn siwc_bind_saves_only_the_bound_file() {
-        struct Recorder(std::sync::Mutex<Vec<Vec<PathBuf>>>, PathBuf);
-        impl cpa_server::persist::StorePersister for Recorder {
-            fn persist_config(&self) -> futures_util::future::BoxFuture<'_, anyhow::Result<()>> {
-                Box::pin(async { Ok(()) })
-            }
-            fn persist_auth_files(
-                &self,
-                _: String,
-                paths: Vec<PathBuf>,
-            ) -> futures_util::future::BoxFuture<'_, anyhow::Result<()>> {
-                self.0.lock().unwrap().push(paths);
-                Box::pin(async { Ok(()) })
-            }
-            fn delete_auth(&self, _: PathBuf) -> anyhow::Result<()> {
-                Ok(())
-            }
-            fn auth_dir(&self) -> PathBuf {
-                self.1.clone()
-            }
-        }
-        let root = std::env::temp_dir().join(format!(
-            "cook-router-siwc-store-{}-{}",
+    fn credential_test_dir() -> PathBuf {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        std::env::temp_dir().join(format!(
+            "cook-cli-credential-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(root.join("real")).unwrap();
-        // The store names the auth directory through a link; the bound path is real.
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(root.join("real"), root.join("auth")).unwrap();
-        #[cfg(not(unix))]
-        std::fs::create_dir_all(root.join("auth")).unwrap();
-        let auth = root.join("auth");
-        std::fs::write(auth.join("c.json"), "{}").unwrap();
-        let before = auth_files(&auth);
-        std::fs::write(auth.join("c.json"), r#"{"use_siwc":true}"#).unwrap();
-        std::fs::write(auth.join("other.json"), "{}").unwrap();
-        let recorder = Arc::new(Recorder(Default::default(), auth.clone()));
-        let store = cpa_store::Store {
-            config_path: root.join("config.yaml"),
-            auth_dir: auth.clone(),
-            persister: recorder.clone(),
-            cooldown: None,
-            enabled: String::new(),
-        };
-        let real = std::fs::canonicalize(auth.join("c.json")).unwrap();
-        persist_command(&store, &before, &Ok(Ran::Bound(Some(real)))).await;
-        assert_eq!(*recorder.0.lock().unwrap(), vec![vec![auth.join("c.json")]]);
-        recorder.0.lock().unwrap().clear();
-        persist_command(&store, &before, &Ok(Ran::Bound(None))).await;
-        assert!(recorder.0.lock().unwrap().is_empty());
-        persist_command(&store, &before, &Ok(Ran::Login)).await;
-        let mut saved: Vec<PathBuf> = recorder.0.lock().unwrap().concat();
-        saved.sort();
-        assert_eq!(saved, vec![auth.join("c.json"), auth.join("other.json")]);
-        let _ = std::fs::remove_dir_all(root);
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ))
     }
 
-    /// `worker-threads` from the config file; anything but a positive number, or no
-    /// file, falls back to min(CPUs, 2). (`TOKIO_WORKER_THREADS` is not set in tests.)
     #[test]
-    fn worker_threads_come_from_the_config_file() {
-        let dir = std::env::temp_dir().join(format!("cook-router-workers-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("config.yaml");
+    fn credential_initialization_skips_home() {
+        // Home must return before touching credentials, even when legacy files exist.
+        let root = credential_test_dir();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("legacy.json"), b"{\"secret\":true}").unwrap();
+        let mut config = Config::parse("").unwrap();
+        config.auth_dir = root.clone();
+        assert!(matches!(
+            initialize_credentials(Arc::new(ConfigStore::memory()), &mut config, true).unwrap(),
+            CredentialAuthority::Home
+        ));
+        assert_eq!(config.auth_dir, root);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cli_changes_and_claude_legacy_deletion_survive_reopen() {
+        let root = credential_test_dir();
+        let legacy = root.join("legacy");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("claude-old.json"), b"{\"type\":\"claude\",\"old\":true}").unwrap();
+        let path = root.join("cook.db");
+        let mut config = Config::parse("").unwrap();
+        config.auth_dir = legacy.clone();
+        let CredentialAuthority::Local(db) =
+            initialize_credentials(Arc::new(ConfigStore::open(&path).unwrap()), &mut config, false).unwrap()
+        else {
+            panic!("local credentials expected");
+        };
+        assert_eq!(config.auth_dir, db.auth_dir());
+        let canonical = config.auth_dir.join("claude-new.json");
+        let bytes = b"{\"type\":\"claude\",\"access_token\":\"new\",\"unknown\":[1,2]}";
+        let (save, failure) = login_save(db.clone());
+        cpa_exec::login_store::save_login(
+            Some(&save),
+            &[canonical.clone(), config.auth_dir.join("claude-old.json")],
+            || {
+                std::fs::write(&canonical, bytes).map_err(|error| error.to_string())?;
+                std::fs::remove_file(config.auth_dir.join("claude-old.json")).map_err(|error| error.to_string())
+            },
+        )
+        .unwrap();
+        assert!(failure.lock().unwrap().is_none());
+        drop(save);
+        drop(db);
+        std::fs::remove_dir_all(&config.auth_dir).unwrap();
+        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &legacy).unwrap();
+        assert_eq!(std::fs::read(&canonical).unwrap(), bytes);
+        assert!(db.read(&config.auth_dir.join("claude-old.json")).unwrap().is_none());
+        assert!(!config.auth_dir.join("claude-old.json").exists());
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cli_durable_failure_is_returned_and_restores_working_bytes() {
+        let root = credential_test_dir();
+        let path = root.join("cook.db");
+        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let auth = db.auth_dir().join("login.json");
+        db.save(&auth, b"{\"old\":true}").unwrap();
+        let (save, failure) = login_save(db.clone());
+        let blocker = ConfigStore::open(&path).unwrap();
+        let (locked, acquired) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            blocker
+                .edit("test", "hold write transaction", |_| {
+                    locked.send(()).unwrap();
+                    released.recv().unwrap();
+                    Ok(())
+                })
+                .unwrap()
+        });
+        acquired.recv().unwrap();
+        let mut called = false;
+        let result = cpa_exec::login_store::save_login(Some(&save), std::slice::from_ref(&auth), || {
+            called = true;
+            std::fs::write(&auth, b"{\"new\":true}").map_err(|error| error.to_string())
+        });
+        release.send(()).unwrap();
+        writer.join().unwrap();
+        assert!(result.unwrap_err().contains("commit CLI credentials to SQLite"));
+        assert!(failure.lock().unwrap().is_some());
+        assert!(!called, "SQLite failure must precede the working-file mutation");
+        assert_eq!(std::fs::read(&auth).unwrap(), b"{\"old\":true}");
+        assert_eq!(db.read(&auth).unwrap().unwrap(), b"{\"old\":true}");
+        drop(save);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cli_writer_cannot_be_reverted_by_concurrent_materialization() {
+        let root = credential_test_dir();
+        let path = root.join("cook.db");
+        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let auth = db.auth_dir().join("login.json");
+        db.save(&auth, b"{\"old\":true}").unwrap();
+        let watcher =
+            CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let (save, _) = login_save(db.clone());
+        let (written, changed) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let target = auth.clone();
+        let writer = std::thread::spawn(move || {
+            cpa_exec::login_store::save_login(Some(&save), std::slice::from_ref(&target), || {
+                std::fs::write(&target, b"{\"new\":true}").map_err(|error| error.to_string())?;
+                written.send(()).unwrap();
+                released.recv().unwrap();
+                Ok(())
+            })
+            .unwrap()
+        });
+        changed.recv().unwrap();
+        let (started, starting) = std::sync::mpsc::channel();
+        let (finished, done) = std::sync::mpsc::channel();
+        let materializer = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            watcher.materialize().unwrap();
+            finished.send(()).unwrap();
+        });
+        starting.recv().unwrap();
+        let blocked = done.recv_timeout(Duration::from_millis(100));
+        release.send(()).unwrap();
+        writer.join().unwrap();
+        materializer.join().unwrap();
+        assert!(matches!(blocked, Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
+        assert_eq!(db.read(&auth).unwrap().unwrap(), b"{\"new\":true}");
+        assert_eq!(std::fs::read(&auth).unwrap(), b"{\"new\":true}");
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Positive configured worker counts override the CPU-based default.
+    #[test]
+    fn worker_threads_come_from_the_config() {
         let default = std::thread::available_parallelism().map_or(1, |n| n.get().min(2));
-        std::fs::write(&path, "port: 1\nworker-threads: 5\n").unwrap();
-        assert_eq!(worker_threads(Some(&path)), 5);
-        for text in [
-            "worker-threads: 0\n",
-            "worker-threads: -3\n",
-            "worker-threads: many\n",
-            ": not yaml [",
-        ] {
-            std::fs::write(&path, text).unwrap();
-            assert_eq!(worker_threads(Some(&path)), default, "{text:?}");
+        let cfg = Config::parse("worker-threads: 5\n").unwrap();
+        assert_eq!(worker_threads(Some(&cfg)), 5);
+        for text in ["worker-threads: 0\n", "worker-threads: -3\n", ""] {
+            let cfg = Config::parse(text).unwrap();
+            assert_eq!(worker_threads(Some(&cfg)), default, "{text:?}");
         }
-        assert_eq!(worker_threads(Some(&dir.join("missing.yaml"))), default);
         assert_eq!(worker_threads(None), default);
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     // Expected values: Go resolveManagementBaseURL (tests/fixtures/discovery_main_go.json).
@@ -1909,22 +2055,25 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cpa-standalone-{}", std::process::id()));
         let auth = dir.join("auth");
         std::fs::create_dir_all(&auth).unwrap();
-        let path = dir.join("config.yaml");
-        std::fs::write(
-            &path,
-            format!("host: 127.0.0.1\nport: 0\nauth-dir: '{}'\n", auth.display()),
-        )
-        .unwrap();
-        let config = Config::load(&path).unwrap();
+        let store = Arc::new(ConfigStore::open(&dir.join("cook.db")).unwrap());
+        store
+            .import_yaml(
+                &format!("host: 127.0.0.1\nport: 0\nauth-dir: '{}'\n", auth.display()),
+                "test",
+                "standalone server",
+            )
+            .unwrap();
+        let mut config = store.load().unwrap().config;
+        let backend = initialize_credentials(store.clone(), &mut config, false).unwrap();
         assert!(config.management.secret_key.is_empty());
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let (listening, listener) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(serve(
             config,
-            path,
+            store,
+            backend,
             "fake-tui-password".into(),
             true,
-            None,
             None,
             cpa_plugin::Host::default(),
             async {
@@ -1948,9 +2097,11 @@ mod tests {
         use tower::ServiceExt as _;
         let dir = std::env::temp_dir().join(format!("cpa-siwc-route-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("auth")).unwrap();
-        let path = dir.join("config.yaml");
-        std::fs::write(&path, format!("auth-dir: '{}'\n", dir.join("auth").display())).unwrap();
-        let config = Config::load(&path).unwrap();
+        let store = Arc::new(ConfigStore::memory_with(&format!(
+            "auth-dir: '{}'\n",
+            dir.join("auth").display()
+        )));
+        let config = store.load().unwrap().config;
         for (name, enabled, home, authorized, want) in [
             ("authorized invalid target", true, false, true, 400),
             ("missing management key", true, false, false, 401),
@@ -1976,7 +2127,7 @@ mod tests {
                 log_dir: Some(dir.join("logs")),
                 ..Default::default()
             };
-            let management = cpa_server::management::Management::with_options(rt.clone(), path.clone(), options);
+            let management = cpa_server::management::Management::with_options(rt.clone(), store.clone(), options);
             let mut request = axum::http::Request::post("/v8/management/oauth/siwc/bind")
                 .header("content-type", "application/json")
                 .extension(axum::extract::ConnectInfo(SocketAddr::from((
@@ -2004,29 +2155,93 @@ mod tests {
     }
 
     #[test]
-    fn cloud_mode_treats_missing_empty_and_broken_files_as_empty_config() {
-        let dir = std::env::temp_dir().join(format!("cpa-cloud-{}", std::process::id()));
+    fn optional_first_import_only_tolerates_a_missing_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "cpa-cloud-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("cook.db");
         let missing = dir.join("missing.yaml");
-        assert_eq!(load_config(&missing, true).unwrap().port, 0);
-        assert!(load_config(&missing, false).is_err());
-        assert_eq!(load_config(&dir, true).unwrap().port, 0, "a directory is standby too");
-        for text in ["port: [\n", "port: wrong\n", "- a\n- b\n"] {
+        let (store, cfg) = load_config(&db, &missing, true).unwrap();
+        assert_eq!(cfg.port, 0);
+        assert!(!store.is_empty().unwrap(), "even an empty initial import is durable");
+        assert!(!cloud_config_present(&store, &cfg));
+        std::fs::write(&missing, "port: 9000\n").unwrap();
+        assert_eq!(load_config(&db, &missing, false).unwrap().1.port, 0);
+        for (i, text) in ["port: [\n", "port: wrong\n", "- a\n- b\n"].iter().enumerate() {
             let broken = dir.join("broken.yaml");
             std::fs::write(&broken, text).unwrap();
-            assert_eq!(load_config(&broken, true).unwrap().port, 0, "{text}");
-            assert!(load_config(&broken, false).is_err(), "{text}");
+            assert!(
+                load_config(&dir.join(format!("invalid-{i}.db")), &broken, true).is_err(),
+                "{text}"
+            );
         }
-        let good = dir.join("good.yaml");
-        std::fs::write(&good, "port: 9\n").unwrap();
-        let cfg = load_config(&good, true).unwrap();
-        assert!(cloud_config_present(&good, &cfg));
-        assert!(!cloud_config_present(&missing, &Config::parse("").unwrap()));
-        assert!(!cloud_config_present(&dir, &Config::parse("").unwrap()));
-        let _ = std::fs::rename(
-            &dir,
-            std::env::temp_dir().join(format!("cpa-trash-cloud-{}", std::process::id())),
+        assert!(load_config(&dir.join("directory.db"), &dir, true).is_err());
+        let invalid_db = dir.join("invalid.db");
+        std::fs::write(&invalid_db, "not SQLite").unwrap();
+        assert!(
+            load_config(&invalid_db, &missing, true).is_err(),
+            "a valid YAML file cannot mask a bad DB"
         );
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn local_home_listener_overrides_preserve_remote_runtime_ownership() {
+        let remote = home::overlay(b"port: 0\nrequest-retry: 7\napi-keys: [remote-key]\n", None).unwrap();
+        let default_port = remote.port;
+        assert_ne!(default_port, 0);
+        let empty = Config::parse("").unwrap();
+        assert_eq!(home_listener_config(remote.clone(), &empty).unwrap().port, default_port);
+        let local = Config::parse("host: 127.0.0.1\nport: 9345\ntls:\n  enable: true\n  cert: local.crt\n  key: local.key\nworker-threads: 3\nrequest-retry: 99\napi-keys: [local-key]\n").unwrap();
+        let merged = home_listener_config(remote, &local).unwrap();
+        assert_eq!(merged.host, "127.0.0.1");
+        assert_eq!(merged.port, 9345);
+        assert_eq!(merged.document["server"]["tls"], local.document["server"]["tls"]);
+        assert_eq!(merged.document["worker-threads"], local.document["worker-threads"]);
+        assert_eq!(merged.document["routing"]["retry"]["request-retry"].as_i64(), Some(7));
+        assert!(merged.api_keys.is_empty());
+        let updated = home::overlay(b"port: 9999\nhost: 0.0.0.0\n", Some(&merged)).unwrap();
+        assert_eq!(updated.host, "127.0.0.1");
+        assert_eq!(updated.port, 9345);
+    }
+
+    #[test]
+    fn live_remote_store_selection_is_rejected_without_touching_it() {
+        for key in ["PGSTORE_DSN", "OBJECTSTORE_ENDPOINT", "GITSTORE_GIT_URL", "pgstore_dsn"] {
+            let error = reject_remote_store(&|name| (name == key).then(|| "fake-secret".to_owned()))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("config import"));
+            assert!(error.contains("persistent volume"));
+            assert!(!error.contains("fake-secret"));
+        }
+        reject_remote_store(&|_| None).unwrap();
+        reject_remote_store(&|_| Some("  ".to_owned())).unwrap();
+    }
+
+    #[test]
+    fn an_existing_database_does_not_reread_the_import_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "cpa-import-once-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("cook.db");
+        let file = dir.join("config.yaml");
+        std::fs::write(&file, "port: 9\n").unwrap();
+        assert_eq!(load_config(&db, &file, false).unwrap().1.port, 9);
+        std::fs::write(&file, "port: 10\n").unwrap();
+        assert_eq!(load_config(&db, &file, false).unwrap().1.port, 9);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]

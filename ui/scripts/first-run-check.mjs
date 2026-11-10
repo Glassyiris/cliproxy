@@ -9,9 +9,9 @@
 // The walk: a server whose management API is off is explained on the sign-in page; on the empty
 // server the overview's Get started card starts at 0 of 3 in both themes, on desktop and phone,
 // without horizontal overflow; its first step is done by keyboard alone (Add key, type a key, Enter)
-// and the card then reads 1 of 3; Use with tools shows each of the six setups with this server's
-// address and the key shortened, and tests the key (2 of 3); an account on the server and its
-// traffic close the card, after which the overview shows traffic, in both themes and on a phone.
+// and the card then reads 1 of 3; Use with tools explicitly reveals the selected resource's key,
+// shows each setup with this server's address and the key shortened, and tests the key (2 of 3);
+// an account on the server and its traffic close the card, after which overview shows traffic.
 //
 // What the mock cannot do, so it is not walked: a provider sign-in (the account is uploaded through
 // the Management API instead) and a proxied request (the mock's accounts come with traffic), and the
@@ -33,7 +33,7 @@ mkdirSync(out, { recursive: true });
 
 /** One Management API call from this script, as a client of the same server the page talks to. */
 async function api(method, path, body) {
-  const r = await fetch(new URL(`v8/management/${path}`, root), {
+  const r = await fetch(new URL(path.startsWith("admin/v1/") ? path : `v8/management/${path}`, root), {
     method,
     headers: { Authorization: `Bearer ${secret}`, ...(typeof body === "string" ? { "Content-Type": "application/json" } : {}) },
     body,
@@ -44,7 +44,7 @@ async function api(method, path, body) {
 
 // A real server signs in and stores accounts: its auth-dir must be private, not the ~/.cli-proxy-api
 // fallback. The mock keeps accounts in memory and says so in X-CPA-VERSION.
-const probe = await api("GET", "config");
+const probe = await api("GET", "admin/v1/effective/config");
 if (probe.headers.get("x-cpa-version") !== "cook-router-mock") await assertPrivateAuthDir(root, secret);
 const present = (await api("GET", "credentials")).json.files.length;
 assert.equal(present, 0, `not an empty server: it already has ${present} accounts (restart the mock with --accounts 0)`);
@@ -54,12 +54,17 @@ const desktop = { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 }
 const phone = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
 const pass = (t) => console.log(`PASS ${t}`);
 const errors = [];
+const secretExports = [];
 
 async function open(device, theme) {
   const context = await browser.newContext({ ...device, colorScheme: theme });
   await context.addInitScript((t) => localStorage.setItem("cliproxy-theme", t), theme);
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(String(e)));
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/admin/v1/export") && url.searchParams.get("include_secrets") === "true") secretExports.push(request.url());
+  });
   await page.goto(root);
   return page;
 }
@@ -88,7 +93,7 @@ try {
   // 1. A server started without a management key: the dashboard maps its 404 to an explanation.
   {
     const page = await open(desktop, "light");
-    await page.route("**/v8/management/**", (route) => route.fulfill({ status: 404, body: "" }));
+    await page.route(/\/(?:v8\/management|admin\/v1)\//, (route) => route.fulfill({ status: 404, body: "" }));
     await keyField(page).fill("anything");
     await connect(page).click();
     // Other alerts, an empty live region among them, may exist; this is the one with the text.
@@ -104,7 +109,8 @@ try {
   }
 
   // 2. An empty server: nothing connected yet. Start from no client keys.
-  await api("PUT", "config/access/api-keys", "[]");
+  const originalKeys = probe.json.access?.["api-keys"] ?? [];
+  await api("POST", "admin/v1/apply", JSON.stringify({ ops: [{ op: "set", path: "access/api-keys", value: [], expect: originalKeys }] }));
   const page = await open(desktop, "light");
   const main = page.getByRole("main");
   await signIn(page);
@@ -138,22 +144,34 @@ try {
   await page.keyboard.type(key);
   await page.keyboard.press("Enter");
   await dialog.waitFor({ state: "detached" });
-  await appears(page.getByRole("row", { name: new RegExp(mask(key)) }), "the new key in the client keys table");
+  const clients = (await api("GET", "admin/v1/r/client-key")).json.items;
+  assert.equal(clients.length, 1, "one resource was created");
+  const clientId = clients[0].id;
+  assert.equal(clients[0].spec.key, "$secret", "ordinary client reads stay masked");
+  await appears(page.getByRole("row").filter({ hasText: clientId }), "the new resource ID in the client keys table");
+  assert.equal(await main.getByText(key, { exact: true }).count(), 0, "the table does not reveal the new key automatically");
   await page.evaluate(() => (location.hash = "#overview"));
   await appears(main.getByText("1 of 3 done"), "Get started at 1 of 3 after adding the key");
   assert.equal(await startSteps(page).getByText("completed").count(), 1, "one step is done");
   assert.equal(await startSteps(page).getByRole("listitem").first().getByText("completed").count(), 1, "the key step is the done one");
   pass("Get started: Add key by keyboard adds the key (1 of 3)");
 
-  // 4. Use with tools: each of the six setups points at this server with the key shortened, then the
-  //    test step, which Get started's last step also opens, tests the key.
-  await page.evaluate(() => (location.hash = "#clients?open=use"));
+  // 4. Use with tools selects the stable resource ID; only explicit Reveal fetches plaintext.
+  assert.equal(secretExports.length, 0, "ordinary pages never request plaintext export");
+  await page.evaluate((id) => (location.hash = `#clients?open=use&key=${encodeURIComponent(id)}`), clientId);
   const use = page.getByRole("dialog", { name: "Use with tools" });
   await appears(use, "the Use with tools dialog");
   const origin = new URL(root).origin;
+  assert.equal(secretExports.length, 0, "opening Use with tools does not reveal a key");
   for (const tool of ["Claude Code", "Codex CLI", "Cursor", "OpenAI SDK", "Anthropic SDK", "curl"]) {
     await use.getByRole("radio", { name: new RegExp(`^${tool}`) }).check();
     await use.getByRole("button", { name: "Continue" }).click();
+    if (tool === "Claude Code") {
+      assert.equal(secretExports.length, 0, "opening settings does not reveal a key");
+      await use.getByRole("button", { name: /^(?:Reveal|Show key)$/ }).click();
+      await use.getByRole("button", { name: /^(?:Reveal|Show key)$/ }).waitFor({ state: "detached" });
+      assert.equal(secretExports.length, 1, "explicit Reveal fetches one plaintext export");
+    }
     const code = await use.locator("pre").textContent();
     if (tool === "Cursor") assert.ok(code.includes("https://your-public-address/v1"), "Cursor gets a public-address placeholder on localhost");
     else assert.ok(code.includes(origin), `${tool}: uses ${origin}`);

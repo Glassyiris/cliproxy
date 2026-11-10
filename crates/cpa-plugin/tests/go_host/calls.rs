@@ -366,7 +366,7 @@ async fn command_line(host: &Host, args: &Value) -> Value {
             break;
         }
     }
-    let persist = |_auth: PluginAuth| -> Result<String, String> { Err("unexpected save".into()) };
+    let persist = |_auths: Vec<PluginAuth>| -> Result<Vec<String>, String> { Err("unexpected save".into()) };
     let (exit, handled, output) = host
         .execute_command_line("cliproxy", &argv, "/etc/cliproxy/config.yaml", &values, &persist)
         .await;

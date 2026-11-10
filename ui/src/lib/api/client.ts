@@ -3,7 +3,7 @@ import type { Route } from "./routes.ts";
 // Requests read the management key from this module's memory; lib/keyStore.ts keeps the stored
 // copy that a reload reads back once.
 // Requests go only to the server that served this page: the API sits next to it
-// (/management.html -> /v8/management, also under a reverse-proxy path prefix).
+// (/management.html -> /admin/v1 and /v8/management, also under a reverse-proxy path prefix).
 export const base = new URL(".", location.href).href.replace(/\/$/, "");
 const endpoint = `${base}/v8/management`;
 
@@ -35,19 +35,48 @@ export function disconnect() {
   resetCapabilities();
 }
 
+type ErrorDetails = { resource?: string; pointer?: string; pointers?: string[] };
+
+function errorDetails(value: unknown): ErrorDetails {
+  if (!value || typeof value !== "object") return {};
+  return {
+    resource:
+      "resource" in value && typeof value.resource === "string" ? value.resource : undefined,
+    pointer: "pointer" in value && typeof value.pointer === "string" ? value.pointer : undefined,
+    pointers:
+      "pointers" in value && Array.isArray(value.pointers)
+        ? value.pointers.filter(
+            (pointer: unknown): pointer is string => typeof pointer === "string",
+          )
+        : undefined,
+  };
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly method: string;
   readonly path: string;
-  constructor(message: string, status: number, code: string, route: Route) {
+  readonly resource: string | undefined;
+  readonly pointer: string | undefined;
+  readonly pointers: readonly string[];
+  constructor(
+    message: string,
+    status: number,
+    code: string,
+    route: Route,
+    details: ErrorDetails = {},
+  ) {
     super(message);
     this.status = status;
     this.code = code;
     this.method = route.method;
     this.path = route.path;
+    this.resource = details.resource;
+    this.pointer = details.pointer;
+    this.pointers = details.pointers ?? (details.pointer ? [details.pointer] : []);
   }
-  /** The server does not implement this route or method: 501, 405, or Go's empty 404. */
+  /** The server does not implement this route or method: 501, 405, or an empty 404. */
   get notImplemented() {
     return this.status === 501 || this.status === 405 || (this.status === 404 && !this.code);
   }
@@ -91,13 +120,11 @@ export type Call = {
   /** `{name}` segments are percent-encoded; a `{*name}` remainder is inserted as given. */
   params?: Record<string, string>;
   query?: Record<string, string | number | boolean | undefined>;
-  /** JSON-encoded unless it is FormData, or text for /config.yaml. */
+  /** JSON-encoded unless it is FormData. */
   body?: unknown;
   /** Aborting it drops the request, so the latest read of a value wins. */
   signal?: AbortSignal;
   as?: "json" | "text" | "blob";
-  ifMatch?: string;
-  onHeaders?: (headers: Headers) => void;
 };
 
 function url(route: Route, call: Call) {
@@ -110,19 +137,17 @@ function url(route: Route, call: Call) {
   for (const [k, v] of Object.entries(call.query ?? {}))
     if (v !== undefined) query.set(k, String(v));
   const search = query.size ? `?${query}` : "";
-  return { path, href: `${endpoint}${path}${search}` };
+  const root = path.startsWith("/admin/v1/") ? base : endpoint;
+  return { path, href: `${root}${path}${search}` };
 }
 
 async function send(route: Route, call: Call) {
   if (!key) throw new ConnectionError("signed-out");
   const at = revision;
   const { path, href } = url(route, call);
-  const yaml = path === "/config.yaml";
   const form = call.body instanceof FormData;
   const headers: Record<string, string> = { Authorization: `Bearer ${key}` };
-  if (call.body !== undefined && !form)
-    headers["Content-Type"] = yaml ? "application/yaml" : "application/json";
-  if (call.ifMatch) headers["If-Match"] = call.ifMatch;
+  if (call.body !== undefined && !form) headers["Content-Type"] = "application/json";
   const timeout = AbortSignal.timeout(path.includes("/refresh") ? 300_000 : 30_000);
   let response: Response;
   try {
@@ -130,7 +155,7 @@ async function send(route: Route, call: Call) {
       method: route.method,
       headers,
       body:
-        call.body === undefined || form || yaml
+        call.body === undefined || form
           ? (call.body as BodyInit | undefined)
           : JSON.stringify(call.body),
       signal: call.signal ? AbortSignal.any([call.signal, timeout]) : timeout,
@@ -157,7 +182,6 @@ async function send(route: Route, call: Call) {
 export async function request<T>(route: Route, call: Call = {}): Promise<T> {
   const at = revision;
   const response = await send(route, call);
-  call.onHeaders?.(response.headers);
   const as = call.as ?? "json";
   let value;
   try {
@@ -188,6 +212,7 @@ export async function request<T>(route: Route, call: Call = {}): Promise<T> {
     response.status,
     String(value?.code || value?.error || ""),
     route,
+    errorDetails(value),
   );
   if (error.notImplemented && !missing.has(routeId(route))) {
     missing.add(routeId(route));

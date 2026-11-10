@@ -991,7 +991,7 @@ impl PluginAuth {
     /// The auth as credential loading takes it. The credential keeps one JSON document,
     /// the one Go saves for it (`pluginTokenStorage`): the plugin's storage overlaid
     /// with its metadata.
-    pub(crate) fn into_parsed(self) -> cpa_core::config::credentials::ParsedAuth {
+    pub fn into_parsed(self) -> cpa_core::config::credentials::ParsedAuth {
         let metadata = self
             .storage_payload()
             .ok()

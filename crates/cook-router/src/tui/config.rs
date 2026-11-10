@@ -1,5 +1,4 @@
-//! Go's config tab (internal/tui/config_tab.go): the editable runtime fields, written
-//! through the v0 scalar routes.
+//! Editable runtime configuration through the admin API.
 use std::sync::Arc;
 
 use ratatui::buffer::Buffer;
@@ -30,96 +29,66 @@ pub struct Field {
     pub value: String,
 }
 
-/// Go `parseConfig`. GET /config omits port and host (Go's `json:"-"`), so they read
-/// as `0` and empty, exactly as in Go.
+/// Editable fields address the effective configuration tree.
 pub fn parse_config(cfg: &Object) -> Vec<Field> {
-    let num = |k: &str| s::int_text(s::get_float(cfg, k));
-    let flag = |b: bool| b.to_string();
-    let nested = |outer: &str, k: &str| {
-        cfg.get(outer)
-            .and_then(Value::as_object)
-            .is_some_and(|o| s::get_bool(o, k))
-    };
-    let strategy = cfg
-        .get("routing")
-        .and_then(Value::as_object)
-        .map(|r| s::get_string(r, "strategy"))
-        .unwrap_or_default();
-    let f = |label, path, kind, value| Field {
-        label,
-        path,
-        kind,
-        value,
-    };
-    vec![
-        f("Port", "port", Kind::ReadOnly, num("port")),
-        f("Host", "host", Kind::ReadOnly, s::get_string(cfg, "host")),
-        f("Debug", "debug", Kind::Bool, flag(s::get_bool(cfg, "debug"))),
-        f("Proxy URL", "proxy-url", Kind::Str, s::get_string(cfg, "proxy-url")),
-        f("Request Retry", "request-retry", Kind::Int, num("request-retry")),
-        f(
-            "Max Retry Interval (s)",
-            "max-retry-interval",
-            Kind::Int,
-            num("max-retry-interval"),
-        ),
-        // Go reads a bool as a string here, so this shows empty and a write is refused.
-        f(
-            "Force Model Prefix",
-            "force-model-prefix",
-            Kind::Str,
-            s::get_string(cfg, "force-model-prefix"),
-        ),
-        f(
-            "Logging to File",
-            "logging-to-file",
-            Kind::Bool,
-            flag(s::get_bool(cfg, "logging-to-file")),
-        ),
-        f(
+    let fields = [
+        ("Port", "server/port", Kind::ReadOnly),
+        ("Host", "server/host", Kind::ReadOnly),
+        ("Debug", "observability/logs/debug", Kind::Bool),
+        ("Proxy URL", "requests/proxy-url", Kind::Str),
+        ("Request Retry", "routing/retry/request-retry", Kind::Int),
+        ("Max Retry Interval (s)", "routing/retry/max-retry-interval", Kind::Int),
+        ("Force Model Prefix", "routing/force-model-prefix", Kind::Bool),
+        ("Logging to File", "observability/logs/logging-to-file", Kind::Bool),
+        (
             "Logs Max Total Size (MB)",
-            "logs-max-total-size-mb",
+            "observability/logs/logs-max-total-size-mb",
             Kind::Int,
-            num("logs-max-total-size-mb"),
         ),
-        f(
+        (
             "Error Logs Max Files",
-            "error-logs-max-files",
+            "observability/logs/error-logs-max-files",
             Kind::Int,
-            num("error-logs-max-files"),
         ),
-        f(
+        (
             "Usage Stats Enabled",
-            "usage-statistics-enabled",
+            "observability/usage/usage-statistics-enabled",
             Kind::Bool,
-            flag(s::get_bool(cfg, "usage-statistics-enabled")),
         ),
-        f(
-            "Request Log",
-            "request-log",
-            Kind::Bool,
-            flag(s::get_bool(cfg, "request-log")),
-        ),
-        f(
-            "Switch Project on Quota",
-            "quota-exceeded/switch-project",
-            Kind::Bool,
-            flag(nested("quota-exceeded", "switch-project")),
-        ),
-        f(
+        ("Request Log", "observability/logs/request-log", Kind::Bool),
+        ("Switch Project on Quota", "quota-exceeded/switch-project", Kind::Bool),
+        (
             "Switch Preview Model",
             "quota-exceeded/switch-preview-model",
             Kind::Bool,
-            flag(nested("quota-exceeded", "switch-preview-model")),
         ),
-        f("Routing Strategy", "routing/strategy", Kind::Str, strategy),
-        f(
-            "WebSocket Auth",
-            "ws-auth",
-            Kind::Bool,
-            flag(s::get_bool(cfg, "ws-auth")),
-        ),
-    ]
+        ("Routing Strategy", "routing/strategy", Kind::Str),
+        ("WebSocket Auth", "oauth/providers/aistudio/ws-auth", Kind::Bool),
+    ];
+    fields
+        .into_iter()
+        .map(|(label, path, kind)| {
+            let value = super::client::value_at(cfg, path);
+            let value = match kind {
+                Kind::Bool => value.and_then(Value::as_bool).unwrap_or(false).to_string(),
+                Kind::Int => value.and_then(Value::as_i64).unwrap_or(0).to_string(),
+                _ if path == "routing/strategy" => value
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("soonest-reset")
+                    .to_owned(),
+                _ => value
+                    .map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))
+                    .unwrap_or_default(),
+            };
+            Field {
+                label,
+                path,
+                kind,
+                value,
+            }
+        })
+        .collect()
 }
 
 /// Go `fieldSection`.
@@ -130,17 +99,14 @@ fn section(path: &str) -> &'static str {
     if path.starts_with("routing/") {
         return t("section_routing");
     }
-    match path {
-        "port" | "host" | "debug" | "proxy-url" | "request-retry" | "max-retry-interval" | "force-model-prefix" => {
-            t("section_server")
-        }
-        "logging-to-file"
-        | "logs-max-total-size-mb"
-        | "error-logs-max-files"
-        | "usage-statistics-enabled"
-        | "request-log" => t("section_logging"),
-        "ws-auth" => t("section_websocket"),
-        _ => t("section_other"),
+    if path.starts_with("server/") || path.starts_with("requests/") {
+        t("section_server")
+    } else if path.starts_with("observability/") {
+        t("section_logging")
+    } else if path == "oauth/providers/aistudio/ws-auth" {
+        t("section_websocket")
+    } else {
+        t("section_other")
     }
 }
 
@@ -401,6 +367,23 @@ impl ConfigTab {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fields_read_the_effective_tree() {
+        let cfg = serde_json::json!({
+            "server": {"port": 8317, "host": "127.0.0.1"},
+            "observability": {"logs": {"debug": true}},
+            "routing": {"retry": {"request-retry": 3}, "force-model-prefix": true}
+        });
+        let fields = parse_config(cfg.as_object().unwrap());
+        let field = |path| fields.iter().find(|f| f.path == path).unwrap();
+        assert_eq!(field("server/port").value, "8317");
+        assert_eq!(field("observability/logs/debug").value, "true");
+        assert_eq!(field("routing/retry/request-retry").value, "3");
+        assert_eq!(field("routing/force-model-prefix").kind, Kind::Bool);
+        assert_eq!(field("routing/force-model-prefix").value, "true");
+        assert_eq!(field("routing/strategy").value, "soonest-reset");
+    }
 
     #[test]
     fn atoi_follows_go() {

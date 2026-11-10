@@ -77,13 +77,14 @@ pub fn router(management: &Arc<Management>, app: axum::Router) -> axum::Router {
     {
         return app;
     }
-    // Go resolves relative request-log directories against the config directory.
+    // A relative request-log directory is resolved against the config database's folder.
     let dir = if management.log_dir.is_absolute() {
         management.log_dir.clone()
     } else {
         management
-            .path
-            .parent()
+            .config
+            .path()
+            .and_then(Path::parent)
             .unwrap_or(Path::new("."))
             .join(&management.log_dir)
     };
@@ -97,7 +98,8 @@ pub fn router(management: &Arc<Management>, app: axum::Router) -> axum::Router {
 }
 
 fn eligible(request: &Request, path: &str) -> bool {
-    if ["/v0/management", "/v8/management", "/management"]
+    // Management bodies carry provider and client keys.
+    if ["/v0/management", "/v8/management", "/management", "/admin/"]
         .iter()
         .any(|p| path.starts_with(p))
     {
@@ -1677,7 +1679,7 @@ mod tests {
 
     fn management(dir: &Path, enabled: bool, commercial: bool) -> Arc<Management> {
         let config = cpa_core::config::Config::parse(&format!(
-            "observability: {{logs: {{request-log: {enabled}}}}}\nserver: {{commercial-mode: {commercial}}}\n"
+            "oauth: {{auth-dir: {}}}\nobservability: {{logs: {{request-log: {enabled}}}}}\nserver: {{commercial-mode: {commercial}}}\n", dir.display()
         ))
         .unwrap();
         let rt = Arc::new(crate::testing::runtime(
@@ -1693,7 +1695,7 @@ mod tests {
         ));
         Management::with_options(
             rt,
-            dir.join("config.yaml"),
+            Arc::new(crate::config_store::ConfigStore::memory()),
             crate::management::Options {
                 log_dir: Some(dir.to_owned()),
                 management_password: Some(String::new()),

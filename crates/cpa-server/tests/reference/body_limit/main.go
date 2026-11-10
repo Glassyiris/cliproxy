@@ -272,7 +272,6 @@ func scenarios() []scenario {
 		{"POST", "/v0/management/reset-quota", `{}`},
 		{"POST", "/v0/management/quota/fetch", `{}`},
 		{"PATCH", "/v0/management/plugins/demo/enabled", `{"enabled":true}`},
-		{"PUT", "/v0/management/plugins/demo/config", `{}`},
 		{"DELETE", "/v0/management/plugins/demo/quota", `{"auth_index":"1"}`},
 	} {
 		add(scenario{Name: "json_first_value_within_limit " + c.method + " " + c.path, YAML: mgmtYAML, Method: c.method, Path: c.path,
@@ -413,6 +412,8 @@ func scenarios() []scenario {
 			Headers: images, Body: imageForm, Chunked: true})
 	}
 	add(scenario{Name: "management_content_length_over_limit", YAML: mgmtYAML, Method: "PUT", Path: "/v8/management/config", Headers: mgmt, Body: oversized})
+	// The Rust fixture retargets config cases to /admin/v1 and records its typed
+	// authentication envelope; preserve that migration after regenerating Go data.
 	add(scenario{Name: "management_unauthenticated_chunked", YAML: mgmtYAML, Method: "PUT", Path: "/v8/management/config",
 		Headers: map[string]string{"Content-Type": "application/json"}, Body: oversized, Chunked: true})
 

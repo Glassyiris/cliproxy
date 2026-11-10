@@ -3,7 +3,8 @@
 // (each key with its weight, traffic, reveal and copy; the models, when the group restricts them).
 import { icons } from "../../components/icons.ts";
 import { PanelBlock } from "../../components/PanelBlock.tsx";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useConfig } from "../../app/serverQueries.ts";
 import { Eye, X } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import { Divider } from "@astryxdesign/core/Divider";
@@ -16,11 +17,13 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Identifier } from "../../components/Identifier.tsx";
+import { useAction } from "../../app/useAction.ts";
 import { familyName } from "../../components/keyFamilies.ts";
 import { ProviderLabel } from "../../components/ProviderIcon.tsx";
 import { RequestSparkline } from "../../components/RequestSparkline.tsx";
 import { StatusLamp } from "../../components/StatusLamp.tsx";
 import { mask } from "../../lib/clientKeys.ts";
+import { revealProviderKey } from "../../lib/api/config.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
 import { roles } from "../../themes/site/roles.ts";
@@ -37,7 +40,7 @@ function KeyText({ value, revealed }: { value: string; revealed: boolean }) {
   if (!revealed)
     return (
       <Text type={roles.textType.body} textWrap="nowrap" hasTabularNumbers>
-        {mask(value)}
+        {mask("")}
       </Text>
     );
   return <MiddleText head={value.slice(0, -KEY_TAIL)} tail={value.slice(-KEY_TAIL)} />;
@@ -45,17 +48,22 @@ function KeyText({ value, revealed }: { value: string; revealed: boolean }) {
 
 /** The row's end: the shared requests slot, then reveal and copy, as Clients draws a key. */
 function KeyEnd({
-  value,
+  isCopied,
+  busy,
+  available,
   traffic,
   revealed,
   onReveal,
+  onCopy,
 }: {
-  value: string;
+  isCopied: boolean;
+  busy: boolean;
+  available: boolean;
   traffic: KeyTraffic | null;
   revealed: boolean;
   onReveal: () => void;
+  onCopy: () => void;
 }) {
-  const { copy, isCopied } = useClipboard();
   const reveal = revealed ? t("providers.key.hide") : t("providers.key.show");
   return (
     <HStack gap={1} vAlign="center" wrap="nowrap">
@@ -73,6 +81,7 @@ function KeyEnd({
         variant={roles.rowAction.variant}
         icon={<Icon icon={revealed ? "eyeSlash" : Eye} size="sm" />}
         aria-pressed={revealed}
+        isDisabled={!available || busy}
         onClick={onReveal}
       />
       <IconButton
@@ -81,13 +90,8 @@ function KeyEnd({
         size={roles.rowAction.size}
         variant={roles.rowAction.variant}
         icon={<Icon icon={isCopied ? "check" : "copy"} size="sm" />}
-        onClick={() =>
-          void copy(value).then((ok) =>
-            ok
-              ? notify("success", t("providers.key.copied"))
-              : notify("error", t("providers.key.copyFailed")),
-          )
-        }
+        isDisabled={!available || busy}
+        onClick={onCopy}
       />
     </HStack>
   );
@@ -96,14 +100,46 @@ function KeyEnd({
 /** One key per row: the key with its weight (and whether it fails) under it, then its end. */
 function KeyRow({
   keyEntry: { key, traffic },
-  revealed,
-  onReveal,
+  providerId,
 }: {
   keyEntry: { key: Key; traffic: KeyTraffic | null };
-  revealed: boolean;
-  onReveal: () => void;
+  providerId: string | undefined;
 }) {
-  const value = String(key["api-key"] ?? "");
+  const [value, setValue] = useState("");
+  const revealed = !!value;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => void (mounted.current = false);
+  }, []);
+  const action = useAction();
+  const { copy, isCopied } = useClipboard();
+  const keyId = key["@id"];
+  const available = !!providerId && !!keyId;
+  const onReveal = () => {
+    if (!providerId || !keyId) return;
+    if (revealed) {
+      setValue("");
+    } else {
+      void action.run(async () => {
+        const actual = await revealProviderKey(providerId, keyId);
+        if (mounted.current) setValue(actual);
+      });
+    }
+  };
+  const onCopy = () => {
+    if (!providerId || !keyId) return;
+    void action.run(async () => {
+      const actual = await revealProviderKey(providerId, keyId);
+      if (!mounted.current) return;
+      const ok = await copy(actual);
+      if (mounted.current)
+        notify(
+          ok ? "success" : "error",
+          t(ok ? "providers.key.copied" : "providers.key.copyFailed"),
+        );
+    });
+  };
   return (
     <ListItem
       label={<KeyText value={value} revealed={revealed} />}
@@ -118,26 +154,34 @@ function KeyRow({
         </VStack>
       }
       endContent={
-        <KeyEnd value={value} traffic={traffic} revealed={revealed} onReveal={onReveal} />
+        <KeyEnd
+          isCopied={isCopied}
+          busy={action.busy}
+          available={available}
+          traffic={traffic}
+          revealed={revealed}
+          onReveal={onReveal}
+          onCopy={onCopy}
+        />
       }
     />
   );
 }
 
 function Keys({ entry }: { entry: Entry }) {
-  const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set());
-  const toggle = (i: number) =>
-    setRevealed((now) => {
-      const next = new Set(now);
-      if (!next.delete(i)) next.add(i);
-      return next;
-    });
+  const { dataUpdatedAt } = useConfig();
+  // Each refreshed config snapshot discards row-local plaintext, even if its mask is unchanged.
+  const providerId = entry.group["@id"];
   return (
     <PanelBlock title={t("providers.panel.keys")}>
       {entry.keys.length ? (
         <List density="compact" hasDividers>
-          {entry.keys.map((k, i) => (
-            <KeyRow key={i} keyEntry={k} revealed={revealed.has(i)} onReveal={() => toggle(i)} />
+          {entry.keys.map((k) => (
+            <KeyRow
+              key={`${providerId}:${dataUpdatedAt}:${k.key["@id"]}`}
+              keyEntry={k}
+              providerId={providerId}
+            />
           ))}
         </List>
       ) : (
@@ -176,7 +220,8 @@ function Actions({
   toggling: boolean;
   onAction: (action: GroupAction) => void;
 }) {
-  const { family, index, group } = entry;
+  const { family, group } = entry;
+  const id = group["@id"];
   return (
     <HStack gap={2} vAlign="center" hAlign="end">
       {family === "openai-compatibility" && (
@@ -184,8 +229,8 @@ function Actions({
           label={group.disabled ? t("providers.group.enable") : t("providers.group.disable")}
           size="sm"
           isLoading={toggling}
-          isDisabled={busy}
-          onClick={() => onAction({ kind: "toggle", family, index })}
+          isDisabled={busy || !id}
+          onClick={() => id && onAction({ kind: "toggle", family, id })}
         />
       )}
       <MoreMenu
@@ -198,8 +243,8 @@ function Actions({
             label: t("providers.group.deleteOne"),
             icon: icons.delete,
             variant: "destructive",
-            isDisabled: busy,
-            onClick: () => onAction({ kind: "delete", family, index }),
+            isDisabled: busy || !id,
+            onClick: () => id && onAction({ kind: "delete", family, id }),
           },
         ]}
       />

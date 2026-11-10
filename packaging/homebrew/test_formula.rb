@@ -4,8 +4,8 @@ require "tmpdir"
 require "yaml"
 
 formula = Formulary.factory(ARGV.fetch(0))
-expected_command = [formula.opt_bin/"cliproxy", "--config", formula.etc/"cliproxy-rs/config.yaml"].map(&:to_s)
-raise "service does not pass config" unless formula.service.run == expected_command
+expected_command = [formula.opt_bin/"cliproxy", "--db", formula.etc/"cliproxy-rs/cook.db"].map(&:to_s)
+raise "service does not pass database" unless formula.service.run == expected_command
 raise "background service type" unless formula.service.run_type == :immediate
 
 Dir.mktmpdir("cliproxy-homebrew-test") do |directory|
@@ -13,9 +13,19 @@ Dir.mktmpdir("cliproxy-homebrew-test") do |directory|
   config_dir = Pathname(directory)/"cliproxy-rs"
   config = config_dir/"config.yaml"
   keys_file = config_dir/"keys.env"
+  db = config_dir/"cook.db"
+  imports = []
+  formula.define_singleton_method(:quiet_system) do |*args|
+    expected = [bin/"cliproxy", "--db", db, "config", "import", config].map(&:to_s)
+    raise "wrong import command" unless args.map(&:to_s) == expected
+    imports << config.read
+    db.write "committed database"
+    true
+  end
 
   formula.post_install
   settings = YAML.safe_load(config.read)
+  raise "missing first import" unless imports == [config.read] && db.exist?
   keys = keys_file.read.lines.to_h { |line| line.strip.split("=", 2) }
   raise "not localhost-only" unless settings.fetch("server") == { "host" => "127.0.0.1", "port" => 8317 }
   raise "remote management enabled" unless settings.fetch("management").fetch("allow-remote") == false
@@ -36,6 +46,7 @@ Dir.mktmpdir("cliproxy-homebrew-test") do |directory|
   original_keys = "\n  # Keep these existing keys.\n\n#{keys_file.read}\n \t\n"
   keys_file.unlink
   keys_file.write original_keys
+  db.unlink
   config.unlink
   formula.post_install
   raise "existing keys replaced" unless keys_file.read == original_keys
@@ -43,15 +54,29 @@ Dir.mktmpdir("cliproxy-homebrew-test") do |directory|
   raise "existing keys not reused" unless restored.fetch("management").fetch("secret-key") == management_key
 
   config.unlink
-  config.write "user-owned config\n"
+  config.write "stale YAML must never be read\n"
+  original_db = db.read
   formula.post_install
-  raise "existing config replaced" unless config.read == "user-owned config\n"
+  raise "existing database reimported" unless imports.length == 2 && db.read == original_db
+  raise "existing config replaced" unless config.read == "stale YAML must never be read\n"
   raise "existing keys changed" unless keys_file.read == original_keys
   keys_file.unlink
+  config.unlink
   formula.post_install
-  raise "keys generated for existing config" if keys_file.exist?
+  raise "keys generated for existing database" if keys_file.exist? || config.exist?
+
+  # A legacy YAML without a DB is imported exactly once and retained as a backup.
+  db.unlink
+  legacy = "server:\n  host: 127.0.0.1\n  port: 9123\n"
+  config.write legacy
+  formula.post_install
+  raise "legacy import missing" unless imports.last == legacy && imports.length == 3 && db.exist?
+  raise "legacy backup changed" unless config.read == legacy
+  raise "keys generated during migration" if keys_file.exist?
+  formula.post_install
+  raise "legacy imported twice" unless imports.length == 3
 end
-puts "Formula: explicit service config, immediate service type, private config, key reuse and preservation passed"
+puts "Formula: explicit database service, first import, private keys, database reuse and legacy migration passed"
 
 workflow = YAML.safe_load_file(".github/workflows/release.yml")
 raise "missing published event" unless workflow.fetch("on", workflow[true]).fetch("release").fetch("types") == ["published"]

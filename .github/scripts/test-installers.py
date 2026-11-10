@@ -91,7 +91,7 @@ def main():
             package("v999.4.0", fixtures / "plain-health.exe")
         if not windows:
             bad = root / "broken"
-            bad.write_text("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cook-router 999.2.0'; else exit 1; fi\n")
+            bad.write_text('#!/bin/sh\ncase "$1" in --version) echo "cook-router 999.2.0";; --help) echo "--db PATH";; *) case " $* " in *" config "*) exec "$INSTALLER_REAL_BINARY" "$@";; *) exit 1;; esac;; esac\n')
             bad.chmod(0o755)
             package("v999.2.0", bad)
 
@@ -133,6 +133,7 @@ def main():
                "COOK_ROUTER_RELEASES": f"http://127.0.0.1:{server.server_port}/releases",
                "COOK_ROUTER_HOME": str(home), "COOK_ROUTER_INSTALL_DIR": str(bindir),
                "COOK_ROUTER_NO_OPEN": "1", "COOK_ROUTER_NO_UPDATE_CHECK": "1"})
+        env["INSTALLER_REAL_BINARY"] = str(binary)
         # Catalog fetches cannot leave loopback even on native runners without namespaces.
         env.update(HTTP_PROXY="http://127.0.0.1:9", HTTPS_PROXY="http://127.0.0.1:9",
                    ALL_PROXY="http://127.0.0.1:9", NO_PROXY="127.0.0.1,localhost,::1")
@@ -187,6 +188,46 @@ def main():
         def pid():
             return int((home / "cook-router.pid").read_text().strip())
 
+        def commit_config(text):
+            """Write committed settings through the supported import, retaining stale YAML backup."""
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", dir=root, delete=False) as source:
+                source.write(text)
+                path = Path(source.name)
+            try:
+                result = capture([binary, "--db", home / "cook.db", "config", "import", path], env=env)
+                assert result.returncode == 0, "fixture config import failed"
+            finally:
+                path.unlink()
+
+        def migrate_windows():
+            """A pre-rename YAML-only home becomes a DB install without replacing its keys."""
+            user = root / "legacy-windows"
+            old_home = user / ".cliproxy-rs"
+            (old_home / "auth").mkdir(parents=True)
+            auth = str(old_home / "auth").replace("'", "''")
+            legacy_yaml = f"server:\n  host: '127.0.0.1'\n  port: 8322\naccess:\n  api-keys:\n    - sk-legacy\nmanagement:\n  secret-key: legacy\noauth:\n  auth-dir: '{auth}'\n"
+            (old_home / "config.yaml").write_text(legacy_yaml)
+            legacy_keys = "CLIPROXY_PORT=8322\nCLIPROXY_CLIENT_KEY=sk-legacy\nCLIPROXY_MANAGEMENT_KEY=legacy\n"
+            (old_home / "keys.env").write_text(legacy_keys)
+            saved = env.copy()
+            try:
+                env.pop("COOK_ROUTER_HOME")
+                env.pop("COOK_ROUTER_INSTALL_DIR")
+                env.update(USERPROFILE=str(user), LOCALAPPDATA=str(user / "AppData/Local"), COOK_ROUTER_VERSION="v999.1.0")
+                output = install()
+                assert f"Using {old_home} from before the rename" in output, output
+                assert (old_home / "cook.db").is_file() and not (user / ".cook-router").exists()
+                assert (old_home / "config.yaml").read_text() == legacy_yaml
+                assert (old_home / "keys.env").read_text() == legacy_keys
+                with urllib.request.urlopen("http://127.0.0.1:8322/healthz", timeout=5) as response:
+                    assert response.status == 200
+            finally:
+                marker = old_home / "cook-router.pid"
+                if marker.exists():
+                    ps(f"Stop-Process -Id {int(marker.read_text().strip())} -ErrorAction SilentlyContinue", check=False)
+                env.clear()
+                env.update(saved)
+
         def migrate(tag):
             """An install from before the rename: ~/.cliproxy-rs, CLIPROXY_* settings, a cliproxy
             binary and its server, once in the background and once as a login service."""
@@ -206,7 +247,9 @@ def main():
                 legacy.update(HOME=str(user), CLIPROXY_RELEASES=env["COOK_ROUTER_RELEASES"], CLIPROXY_VERSION=tag,
                               CLIPROXY_NO_OPEN="1", COOK_ROUTER_NO_UPDATE_CHECK="1")
                 with (old_home / "cliproxy.log").open("ab") as out:
-                    old = subprocess.Popen([old_bin, "--config", old_home / "config.yaml"], cwd=old_home, env=legacy,
+                    imported = capture([old_bin, "--db", old_home / "legacy-live.db", "config", "import", old_home / "config.yaml"], env=legacy)
+                    assert imported.returncode == 0, "legacy server fixture import failed"
+                    old = subprocess.Popen([old_bin, "--db", old_home / "legacy-live.db", "--config", old_home / "config.yaml"], cwd=old_home, env=legacy,
                                            stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
                 # Reap the old server as soon as it exits, as init would: the service shims wait on
                 # `kill -0`, and macOS runners refuse `ps`, so a zombie would never look gone.
@@ -241,7 +284,7 @@ case "$*" in
     fi
     exit 1 ;;
   bootstrap*|kickstart*|*restart*)
-    (cd "$HOME/.cliproxy-rs" && exec nohup "$HOME/.local/bin/cook-router" --config "$HOME/.cliproxy-rs/config.yaml" </dev/null >>"$HOME/.cliproxy-rs/cook-router.log" 2>&1) &
+    (cd "$HOME/.cliproxy-rs" && exec nohup "$HOME/.local/bin/cook-router" --db "$HOME/.cliproxy-rs/cook.db" </dev/null >>"$HOME/.cliproxy-rs/cook-router.log" 2>&1) &
     echo $! > "$HOME/service.pid" ;;
   *) exit 1 ;;
 esac
@@ -271,6 +314,7 @@ esac
                     old.wait(timeout=20)
                     assert not (user / ".cook-router").exists() and old_bin.exists() and (local / "cook-router").exists()
                     assert [(old_home / f).read_bytes() for f in ("config.yaml", "keys.env")] == before
+                    assert (old_home / "cook.db").is_file(), "legacy YAML was not imported"
                     with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=5) as response:
                         assert response.status == 200
                     if as_service:
@@ -279,6 +323,7 @@ esac
                         assert stopped in calls, calls
                         assert darwin or "--user disable --quiet cliproxy.service" in calls, calls
                         assert not old_unit.exists() and str(local / "cook-router") in new_unit.read_text()
+                        assert "--db" in new_unit.read_text() and "config.yaml" not in new_unit.read_text()
                         assert f"Removed {old_unit}" in output, output
                     else:
                         assert not (old_home / "cliproxy.pid").exists()
@@ -330,14 +375,43 @@ if stop_pidfile; then exit 0; else exit 1; fi
                 assert "not installed" in install("--check")
                 assert not home.exists() and not bindir.exists()
                 assert not any("/download/" in r for r in requests)
-            # Check the bracketed IPv6 wildcard and YAML boolean aliases without
-            # asking the server to bind a bracketed literal (not a bind address).
+            # Probe normalization reads committed settings, never the YAML backup.
             probe_config = root / "probe-only.yaml"
-            probe_config.write_text('server:\n  host: "[::]"\n  tls: # self-signed\n    enable: ON\n')
+            probe_config.write_text('server:\n  host: "[::]"\n  port: 8317\n  tls:\n    enable: true\n')
+            probe_db = root / "probe-only.db"
+            imported = capture([binary, "--db", probe_db, "config", "import", probe_config], env=env)
+            assert imported.returncode == 0, "probe fixture import failed"
             if windows:
                 script = str(repo / "install.ps1").replace("'", "''")
-                test_config = str(probe_config).replace("'", "''")
-                base = ps(f"$code=(Get-Content -Raw '{script}') -replace '(?m)^Install-CookRouter -Service.*$', ''; . ([scriptblock]::Create($code)); (Get-CookRouterProbe '{test_config}').Base; " + '''
+                test_db = str(probe_db).replace("'", "''")
+                image = str(binary).replace("'", "''")
+                base = ps(f"$ErrorActionPreference='Stop'; $code=(Get-Content -Raw '{script}') -replace '(?m)^Install-CookRouter -Service.*$', ''; . ([scriptblock]::Create($code)); (Get-CookRouterProbe '{image}' '{test_db}').Base; " + f'''
+$invalid=Join-Path (Split-Path $env:COOK_ROUTER_HOME) 'invalid-import'
+New-Item -ItemType Directory -Path $invalid | Out-Null
+$config=Join-Path $invalid 'config.yaml'
+[IO.File]::WriteAllText($config, 'server: [')
+$failure=$null
+try {{ Initialize-CookRouterHome $invalid $config (Join-Path $invalid 'keys.env') (Join-Path $invalid 'cook.db') '{image}' | Out-Null }} catch {{ $failure=$_.Exception.Message }}
+if($failure -notlike '*could not import*keep config.yaml and retry*'){{throw "import hid its recovery message: $failure"}}
+if($ErrorActionPreference -ne 'Stop'){{throw 'import changed the error preference'}}
+$log=Join-Path $invalid 'cook-router.log'
+if((Get-Item $log).Length -eq 0 -or [IO.File]::ReadAllBytes($log) -contains 0){{throw 'import log is empty or UTF-16'}}
+''' + r'''
+$dir='C:\private bin'
+$db='C:\private home\cook.db'
+function Get-CimInstance {
+  @('cook-router --db "C:\private home\cook.db"',
+    'cook-router --db "C:\private home\cook.db2"',
+    'cook-router --db C:\db\cook.db',
+    'cook-router --db C:\db\cook.db2',
+    'cook-router --log-file "C:\private home\cook.db"',
+    'cook-router --config "C:\private home\config.yaml"',
+    $null) | ForEach-Object { [pscustomobject]@{Name='cook-router.exe'; ExecutablePath='C:\private bin\cook-router.exe'; CommandLine=$_} }
+}
+$selected=@(Get-CookRouterServers $dir 'C:\private home\config.yaml' -db $db)
+if($selected.Count -ne 2 -or $selected[0].CommandLine -ne 'cook-router --db "C:\private home\cook.db"'){throw 'quoted database argument was not matched exactly'}
+$selected=@(Get-CookRouterServers $dir 'C:\other\config.yaml' -db 'C:\db\cook.db')
+if($selected.Count -ne 1 -or $selected[0].CommandLine -ne 'cook-router --db C:\db\cook.db'){throw 'unquoted database argument was not matched exactly'}
 $script:removed=@()
 function Get-ChildItem {
   [pscustomobject]@{Name='cook-router.prev-keep.exe'; FullName='/long/path/cook-router.prev-keep.exe'}
@@ -351,11 +425,13 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cook-route
 ''')
             else:
                 code = (repo / "install.sh").read_text().removesuffix('main "$@"\n')
-                base = capture(["sh", "-c", code + '\nconfig=$1; read_probe; printf "%s" "$base"', "sh", probe_config], env=env).stdout
+                base = capture(["sh", "-c", code + '\nbin=$1; db=$2; log=$3; read_probe; printf "%s" "$base"', "sh", binary, probe_db, root / "probe.log"], env=env).stdout
             assert base.strip() == "https://[::1]:8317", base
-            install(pipe=windows)
+            first_output = install(pipe=windows)
+            assert (home / "cook.db").is_file(), "fresh install did not create its database"
             health()
             keys = dict(line.split("=", 1) for line in (home / "keys.env").read_text().splitlines() if line.startswith("COOK_ROUTER_"))
+            assert all(value not in first_output for key, value in keys.items() if key.endswith("_KEY")), "installer printed a key"
             # The dashboard page alone is not enough: on Windows its nested scripts,
             # styles and fonts once returned 404, leaving the page blank.
             with urllib.request.urlopen("http://127.0.0.1:8317/management.html", timeout=5) as response:
@@ -379,7 +455,7 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cook-route
             for path, key, expected in [
                 ("/v1/models", None, 401),
                 ("/v1/models", keys["COOK_ROUTER_CLIENT_KEY"], 200),
-                ("/v8/management/config", keys["COOK_ROUTER_MANAGEMENT_KEY"], 200),
+                ("/admin/v1/effective/config", keys["COOK_ROUTER_MANAGEMENT_KEY"], 200),
                 ("/assets/missing.js", None, 404),
             ]:
                 request = urllib.request.Request("http://127.0.0.1:8317" + path)
@@ -434,7 +510,8 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cook-route
                 requests.clear()
                 assert "already current" in install("--check")
                 assert "already current" in install()
-                assert pid() == old_pid
+                assert pid() != old_pid, "setup must refresh DB startup arguments even at the current version"
+                old_pid = pid()
                 assert (bindir / exe).stat().st_ino == old_inode
                 assert not any("/download/" in r for r in requests)
             env["COOK_ROUTER_VERSION"] = "v999.1.0"
@@ -448,11 +525,30 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cook-route
             health()
             assert pid() != old_pid
             assert [(home / f).read_bytes() for f in ("config.yaml", "keys.env")] == before
+            # An existing DB is sufficient even after both import artifacts are removed.
+            # The installer must neither regenerate credentials nor import defaults.
+            config_backup = home / "saved-config.yaml"
+            keys_backup = home / "saved-keys.env"
+            (home / "config.yaml").rename(config_backup)
+            (home / "keys.env").rename(keys_backup)
+            committed = capture([binary, "--db", home / "cook.db", "config", "export", "--secrets"], env=env)
+            assert committed.returncode == 0, "existing database export failed"
+            try:
+                os.utime(bindir / exe, None)
+                install()
+                health()
+                assert not (home / "config.yaml").exists() and not (home / "keys.env").exists(), "existing DB regenerated import files"
+                after_export = capture([binary, "--db", home / "cook.db", "config", "export", "--secrets"], env=env)
+                assert after_export.returncode == 0 and after_export.stdout == committed.stdout, "existing DB settings or keys changed"
+            finally:
+                config_backup.rename(home / "config.yaml")
+                keys_backup.rename(home / "keys.env")
             if not windows:
                 assert not any("/download/" in r for r in requests), "current on-disk upgrade must restart without downloading"
                 restarted = pid()
                 assert "already current" in install()
-                assert pid() == restarted
+                assert pid() != restarted
+                restarted = pid()
                 subprocess.run(["kill", str(restarted)], check=True, timeout=10)
                 time.sleep(2)
                 install()
@@ -488,13 +584,15 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cook-route
                 finally:
                     env["PATH"] = original_path
             second = root / "second"
-            env.update(COOK_ROUTER_HOME=str(second))
+            env.update(COOK_ROUTER_HOME=str(second), COOK_DB=str(second / "alternate.db"))
             try:
                 install()
+                assert (second / "alternate.db").is_file() and not (second / "cook.db").exists(), "COOK_DB was not honored"
                 assert "COOK_ROUTER_PORT=8318" in (second / "keys.env").read_text()
                 with urllib.request.urlopen("http://127.0.0.1:8318/healthz", timeout=5) as response:
                     assert response.status == 200
                 second_pid = int((second / "cook-router.pid").read_text().strip())
+                env.pop("COOK_DB")
                 env.update(COOK_ROUTER_HOME=str(home))
                 if windows:
                     # Simulate a stale PID reused by another config sharing the
@@ -515,6 +613,7 @@ if($script:removed.Count -ne 1 -or $script:removed[0] -ne '/long/path/cook-route
                             subprocess.run(["kill", str(second_pid)], check=False, timeout=10)
                 except (OSError, ValueError, subprocess.SubprocessError) as error:
                     print(f"Best-effort cleanup: {error}", file=sys.stderr)
+                env.pop("COOK_DB", None)
                 env.update(COOK_ROUTER_HOME=str(home))
             if not windows:
                 # A service command fails once after the swap; rollback must restart and
@@ -534,7 +633,7 @@ case "$*" in
     if [ -f "$COOK_ROUTER_HOME/fail-service-once" ]; then
       rm "$COOK_ROUTER_HOME/fail-service-once"; echo 'injected service failure' >&2; exit 1
     fi
-    (cd "$COOK_ROUTER_HOME" && exec nohup "$COOK_ROUTER_INSTALL_DIR/cook-router" --config "$COOK_ROUTER_HOME/config.yaml" </dev/null >>"$COOK_ROUTER_HOME/cook-router.log" 2>&1) &
+    (cd "$COOK_ROUTER_HOME" && exec nohup "$COOK_ROUTER_INSTALL_DIR/cook-router" --db "$COOK_ROUTER_HOME/cook.db" </dev/null >>"$COOK_ROUTER_HOME/cook-router.log" 2>&1) &
     echo $! > "$COOK_ROUTER_HOME/service.pid" ;;
   *) exit 1 ;;
 esac
@@ -569,7 +668,7 @@ esac
                 selected = ps(f"$code=(Get-Content -Raw '{script}') -replace '(?m)^Install-CookRouter -Service.*$', ''; . ([scriptblock]::Create($code)); "
                               "$dir=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:COOK_ROUTER_INSTALL_DIR); "
                               "$data=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:COOK_ROUTER_HOME); "
-                              "Get-CookRouterServers $dir (Join-Path $data 'config.yaml') | ForEach-Object { [IO.Path]::GetFileName((Get-CookRouterImage $_.ProcessId $dir)) }")
+                              "Get-CookRouterServers $dir (Join-Path $data 'config.yaml') -db (Join-Path $data 'cook.db') | ForEach-Object { [IO.Path]::GetFileName((Get-CookRouterImage $_.ProcessId $dir)) }")
                 assert selected.startswith("cook-router.prev-") and selected.endswith(".exe"), selected
             output = install(success=False)
             assert ("Rolled back" if windows else "verified it is healthy") in output, output
@@ -595,7 +694,7 @@ esac
                 env["COOK_ROUTER_VERSION"] = "v999.1.0"
                 install("-Service")
                 entry = ps("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cook-router'")
-                assert entry.startswith(f'"{bindir / exe}" --config '), entry
+                assert entry.startswith(f'"{bindir / exe}" --db '), entry
                 assert "--log-file" in entry and "--working-dir" in entry and not any(x in entry.lower() for x in ("powershell", "cmd.exe", "start.ps1"))
                 existing_image = (bindir / exe).read_bytes()
                 existing_pid = pid()
@@ -609,7 +708,7 @@ esac
                 # Execute the exact Run entry, not an installer-generated launcher.
                 (home / ".env").write_text("WRITABLE_PATH=./relative-state\n")
                 config = home / "config.yaml"
-                config.write_text(config.read_text() + "\nobservability:\n  logs:\n    logging-to-file: true\n")
+                commit_config(config.read_text() + "\nobservability:\n  logs:\n    logging-to-file: true\n")
                 launched = int(ps(f"$e=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cook-router'; $e -match '^\"([^\"]+)\" (.*)$' | Out-Null; (Start-Process -FilePath $Matches[1] -ArgumentList $Matches[2] -PassThru).Id", cwd=root))
                 (home / "cook-router.pid").write_text(str(launched))
                 health()
@@ -626,10 +725,25 @@ esac
                 assert "Replaced the cliproxy-rs sign-in entry" in install()
                 health()
                 assert ps("$e=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).'cliproxy-rs'; if($e){$e}") == ""
-                assert ps("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cook-router'").startswith(f'"{bindir / exe}" --config ')
+                assert ps("(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'cook-router'").startswith(f'"{bindir / exe}" --db ')
+                # Restoring a pre-SQLite image must never restart stale YAML or retain
+                # a sign-in entry that would do so on the next login.
+                ps(f"Stop-Process -Id {pid()} -Force; Wait-Process -Id {pid()} -ErrorAction SilentlyContinue", check=False)
+                shutil.copy2(legacy, bindir / exe)
+                ps(f"Set-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name cook-router -Value '\"{bindir / exe}\" --config \"{home / 'config.yaml'}\"'")
+                env["COOK_ROUTER_VERSION"] = "v999.3.0"
+                output = install(success=False)
+                assert "cannot read" in output and "stale config.yaml backup" in output and "ROLLBACK FAILED" in output, output
+                assert (bindir / exe).read_bytes() == legacy.read_bytes(), "old binary was not restored"
+                assert not (home / "cook-router.pid").exists(), "incompatible rollback launched a server"
+                assert ps("$e=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).'cook-router'; if($e){$e}") == ""
+                env["COOK_ROUTER_VERSION"] = "v999.1.0"
+                install()
+                health()
             # Non-default bind host: derive both the health probe and dashboard URL.
             config = home / "config.yaml"
-            config.write_text(config.read_text().replace('host: "127.0.0.1"', 'host: "::1"'))
+            plain_backup = config.read_text()
+            commit_config(plain_backup.replace('host: "127.0.0.1"', 'host: "::1"'))
             env["COOK_ROUTER_VERSION"] = f"v{version}" if not windows else "v999.1.0"
             if not windows:
                 # Make the on-disk current file newer than its last-start marker.
@@ -639,7 +753,7 @@ esac
             connection = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             with connection.open("http://[::1]:8317/healthz", timeout=5) as response:
                 assert response.status == 200
-            config.write_text(config.read_text().replace('host: "::1"', 'host: "::"'))
+            commit_config(plain_backup.replace('host: "127.0.0.1"', 'host: "::"'))
             os.utime(bindir / exe, None)
             assert "http://[::1]:8317/management.html" in install()
             with connection.open("http://[::1]:8317/healthz", timeout=5) as response:
@@ -649,9 +763,9 @@ esac
             subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
                             "-subj", "/CN=localhost", "-keyout", key, "-out", cert],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-            plain = config.read_text()
-            for mapping, enabled in [("tls: # self-signed", "true"), ("tls:", "yes")]:
-                config.write_text(plain.replace("  port: 8317", f"  port: 8317\n  {mapping}\n    enable: {enabled}\n    cert: '{cert}'\n    key: '{key}'"))
+            plain = plain_backup.replace('host: "127.0.0.1"', 'host: "::"')
+            for mapping, enabled in [("tls: # self-signed", "true"), ("tls:", "true")]:
+                commit_config(plain.replace("  port: 8317", f"  port: 8317\n  {mapping}\n    enable: {enabled}\n    cert: '{cert}'\n    key: '{key}'"))
                 os.utime(bindir / exe, None)
                 assert "https://[::1]:8317/management.html" in install()
                 connection = urllib.request.build_opener(urllib.request.ProxyHandler({}),
@@ -698,11 +812,14 @@ Write-Output 'PASS Windows PowerShell 5.1: HTTPS status and scoped certificate v
                 assert (bindir / exe).read_bytes() == image
                 with connection.open("https://[::1]:8317/healthz", timeout=5) as response:
                     assert response.status == 200, "TLS rollback must restore the original healthy server"
+            assert config.read_text() == plain_backup, "database edits changed the stale YAML backup"
+            if windows:
+                migrate_windows()
             if not windows:
                 migrate("v999.1.0")
             print(f"PASS {platform.system()}: install, upgrade, binary-only, unchanged keys" +
                   (", direct Run entry, old sign-in entry, process log and HTTPS rollback" if windows else
-                   ", check, current no-op, hard link, rollback, checksum rejection, install from before the rename"))
+                   ", check, current restart, hard link, rollback, checksum rejection, install from before the rename"))
         except BaseException:
             def diagnostic(action):
                 try:
