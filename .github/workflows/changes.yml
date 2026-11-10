@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 5
     steps:
       # The check needs the merge base of the pull request, so fetch full history.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Run the parser tests
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run the title checker's tests
         run: python3 -I -m unittest discover -s .github/scripts -p 'test_pr_title.py'
       - name: Check the pull request title
