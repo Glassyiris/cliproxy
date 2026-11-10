@@ -36,6 +36,29 @@ cook-router started as a Rust rewrite of CLIProxyAPI (https://github.com/router-
 - Mark deliberate simplifications with a `ponytail:` comment naming the ceiling and the upgrade path.
 - Prompt-cache changes must keep request semantics and stable prefixes, and show cache-read and cache-write usage for warm, changed-context and idle continuations before merge. Never add inference keepalive pings. `bench/claude-cache-live.sh` runs that check against a live Claude login, by hand.
 
+## Landing a change
+
+`master` must stay green. A change that turns it red blocks every pull request that touches Rust.
+
+- **Never merge with a failing or pending check.** The `master` ruleset requires `ci-ok`, `fragments` and `title`. Do not disable it to land a feature. If CI is red for a reason outside your change, fix that first in its own pull request.
+- **Before you open the pull request, run what CI runs** on the final tree and read the results:
+  - `cargo fmt --all --check`
+  - `cargo clippy --workspace --all-targets --locked -- -D warnings`
+  - `cargo nextest run --workspace --locked`
+  - `cargo check --locked --manifest-path harness/rust/Cargo.toml`
+  - `npm run check` in `ui/`
+  - `python3 -I tools/third-party-notices.py --check`
+  - after a change to anything that runs while the server is idle: `cargo build --release -p cook-router && bench/gate.sh idle linux target/release/cook-router 1`
+
+  A change too large to check this way is too large for one pull request; split it.
+- **A dependency change updates every generated file in the same pull request:**
+  - `Cargo.lock`;
+  - `harness/rust/Cargo.lock`, which `--locked` refuses to update in CI;
+  - `THIRD-PARTY-NOTICES`: run `python3 -I tools/third-party-notices.py` (cargo-about 0.9.3 with `--features cli`; `npm ci` in `ui/` first).
+- **Removing a screen or control also removes its message keys** in every locale. `npm run check` fails on unused keys.
+- **A background task or thread stops with its owner.** Stop it on drop or shutdown and wait for it. A task that outlives its owner keeps writing into directories that tests then fail to delete (`DirectoryNotEmpty`). Wait on events (a channel, `Notify`, a file watcher), not on a polling timer. The idle server must stay within `bench/budgets.txt`: about three wakeups in the measured window. Raising a budget needs a maintainer's approval and a measured reason.
+- **Title the pull request `<area>: <subject>`.** The areas and rules are in CONTRIBUTING.md under Commits and pull request titles. The title becomes the squash commit's subject.
+
 ## Review guidelines
 
 Flag, in order: request or response bytes changed on passthrough; credentials or client keys reaching logs or the wrong side; tests that can touch the network, a real database or a real `auth-dir`; work on a request body that grows faster than linearly with its size; a behaviour change that leaves a caller (dashboard, TUI, tests, docs) on the old contract. Skip style nits that `cargo fmt` and clippy already cover.
