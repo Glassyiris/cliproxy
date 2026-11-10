@@ -318,7 +318,7 @@ mod tests {
     use super::*;
 
     fn sqlite_state(work: &Path) -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>) {
-        let store = Arc::new(crate::config_store::ConfigStore::open(&work.join("config.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&work.join("config.db")).unwrap());
         let db = crate::credential_store::CredentialDb::initialize(store.clone(), &work.join("legacy")).unwrap();
         let mut cfg = store.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
@@ -362,8 +362,7 @@ mod tests {
             let prior = br#"{"type":"rec","access_token":"old","plugin_extra":{"keep":true}}"#;
             db.save(&existing, prior).unwrap();
             if sql_failure {
-                rusqlite::Connection::open(work.join("config.db"))
-                    .unwrap()
+                crate::testing::database_connection(state.config_store())
                     .execute_batch(
                         "CREATE TRIGGER reject_plugin BEFORE INSERT ON credential_document
                          WHEN instr(CAST(NEW.bytes AS TEXT), 'reject') > 0

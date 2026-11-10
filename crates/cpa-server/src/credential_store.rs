@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use anyhow::{Context as _, bail};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 
-use crate::config_store::{ConfigStore, checkpoint_truncate};
+use crate::config_store::ConfigStore;
 use crate::cooldown_store::{Backend, Record};
 
 pub struct CredentialDb {
@@ -102,6 +102,7 @@ impl CredentialDb {
     }
 
     fn import_legacy(&self, dir: &Path) -> anyhow::Result<()> {
+        let _coordination = self.store.write_guard()?;
         let mut conn = self.store.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let imported: bool = tx.query_row(
@@ -110,6 +111,8 @@ impl CredentialDb {
             |r| r.get(0),
         )?;
         if imported {
+            drop(tx);
+            self.store.publish(&conn)?;
             return Ok(());
         }
         for path in json_files(dir, false)? {
@@ -129,7 +132,7 @@ impl CredentialDb {
             [],
         )?;
         tx.commit()?;
-        checkpoint_truncate(&conn);
+        self.store.publish(&conn)?;
         Ok(())
     }
 
@@ -185,6 +188,7 @@ impl CredentialDb {
 
     fn save_checked(&self, path: &Path, bytes: &[u8], expected: Option<Option<[u8; 32]>>) -> anyhow::Result<bool> {
         let result = (|| {
+            let _coordination = self.store.write_guard()?;
             let mut conn = self.store.conn();
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let name = self.name(path)?;
@@ -204,7 +208,7 @@ impl CredentialDb {
             put(&tx, &name, Some(bytes))?;
             materialize(path, bytes)?;
             tx.commit()?;
-            checkpoint_truncate(&conn);
+            self.store.publish(&conn)?;
             Ok(true)
         })();
         if result.is_err() {
@@ -218,6 +222,7 @@ impl CredentialDb {
     /// write or transaction restores the unchanged canonical working documents.
     pub fn write_files<T>(&self, paths: &[PathBuf], write: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
         let result = (|| {
+            let _coordination = self.store.write_guard()?;
             let mut conn = self.store.conn();
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             for path in paths {
@@ -228,7 +233,7 @@ impl CredentialDb {
                 persist_file(self, &tx, path)?;
             }
             tx.commit()?;
-            checkpoint_truncate(&conn);
+            self.store.publish(&conn)?;
             Ok(value)
         })();
         if result.is_err() {
@@ -296,11 +301,12 @@ impl Backend for CredentialDb {
 
     fn save(&self, records: Vec<Record>, now: SystemTime) -> Result<(), String> {
         let save = || -> anyhow::Result<()> {
+            let _coordination = self.store.write_guard()?;
             let mut conn = self.store.conn();
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             write_cooldowns(&tx, records, now)?;
             tx.commit()?;
-            checkpoint_truncate(&conn);
+            self.store.publish(&conn)?;
             Ok(())
         };
         save().map_err(|e| e.to_string())
@@ -435,10 +441,48 @@ mod tests {
     }
 
     #[test]
+    fn retrying_a_failed_legacy_import_republishes_with_the_same_store() {
+        let root = directory();
+        let path = root.join("cook.db");
+        let store = Arc::new(crate::testing::config_store(&path).unwrap());
+        let legacy = root.join("legacy");
+        std::fs::create_dir(&legacy).unwrap();
+        let bytes = br#"{"type":"private","access_token":"test-only"}"#;
+        std::fs::write(legacy.join("login.json"), bytes).unwrap();
+        let saved = root.join("previous.db");
+        std::fs::rename(&path, &saved).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(CredentialDb::initialize(store.clone(), &legacy).is_err());
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::rename(&saved, &path).unwrap();
+        let retried = CredentialDb::initialize(store.clone(), &legacy).unwrap();
+        let published = rusqlite::Connection::open(&path).unwrap();
+        let count: i64 = published
+            .query_row("SELECT count(*) FROM credential_document", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "successful initialization must publish the previously committed import"
+        );
+        assert_eq!(
+            retried.read(&retried.auth_dir().join("login.json")).unwrap().as_deref(),
+            Some(bytes.as_slice())
+        );
+        drop(published);
+        drop(retried);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn initialize_save_reopen_documents_round_trip() {
         let root = directory();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let local = db.auth_dir().join("auth.json");
         let nested = db.auth_dir().join("nested/auth.json");
         let external = root.join("external.json");
@@ -451,7 +495,11 @@ mod tests {
         assert!(db.name(&external).unwrap().starts_with("external:"));
         let before = db.documents().unwrap();
         drop(db);
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         assert_eq!(db.documents().unwrap(), before);
         drop(db);
         std::fs::remove_dir_all(root).unwrap();
@@ -464,7 +512,7 @@ mod tests {
 
         let root = directory();
         let db = CredentialDb::initialize(
-            Arc::new(ConfigStore::open(&root.join("cook.db")).unwrap()),
+            Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap()),
             &root.join("missing"),
         )
         .unwrap();
@@ -510,8 +558,11 @@ mod tests {
             symlink("..2024_mount/nested.json", legacy.join("linked.json")).unwrap();
             std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
         }
-        let db =
-            CredentialDb::initialize(Arc::new(ConfigStore::open(&root.join("cook.db")).unwrap()), &legacy).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap()),
+            &legacy,
+        )
+        .unwrap();
         let names: Vec<_> = db
             .documents()
             .unwrap()
@@ -587,7 +638,7 @@ mod tests {
         let original = b"{\n  \"type\":\"plugin-private\",\"opaque\":{\"secret\":\"first\"}\n}\n";
         std::fs::write(legacy.join("auth.json"), original).unwrap();
         let path = root.join("cook.db");
-        let store = Arc::new(ConfigStore::open(&path).unwrap());
+        let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store
             .import_yaml("server: {port: 8317}\n", "test", "preinitialized config")
             .unwrap();
@@ -603,13 +654,13 @@ mod tests {
         drop(db);
         drop(store);
         std::fs::remove_dir_all(&dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &legacy).unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap()), &legacy).unwrap();
         assert_eq!(std::fs::read(&auth).unwrap(), updated);
         std::fs::remove_file(&auth).unwrap();
         db.delete(&auth).unwrap();
         drop(db);
         std::fs::remove_dir_all(&dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &legacy).unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap()), &legacy).unwrap();
         assert!(db.read(&auth).unwrap().is_none());
         assert!(!auth.exists());
         assert!(legacy.join("auth.json").exists());
@@ -621,7 +672,7 @@ mod tests {
     fn canonical_scan_preserves_external_documents_and_auth_indexes_across_restart() {
         let root = directory();
         let path = root.join("cook.db");
-        let store = Arc::new(ConfigStore::open(&path).unwrap());
+        let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store.import_yaml("oauth: {}\n", "test", "").unwrap();
         let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
         let nested = db.auth_dir().join("nested/auth.json");
@@ -646,7 +697,11 @@ mod tests {
         drop(store);
         std::fs::remove_dir_all(dir).unwrap();
         std::fs::remove_file(&external).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         assert_eq!(identities(&db), before);
         assert_eq!(db.read(&nested).unwrap().unwrap(), bytes);
         assert_eq!(std::fs::read(&external).unwrap(), bytes);
@@ -657,7 +712,7 @@ mod tests {
     #[test]
     fn failed_batch_is_atomic_and_restores_working_documents() {
         let root = directory();
-        let store = Arc::new(ConfigStore::open(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
         let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
         let first = db.auth_dir().join("first.json");
         let second = db.auth_dir().join("second.json");
@@ -684,7 +739,11 @@ mod tests {
     fn cooldown_records_survive_removal_of_working_directory() {
         let root = directory();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let records = vec![Record {
             auth_id: "auth.json".into(),
             model: "model".into(),
@@ -695,7 +754,11 @@ mod tests {
         let dir = db.auth_dir();
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let saved = Backend::load(&*db).unwrap();
         assert_eq!(saved.len(), 1);
         assert_eq!(

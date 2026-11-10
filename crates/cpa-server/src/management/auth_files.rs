@@ -2918,7 +2918,7 @@ mod tests {
             br#"{"type":"claude","access_token":"old","plugin_extra":{"keep":true}}"#,
         )
         .unwrap();
-        let config = Arc::new(crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap());
+        let config = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
         config
             .import_yaml(&format!("oauth: {{auth-dir: {}}}\n", legacy.display()), "test", "")
             .unwrap();
@@ -3008,7 +3008,7 @@ mod tests {
         let cache = db.auth_dir();
         drop(db);
         std::fs::remove_dir_all(&cache).unwrap();
-        let store = Arc::new(crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
         let db = crate::credential_store::CredentialDb::initialize(store.clone(), &root.join("legacy")).unwrap();
         assert_eq!(std::fs::read(&auth).unwrap(), bytes);
         std::fs::remove_file(&auth).unwrap();
@@ -3017,7 +3017,7 @@ mod tests {
         drop(store);
         std::fs::remove_dir_all(&cache).unwrap();
         let db = crate::credential_store::CredentialDb::initialize(
-            Arc::new(crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap()),
+            Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap()),
             &root.join("legacy"),
         )
         .unwrap();

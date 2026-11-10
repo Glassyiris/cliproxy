@@ -11,7 +11,6 @@ use std::sync::Arc;
 use cpa_exec::Executors;
 use cpa_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL, Hooks};
 use cpa_server::Runtime;
-use cpa_server::config_store::ConfigStore;
 use wreq::tls::trust::CertStore;
 
 #[tokio::main]
@@ -19,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     anyhow::ensure!(args.len() == 3, "usage: driver CONFIG TEST_CA");
     let config_path = Path::new(&args[1]);
-    let store = Arc::new(ConfigStore::open(&config_path.with_extension("db"))?);
+    let store = Arc::new(cpa_server::testing::config_store(&config_path.with_extension("db"))?);
     store.import_yaml(&std::fs::read_to_string(config_path)?, "harness", "fixture")?;
     let mut config = store.load().map_err(|e| anyhow::anyhow!("{e}"))?.config;
     let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &config.auth_dir)?;

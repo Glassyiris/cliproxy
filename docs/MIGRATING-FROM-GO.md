@@ -6,7 +6,7 @@ cook-router develops independently from CLIProxyAPI. SQLite is now the sole dura
 
 1. Locate the Go server's YAML config, credential directory and service command. Legacy layouts use `auth-dir`; v8 layouts use `oauth.auth-dir` (often `~/.cli-proxy-api`). Export legacy remote-store contents to private local files if necessary; cook-router will not fetch or mutate them as runtime state.
 2. Stop the Go server before copying or importing credentials. Back up its YAML and credential files privately. They contain provider secrets and refresh tokens.
-3. Choose a stable SQLite path on a persistent local volume, for example `/var/lib/cook-router/cook.db`. Give the cook-router service user exclusive write access to the directory; keep it private (0700 on Unix). The database, WAL, SHM and backups must be private (0600 or equivalent ACLs).
+3. Choose a stable SQLite path on a persistent local volume, for example `/var/lib/cook-router/cook.db`. Give the cook-router service user exclusive write access to the directory; keep it private (0700 on Unix). The published database, temporary working databases and backups must be private (0600 or equivalent ACLs).
 4. Remove selected `PGSTORE_*`, `OBJECTSTORE_*` and `GITSTORE_*` backend settings from the new server's environment. A selected legacy remote config store now fails startup with a migration error; it is not a fallback authority or asynchronous YAML mirror.
 
 Do not run Go and cook-router with credentials for the same account at the same time, even from separate copies. Providers can rotate refresh tokens; one server's refresh can invalidate the other's copy. A copied credential directory is not an isolated test. Use a separate test account and a different port for side-by-side trials. A backup's refresh tokens may stop working after either server refreshes them.
@@ -44,7 +44,7 @@ See [Configuration](CONFIGURATION.md#administration-api) for routes, preconditio
 
 Update a service to use an explicit `--db /var/lib/cook-router/cook.db`, with a writable private database directory. If bootstrapping through `--config`, use it only to select the initial import. Changes made later through the dashboard do not update that file; service health probes must not treat stale YAML as the effective configuration.
 
-Mount a **directory** for SQLite, not only a config file, so the main database and `-wal`/`-shm` sidecars persist together. The default Docker image runs as UID/GID 10001: give it ownership of the mounted directory. A remote bucket, PostgreSQL database or git repository is not a substitute for this persistent volume. See [Docker](INSTALL.md#docker).
+Mount a **directory** for the published SQLite snapshot, not only a file: each commit creates a temporary snapshot beside it and atomically replaces it. Keep OS tmp writable and private for the working database; server and CLI writers must share the same OS user and temporary namespace. WAL/SHM files are not runtime storage. The default Docker image runs as UID/GID 10001: give it ownership of the mounted directory. A remote bucket, PostgreSQL database or git repository is not a substitute for this persistent volume. See [Docker](INSTALL.md#docker).
 
 ## Backup and recovery
 
@@ -52,7 +52,9 @@ Mount a **directory** for SQLite, not only a config file, so the main database a
 cook-router --db /var/lib/cook-router/cook.db config backup /private/cook-router-backup.db
 ```
 
-This uses SQLite's `VACUUM INTO` for a consistent snapshot and includes configuration, revision history and credential secrets. Do not raw-copy only the main database while WAL is open; committed data can still be in the WAL. Keep backups private, stop the server before replacing its database, and treat old refresh tokens as potentially invalid. Config-history restore is not credential recovery. Logical deletion or secure-delete settings do not guarantee physical disk erasure, especially on SSDs, snapshots or retained backups.
+This uses SQLite's `VACUUM INTO` and includes configuration, revision history and credential secrets. The `--db` file is also a complete published snapshot: copy it directly while the service runs for a usable backup. Keep backups private and treat old refresh tokens as potentially invalid. Config-history restore is not credential recovery. Logical deletion or secure-delete settings do not guarantee physical disk erasure, especially on SSDs, snapshots or retained backups.
+
+For a cold restore, stop all server/CLI users first. A valid working database left by an abnormal exit wins on restart and can republish over a replaced snapshot. Before restoring, either remove only the correct `<TMPDIR>/cook-router/<canonical-db-path-hash>` directory after verifying no PID reference is alive, or configure a fresh private trusted temporary namespace shared by every future server/CLI user. Never delete `coordination.db` or an active working directory; do not later switch back to a namespace containing the old live state. Restore the snapshot with the service user's ownership and private permissions, then restart in the selected namespace. See the [step-by-step cold-restore procedure](CONFIGURATION.md#restore-a-backup-instead-of-resuming).
 
 ## Switching back
 

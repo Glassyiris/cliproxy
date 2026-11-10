@@ -5,16 +5,16 @@
 //!
 //! One connection per process, behind a mutex. Writes take SQLite's write lock first
 //! (`BEGIN IMMEDIATE`), so a second process (the CLI) serializes with this one.
-//! History keeps every revision's changes with secrets replaced by
-//! [`resources::SECRET`]; deleted rows are zeroed (`secure_delete`) and the WAL is
-//! truncated after each commit, so a removed key does not stay in the files.
+//! Each completed write publishes an immutable, standalone snapshot at `--db`.
+//! The mutable DELETE-journal database lives in private OS tmp storage. History
+//! redacts secrets; `secure_delete` clears removed rows from the working database.
 
 mod commit;
 mod db;
 mod history;
+mod published;
 pub mod resources;
 
-pub(crate) use db::checkpoint_truncate;
 use db::{all, head, stored_kind};
 use history::shown_change;
 
@@ -35,6 +35,8 @@ pub struct ConfigStore {
     /// `PRAGMA data_version` when it was last read: it moves when another connection
     /// commits.
     seen: Mutex<i64>,
+    // Declared after conn so its cleanup runs only after SQLite closes the file.
+    disk: Option<published::Disk>,
 }
 
 #[derive(Debug, Clone)]

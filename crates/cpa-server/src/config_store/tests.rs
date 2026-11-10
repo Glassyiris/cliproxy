@@ -175,7 +175,7 @@ fn history_hides_secrets_and_restore_keeps_the_current_ones() {
 fn a_deleted_key_leaves_no_trace_in_the_files() {
     let dir = std::env::temp_dir().join(format!("cook-config-store-{}", uuid::Uuid::new_v4()));
     let path = dir.join("cook.db");
-    let store = ConfigStore::open(&path).unwrap();
+    let store = crate::testing::config_store(&path).unwrap();
     let secret = "sk-forget-me-0123456789";
     store
         .commit(&[put("provider", "main", provider(secret))], "t", "", false)
@@ -193,13 +193,11 @@ fn a_deleted_key_leaves_no_trace_in_the_files() {
         )
         .unwrap();
     drop(store);
-    for file in ["cook.db", "cook.db-wal"] {
-        let bytes = std::fs::read(dir.join(file)).unwrap_or_default();
-        assert!(
-            !bytes.windows(secret.len()).any(|w| w == secret.as_bytes()),
-            "{file} keeps the key"
-        );
-    }
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(
+        !bytes.windows(secret.len()).any(|w| w == secret.as_bytes()),
+        "published snapshot keeps the key"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
@@ -266,13 +264,13 @@ fn moves_reorder_list_entries() {
 fn another_connection_s_commit_is_noticed() {
     let dir = std::env::temp_dir().join(format!("cook-config-poll-{}", uuid::Uuid::new_v4()));
     let path = dir.join("cook.db");
-    let server = ConfigStore::open(&path).unwrap();
+    let server = crate::testing::config_store(&path).unwrap();
     assert!(!server.changed_elsewhere().unwrap());
     server
         .commit(&[put("setting", "routing", json!({}))], "t", "", false)
         .unwrap();
     assert!(!server.changed_elsewhere().unwrap(), "its own commit");
-    let cli = ConfigStore::open(&path).unwrap();
+    let cli = crate::testing::config_store(&path).unwrap();
     cli.commit(
         &[put("setting", "routing", json!({"strategy": "fill-first"}))],
         "cli",
@@ -414,13 +412,13 @@ fn public_digests_do_not_fingerprint_secrets() {
 fn snapshot_revision_and_rows_never_cross_external_commits() {
     let dir = std::env::temp_dir().join(format!("cook-config-snapshot-{}", uuid::Uuid::new_v4()));
     let path = dir.join("cook.db");
-    let store = ConfigStore::open(&path).unwrap();
+    let store = crate::testing::config_store(&path).unwrap();
     store
         .commit(&[put("setting", "server", json!({"port":9000}))], "t", "", false)
         .unwrap();
     let writer_path = path.clone();
     let writer = std::thread::spawn(move || {
-        let writer = ConfigStore::open(&writer_path).unwrap();
+        let writer = crate::testing::config_store(&writer_path).unwrap();
         for port in 9001..9020 {
             writer
                 .commit(&[put("setting", "server", json!({"port":port}))], "t", "", false)
@@ -454,13 +452,13 @@ fn limits_reject_oversized_states_and_operation_batches_atomically() {
 #[test]
 fn online_backup_is_consistent_and_never_overwrites_a_path() {
     let dir = std::env::temp_dir().join(format!("cook-config-backup-{}", uuid::Uuid::new_v4()));
-    let store = ConfigStore::open(&dir.join("cook.db")).unwrap();
+    let store = crate::testing::config_store(&dir.join("cook.db")).unwrap();
     store.import_yaml("server: {port: 9001}\n", "t", "").unwrap();
     let destination = dir.join("backup.db");
     store.backup(&destination).unwrap();
     assert!(store.backup(&destination).is_err());
     assert!(store.backup(store.path().unwrap()).is_err());
-    let backup = ConfigStore::open(&destination).unwrap();
+    let backup = crate::testing::config_store(&destination).unwrap();
     assert_eq!(backup.load().unwrap().config.port, 9001);
     drop(backup);
     drop(store);
@@ -516,7 +514,7 @@ fn legacy_history_is_masked_on_read_and_secret_digests_are_invalidated() {
     conn.execute("INSERT INTO change VALUES (1,'provider','main',NULL,?1)", [&after])
         .unwrap();
     drop(conn);
-    let store = ConfigStore::open(&path).unwrap();
+    let store = crate::testing::config_store(&path).unwrap();
     let (revision, changes) = store.revision(1).unwrap().unwrap();
     assert!(revision.digest.is_empty());
     assert!(!serde_json::to_string(&changes).unwrap().contains("legacy-secret"));

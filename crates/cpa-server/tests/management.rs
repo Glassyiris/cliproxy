@@ -3,7 +3,6 @@ use cpa_core::config::Config;
 use cpa_core::gostr::GoStr;
 use cpa_exec::Executors;
 use cpa_exec::claude::ClaudeExecutor;
-use cpa_server::config_store::ConfigStore;
 use cpa_server::credential_store::CredentialDb;
 use cpa_server::management::Management;
 use cpa_server::{Runtime, management, watching};
@@ -132,7 +131,7 @@ impl Fixture {
         let dir = std::env::temp_dir().join(format!("manage-{name}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join("auth")).unwrap();
         let hash = bcrypt::hash("fake-management-only", 4).unwrap();
-        let store = Arc::new(ConfigStore::open(&dir.join("config.db")).unwrap());
+        let store = Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap());
         store.import_yaml(&yaml(&dir.join("auth"), &hash), "test", "").unwrap();
         let mut cfg = store.load().unwrap().config;
         let db = CredentialDb::initialize(store.clone(), &cfg.auth_dir).unwrap();
@@ -163,14 +162,13 @@ impl Fixture {
     /// A separate connection makes writes visible to the watcher's data_version.
     fn writer(&self) -> Arc<CredentialDb> {
         CredentialDb::initialize(
-            Arc::new(ConfigStore::open(&self.dir.join("config.db")).unwrap()),
+            Arc::new(cpa_server::testing::config_store(&self.dir.join("config.db")).unwrap()),
             &self.dir.join("auth"),
         )
         .unwrap()
     }
     fn reject_saves(&self) {
-        rusqlite::Connection::open(self.dir.join("config.db"))
-            .unwrap()
+        cpa_server::testing::database_connection(self.state.config_store())
             .execute_batch("CREATE TRIGGER reject_insert BEFORE INSERT ON credential_document BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END; CREATE TRIGGER reject_update BEFORE UPDATE ON credential_document BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END;")
             .unwrap();
     }
@@ -4054,7 +4052,7 @@ async fn auth_files_list_v8_quota_plugin_id_and_no_quota_probe() {
         std::fs::write(auth.join(name), body).unwrap();
     }
     let hash = bcrypt::hash("fake-management-only", 4).unwrap();
-    let store = Arc::new(ConfigStore::open(&auth.join("config.db")).unwrap());
+    let store = Arc::new(cpa_server::testing::config_store(&auth.join("config.db")).unwrap());
     store
         .import_yaml(
             &format!(
@@ -4350,6 +4348,33 @@ async fn siwc_only_codex_credentials_refresh_by_name_and_in_bulk() {
     upstream.abort();
 }
 
+#[test]
+fn integration_fixtures_never_sweep_the_production_temporary_namespace() {
+    let dir = std::env::temp_dir().join(format!("management-sweep-isolation-{}", uuid::Uuid::new_v4()));
+    let sentinel = dir.join("cook-router").join("a".repeat(64));
+    std::fs::create_dir_all(sentinel.join("refs")).unwrap();
+    std::fs::write(sentinel.join("refs/0"), b"").unwrap();
+    std::fs::write(sentinel.join("live.db"), b"unrelated simulated production database").unwrap();
+    // Only the child gets this private simulated OS tmp; do not mutate the
+    // parallel test process's environment or create files in a real runtime root.
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents",
+        ])
+        .env("TMPDIR", &dir)
+        .env("TMP", &dir)
+        .env("TEMP", &dir)
+        .output()
+        .unwrap();
+    assert!(child.status.success(), "{}", String::from_utf8_lossy(&child.stderr));
+    assert_eq!(
+        std::fs::read(sentinel.join("live.db")).unwrap(),
+        b"unrelated simulated production database"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[tokio::test]
 async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
     for all in [false, true] {
@@ -4360,7 +4385,7 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         for name in ["a.json", "b.json"] {
             std::fs::write(legacy.join(name), original).unwrap();
         }
-        let store = Arc::new(ConfigStore::open(&dir.join("config.db")).unwrap());
+        let store = Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap());
         let hash = bcrypt::hash("fake-management-only", 4).unwrap();
         store
             .import_yaml(
@@ -4398,7 +4423,7 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         let query = if all { "all=true" } else { "name=a.json" };
         let url = format!("{base}/v8/management/credentials?{query}");
         let client = wreq::Client::new();
-        let sql = rusqlite::Connection::open(dir.join("config.db")).unwrap();
+        let sql = cpa_server::testing::database_connection(f.state.config_store());
         sql.execute_batch("CREATE TRIGGER reject_delete BEFORE DELETE ON credential_document BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END;").unwrap();
         let response = client
             .delete(&url)
@@ -4413,8 +4438,11 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
             assert_eq!(std::fs::read(path).unwrap(), original);
             assert!(f.rt.store().get(name).is_some());
         }
-        let reopened =
-            CredentialDb::initialize(Arc::new(ConfigStore::open(&dir.join("config.db")).unwrap()), &legacy).unwrap();
+        let reopened = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap()),
+            &legacy,
+        )
+        .unwrap();
         assert_eq!(reopened.documents().unwrap().len(), 2);
         drop(reopened);
         sql.execute_batch("DROP TRIGGER reject_delete").unwrap();
@@ -4434,8 +4462,11 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         drop(store);
         // Rebuild the working cache on reopen: deleted documents cannot resurrect.
         let _ = std::fs::remove_dir_all(&cache);
-        let reopened =
-            CredentialDb::initialize(Arc::new(ConfigStore::open(&dir.join("config.db")).unwrap()), &legacy).unwrap();
+        let reopened = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap()),
+            &legacy,
+        )
+        .unwrap();
         assert!(reopened.read(&cache.join("a.json")).unwrap().is_none());
         assert!(!cache.join("a.json").exists());
         assert_eq!(reopened.read(&cache.join("b.json")).unwrap().is_none(), all);

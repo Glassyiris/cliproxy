@@ -4703,7 +4703,7 @@ pub(crate) mod tests {
             .strip_suffix(".credentials")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| legacy.join("config.db"));
-        let store = Arc::new(crate::config_store::ConfigStore::open(&database).unwrap());
+        let store = Arc::new(crate::testing::config_store(&database).unwrap());
         let backend = crate::credential_store::CredentialDb::initialize(store.clone(), legacy).unwrap();
         (store, backend)
     }
@@ -6639,7 +6639,7 @@ pub(crate) mod tests {
         let (database, backend) = sqlite_backend(&f.dir);
         let path = backend.auth_dir().join("codex.json");
         let rt = CodexDisk::runtime(&backend.auth_dir(), &f.base);
-        let other_store = Arc::new(crate::config_store::ConfigStore::open(database.path().unwrap()).unwrap());
+        let other_store = Arc::new(crate::testing::config_store(database.path().unwrap()).unwrap());
         let other = crate::credential_store::CredentialDb::initialize(other_store.clone(), &f.dir).unwrap();
         let held = cpa_exec::codex_siwc_bind::lock_file(&path).unwrap();
         let refresh = tokio::spawn({
@@ -6768,7 +6768,7 @@ pub(crate) mod tests {
         let (database, _) = sqlite_backend(&backend.auth_dir());
         let path = dir.join("claude-sqlite.json");
         let old = std::fs::read(&path).unwrap();
-        let other_store = Arc::new(crate::config_store::ConfigStore::open(database.path().unwrap()).unwrap());
+        let other_store = Arc::new(crate::testing::config_store(database.path().unwrap()).unwrap());
         let other =
             crate::credential_store::CredentialDb::initialize(other_store.clone(), &dir.join("no-legacy")).unwrap();
         let held = cpa_exec::codex_siwc_bind::lock_file(&path).unwrap();

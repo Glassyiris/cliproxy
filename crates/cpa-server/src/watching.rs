@@ -126,7 +126,7 @@ mod tests {
     fn state() -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>, PathBuf) {
         let root = std::env::temp_dir().join(format!("cpa-watch-outcome-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        let store = Arc::new(crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
         store.import_yaml("oauth: {}\n", "test", "").unwrap();
         let db = crate::credential_store::CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
         let mut config = store.load().unwrap().config;
@@ -185,7 +185,7 @@ mod tests {
             Arc::ptr_eq(&parked, &state.rt.config()),
             "an idle database republished config"
         );
-        let external = crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap();
+        let external = crate::testing::config_store(&root.join("cook.db")).unwrap();
         let head = external.snapshot().unwrap().0;
         external
             .conn()
@@ -284,7 +284,7 @@ mod tests {
     #[tokio::test]
     async fn a_second_store_connection_publishes_on_reload() {
         let (state, db, root) = state();
-        let external = crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap();
+        let external = crate::testing::config_store(&root.join("cook.db")).unwrap();
         external
             .import_yaml("server: {port: 9002}\noauth: {}\n", "test", "")
             .unwrap();

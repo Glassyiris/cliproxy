@@ -83,7 +83,7 @@ The project was called cliproxy-rs, and its binary `cliproxy`. Run the install s
 
 ### Removing it
 
-Stop the server (`kill $(cat ~/.cook-router/cook-router.pid)` or the service command above), then delete the binary. On Windows stop the intended instance using its service/process command and selected database path, not a stale YAML path. This leaves other instances alone. Your data directory contains the SQLite database, WAL/SHM sidecars, bootstrap files, keys and signed-in accounts; delete it only if no longer needed. Logical deletion does not guarantee physical erasure from disk or backups.
+Stop the server (`kill $(cat ~/.cook-router/cook-router.pid)` or the service command above), then delete the binary. On Windows stop the intended instance using its service/process command and selected database path, not a stale YAML path. This leaves other instances alone. Your data directory contains the published SQLite snapshot, bootstrap files, keys and signed-in accounts; delete it only if no longer needed. Mutable databases live under OS tmp, and clean shutdown removes the instance's per-database temporary directory when its last user exits. Logical deletion does not guarantee physical erasure from disk or backups.
 
 ## Homebrew
 
@@ -188,9 +188,9 @@ The first bootstrap imports `/data/config.yaml`; later starts use `/data/cook.db
 - Set `management.allow-remote: true` for the dashboard. Docker bridge requests are non-local; publishing on `127.0.0.1` as above still keeps other machines out.
 - Point any legacy `oauth.auth-dir` at the private credential import source only; ongoing login and refresh state belongs to SQLite.
 
-The image declares no `VOLUME`: mount `/data` as a persistent directory so the database and WAL/SHM sidecars survive replacement together. A YAML-only mount, remote config store or unmounted container filesystem is insufficient. On Railway attach a Volume at `/data`; its volume ownership must permit writes by the service user (see [Railway permissions](https://docs.railway.com/volumes#permissions)). The image runs as UID/GID 10001. Older images up to 0.2.5 could create an anonymous `/data` volume; preserve/import its private legacy data before replacing it.
+The image declares no `VOLUME`: mount `/data` as a persistent directory so published database snapshots survive replacement. Keep OS tmp writable for the private working database; it does not need persistent storage. A YAML-only mount, remote config store or unmounted container filesystem is insufficient. On Railway attach a Volume at `/data`; its volume ownership must permit writes by the service user (see [Railway permissions](https://docs.railway.com/volumes#permissions)). The image runs as UID/GID 10001. Older images up to 0.2.5 could create an anonymous `/data` volume; preserve/import its private legacy data before replacing it.
 
-The service must write the database directory and its sidecars. Keep that directory private and database/WAL/SHM files private; SQLite contains configuration secrets and OAuth tokens. Use `config backup`, not a raw live-file copy. See [Database safety](CONFIGURATION.md#database-safety-and-backup). Publish on loopback unless other machines need access.
+The service must write the snapshot directory for atomic replacement and its OS temporary directory for working databases. Keep both private; SQLite contains configuration secrets and OAuth tokens. Copy the `--db` file directly for a complete live backup, or use `config backup`. See [Database safety](CONFIGURATION.md#database-safety-and-backup). Publish on loopback unless other machines need access.
 
 Browser sign-in inside a container needs the OAuth callback ports (54545 for Claude, 1455 for Codex) published to your machine, so it is usually easier to sign in from the dashboard and paste the final callback URL, or to use `--codex-device-login`, Kimi or Meta, which use device codes:
 
@@ -247,7 +247,7 @@ ExecStart=/usr/local/bin/cook-router --db /var/lib/cook-router/cook.db
 Restart=on-failure
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/cook-router
+ReadWritePaths=/var/lib/cook-router /tmp
 
 [Install]
 WantedBy=multi-user.target
@@ -259,6 +259,6 @@ sudo systemctl enable --now cook-router
 journalctl -u cook-router -f
 ```
 
-Initialize the database under `/var/lib/cook-router` before starting the service, using the service user. The directory must be writable for SQLite WAL/SHM files and private; set `UMask=0077` in the unit as defense in depth. Mount this directory persistently in ephemeral deployments. No legacy PostgreSQL/S3/git config authority or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).
+Initialize the database under `/var/lib/cook-router` before starting the service, using the service user. The persistent directory must be writable for atomic snapshot publication, and OS tmp must be writable for the private working database; keep both private and set `UMask=0077` in the unit as defense in depth. Server and CLI writers must share the same user and OS temporary directory/namespace. Mount this directory persistently in ephemeral deployments. No legacy PostgreSQL/S3/git config authority or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).
 
 On Windows, to run it as a system service without a signed-in user, wrap it with a service manager such as NSSM.

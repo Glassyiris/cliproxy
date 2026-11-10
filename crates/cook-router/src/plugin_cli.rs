@@ -294,10 +294,13 @@ mod tests {
     #[test]
     fn a_failed_later_plugin_auth_restores_the_whole_command_batch() {
         use cpa_plugin::auth::PluginAuth;
-        use cpa_server::config_store::ConfigStore;
         let dir = std::env::temp_dir().join(format!("cook-cli-plugin-batch-{}", std::process::id()));
         let path = dir.join("cook.db");
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &dir.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &dir.join("missing"),
+        )
+        .unwrap();
         let first = db.auth_dir().join("first.json");
         let old = b"{\"type\":\"acme\",\"token\":\"old\",\"unknown\":[1,2]}";
         db.save(&first, old).unwrap();
@@ -324,7 +327,11 @@ mod tests {
         let workspace = db.auth_dir();
         drop(db);
         std::fs::remove_dir_all(workspace).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &dir.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &dir.join("missing"),
+        )
+        .unwrap();
         assert_eq!(std::fs::read(&first).unwrap(), old);
         assert!(!db.auth_dir().join("second.json").exists());
         drop(db);
@@ -334,7 +341,6 @@ mod tests {
     #[tokio::test]
     async fn an_invalid_later_plugin_auth_leaves_no_cli_documents() {
         use cpa_plugin::testing::scripted::{Script, host_with};
-        use cpa_server::config_store::ConfigStore;
         let dir = std::env::temp_dir().join(format!("cook-cli-plugin-invalid-batch-{}", std::process::id()));
         let script = Script {
             caps: r#""command_line_plugin":true"#,
@@ -346,7 +352,7 @@ mod tests {
         };
         let (host, _) = host_with(&dir, [("cli", script)].into()).await;
         let db = CredentialDb::initialize(
-            Arc::new(ConfigStore::open(&dir.join("cook.db")).unwrap()),
+            Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap()),
             &dir.join("missing"),
         )
         .unwrap();
@@ -411,7 +417,6 @@ mod tests {
     #[tokio::test]
     async fn plugin_explicit_path_survives_reopen_and_sqlite_failure_exits_nonzero() {
         use cpa_plugin::testing::scripted::{Script, host_with};
-        use cpa_server::config_store::ConfigStore;
         let dir = std::env::temp_dir().join(format!("cook-cli-plugin-durable-{}", std::process::id()));
         let path = dir.join("cook.db");
         let script = Script {
@@ -423,7 +428,11 @@ mod tests {
             ..Default::default()
         };
         let (host, _) = host_with(&dir, [("cli", script)].into()).await;
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &dir.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &dir.join("missing"),
+        )
+        .unwrap();
         use cpa_plugin::hostauth::{AuthManager as _, SavedAuths};
         let nested = db.auth_dir().join("nested.json");
         let raw = b"{\"type\":\"acme\",\"opaque\":[1,2]}";
@@ -457,9 +466,13 @@ mod tests {
         drop(db);
         std::fs::remove_file(&explicit).unwrap();
         std::fs::remove_dir_all(&workspace).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &dir.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &dir.join("missing"),
+        )
+        .unwrap();
         assert_eq!(std::fs::read(&explicit).unwrap(), bytes);
-        let blocker = ConfigStore::open(&path).unwrap();
+        let blocker = cpa_server::testing::config_store(&path).unwrap();
         let (locked, acquired) = std::sync::mpsc::channel();
         let (release, released) = std::sync::mpsc::channel();
         let writer = std::thread::spawn(move || {

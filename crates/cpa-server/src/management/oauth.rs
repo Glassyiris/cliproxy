@@ -1683,7 +1683,7 @@ mod tests {
     fn sqlite_state(label: &str) -> (PathBuf, Arc<Management>, Arc<crate::credential_store::CredentialDb>) {
         let root = std::env::temp_dir().join(format!("oauth-{label}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        let config = Arc::new(crate::config_store::ConfigStore::open(&root.join("config.db")).unwrap());
+        let config = Arc::new(crate::testing::config_store(&root.join("config.db")).unwrap());
         let db = crate::credential_store::CredentialDb::initialize(config.clone(), &root.join("legacy")).unwrap();
         let mut cfg = config.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();

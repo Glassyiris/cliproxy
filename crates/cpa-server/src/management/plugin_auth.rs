@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn written_saves_are_durable_and_sql_failures_do_not_publish() {
         let work = cpa_plugin::testing::scratch(&std::env::temp_dir(), "plugin-written-sqlite");
-        let store = Arc::new(crate::config_store::ConfigStore::open(&work.join("config.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&work.join("config.db")).unwrap());
         let db = crate::credential_store::CredentialDb::initialize(store.clone(), &work.join("legacy")).unwrap();
         let mut cfg = store.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
@@ -340,8 +340,7 @@ mod tests {
         assert_eq!(db.read(&path).unwrap().unwrap(), original);
         std::fs::remove_file(&path).unwrap();
         assert_eq!(manager.read_file(&path).unwrap(), original);
-        rusqlite::Connection::open(work.join("config.db"))
-            .unwrap()
+        crate::testing::database_connection(state.config_store())
             .execute_batch(
                 "CREATE TRIGGER reject_host_save BEFORE INSERT ON credential_document
                  BEGIN SELECT RAISE(ABORT, 'reject host save'); END;",
@@ -379,7 +378,7 @@ mod tests {
             assert!(state.rt.store().snapshot().is_empty());
         }
         let reopened = crate::credential_store::CredentialDb::initialize(
-            Arc::new(crate::config_store::ConfigStore::open(&work.join("config.db")).unwrap()),
+            Arc::new(crate::testing::config_store(&work.join("config.db")).unwrap()),
             &work.join("legacy"),
         )
         .unwrap();

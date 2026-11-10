@@ -32,12 +32,44 @@ pub const DENY_PROXY: &str = "http://127.0.0.1:9";
 /// Attribute set by [`local`].
 const LOCAL: &str = "cpa_test_local";
 
+/// Opens a fixture database with a private working/coordinator namespace beside
+/// its snapshot. This must be used even by integration tests, where cfg(test)
+/// does not apply to this library. Never changes process-global TMPDIR.
+pub fn config_store(path: &std::path::Path) -> anyhow::Result<crate::config_store::ConfigStore> {
+    config_store_mode(path, true)
+}
+
+/// The same fixture namespace, preserving the offline no-schema-migration contract.
+pub fn config_store_without_migration(path: &std::path::Path) -> anyhow::Result<crate::config_store::ConfigStore> {
+    config_store_mode(path, false)
+}
+
+fn config_store_mode(path: &std::path::Path, migrate: bool) -> anyhow::Result<crate::config_store::ConfigStore> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    if migrate {
+        std::fs::create_dir_all(parent)?;
+    }
+    let root = std::fs::canonicalize(parent)?.join(".cook-router-test-storage");
+    crate::config_store::ConfigStore::open_in(path, migrate, root)
+}
+
+/// Opens a test-only SQL connection to the mutable database for failure injection.
+/// Keep `store` alive until this connection is closed; `store.path()` names the
+/// immutable published backup, not the database the runtime writes.
+pub fn database_connection(store: &crate::config_store::ConfigStore) -> rusqlite::Connection {
+    let path = store.conn().path().expect("on-disk test database").to_owned();
+    rusqlite::Connection::open(path).expect("test database connection")
+}
+
 /// A local runtime with a private SQLite database whose executors cannot leave the
 /// machine. Credentials seeded in the private auth directory are imported once.
 pub fn runtime(mut config: Config, mut credentials: Vec<Credential>, executors: Executors) -> Runtime {
     let dir = std::env::temp_dir().join(format!("cpa-runtime-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&dir).expect("private runtime directory");
-    let store = Arc::new(crate::config_store::ConfigStore::open(&dir.join("test.db")).expect("test database"));
+    let store = Arc::new(config_store(&dir.join("test.db")).expect("test database"));
     let original = config.auth_dir.clone();
     let legacy = if original == Config::default().auth_dir {
         dir.join("legacy")

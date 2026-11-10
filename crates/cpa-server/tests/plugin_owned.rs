@@ -3376,14 +3376,14 @@ async fn a_host_config_change_reparses_the_auth_files() {
         return;
     };
     let path = env.dir.join("cook.db");
-    let store = Arc::new(ConfigStore::open(&path).unwrap());
+    let store = Arc::new(cpa_server::testing::config_store(&path).unwrap());
     store.import_yaml(&env.yaml, "test", "").unwrap();
     let management = cpa_server::management::Management::new(env.rt.clone(), store);
     let watcher = cpa_server::watching::start(&management);
     eventually("the file was never parsed", || env.rt.store().get("acme-a").is_some()).await;
     settles(&env, "acme").await;
     let proxy = "http://127.0.0.1:9";
-    let writer = ConfigStore::open(&path).unwrap();
+    let writer = cpa_server::testing::config_store(&path).unwrap();
     writer
         .import_yaml(&format!("proxy-url: {proxy}\n{}", env.yaml), "test", "")
         .unwrap();
@@ -3888,7 +3888,8 @@ async fn a_plugin_refresh_that_cannot_be_saved_backs_off() {
     };
     let auth_dir = env.rt.config().auth_dir.clone();
     let database = auth_dir.to_str().unwrap().strip_suffix(".credentials").unwrap();
-    let connection = rusqlite::Connection::open(database).unwrap();
+    let store = cpa_server::testing::config_store_without_migration(std::path::Path::new(database)).unwrap();
+    let connection = cpa_server::testing::database_connection(&store);
     connection.execute_batch(
         "CREATE TRIGGER refuse_refresh BEFORE UPDATE ON credential_document BEGIN SELECT RAISE(FAIL, 'test credential save failure'); END;",
     ).unwrap();

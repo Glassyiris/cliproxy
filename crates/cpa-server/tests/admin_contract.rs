@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use axum::extract::Request;
 use axum::middleware::Next;
-use cpa_server::config_store::{ConfigStore, Kind, Op};
+use cpa_server::config_store::{Kind, Op};
 use cpa_server::management::{Management, Options};
 use cpa_server::{Runtime, management, request_logging};
 use serde_json::{Value, json};
@@ -40,7 +40,7 @@ impl Fixture {
         } else {
             "trusted-proxies: []"
         };
-        let store = Arc::new(ConfigStore::open(&dir.join("config.db")).unwrap());
+        let store = Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap());
         store.import_yaml(&format!(
             "config-version: 8\nserver: {{host: '127.0.0.1', port: 0, {trusted}}}\nmanagement: {{secret-key: '{hash}', allow-remote: false}}\noauth: {{auth-dir: {}}}\nrouting: {{retry: {{request-retry: 3}}}}\naccess: {{api-keys: [client-http-test-secret]}}\nobservability: {{logs: {{request-log: true}}}}\n",
             dir.join("auth").display()
@@ -427,7 +427,7 @@ async fn collection_replacements_require_atomic_global_preconditions() {
         .await;
     }
     // A peer connection commits after the export, without this HTTP server's lock.
-    let peer = ConfigStore::open(f.state.config_store().path().unwrap()).unwrap();
+    let peer = cpa_server::testing::config_store(f.state.config_store().path().unwrap()).unwrap();
     peer.commit_if(
         &[Op::Patch {
             kind: "setting".into(),
@@ -529,7 +529,7 @@ async fn collection_replacements_require_atomic_global_preconditions() {
     assert_eq!(f.rt.config().routing.retry.request_retry, 3);
     // Even an uninitialized destination requires its concrete revision 0 rather
     // than a wildcard that says nothing about the snapshot being replaced.
-    let conn = rusqlite::Connection::open(f.state.config_store().path().unwrap()).unwrap();
+    let conn = cpa_server::testing::database_connection(f.state.config_store());
     conn.execute_batch("DELETE FROM change; DELETE FROM resource; DELETE FROM revision;")
         .unwrap();
     assert_eq!(f.head(), 0);
@@ -733,7 +733,7 @@ async fn errors_never_echo_parser_or_database_messages_and_keep_safe_locations()
     )
     .await;
     let head = f.head();
-    let conn = rusqlite::Connection::open(f.state.config_store().path().unwrap()).unwrap();
+    let conn = cpa_server::testing::database_connection(f.state.config_store());
     conn.execute_batch("CREATE TRIGGER reject_secret BEFORE INSERT ON resource BEGIN SELECT RAISE(ABORT, 'db-secret-must-not-be-serialized'); END;").unwrap();
     let response = rejected(
         f.request(wreq::Method::PATCH, "/admin/v1/r/setting/routing")

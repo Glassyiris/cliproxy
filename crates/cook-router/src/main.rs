@@ -1651,9 +1651,12 @@ mod tests {
         let path = root.join("cook.db");
         let mut config = Config::parse("").unwrap();
         config.auth_dir = legacy.clone();
-        let CredentialAuthority::Local(db) =
-            initialize_credentials(Arc::new(ConfigStore::open(&path).unwrap()), &mut config, false).unwrap()
-        else {
+        let CredentialAuthority::Local(db) = initialize_credentials(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &mut config,
+            false,
+        )
+        .unwrap() else {
             panic!("local credentials expected");
         };
         assert_eq!(config.auth_dir, db.auth_dir());
@@ -1673,7 +1676,8 @@ mod tests {
         drop(save);
         drop(db);
         std::fs::remove_dir_all(&config.auth_dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &legacy).unwrap();
+        let db =
+            CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&path).unwrap()), &legacy).unwrap();
         assert_eq!(std::fs::read(&canonical).unwrap(), bytes);
         assert!(db.read(&config.auth_dir.join("claude-old.json")).unwrap().is_none());
         assert!(!config.auth_dir.join("claude-old.json").exists());
@@ -1685,11 +1689,15 @@ mod tests {
     fn cli_durable_failure_is_returned_and_restores_working_bytes() {
         let root = credential_test_dir();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let auth = db.auth_dir().join("login.json");
         db.save(&auth, b"{\"old\":true}").unwrap();
         let (save, failure) = login_save(db.clone());
-        let blocker = ConfigStore::open(&path).unwrap();
+        let blocker = cpa_server::testing::config_store(&path).unwrap();
         let (locked, acquired) = std::sync::mpsc::channel();
         let (release, released) = std::sync::mpsc::channel();
         let writer = std::thread::spawn(move || {
@@ -1723,11 +1731,18 @@ mod tests {
     fn cli_writer_cannot_be_reverted_by_concurrent_materialization() {
         let root = credential_test_dir();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let auth = db.auth_dir().join("login.json");
         db.save(&auth, b"{\"old\":true}").unwrap();
-        let watcher =
-            CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let watcher = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let (save, _) = login_save(db.clone());
         let (written, changed) = std::sync::mpsc::channel();
         let (release, released) = std::sync::mpsc::channel();
@@ -2055,7 +2070,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cpa-standalone-{}", std::process::id()));
         let auth = dir.join("auth");
         std::fs::create_dir_all(&auth).unwrap();
-        let store = Arc::new(ConfigStore::open(&dir.join("cook.db")).unwrap());
+        let store = Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap());
         store
             .import_yaml(
                 &format!("host: 127.0.0.1\nport: 0\nauth-dir: '{}'\n", auth.display()),

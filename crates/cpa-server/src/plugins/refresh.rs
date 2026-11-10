@@ -588,7 +588,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cpa-refresh-commit-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let db = crate::credential_store::CredentialDb::initialize(
-            Arc::new(crate::config_store::ConfigStore::open(&dir.join("test.db")).unwrap()),
+            Arc::new(crate::testing::config_store(&dir.join("test.db")).unwrap()),
             &dir.join("legacy"),
         )
         .unwrap();

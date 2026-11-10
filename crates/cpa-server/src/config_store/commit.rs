@@ -107,6 +107,7 @@ impl ConfigStore {
         if actor.len() > 256 || message.len() > 4096 {
             return Err(CommitError::invalid("actor or message exceeds size limit"));
         }
+        let _coordination = self.write_guard().map_err(CommitError::db)?;
         let mut conn = self.conn();
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -151,6 +152,12 @@ impl ConfigStore {
         let changes = diff(&current, &next);
         let shown: Vec<Change> = changes.iter().map(|(b, a)| shown_change(*b, *a)).collect();
         if changes.is_empty() && rev != 0 || dry_run {
+            drop(tx);
+            if !dry_run {
+                // A retry can match an already committed write whose publication
+                // failed. It still needs a durable snapshot before success.
+                self.publish(&conn).map_err(CommitError::db)?;
+            }
             return Ok(Committed {
                 rev,
                 written: false,
@@ -212,9 +219,7 @@ impl ConfigStore {
         };
         write().map_err(CommitError::db)?;
         tx.commit().map_err(CommitError::db)?;
-        // The old pages of a rewritten row stay in the WAL until a checkpoint; a busy
-        // reader in another process can defer it to a later commit.
-        checkpoint_truncate(&conn);
+        self.publish(&conn).map_err(CommitError::db)?;
         let mut resources = next;
         for r in &mut resources {
             if !current

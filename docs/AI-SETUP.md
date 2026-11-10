@@ -10,7 +10,7 @@ These are exact steps for a coding agent (Claude Code, Codex, Amp, Cursor's agen
 - Do not open the proxy to the internet. Keep `server.host` at `127.0.0.1`.
 - Ask before setting up start at login (step 5).
 - SQLite is the only durable config and OAuth credential authority. Select one persistent `--db`/`COOK_DB` path for bootstrap, server, sign-in commands and services; never keep editing an imported YAML file or share a watched auth directory with Go.
-- Keep the data directory, database/WAL/SHM sidecars and backups private. Use `config backup` for a live backup; do not raw-copy the main file while WAL is open. Config-history restore never restores revoked tokens.
+- Keep the data directory, published database, temporary working databases and backups private. The `--db` file can be copied directly while the service runs; each completed write atomically publishes a complete snapshot. `config backup` is also available. Config-history restore never restores revoked tokens.
 
 ## 1. Detect the system
 
@@ -74,7 +74,7 @@ cd ~/cook-router-src && cargo build --release -p cook-router
 mkdir -p ~/.local/bin && install -m 0755 target/release/cook-router ~/.local/bin/cook-router
 ```
 
-The installer starts a background process until restart/sign-out unless a service is configured. In a container or sandbox with a process manager, use that manager instead: stop the intended background instance and run `~/.local/bin/cook-router --db ~/.cook-router/cook.db` under it. Mount a persistent directory for the database and WAL/SHM sidecars in an ephemeral container.
+The installer starts a background process until restart/sign-out unless a service is configured. In a container or sandbox with a process manager, use that manager instead: stop the intended background instance and run `~/.local/bin/cook-router --db ~/.cook-router/cook.db` under it. Mount a persistent directory for the published database snapshot in an ephemeral container; keep OS tmp writable for its private working database.
 
 ## 4. Verify
 
