@@ -25,7 +25,7 @@ import { icons } from "../../components/icons.ts";
 import { useConfig, usePlugins } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams, useHashRoute } from "../../app/useHashRoute.ts";
-import { ConfigEditor } from "../../components/ConfigEditor.tsx";
+import { PluginConfigEditor } from "../../components/PluginConfigEditor.tsx";
 import { ReadError } from "../../components/ReadError.tsx";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
@@ -170,8 +170,8 @@ function InstalledPanel({ onBrowse }: { onBrowse: () => void }) {
         onConfirm={() => void confirmation.confirm()}
         onClose={confirmation.close}
       />
-      <ConfigEditor
-        source={editing && isShown ? { path: `plugins/configs/${editing}` } : null}
+      <PluginConfigEditor
+        id={editing && isShown ? editing : null}
         title={t("plugins.row.configureTitle", { name: edited ? pluginName(edited) : editing })}
         hashKey="plugin"
         action={action}

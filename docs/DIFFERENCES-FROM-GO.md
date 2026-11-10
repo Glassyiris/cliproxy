@@ -1,5 +1,7 @@
 # Differences from Go CLIProxyAPI
 
+> **Historical pre-split differences.** The comparisons below retain their original provenance; Go compatibility is no longer a development target. In the current release SQLite alone persists configuration and OAuth credentials, YAML/auth files are first-import sources, remote stores cannot be runtime authorities, and `/admin/v1` replaces the old config endpoints. Descriptions below of comment-preserving saves, shared Go files, watchers or v0/v8 config writes are historical, not current instructions. See [Configuration](CONFIGURATION.md) and [Migration](MIGRATING-FROM-GO.md).
+
 The compatibility target is frozen at CLIProxyAPI v8.0.35, commit `ae3ee3be303fb07fb8173279923413005bf32177` ([PARITY.md](PARITY.md)). This page records deliberate differences and implementation limits; it does not claim that every newer Go feature is ported. Existing fixtures retain their original Go versions. Missing or unproven v8.0.35 contracts are tracked in the [parity audit](parity-audit/status.md), with the intervening commits in the [upstream inventory](parity-audit/upstream-v8.0.35.md).
 
 ## Additions in cook-router

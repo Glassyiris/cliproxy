@@ -8,10 +8,10 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
-use cpa_core::config::Config;
 use cpa_exec::Executors;
 use cpa_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL, Hooks};
 use cpa_server::Runtime;
+use cpa_server::config_store::ConfigStore;
 use wreq::tls::trust::CertStore;
 
 #[tokio::main]
@@ -19,8 +19,13 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     anyhow::ensure!(args.len() == 3, "usage: driver CONFIG TEST_CA");
     let config_path = Path::new(&args[1]);
-    let config = Config::load(config_path)?;
-    let credentials = cpa_core::config::credentials::load(&config);
+    let store = Arc::new(ConfigStore::open(&config_path.with_extension("db"))?);
+    store.import_yaml(&std::fs::read_to_string(config_path)?, "harness", "fixture")?;
+    let mut config = store.load().map_err(|e| anyhow::anyhow!("{e}"))?.config;
+    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &config.auth_dir)?;
+    config.auth_dir = db.auth_dir();
+    let mut credentials = db.scan(&config)?.credentials;
+    credentials.extend(cpa_core::config::credentials::from_config(&config));
     let upstream: SocketAddr = "127.0.0.3:443".parse()?;
     let hooks = Hooks {
         trust: Some(CertStore::from_pem_stack(std::fs::read(&args[2])?)?),
@@ -37,14 +42,11 @@ async fn main() -> anyhow::Result<()> {
         devices: Default::default(),
     };
     let listener = tokio::net::TcpListener::bind((config.host.as_str(), config.port)).await?;
-    let rt = Arc::new(Runtime::new(config, credentials, executors));
+    let rt = Arc::new(Runtime::new(config, credentials, executors, db));
     cpa_server::install_registry(&rt);
     rt.start_auto_refresh();
-    let management = cpa_server::management::Management::with_options(
-        rt.clone(),
-        config_path.to_owned(),
-        cpa_server::management::Options::default(),
-    );
+    let management =
+        cpa_server::management::Management::with_options(rt.clone(), store, cpa_server::management::Options::default());
     let _watcher = cpa_server::watching::start(&management);
     let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()))
         .layer(axum::middleware::from_fn(cpa_server::management::cors));

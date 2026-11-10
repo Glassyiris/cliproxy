@@ -1,5 +1,5 @@
 // Compares the Management API registry (src/lib/api/routes.ts) with the routes the Rust
-// router registers under /v8/management. Fails when the registry names a route the server
+// router registers under /v8/management and /admin/v1. Fails when the registry names a route the server
 // lacks, or the server has a route that is neither in the registry nor allowlisted with a
 // reason in tools/api-allowlist.json. The keyless routes in `publicRoutes` must each appear as a
 // `.route("<path>", get(..))` in crates/cpa-server/src/lib.rs; the server's other public routes
@@ -19,6 +19,7 @@ const rustFile = fileURLToPath(new URL("../../crates/cpa-server/src/management.r
 const libFile = fileURLToPath(new URL("../../crates/cpa-server/src/lib.rs", import.meta.url));
 const allowFile = fileURLToPath(new URL("./api-allowlist.json", import.meta.url));
 const PREFIX = "/v8/management";
+const ADMIN_PREFIX = "/admin/v1";
 const VERBS = { get: "GET", post: "POST", put: "PUT", patch: "PATCH", delete: "DELETE" };
 // Router and MethodRouter calls that add no route rows. HEAD and `any` go to the
 // not-found fallback, so they are not rows either.
@@ -279,14 +280,14 @@ class Evaluator {
       return;
     }
     // A loop over a constant defined elsewhere is skipped only when every route it
-    // registers is outside /v8/management.
+    // registers is outside the management and admin APIs.
     const formats = st.tokens.flatMap((t, i) =>
       t.v === "format" && st.tokens[i + 1]?.v === "!" && st.tokens[i + 3]?.k === "str" ? [st.tokens[i + 3].v] : [],
     );
     const outside = formats.every((f) => {
       const m = /^\{(\w+)\}/.exec(f);
       const head = m && env[m[1]];
-      return head?.t === "str" && !head.v.startsWith(PREFIX);
+      return head?.t === "str" && ![PREFIX, ADMIN_PREFIX].some((prefix) => head.v.startsWith(prefix));
     });
     if (!formats.length || !outside) fail(`cannot expand a loop over ${describe(st.iter)}`);
   }
@@ -375,7 +376,7 @@ class Evaluator {
 }
 
 const describe = (node) => (node.e === "path" ? node.path.join("::") : node.e);
-const key = (r) => `${r.method} ${r.path}`;
+const key = (r) => `${r.method} ${r.path.replace(/^\/admin\/v1\/r\/(?:setting|provider|client-key|router|plugin)$/, "/admin/v1/r/{kind}")}`;
 
 function serverRoutes() {
   const tokens = tokenize(readFileSync(rustFile, "utf8"));
@@ -383,8 +384,8 @@ function serverRoutes() {
   const result = new Evaluator(tokens).run(statements, {});
   if (result.t !== "router") fail("fn router does not end in a Router");
   return result.rows
-    .filter((r) => r.path.startsWith(`${PREFIX}/`))
-    .map((r) => ({ method: r.method, path: r.path.slice(PREFIX.length) }));
+    .filter((r) => [PREFIX, ADMIN_PREFIX].some((prefix) => r.path.startsWith(`${prefix}/`)))
+    .map((r) => ({ method: r.method, path: r.path.startsWith(`${PREFIX}/`) ? r.path.slice(PREFIX.length) : r.path }));
 }
 
 // Every `.route("<path>", get(` in lib.rs. A keyless dashboard route is a GET; the server's
@@ -403,7 +404,7 @@ function publicProblems(registry, server) {
   const have = new Set(server.map(key));
   const problems = [];
   for (const r of registry) {
-    if (r.path.startsWith(PREFIX)) problems.push(`publicRoutes: ${r.name} is under ${PREFIX}; move it to routes`);
+    if ([PREFIX, ADMIN_PREFIX].some((prefix) => r.path.startsWith(prefix))) problems.push(`publicRoutes: ${r.name} is an authenticated route; move it to routes`);
     else if (!have.has(key(r))) problems.push(`publicRoutes: ${r.name} is ${key(r)}, which lib.rs does not route`);
   }
   return problems;
@@ -475,7 +476,7 @@ async function main() {
     for (const p of problems) console.error(`check-api: ${p}`);
     return 1;
   }
-  console.log(`check-api: ${server.length} routes under ${PREFIX}: ${registry.length} in the registry, ${allow.length} allowlisted; ${publicRegistry.length} keyless route(s) found in lib.rs`);
+  console.log(`check-api: ${server.length} management/admin routes: ${registry.length} in the registry, ${allow.length} allowlisted; ${publicRegistry.length} keyless route(s) found in lib.rs`);
   return 0;
 }
 

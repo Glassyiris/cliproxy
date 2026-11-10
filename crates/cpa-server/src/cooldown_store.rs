@@ -1,7 +1,4 @@
-//! `routing.cooldown.save-cooldown-status`: cooldowns persisted as one `.cds` file per
-//! credential under `auth-dir` (Go sdk/cliproxy/auth/cooldown_state.go). The files use
-//! Go's layout and field names, so state survives a switch between CLIProxyAPI and
-//! cook-router in either direction.
+//! SQLite cooldown persistence and the legacy `.cds` import/file format.
 
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -209,14 +206,81 @@ fn cds_files(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// A cooldown store other than `.cds` files (Go `CooldownStateStore` from a token store
-/// that is a `CooldownStateStoreProvider`: PGSTORE's `cooldown_store` table). Used
-/// while `save-cooldown-status` is on, in place of the files.
+/// Durable cooldown snapshots, replacing legacy `.cds` files while persistence is on.
 pub trait Backend: Send + Sync {
     /// Go `Load`.
     fn load(&self) -> Result<Vec<Record>, String>;
     /// Go `Save`: the complete live set; records no longer present are cleared.
     fn save(&self, records: Vec<Record>, now: SystemTime) -> Result<(), String>;
+}
+
+/// One in-flight save and one replaceable snapshot; disk I/O never holds the queue lock.
+pub(crate) struct Writer {
+    state: std::sync::Arc<(std::sync::Mutex<WriteState>, std::sync::Condvar)>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct WriteState {
+    pending: Option<(Vec<Record>, SystemTime)>,
+    writing: bool,
+    stopping: bool,
+}
+
+impl Writer {
+    pub(crate) fn new(backend: std::sync::Arc<dyn Backend>) -> Self {
+        let state = std::sync::Arc::new((std::sync::Mutex::new(WriteState::default()), std::sync::Condvar::new()));
+        let shared = state.clone();
+        let thread = std::thread::spawn(move || {
+            let (lock, ready) = &*shared;
+            loop {
+                let mut state = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                while state.pending.is_none() && !state.stopping {
+                    state = ready.wait(state).unwrap_or_else(std::sync::PoisonError::into_inner);
+                }
+                let Some((records, now)) = state.pending.take() else {
+                    break;
+                };
+                state.writing = true;
+                drop(state);
+                if let Err(error) = backend.save(records, now) {
+                    tracing::warn!(%error, "failed to persist cooldown state");
+                }
+                let mut state = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                state.writing = false;
+                ready.notify_all();
+            }
+        });
+        Self {
+            state,
+            thread: Some(thread),
+        }
+    }
+
+    pub(crate) fn save(&self, records: Vec<Record>, now: SystemTime) {
+        let (lock, ready) = &*self.state;
+        lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner).pending = Some((records, now));
+        ready.notify_all();
+    }
+
+    pub(crate) fn flush(&self) {
+        let (lock, ready) = &*self.state;
+        let mut state = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        while state.pending.is_some() || state.writing {
+            state = ready.wait(state).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
+impl Drop for Writer {
+    fn drop(&mut self) {
+        let (lock, ready) = &*self.state;
+        lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner).stopping = true;
+        ready.notify_all();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 /// Go `FileCooldownStateStore.Load`: every `.cds` file below `dir`. A missing directory
@@ -288,6 +352,53 @@ fn create_private_dir(dir: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writer_coalesces_ordered_snapshots_and_drains_on_drop() {
+        use std::sync::{Arc, Mutex, mpsc};
+        struct Gated {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+            saved: Mutex<Vec<String>>,
+        }
+        impl Backend for Gated {
+            fn load(&self) -> Result<Vec<Record>, String> {
+                Ok(Vec::new())
+            }
+            fn save(&self, records: Vec<Record>, _: SystemTime) -> Result<(), String> {
+                if self.saved.lock().unwrap().is_empty() {
+                    self.entered.send(()).unwrap();
+                    self.release.lock().unwrap().recv().unwrap();
+                }
+                self.saved.lock().unwrap().push(records[0].model.clone());
+                Ok(())
+            }
+        }
+        let (entered, ready) = mpsc::channel();
+        let (release, gate) = mpsc::channel();
+        let backend = Arc::new(Gated {
+            entered,
+            release: Mutex::new(gate),
+            saved: Mutex::new(Vec::new()),
+        });
+        let writer = Writer::new(backend.clone());
+        let snapshot = |model: &str| {
+            vec![Record {
+                model: model.into(),
+                ..Record::default()
+            }]
+        };
+        writer.save(snapshot("first"), SystemTime::now());
+        ready.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        writer.save(snapshot("superseded"), SystemTime::now());
+        writer.save(snapshot("latest"), SystemTime::now());
+        release.send(()).unwrap();
+        writer.flush();
+        assert_eq!(*backend.saved.lock().unwrap(), ["first", "latest"]);
+        writer.save(snapshot("on-drop"), SystemTime::now());
+        drop(writer);
+        assert_eq!(*backend.saved.lock().unwrap(), ["first", "latest", "on-drop"]);
+    }
 
     #[test]
     fn file_names_follow_go_sanitizing() {

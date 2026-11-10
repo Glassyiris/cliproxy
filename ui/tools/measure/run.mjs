@@ -224,7 +224,7 @@ async function startServers() {
 async function measure(browser, base, route, viewport, answer) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, colorScheme: "dark" });
   try {
-    await context.route("**/v8/management/**", async (request) => {
+    await context.route(/\/(?:v8\/management|admin\/v1)\//, async (request) => {
       await sleep(API_DELAY_MS);
       await request.continue();
     });

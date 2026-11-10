@@ -6,47 +6,80 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack } from "@astryxdesign/core/Layout";
 import { Table, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
+import { useAction } from "../../app/useAction.ts";
 import { icons } from "../../components/icons.ts";
 import { loadingCell, placeholderRows, type LoadingRow } from "../../components/loadingRows.tsx";
-import { mask } from "../../lib/clientKeys.ts";
+import { revealClientKey, type ClientKey } from "../../lib/api/clientKeys.ts";
 import { t } from "../../lib/i18n.ts";
 import { notify } from "../../lib/notify.ts";
 import { roles } from "../../themes/site/roles.ts";
 
-type Key = { value: string; index: number };
-type Row = LoadingRow<Key>;
+type Row = LoadingRow<ClientKey>;
+type Revealed = { rev: number; key: string };
 
-function RevealKey({ isShown, onToggle }: { isShown: boolean; onToggle: () => void }) {
-  const label = isShown ? t("keys.row.hide") : t("keys.row.show");
-  return (
-    <IconButton
-      label={label}
-      tooltip={label}
-      size={roles.rowAction.size}
-      variant={roles.rowAction.variant}
-      icon={<Icon icon={isShown ? "eyeSlash" : Eye} size="sm" />}
-      aria-pressed={isShown}
-      onClick={onToggle}
-    />
-  );
-}
-
-/** Copies one full key; its own clipboard state, so only this row shows the check. */
-function CopyKey({ value }: { value: string }) {
+function KeyActions({
+  resource,
+  shown,
+  onShow,
+  onUse,
+  onRevoke,
+}: {
+  resource: ClientKey;
+  shown: boolean;
+  onShow: (value?: Revealed) => void;
+  onUse: (id: string) => void;
+  onRevoke: (resource: ClientKey) => void;
+}) {
+  const action = useAction();
   const { copy, isCopied } = useClipboard();
+  const label = shown ? t("keys.row.hide") : t("keys.row.show");
   return (
-    <IconButton
-      label={t("keys.row.copy")}
-      tooltip={t("keys.row.copy")}
-      size={roles.rowAction.size}
-      variant={roles.rowAction.variant}
-      icon={<Icon icon={isCopied ? "check" : "copy"} size="sm" />}
-      onClick={() =>
-        void copy(value).then((ok) =>
-          ok ? notify("success", t("keys.row.copied")) : notify("error", t("keys.row.copyFailed")),
-        )
-      }
-    />
+    <HStack gap={1} vAlign="center" hAlign="end">
+      <IconButton
+        label={label}
+        tooltip={label}
+        size={roles.rowAction.size}
+        variant={roles.rowAction.variant}
+        icon={<Icon icon={shown ? "eyeSlash" : Eye} size="sm" />}
+        aria-pressed={shown}
+        isLoading={action.busy}
+        onClick={() => {
+          if (shown) return onShow();
+          void action.run(async () =>
+            onShow({ rev: resource.rev, key: await revealClientKey(resource.id) }),
+          );
+        }}
+      />
+      <IconButton
+        label={t("keys.row.copy")}
+        tooltip={t("keys.row.copy")}
+        size={roles.rowAction.size}
+        variant={roles.rowAction.variant}
+        icon={<Icon icon={isCopied ? "check" : "copy"} size="sm" />}
+        onClick={() =>
+          void action.run(async () => {
+            const ok = await copy(await revealClientKey(resource.id));
+            notify(ok ? "success" : "error", t(ok ? "keys.row.copied" : "keys.row.copyFailed"));
+          })
+        }
+      />
+      <IconButton
+        label={t("app.nav.use")}
+        tooltip={t("app.nav.use")}
+        size={roles.rowAction.size}
+        variant={roles.rowAction.variant}
+        icon={<Icon icon={icons.use} size="sm" />}
+        onClick={() => onUse(resource.id)}
+      />
+      <IconButton
+        label={t("keys.row.revoke")}
+        tooltip={t("keys.row.revoke")}
+        size={roles.rowAction.size}
+        variant={roles.rowAction.variant}
+        icon={<Icon icon={icons.delete} size="sm" />}
+        onClick={() => onRevoke(resource)}
+      />
+    </HStack>
   );
 }
 
@@ -55,29 +88,18 @@ export function KeyTable({
   onUse,
   onRevoke,
 }: {
-  /** Undefined while the config loads: placeholder rows in the table's shape. */
-  keys: string[] | undefined;
-  onUse: (index: number) => void;
-  onRevoke: (key: string) => void;
+  keys: ClientKey[] | undefined;
+  onUse: (id: string) => void;
+  onRevoke: (resource: ClientKey) => void;
 }) {
-  const loading = keys === undefined;
-  // Row actions sit together at the end, so the
-  // reveal state lives here and the key cell only draws the key. It holds key values, not row
-  // positions: revoking an earlier key moves the rows up and must not reveal another key.
-  const [shown, setShown] = useState<ReadonlySet<string>>(() => new Set());
-  const toggle = (key: Key) =>
-    setShown((was) => {
-      const next = new Set(was);
-      if (!next.delete(key.value)) next.add(key.value);
-      return next;
-    });
+  const [shown, setShown] = useState<Record<string, Revealed | undefined>>({});
   const columns: TableColumn<Row>[] = [
     {
       key: "value",
       header: t("keys.table.key"),
-      renderCell: loadingCell((key: Key) => (
+      renderCell: loadingCell((resource: ClientKey) => (
         <Text type={roles.textType.identifier}>
-          {shown.has(key.value) ? key.value : mask(key.value)}
+          {shown[resource.id]?.rev === resource.rev ? shown[resource.id]?.key : resource.id}
         </Text>
       )),
     },
@@ -87,38 +109,24 @@ export function KeyTable({
       align: "end",
       renderCell: ({ item }) =>
         item === null ? null : (
-          <HStack gap={1} vAlign="center" hAlign="end">
-            <RevealKey isShown={shown.has(item.value)} onToggle={() => toggle(item)} />
-            <CopyKey value={item.value} />
-            <IconButton
-              label={t("app.nav.use")}
-              tooltip={t("app.nav.use")}
-              size={roles.rowAction.size}
-              variant={roles.rowAction.variant}
-              icon={<Icon icon={icons.use} size="sm" />}
-              onClick={() => onUse(item.index)}
-            />
-            <IconButton
-              label={t("keys.row.revoke")}
-              tooltip={t("keys.row.revoke")}
-              size={roles.rowAction.size}
-              variant={roles.rowAction.variant}
-              icon={<Icon icon={icons.delete} size="sm" />}
-              onClick={() => onRevoke(item.value)}
-            />
-          </HStack>
+          <KeyActions
+            key={`${item.id}:${item.rev}`}
+            resource={item}
+            shown={shown[item.id]?.rev === item.rev}
+            onShow={(value) => setShown((was) => ({ ...was, [item.id]: value }))}
+            onUse={onUse}
+            onRevoke={onRevoke}
+          />
         ),
     },
   ];
-  const data =
-    keys?.map((value, index) => ({ id: String(index), item: { value, index } })) ?? placeholderRows;
   return (
     <Table<Row>
-      data={data}
+      data={keys?.map((item) => ({ id: item.id, item })) ?? placeholderRows}
       columns={columns}
       idKey="id"
       density={roles.table.density}
-      hasHover={!loading}
+      hasHover={keys !== undefined}
     />
   );
 }

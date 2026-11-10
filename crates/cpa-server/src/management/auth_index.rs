@@ -1,6 +1,6 @@
 //! Each `api-keys` entry with its credential's live `auth_index` (Go v8.0.35
 //! `injectV8APIKeyAuthIndexesLocked`, `0fb50a18`), for config reads. Writes drop the
-//! field again ([`crate::config_store::resources::without_read_only`]).
+//! field again ([`crate::config_store::resources::strip_read_annotations_at`]).
 
 use std::collections::{BTreeMap, HashMap};
 

@@ -11,7 +11,8 @@ Object.defineProperty(globalThis, "document", {
   value: Object.defineProperty({}, "cookie", { get: storageAccess, set: storageAccess }),
 });
 
-const server = fakeServer();
+const server = fakeServer("http://cpa.test/proxy/management.html");
+// Dynamic imports let fakeServer install location before the client initializes its base URL.
 const { ApiError, ConnectionError, available, connect, disconnect, probe, request } =
   await import("./client.ts");
 const { routes } = await import("./routes.ts");
@@ -39,7 +40,7 @@ test("API session sends the key only while connected and never accesses storage"
     );
   assert.deepEqual(await request(routes.readConfig), { "config-version": 8 });
   assert.equal(server.sent[0].headers.Authorization, "Bearer secret");
-  assert.equal(server.sent[0].url.href, "http://cpa.test/v8/management/config");
+  assert.equal(server.sent[0].url.href, "http://cpa.test/proxy/admin/v1/effective/config");
   assert.deepEqual(builds.at(-1), { version: "cook-router-1.0.0", commit: "abc1234", built: "" });
   disconnect();
   const sent = server.sent.length;
@@ -70,17 +71,17 @@ test("server errors keep status and message; 401 signs out", async () => {
     (e) =>
       e instanceof ApiError && e.code === "invalid_plugin_id" && e.message === "invalid plugin id",
   );
-  assert.equal(server.sent.at(-1)!.url.pathname, "/v8/management/plugins/a%20b");
+  assert.equal(server.sent.at(-1)!.url.pathname, "/proxy/v8/management/plugins/a%20b");
 });
 
 test("an empty 404, 501 or 405 marks the route not implemented until the next sign-in", async () => {
   signIn();
   server.answer = () => Response.json({ error: "not_found" }, { status: 404 });
   await assert.rejects(
-    request(routes.readConfigValue, { params: { path: "x" } }),
+    request(routes.readConfig),
     (e) => e instanceof ApiError && !e.notImplemented,
   );
-  assert.equal(available(routes.readConfigValue), true);
+  assert.equal(available(routes.readConfig), true);
   for (const status of [404, 501, 405]) {
     server.answer = () => new Response(null, { status });
     await assert.rejects(
@@ -105,7 +106,7 @@ test("probes are side-effect-free requests, sent once per session", async () => 
   const queue = server.sent[0];
   assert.equal(
     `${queue.method} ${queue.url.pathname}${queue.url.search}`,
-    "GET /v8/management/observability/usage/queue?count=0",
+    "GET /proxy/v8/management/observability/usage/queue?count=0",
   );
   assert.equal(queue.body, undefined);
   for (const s of server.sent.slice(1))
@@ -158,7 +159,7 @@ test("a 2xx body that cannot be read fails like an unreachable server", async ()
     return new Response(body);
   };
   await assert.rejects(
-    request(routes.readConfigYaml, { as: "text" }),
+    request(routes.readRequestLog, { params: { id: "request-one" }, as: "text" }),
     (e) => e instanceof ConnectionError && e.reason === "unreachable",
   );
 });

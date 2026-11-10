@@ -72,6 +72,8 @@ fn plugin_command_line_matches_go() {
             text = text.replace(key, &dir.to_string_lossy());
         }
         std::fs::write(&config, text).unwrap();
+        let db = work.join("cook.db");
+        let credential_dir = work.join("cook.db.credentials");
         let args: Vec<String> = case["args"]
             .as_array()
             .unwrap()
@@ -81,6 +83,12 @@ fn plugin_command_line_matches_go() {
         let mut child = Command::new(env!("CARGO_BIN_EXE_cook-router"))
             .args(&args)
             .current_dir(&work)
+            .env_clear()
+            .env("HOME", &work)
+            .env("COOK_DB", &db)
+            .env("PATH", "/usr/bin:/bin")
+            .env("TZ", "UTC")
+            .env("TMPDIR", std::env::temp_dir())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -95,7 +103,9 @@ fn plugin_command_line_matches_go() {
         }
         let output = child.wait_with_output().unwrap();
         let normalize = |s: &str| {
-            let mut s = s.replace(&*config.to_string_lossy(), "CONFIG");
+            let mut s = s
+                .replace(&*credential_dir.to_string_lossy(), "AUTHDIR")
+                .replace(&*config.to_string_lossy(), "CONFIG");
             for (key, dir) in &dirs {
                 s = s.replace(&*dir.to_string_lossy(), key);
             }
@@ -105,18 +115,32 @@ fn plugin_command_line_matches_go() {
         let mut request = Value::Null;
         for rec in cpa_server::testing::records(&dirs[1].1.join("a.jsonl")) {
             if rec["method"] == "command_line.execute" {
+                let raw: Value = serde_json::from_str(rec["request"].as_str().unwrap()).unwrap();
+                assert_eq!(
+                    raw["Host"]["AuthDir"],
+                    credential_dir.to_string_lossy().as_ref(),
+                    "{name}"
+                );
                 request = serde_json::from_str(&normalize(rec["request"].as_str().unwrap())).unwrap();
                 request["Program"] = "PROGRAM".into();
             }
         }
         let mut files = serde_json::Map::new();
-        let mut names: Vec<_> = std::fs::read_dir(&dirs[2].1)
+        // SQLite materializes credentials beside the private DB; the legacy directory
+        // is only the import source. Parse failures may exit before materialization.
+        let auth_dir = if credential_dir.is_dir() {
+            &credential_dir
+        } else {
+            &dirs[2].1
+        };
+        let mut names: Vec<_> = std::fs::read_dir(auth_dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name != ".initialize.lock")
             .collect();
         names.sort();
         for file in names {
-            let path = dirs[2].1.join(&file);
+            let path = auth_dir.join(&file);
             let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
             let body = std::fs::read_to_string(&path).unwrap();
             files.insert(file, format!("{mode:o} {body}").into());
@@ -129,6 +153,16 @@ fn plugin_command_line_matches_go() {
             "files": files,
         });
         let mut want = case["result"].clone();
+        // Keep the Go recording intact, but pin deliberate SQLite changes: no YAML
+        // backing path, an additional built-in db flag, and materialized auth paths
+        // normalized above. Everything else still compares against the recording.
+        if let Some(request) = want["request"].as_object_mut() {
+            request.insert("ConfigPath".into(), "".into());
+            request["Flags"].as_object_mut().unwrap().insert(
+                "db".into(),
+                serde_json::json!({"Name": "db", "Set": false, "Type": "", "Value": ""}),
+            );
+        }
         // ponytail: an unknown flag is reported by clap, not with Go's "flag provided but
         // not defined" (the binary's documented flag-parse gap); only the exit code is
         // compared there.

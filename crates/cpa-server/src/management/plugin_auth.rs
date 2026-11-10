@@ -53,6 +53,16 @@ impl AuthManager for PluginAuthManager {
         let state = self.0.upgrade()?;
         state.rt.store().get(id).map(|c| host_auth(&state, &c))
     }
+    fn read_file(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+        let state = self
+            .0
+            .upgrade()
+            .ok_or_else(|| std::io::Error::other("auth manager unavailable"))?;
+        if state.rt.store().is_home() {
+            return Err(std::io::Error::other("credential reads unavailable in Home mode"));
+        }
+        super::auth_files::read_file(&state, path)
+    }
 
     /// Under the disk lock (the auth-file writes and reloads lock): the host writes the
     /// file, the file store rewrites it in its canonical form, and the file's
@@ -60,71 +70,77 @@ impl AuthManager for PluginAuthManager {
     /// the file's other credentials go. Nothing else is reloaded and the config is not
     /// republished.
     fn save(&self, auths: SavedAuths, write: &mut dyn FnMut() -> Result<(), String>) -> Result<(), String> {
-        let Some(state) = self.0.upgrade() else {
-            return write();
-        };
+        let state = self.0.upgrade().ok_or("auth manager unavailable")?;
+        if state.rt.store().is_home() {
+            return Err("credential saves unavailable in Home mode".into());
+        }
         let _disk = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        write()?;
-        let fallbacks = || state.fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
-        let (path, credentials, refresh) = match auths {
-            SavedAuths::Written { path, data } => {
-                credentials::note_plugin_auth_write(&path, &data);
-                return Ok(());
-            }
-            SavedAuths::BuiltIn(auth) => {
-                let path = PathBuf::from(auth.attributes.get("path").cloned().unwrap_or_default());
-                let bytes = persist(&path, &auth.metadata, auth.disabled)?;
-                credentials::note_plugin_auth_write(&path, &bytes);
-                let cfg = state.rt.config();
-                let mut credential = match credentials::from_file(&cfg, &cfg.auth_dir, &path, &bytes) {
-                    Ok(Some(c)) => {
-                        fallbacks().remove(&path);
-                        c
+        let path = match &auths {
+            SavedAuths::BuiltIn(auth) => PathBuf::from(auth.attributes.get("path").cloned().unwrap_or_default()),
+            SavedAuths::Plugin { path, .. } | SavedAuths::Written { path, .. } => path.clone(),
+        };
+        let backend = state.rt.store().credential_backend();
+        let apply = || {
+            write()?;
+            match auths {
+                SavedAuths::Written { data, .. } => Ok((data, None)),
+                SavedAuths::BuiltIn(auth) => {
+                    let bytes = persist(&path, &auth.metadata, auth.disabled)?;
+                    let cfg = state.rt.config();
+                    let (mut credential, fallback) = match credentials::from_file(&cfg, &cfg.auth_dir, &path, &bytes) {
+                        Ok(Some(c)) => (c, false),
+                        // Go registers what its synthesizer would skip; uploads keep such
+                        // files the same way (see `credentials::upload_fallback`).
+                        Ok(None) => match credentials::upload_fallback(&cfg.auth_dir, &path, &bytes) {
+                            Some(c) => (c, true),
+                            None => return Ok((bytes, None)),
+                        },
+                        Err(e) => return Err(format!("register auth: {e}")),
+                    };
+                    // Keep the existing credential's ID and refresh state.
+                    if !auth.id.is_empty() {
+                        credential.id = auth.id.clone();
                     }
-                    // Go registers what its synthesizer would skip; uploads keep such
-                    // files the same way (see `credentials::upload_fallback`).
-                    Ok(None) => match credentials::upload_fallback(&cfg.auth_dir, &path, &bytes) {
-                        Some(c) => {
-                            fallbacks().insert(path.clone());
-                            c
-                        }
-                        None => return Ok(()),
-                    },
-                    Err(e) => return Err(format!("register auth: {e}")),
-                };
-                // Go keeps the ID of the credential the file already has, and that
-                // credential's refresh state (`preserveExistingAuthState`): its ID is the
-                // one a registered credential the save replaces has.
-                if !auth.id.is_empty() {
-                    credential.id = auth.id.clone();
+                    let refresh = vec![SavedRefresh {
+                        id: credential.id.clone(),
+                        donor: Some(credential.id.clone()),
+                    }];
+                    Ok((bytes, Some((vec![credential], refresh, fallback))))
                 }
-                let refresh = vec![SavedRefresh {
-                    id: credential.id.clone(),
-                    donor: Some(credential.id.clone()),
-                }];
-                (path, vec![credential], refresh)
-            }
-            SavedAuths::Plugin {
-                path,
-                mut credentials,
-                persist: rewrite,
-                refresh,
-            } => {
-                // Go persists the one auth, its metadata taking `disabled`; otherwise the
-                // file keeps what the plugin saved.
-                let bytes = match (rewrite, credentials.as_mut_slice()) {
-                    (true, [one]) => {
-                        one.metadata.insert("disabled".into(), one.disabled.into());
-                        persist(&path, &one.metadata, one.disabled)?
-                    }
-                    _ => std::fs::read(&path).map_err(|e| format!("auth filestore: read existing failed: {e}"))?,
-                };
-                credentials::note_plugin_auth_write(&path, &bytes);
-                fallbacks().remove(&path);
-                (path, credentials, refresh)
+                SavedAuths::Plugin {
+                    mut credentials,
+                    persist: rewrite,
+                    refresh,
+                    ..
+                } => {
+                    // A virtual/multiple-auth document retains its raw plugin bytes.
+                    let bytes = match (rewrite, credentials.as_mut_slice()) {
+                        (true, [one]) => {
+                            one.metadata.insert("disabled".into(), one.disabled.into());
+                            persist(&path, &one.metadata, one.disabled)?
+                        }
+                        _ => std::fs::read(&path).map_err(|e| format!("auth filestore: read existing failed: {e}"))?,
+                    };
+                    Ok((bytes, Some((credentials, refresh, false))))
+                }
             }
         };
-        state.rt.store().upsert_file(Some(&path), credentials, &refresh);
+        let (bytes, publication) = backend
+            .write_files(std::slice::from_ref(&path), || apply().map_err(anyhow::Error::msg))
+            .map_err(|e| format!("persist auth: {e}"))?;
+        // Nested Written saves must be durable before making their parse observable.
+        credentials::note_plugin_auth_write(&path, &bytes);
+        if let Some((credentials, refresh, fallback)) = publication {
+            let mut fallbacks = state.fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
+            if fallback {
+                fallbacks.insert(path.clone());
+            } else {
+                fallbacks.remove(&path);
+            }
+            drop(fallbacks);
+            state.rt.store().upsert_file(Some(&path), credentials, &refresh);
+        }
+        state.credential_changes.notify_one();
         Ok(())
     }
 
@@ -253,6 +269,124 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn home_mode_rejects_credential_saves_before_writing() {
+        let work = cpa_plugin::testing::scratch(&std::env::temp_dir(), "plugin-home-save");
+        let store = Arc::new(crate::config_store::ConfigStore::memory_with(&format!(
+            "oauth: {{auth-dir: {}}}\n",
+            work.display()
+        )));
+        let rt = Arc::new(crate::Runtime::home(
+            store.load().unwrap().config,
+            Vec::new(),
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+        ));
+        rt.deny_external.store(true, std::sync::atomic::Ordering::Relaxed);
+        let state = Management::new(rt, store);
+        let manager = PluginAuthManager(Arc::downgrade(&state));
+        let path = work.join("saved.json");
+        let result = manager.save(
+            SavedAuths::Written {
+                path: path.clone(),
+                data: b"{}".to_vec(),
+            },
+            &mut || panic!("Home mode must reject before invoking the credential writer"),
+        );
+        assert_eq!(result.unwrap_err(), "credential saves unavailable in Home mode");
+        assert!(!path.exists());
+        assert!(state.rt.store().snapshot().is_empty());
+        drop(state);
+        std::fs::remove_dir_all(work).unwrap();
+    }
+
+    #[test]
+    fn written_saves_are_durable_and_sql_failures_do_not_publish() {
+        let work = cpa_plugin::testing::scratch(&std::env::temp_dir(), "plugin-written-sqlite");
+        let store = Arc::new(crate::config_store::ConfigStore::open(&work.join("config.db")).unwrap());
+        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &work.join("legacy")).unwrap();
+        let mut cfg = store.load().unwrap().config;
+        cfg.auth_dir = db.auth_dir();
+        let rt = Arc::new(crate::testing::runtime_with_db(
+            cfg,
+            Vec::new(),
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            db.clone(),
+        ));
+        let state = Management::new(rt, store);
+        let manager = PluginAuthManager(Arc::downgrade(&state));
+        let path = db.auth_dir().join("nested.json");
+        let original = br#"{ "type":"rec", "plugin_unknown":[1,{"keep":true}] }"#;
+        manager
+            .save(
+                SavedAuths::Written {
+                    path: path.clone(),
+                    data: original.to_vec(),
+                },
+                &mut || std::fs::write(&path, original).map_err(|e| e.to_string()),
+            )
+            .unwrap();
+        assert_eq!(db.read(&path).unwrap().unwrap(), original);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(manager.read_file(&path).unwrap(), original);
+        rusqlite::Connection::open(work.join("config.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_host_save BEFORE INSERT ON credential_document
+                 BEGIN SELECT RAISE(ABORT, 'reject host save'); END;",
+            )
+            .unwrap();
+        let replacement = br#"{"type":"claude","access_token":"new"}"#;
+        let auth = HostAuth {
+            attributes: [("path".into(), path.to_string_lossy().into_owned())].into(),
+            metadata: serde_json::from_slice::<Value>(replacement)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .clone(),
+            ..Default::default()
+        };
+        for auths in [
+            SavedAuths::Written {
+                path: path.clone(),
+                data: replacement.to_vec(),
+            },
+            SavedAuths::BuiltIn(Box::new(auth)),
+            SavedAuths::Plugin {
+                path: path.clone(),
+                credentials: Vec::new(),
+                persist: false,
+                refresh: Vec::new(),
+            },
+        ] {
+            let result = manager.save(auths, &mut || {
+                std::fs::write(&path, replacement).map_err(|e| e.to_string())
+            });
+            assert!(result.is_err());
+            assert_eq!(db.read(&path).unwrap().unwrap(), original);
+            assert_eq!(std::fs::read(&path).unwrap(), original);
+            assert!(state.rt.store().snapshot().is_empty());
+        }
+        let reopened = crate::credential_store::CredentialDb::initialize(
+            Arc::new(crate::config_store::ConfigStore::open(&work.join("config.db")).unwrap()),
+            &work.join("legacy"),
+        )
+        .unwrap();
+        assert_eq!(reopened.read(&path).unwrap().unwrap(), original);
+        let _ = std::fs::remove_dir_all(work);
+    }
+
     /// A plugin's `host.auth.save` writes and publishes under the disk lock, so it cannot
     /// interleave with a SIWC commit, which holds that lock from its read of the backing
     /// file to its publication: the save's write waits until the lock is released, and
@@ -261,9 +395,11 @@ mod tests {
     fn a_plugin_save_waits_for_a_commit_holding_the_disk_lock() {
         let dir = std::env::temp_dir().join(format!("cpa-plugin-save-lock-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("config.yaml");
-        std::fs::write(&path, format!("oauth: {{auth-dir: {}}}\n", dir.display())).unwrap();
-        let cfg = cpa_core::config::Config::load(&path).unwrap();
+        let store = Arc::new(crate::config_store::ConfigStore::memory_with(&format!(
+            "oauth: {{auth-dir: {}}}\n",
+            dir.display()
+        )));
+        let cfg = store.load().unwrap().config;
         let rt = Arc::new(crate::testing::runtime(
             cfg,
             Vec::new(),
@@ -275,9 +411,9 @@ mod tests {
                 google: Default::default(),
             },
         ));
-        let state = Management::new(rt, path);
+        let state = Management::new(rt, store);
         let manager = PluginAuthManager(Arc::downgrade(&state));
-        let file = dir.join("saved.json");
+        let file = state.rt.config().auth_dir.join("saved.json");
         let auth = HostAuth {
             attributes: [("path".to_owned(), file.display().to_string())].into(),
             metadata: serde_json::json!({"type": "claude", "access_token": "saved"})

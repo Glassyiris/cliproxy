@@ -725,67 +725,19 @@
     "read": 0
   },
   {
-    "name": "management_chunked PUT /v8/management/config",
+    "name": "management_chunked POST /admin/v1/apply",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v8/management/config",
+    "method": "POST",
+    "path": "/admin/v1/apply",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
     },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
+    "body_b64": "eyJvcHMiOiBbeyJvcCI6ICJzZXQiLCAicGF0aCI6ICJyb3V0aW5nL3N0cmF0ZWd5IiwgInZhbHVlIjogInJvdW5kLXJvYmluIn1dfQ==",
     "chunked": true,
     "status": 413,
-    "response": "{\"error\":\"invalid_body\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "management_chunked PATCH /v8/management/config",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v8/management/config",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 413,
-    "response": "{\"error\":\"invalid_body\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "management_chunked PUT /v8/management/config.yaml",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v8/management/config.yaml",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 413,
-    "response": "{\"error\":\"invalid_body\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "management_chunked PUT /v8/management/config/server/port",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v8/management/config/server/port",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 413,
-    "response": "{\"error\":\"invalid_body\"}",
-    "content_type": "application/json; charset=utf-8",
+    "response": "{\"error\":\"body_too_large\",\"resource\":null,\"pointer\":null,\"pointers\":[],\"message\":\"request body exceeds the limit\"}",
+    "content_type": "application/json",
     "read": 33
   },
   {
@@ -1045,54 +997,6 @@
     "read": 33
   },
   {
-    "name": "management_chunked PUT /v0/management/debug",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v0/management/debug",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 400,
-    "response": "{\"error\":\"invalid body\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "management_chunked PUT /v0/management/config.yaml",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v0/management/config.yaml",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 400,
-    "response": "{\"error\":\"invalid_yaml\",\"message\":\"cannot read request body\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "management_chunked PUT /v0/management/api-keys",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v0/management/api-keys",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 400,
-    "response": "{\"error\":\"failed to read body\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
     "name": "management_multipart_chunked /v0/management/auth-files",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
@@ -1289,38 +1193,6 @@
     "read": 0
   },
   {
-    "name": "management_chunked GET /v8/management/config",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "GET",
-    "path": "/v8/management/config",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
-    "chunked": true,
-    "status": 200,
-    "response": "{\"config-version\":8,\"management\":{\"allow-remote\":true,\"secret-key\":\"$2a$10$LkK5sTAvg3dAkdklZeIADOSdCs7QDCsC/SbbltK6P5to2cMhINxtK\"},\"oauth\":{\"auth-dir\":\"/tmp/cpa-body-limit-3713280111/auth\"},\"server\":{\"max-request-body-bytes\":32}}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 0
-  },
-  {
-    "name": "management_chunked DELETE /v8/management/config/server/max-request-body-bytes",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "DELETE",
-    "path": "/v8/management/config/server/max-request-body-bytes",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
-    "chunked": true,
-    "status": 200,
-    "response": "{\"config-version\":8,\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 0
-  },
-  {
     "name": "json_first_value_within_limit /v0/management/plugins/demo/quota",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
@@ -1413,54 +1285,6 @@
     "chunked": true,
     "status": 413,
     "response": "{\"error\":\"invalid request body\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "json_first_value_within_limit PUT /v0/management/debug",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v0/management/debug",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2YWx1ZSI6dHJ1ZX0gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA=",
-    "chunked": true,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "json_first_value_within_limit PATCH /v0/management/api-keys",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/api-keys",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJvbGQiOiJhIiwibmV3IjoiYiJ9ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
-    "chunked": true,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "json_first_value_within_limit PATCH /v0/management/gemini-api-key",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/gemini-api-key",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJpbmRleCI6MH0gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA=",
-    "chunked": true,
-    "status": 400,
-    "response": "{\"error\":\"invalid body\"}",
     "content_type": "application/json; charset=utf-8",
     "read": 33
   },
@@ -1602,22 +1426,6 @@
       "Content-Type": "application/json"
     },
     "body_b64": "eyJlbmFibGVkIjp0cnVlfSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA==",
-    "chunked": true,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "json_first_value_within_limit PUT /v0/management/plugins/demo/config",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v0/management/plugins/demo/config",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "e30gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA=",
     "chunked": true,
     "status": 200,
     "response": "{\"status\":\"ok\"}",
@@ -2555,13 +2363,13 @@
   {
     "name": "management_content_length_over_limit",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v8/management/config",
+    "method": "POST",
+    "path": "/admin/v1/apply",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
     },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
+    "body_b64": "eyJvcHMiOiBbeyJvcCI6ICJzZXQiLCAicGF0aCI6ICJyb3V0aW5nL3N0cmF0ZWd5IiwgInZhbHVlIjogInJvdW5kLXJvYmluIn1dfQ==",
     "chunked": false,
     "status": 413,
     "response": "{\"error\":\"http: request body too large\"}",
@@ -2571,16 +2379,16 @@
   {
     "name": "management_unauthenticated_chunked",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PUT",
-    "path": "/v8/management/config",
+    "method": "POST",
+    "path": "/admin/v1/apply",
     "headers": {
       "Content-Type": "application/json"
     },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
+    "body_b64": "eyJvcHMiOiBbeyJvcCI6ICJzZXQiLCAicGF0aCI6ICJyb3V0aW5nL3N0cmF0ZWd5IiwgInZhbHVlIjogInJvdW5kLXJvYmluIn1dfQ==",
     "chunked": true,
     "status": 401,
-    "response": "{\"error\":\"missing management key\"}",
-    "content_type": "application/json; charset=utf-8",
+    "response": "{\"error\":\"unauthorized\",\"resource\":null,\"pointer\":null,\"pointers\":[],\"message\":\"missing management key\"}",
+    "content_type": "application/json",
     "read": 0
   },
   {

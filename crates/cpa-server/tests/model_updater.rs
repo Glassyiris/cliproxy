@@ -192,21 +192,20 @@ async fn refresh_skips_failing_sources_and_swaps_a_changed_catalog() {
     };
     let auth = std::env::temp_dir().join(format!("model-updater-{}", std::process::id()));
     std::fs::create_dir_all(&auth).unwrap();
-    let config = auth.join("config.yaml");
     let hash = bcrypt::hash("fake-management-only", 4).unwrap();
     let yaml = format!(
         "api-keys:\n  - fake-client-key\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
         auth.display()
     );
-    std::fs::write(&config, yaml).unwrap();
+    let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&yaml));
     let rt = Arc::new(cpa_server::testing::runtime(
-        cpa_core::config::Config::load(&config).unwrap(),
+        store.load().unwrap().config,
         vec![credential, gemini],
         executors,
     ));
     let registered = |rt: &cpa_server::Runtime| rt.registry().ids().any(|id| id == "claude-refreshed-1");
     assert!(!registered(&rt));
-    let management = cpa_server::management::Management::new(rt.clone(), config);
+    let management = cpa_server::management::Management::new(rt.clone(), store);
     let app = cpa_server::app(rt.clone(), cpa_server::management::router(management));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

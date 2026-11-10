@@ -9,6 +9,8 @@ These are exact steps for a coding agent (Claude Code, Codex, Amp, Cursor's agen
 - Do not stop, change or reconfigure an existing CLIProxyAPI (Go) or cook-router install unless the user asks you to migrate it (see the end of this page).
 - Do not open the proxy to the internet. Keep `server.host` at `127.0.0.1`.
 - Ask before setting up start at login (step 5).
+- SQLite is the only durable config and OAuth credential authority. Select one persistent `--db`/`COOK_DB` path for bootstrap, server, sign-in commands and services; never keep editing an imported YAML file or share a watched auth directory with Go.
+- Keep the data directory, database/WAL/SHM sidecars and backups private. Use `config backup` for a live backup; do not raw-copy the main file while WAL is open. Config-history restore never restores revoked tokens.
 
 ## 1. Detect the system
 
@@ -31,8 +33,8 @@ ls -d ~/.cook-router ~/.cli-proxy-api 2>/dev/null
 curl -s -m 2 http://127.0.0.1:8317/healthz; echo " exit=$?"
 ```
 
-- If `~/.cook-router/config.yaml` exists, cook-router is already set up. Ask the user before going on. Running the installer again only upgrades the binary and restarts the server; it never changes the config or the keys.
-- If `cli-proxy-api` or `CLIProxyAPI` exists, or `~/.cli-proxy-api` exists, or something answers on port 8317, the user probably runs CLIProxyAPI. Tell the user and ask: migrate it (see [Migrating from CLIProxyAPI](#migrating-from-cliproxyapi)) or install cook-router next to it. The installer installs next to it without touching it: it takes the next free port and its own auth folder.
+- If `~/.cook-router/cook.db` (or the configured `COOK_DB`/`--db` path) exists, cook-router is already initialized. Ask before changing it. A remaining `config.yaml` may only be stale bootstrap input, not the current settings. If only legacy YAML exists, treat it as a migration, not proof of an initialized database.
+- If `cli-proxy-api`/`CLIProxyAPI`, `~/.cli-proxy-api` or an existing listener is present, ask whether to migrate (see below) or install beside it using a different database and port. Never stop the existing server or import its real credentials without permission.
 
 ## 3. Install, configure and start
 
@@ -51,10 +53,10 @@ irm https://raw.githubusercontent.com/prep-cook/cook-router/master/install.ps1 |
 The installer:
 
 1. Downloads the release binary, checks it against the release's checksums and installs it as `~/.local/bin/cook-router` (`%LOCALAPPDATA%\Programs\cook-router\cook-router.exe` on Windows).
-2. Writes `~/.cook-router/config.yaml` (`%USERPROFILE%\.cook-router` on Windows) with a free port, starting at 8317, and session affinity on. It creates a client key and a management key and saves them in `~/.cook-router/keys.env`, readable only by the user.
+2. Uses `COOK_DB` or `cook.db` in the selected install home, resolving it to an absolute path. If the database exists, it skips key generation and YAML import even if the original files are absent. Otherwise it imports legacy YAML once or creates private bootstrap YAML and `keys.env` without printing keys, then runs `config import`. The retained YAML is stale backup; later configuration and OAuth changes go only to SQLite.
 3. Starts the server in the background, logging to `~/.cook-router/cook-router.log`, and waits for `/healthz`.
 
-It prints the dashboard address and file locations, never the keys. If it fails, it says why in one line; read the last lines of `cook-router.log` (they contain no keys) and fix what they report.
+The installer prints addresses and locations, not keys. Every managed launch uses the same explicit absolute `--db`, and probes use the secret-free `config listener` command rather than stale YAML. On Windows, rollback to a binary without `--db` support disables sign-in launch and asks for a current release instead of restarting against stale YAML. If startup fails, inspect the private process log without printing secrets and fix the reported error.
 
 `keys.env` looks like this, with real values:
 
@@ -72,7 +74,7 @@ cd ~/cook-router-src && cargo build --release -p cook-router
 mkdir -p ~/.local/bin && install -m 0755 target/release/cook-router ~/.local/bin/cook-router
 ```
 
-The installer starts the server with `nohup`, which keeps it running until the computer restarts. In a container or sandbox that has its own service or process manager, use that manager instead: stop the background server with `kill $(cat ~/.cook-router/cook-router.pid)` and run `~/.local/bin/cook-router --config ~/.cook-router/config.yaml` under the manager.
+The installer starts a background process until restart/sign-out unless a service is configured. In a container or sandbox with a process manager, use that manager instead: stop the intended background instance and run `~/.local/bin/cook-router --db ~/.cook-router/cook.db` under it. Mount a persistent directory for the database and WAL/SHM sidecars in an ephemeral container.
 
 ## 4. Verify
 
@@ -90,7 +92,7 @@ Invoke-RestMethod "http://127.0.0.1:$($k.COOK_ROUTER_PORT)/healthz"
 (Invoke-WebRequest "http://127.0.0.1:$($k.COOK_ROUTER_PORT)/v1/models" -Headers @{ Authorization = "Bearer $($k.COOK_ROUTER_CLIENT_KEY)" } -UseBasicParsing).StatusCode
 ```
 
-Expect `{"status":"ok"}` (PowerShell shows `status: ok`) and then `200`. A `401` means the key in `keys.env` and the one in `config.yaml` differ.
+Expect `{"status":"ok"}` (PowerShell shows `status: ok`) and then `200`. A `401` means the supplied key does not match the database-backed client-key settings; do not compare it with stale import YAML or print either secret.
 
 ## 5. Start at login (only if the user wants it)
 
@@ -100,7 +102,7 @@ Ask the user first. If they agree, run the installer again with `--service`:
 curl -fsSL https://raw.githubusercontent.com/prep-cook/cook-router/master/install.sh | sh -s -- --service
 ```
 
-On Windows: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/prep-cook/cook-router/master/install.ps1))) -Service`. This adds a systemd user unit on Linux, a launchd agent on macOS or a sign-in entry on Windows; [INSTALL.md](INSTALL.md#start-at-login) has the details and how to undo it.
+On Windows: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/prep-cook/cook-router/master/install.ps1))) -Service`. This adds a systemd user unit, launchd agent or Windows sign-in entry; verify the launch uses the same persistent database path as bootstrap. Do not create a second database accidentally through a changed working directory. [INSTALL.md](INSTALL.md#start-at-login) covers service behavior and removal.
 
 ## 6. Open the dashboard
 
@@ -126,7 +128,7 @@ Tell the user: the management key to sign in with is the `COOK_ROUTER_MANAGEMENT
 Tell the user to connect their accounts themselves, in the dashboard (Connect account) or in their own terminal:
 
 ```sh
-cook-router --config ~/.cook-router/config.yaml --claude-login
+cook-router --db ~/.cook-router/cook.db --claude-login
 ```
 
 (`--codex-login`, `--codex-device-login`, `--kimi-login`, `--meta-login`, `--xai-login` and `--devin-login` work the same way; add `--no-browser` on a machine without a browser.) Wait until the user says they are done. Point them to [Accounts and provider terms](../README.md#accounts-and-provider-terms). This setup is for one person using their own accounts on their own machines. Use provider-sanctioned integrations or API keys where available.
@@ -161,18 +163,18 @@ After the user has signed in, confirm with the `/v1/models` request from step 4:
 ## Tips for heavier use
 
 - Several Claude or Codex accounts: see [MULTI-ACCOUNT.md](MULTI-ACCOUNT.md) for routing strategies and limits.
-- Codex accounts: set `"websockets": true` in each Codex account's file in `~/.cook-router/auth` to use the faster WebSocket transport.
-- Session affinity: keep `routing.session-affinity: true`, which the installer sets.
+- Codex accounts: set credential metadata `"websockets": true` through account management, not an old file in `~/.cook-router/auth`.
+- Session affinity: keep `routing.session-affinity: true` in database-backed config. The installer includes it in initial import settings.
 - Other machines: use [Tailscale](https://tailscale.com/) instead of opening a port to the internet; see [Reach the proxy from other machines](MULTI-ACCOUNT.md#reach-the-proxy-from-other-machines). Never expose the proxy to the internet without client keys.
 
 ## Migrating from CLIProxyAPI
 
 Only when the user asks for it:
 
-1. Find the Go server's config file (often `config.yaml` next to its binary, or the path in its service definition) and its `auth-dir` (`~/.cli-proxy-api` by default).
-2. Back them up: `cp -a <config.yaml> <config.yaml>.bak` and `cp -a <auth-dir> <auth-dir>.bak`.
-3. Stop the Go server (its service, or the process). Both servers must never run on the same auth folder at the same time, because each refreshes the sign-in tokens and can invalidate the other's.
-4. Start cook-router on the same file: `cook-router --config <config.yaml>`. It reads the same settings and account files, and the user's existing management key keeps working.
-5. Verify as in step 4 with the port and a client key from that config.
+1. Locate the Go server's YAML config, auth directory and service command. Export remote-store data to private local import files if necessary.
+2. With the user's permission, stop Go before copying/importing credentials; back up YAML and the auth directory privately. Separate copies are not safe for concurrent use: token refresh by either server can invalidate the other's tokens.
+3. Pick a private persistent SQLite path. Remove selected `PGSTORE_*`, `OBJECTSTORE_*` and `GITSTORE_*` backend variables from cook-router's environment: they now fail startup with a migration error, not an automatic remote fetch or YAML mirror.
+4. Validate and import once: `cook-router --db /private/cook.db config validate /private/config.yaml`, then `cook-router --db /private/cook.db config import /private/config.yaml`. Use the configured legacy `oauth.auth-dir` only as a credential import source. Start with `cook-router --db /private/cook.db`; use that same path in all services and sign-in commands.
+5. Verify with the imported port/client key, without printing secrets, and have the user check their accounts in the dashboard. Change later settings through the dashboard or `/admin/v1`; old v0/v8 config endpoints and YAML watchers are gone.
 
-[MIGRATING-FROM-GO.md](MIGRATING-FROM-GO.md) lists what carries over and how to switch back.
+[MIGRATING-FROM-GO.md](MIGRATING-FROM-GO.md) describes credential import, rollback limitations and safe backup. `--config FILE` is first-bootstrap compatibility import only; a started SQLite install never rereads that file. Versioned plugin raw configuration and OAuth-only scope are preserved on import; review validation errors instead of assuming unsupported input was dropped.

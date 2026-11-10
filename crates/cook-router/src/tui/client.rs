@@ -1,6 +1,4 @@
-//! Go's management API client (internal/tui/client.go): the v0 routes, a 10 s
-//! timeout, the Bearer key, Go's environment proxy rules and redirect limit, and Go's
-//! error texts (`HTTP <code>: <body>`).
+//! Management API client with authenticated requests, URL redaction and bounded redirects.
 use cpa_core::gostr::GoStr;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -9,6 +7,12 @@ use serde_json::{Map, Value};
 
 /// A JSON object as Go decodes it into `map[string]any`.
 pub type Object = Map<String, Value>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientKey {
+    pub id: String,
+    pub rev: u64,
+}
 
 /// Go `NewClientWithBaseURL`'s base URL rules.
 pub fn normalize_base_url(raw: &str) -> String {
@@ -238,7 +242,7 @@ impl Client {
     }
 
     pub async fn get_config(&self) -> Result<Object, String> {
-        self.get_json("/v0/management/config").await
+        self.get_json("/admin/v1/effective/config").await
     }
 
     pub async fn get_auth_files(&self) -> Result<Vec<Object>, String> {
@@ -293,35 +297,96 @@ impl Client {
         Ok((lines, latest))
     }
 
-    pub async fn get_api_keys(&self) -> Result<Vec<String>, String> {
-        strings(self.get_json("/v0/management/api-keys").await?.get("api-keys"))
+    pub async fn get_client_keys(&self) -> Result<Vec<ClientKey>, String> {
+        extract_list(&self.get_json("/admin/v1/r/client-key").await?, "items")?
+            .into_iter()
+            .map(|item| {
+                let id = item.get("id").and_then(Value::as_str).ok_or("missing client-key id")?;
+                let rev = item
+                    .get("rev")
+                    .and_then(Value::as_u64)
+                    .ok_or("missing client-key revision")?;
+                Ok(ClientKey { id: id.to_owned(), rev })
+            })
+            .collect()
     }
 
-    /// Go `AddAPIKey`. Go sends `{"old": null, "new": key}`, which Go's own
-    /// `patchStringList` rejects (`400 missing fields`), so adding never worked there.
-    /// `old` = `new` appends the key when it is absent and changes nothing when present.
-    pub async fn add_api_key(&self, key: &str) -> Result<(), String> {
-        let body = marshal_map(vec![("old", key.into()), ("new", key.into())]);
-        self.checked(wreq::Method::PATCH, "/v0/management/api-keys", Some(body))
+    pub async fn add_client_key(&self, key: &str) -> Result<(), String> {
+        if key == "$secret" {
+            return Err("enter a new client key".into());
+        }
+        let id = format!(
+            "tui-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos()
+        );
+        let body = serde_json::json!({"ops": [{"op": "put", "kind": "client-key", "id": id, "spec": {"key": key}, "if_absent": true}]}).to_string();
+        self.checked(wreq::Method::POST, "/admin/v1/apply", Some(body))
             .await
             .map(drop)
     }
 
-    pub async fn edit_api_key(&self, index: usize, value: &str) -> Result<(), String> {
-        let body = marshal_map(vec![("index", index.into()), ("value", value.into())]);
-        self.checked(wreq::Method::PATCH, "/v0/management/api-keys", Some(body))
+    pub async fn edit_client_key(&self, key: &ClientKey, value: &str) -> Result<(), String> {
+        if value == "$secret" {
+            return Err("enter a new client key".into());
+        }
+        let body = serde_json::json!({"ops": [{"op": "patch", "kind": "client-key", "id": key.id, "patch": {"key": value}, "if_rev": key.rev}]}).to_string();
+        self.checked(wreq::Method::POST, "/admin/v1/apply", Some(body))
             .await
             .map(drop)
     }
 
-    pub async fn delete_api_key(&self, index: usize) -> Result<(), String> {
-        let path = format!("/v0/management/api-keys?index={index}");
-        self.delete(&path, "delete failed (HTTP {code})").await
+    pub async fn delete_client_key(&self, key: &ClientKey) -> Result<(), String> {
+        let body =
+            serde_json::json!({"ops": [{"op": "delete", "kind": "client-key", "id": key.id, "if_rev": key.rev}]})
+                .to_string();
+        self.checked(wreq::Method::POST, "/admin/v1/apply", Some(body))
+            .await
+            .map(drop)
     }
 
-    /// Go `getWrappedKeyList`.
-    pub async fn get_key_list(&self, route: &str) -> Result<Vec<Object>, String> {
-        extract_list(&self.get_json(&format!("/v0/management/{route}")).await?, route)
+    /// Copy explicitly reveals one secret; ordinary reads never disclose key material.
+    pub async fn reveal_client_key(&self, key: &ClientKey) -> Result<String, String> {
+        let export = self.get_json("/admin/v1/export?include_secrets=true").await?;
+        let resources = extract_list(&export, "resources")?;
+        let resource = resources
+            .iter()
+            .find(|r| {
+                r.get("kind").and_then(Value::as_str) == Some("client-key")
+                    && r.get("id").and_then(Value::as_str) == Some(key.id.as_str())
+            })
+            .ok_or("client key no longer exists")?;
+        let value = resource
+            .get("spec")
+            .and_then(|v| v.get("key"))
+            .and_then(Value::as_str)
+            .filter(|v| *v != "$secret")
+            .ok_or("client key was not revealed")?;
+        Ok(value.to_owned())
+    }
+
+    pub async fn get_key_list(&self, family: &str) -> Result<Vec<Object>, String> {
+        let cfg = self.get_config().await?;
+        let providers = value_at(&cfg, &format!("api-keys/{family}"));
+        let mut keys = Vec::new();
+        for provider in providers.and_then(Value::as_array).into_iter().flatten() {
+            let Some(entry) = provider.as_object() else { continue };
+            if family == "openai-compatibility" {
+                keys.push(entry.clone());
+                continue;
+            }
+            for key in entry.get("keys").and_then(Value::as_array).into_iter().flatten() {
+                let mut item = entry.clone();
+                if let Some(key) = key.as_object() {
+                    item.extend(key.clone());
+                }
+                keys.push(item);
+            }
+        }
+        Ok(keys)
     }
 
     /// Go `GetAuthStatus`: the status and error strings.
@@ -342,10 +407,9 @@ impl Client {
         self.delete(&path, "HTTP {code}").await
     }
 
-    /// Go `PutBoolField`, `PutIntField` and `PutStringField`.
     pub async fn put_field(&self, path: &str, value: Value) -> Result<(), String> {
-        let body = marshal_map(vec![("value", value)]);
-        self.checked(wreq::Method::PUT, &format!("/v0/management/{path}"), Some(body))
+        let body = serde_json::json!({"ops": [{"op": "set", "path": path, "value": value}]}).to_string();
+        self.checked(wreq::Method::POST, "/admin/v1/apply", Some(body))
             .await
             .map(drop)
     }
@@ -359,6 +423,15 @@ impl Client {
         ]);
         self.post_json("/v0/management/oauth-callback", body).await
     }
+}
+
+pub fn value_at<'a>(cfg: &'a Object, path: &str) -> Option<&'a Value> {
+    let (head, rest) = path.split_once('/').unwrap_or((path, ""));
+    let mut value = cfg.get(head)?;
+    for part in rest.split('/').filter(|part| !part.is_empty()) {
+        value = value.get(part)?;
+    }
+    Some(value)
 }
 
 /// The innermost cause of a request error.
@@ -551,7 +624,7 @@ mod tests {
         let err = client.get_config().await.unwrap_err();
         assert!(
             err.starts_with(&format!(
-                "Get \"http://user:***@127.0.0.1:{port}/v0/management/config\": "
+                "Get \"http://user:***@127.0.0.1:{port}/admin/v1/effective/config\": "
             )),
             "{err}"
         );
@@ -579,6 +652,87 @@ mod tests {
         (port, seen)
     }
 
+    #[tokio::test]
+    async fn client_key_reads_keep_identity_not_secret_material() {
+        let body =
+            serde_json::json!({"items": [{"id": "client-one", "rev": 7, "spec": {"key": "$secret"}}]}).to_string();
+        let (port, seen) = record(format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ))
+        .await;
+        let client = Client::new(&format!("http://127.0.0.1:{port}"), "key");
+        assert_eq!(
+            client.get_client_keys().await.unwrap(),
+            [ClientKey {
+                id: "client-one".into(),
+                rev: 7
+            }]
+        );
+        assert!(seen.lock().unwrap()[0].starts_with("GET /admin/v1/r/client-key "));
+    }
+
+    #[tokio::test]
+    async fn redaction_markers_cannot_be_written_or_copied_as_keys() {
+        let client = Client::new("http://127.0.0.1:1", "key");
+        assert!(client.add_client_key("$secret").await.is_err());
+        assert!(
+            client
+                .edit_client_key(
+                    &ClientKey {
+                        id: "client-one".into(),
+                        rev: 7
+                    },
+                    "$secret"
+                )
+                .await
+                .is_err()
+        );
+        let body =
+            serde_json::json!({"resources": [{"kind":"client-key", "id":"client-one", "spec":{"key":"$secret"}}]})
+                .to_string();
+        let (port, seen) = record(format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ))
+        .await;
+        let client = Client::new(&format!("http://127.0.0.1:{port}"), "key");
+        assert!(
+            client
+                .reveal_client_key(&ClientKey {
+                    id: "client-one".into(),
+                    rev: 7
+                })
+                .await
+                .is_err()
+        );
+        assert!(seen.lock().unwrap()[0].starts_with("GET /admin/v1/export?include_secrets=true "));
+    }
+
+    #[tokio::test]
+    async fn client_keys_patch_by_identity_and_revision() {
+        let (port, seen) = record("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".into()).await;
+        let client = Client::new(&format!("http://127.0.0.1:{port}"), "key");
+        client
+            .edit_client_key(
+                &ClientKey {
+                    id: "shown".into(),
+                    rev: 7,
+                },
+                "edited",
+            )
+            .await
+            .unwrap();
+        let request = seen.lock().unwrap()[0].clone();
+        assert!(request.starts_with("POST /admin/v1/apply "));
+        let (_, body) = request.split_once("\r\n\r\n").unwrap();
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"ops": [{"op":"patch", "kind":"client-key", "id":"shown", "if_rev":7, "patch":{"key":"edited"}}]})
+        );
+    }
+
     // Go TestClient_RemoteServerInteraction and TestNewAppWithBaseURL.
     #[tokio::test]
     async fn remote_get_config_sends_path_and_bearer() {
@@ -590,7 +744,7 @@ mod tests {
         assert_eq!(cfg.get("status"), Some(&Value::from("ok")));
         let request = seen.lock().unwrap()[0].clone();
         assert!(
-            request.starts_with("GET /v0/management/config HTTP/1.1\r\n"),
+            request.starts_with("GET /admin/v1/effective/config HTTP/1.1\r\n"),
             "{request}"
         );
         assert!(
@@ -686,10 +840,15 @@ mod tests {
         })
         .await;
         let client = Client::new(&format!("http://127.0.0.1:{start}"), "fake-bearer");
-        client.put_field("debug", Value::Bool(true)).await.unwrap();
+        client
+            .put_field("observability/logs/debug", Value::Bool(true))
+            .await
+            .unwrap();
         let seen = seen.lock().unwrap().clone();
         assert!(
-            seen[0].starts_with("PUT /v0/management/debug ") && seen[0].contains("{\"value\":true}"),
+            seen[0].starts_with("POST /admin/v1/apply ")
+                && seen[0].contains("\"path\":\"observability/logs/debug\"")
+                && seen[0].contains("\"value\":true"),
             "{}",
             seen[0]
         );
@@ -702,7 +861,7 @@ mod tests {
         assert!(
             seen[1]
                 .go_lower()
-                .contains(&format!("referer: http://127.0.0.1:{start}/v0/management/debug"))
+                .contains(&format!("referer: http://127.0.0.1:{start}/admin/v1/apply"))
         );
     }
 
@@ -722,8 +881,8 @@ mod tests {
         }
         assert_eq!(query_escape("a b/ü~.json"), "a+b%2F%C3%BC~.json");
         assert_eq!(
-            redact_url("http://user:fake-url-password@127.0.0.1:1/v0/management/config"),
-            "http://user:***@127.0.0.1:1/v0/management/config"
+            redact_url("http://user:fake-url-password@127.0.0.1:1/admin/v1/effective/config"),
+            "http://user:***@127.0.0.1:1/admin/v1/effective/config"
         );
         let host = |s: &str| url::Url::parse(s).unwrap();
         assert!(same_site(&host("http://a.example:1/x"), &host("http://a.example:2/y")));

@@ -8,9 +8,9 @@ use std::time::{Duration, SystemTime};
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use cpa_core::config::Config;
 use cpa_exec::Executors;
 use cpa_exec::claude::ClaudeExecutor;
+use cpa_server::config_store::ConfigStore;
 use cpa_server::management::{Management, Options};
 use cpa_server::scheduler::Strategy;
 use serde_json::{Value, json};
@@ -100,6 +100,7 @@ async fn serve(app: axum::Router) -> String {
 struct Proxy {
     url: String,
     rt: Arc<cpa_server::Runtime>,
+    state: Arc<Management>,
     up: Arc<Upstream>,
     base: String,
     /// The two account keys, `x` first in credential ID order (where equal ranks
@@ -125,7 +126,8 @@ async fn proxy(name: &str, strategy: &str) -> Proxy {
     let auth_dir = dir.join("auths");
     std::fs::create_dir_all(&auth_dir).unwrap();
     let yaml = yaml(&base, strategy, &auth_dir);
-    let config = Config::parse(&yaml).unwrap();
+    let store = Arc::new(ConfigStore::memory_with(&yaml));
+    let config = store.load().unwrap().config;
     let mut credentials = cpa_core::config::credentials::load(&config);
     assert_eq!(credentials.len(), 2, "only the two config keys");
     credentials.sort_by(|a, b| a.id.cmp(&b.id));
@@ -142,17 +144,16 @@ async fn proxy(name: &str, strategy: &str) -> Proxy {
             google: Default::default(),
         },
     ));
-    let path = dir.join("config.yaml");
-    std::fs::write(&path, &yaml).unwrap();
     let options = Options {
         management_password: Some(PASSWORD.into()),
         ..Default::default()
     };
-    let management = Management::with_options(rt.clone(), path, options);
-    let app = cpa_server::app(rt.clone(), cpa_server::management::router(management));
+    let management = Management::with_options(rt.clone(), store, options);
+    let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()));
     Proxy {
         url: serve(app).await,
         rt,
+        state: management,
         up,
         base,
         x,
@@ -195,7 +196,7 @@ impl Proxy {
         let client = wreq::Client::new();
         let url = format!("{}{path}", self.url);
         let req = match method {
-            "PUT" => client.put(url),
+            "PATCH" => client.patch(url),
             _ => client.get(url),
         }
         .bearer_auth(PASSWORD);
@@ -252,53 +253,33 @@ async fn management_api_and_reload_switch_the_strategy() {
     let p = proxy("manage", "round-robin").await;
     *p.up.soon.lock().unwrap() = p.y.clone();
     assert_eq!(p.route(4).await, ["x", "y", "x", "y"], "the default spreads evenly");
-    // v8 config path, with the alias: the published policy follows at once.
     let (status, body) = p
         .management(
-            "PUT",
-            "/v8/management/config/routing/strategy",
-            Some(json!("reset-first")),
+            "PATCH",
+            "/admin/v1/r/setting/routing",
+            Some(json!({"strategy": "soonest-reset"})),
         )
         .await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(p.rt.policy().strategy, Strategy::SoonestReset);
     assert_eq!(p.route(3).await, ["y", "y", "y"]);
-    // The deprecated v0 route accepts and normalizes it like Go's other values.
-    let (status, body) = p
-        .management(
-            "PUT",
-            "/v0/management/routing/strategy",
-            Some(json!({"value": "Reset-First"})),
-        )
-        .await;
-    assert_eq!(status, 200, "{body}");
-    let (_, got) = p.management("GET", "/v0/management/routing/strategy", None).await;
-    assert_eq!(got, json!({"strategy": "soonest-reset"}));
-    // A reloaded config (the file watcher's publish) switches back to spreading.
-    p.rt.publish_config(Config::parse(&yaml(&p.base, "round-robin", &p._dir.join("auths"))).unwrap());
+    p.state
+        .config_store()
+        .import_yaml(&yaml(&p.base, "round-robin", &p._dir.join("auths")), "test", "")
+        .unwrap();
+    cpa_server::watching::reload(&p.state).unwrap();
     assert_eq!(p.rt.policy().strategy, Strategy::RoundRobin);
     let spread = p.route(2).await;
     assert!(spread.contains(&"x") && spread.contains(&"y"), "{spread:?}");
 }
 
-/// A hot reload from an explicit round-robin to an unset strategy selects soonest-reset,
-/// which the management API reports without writing it into the file.
+/// Reloading an unset strategy selects the default soonest-reset policy.
 #[tokio::test]
 async fn reloading_to_an_unset_strategy_selects_soonest_reset() {
     let p = proxy("reload-default", "round-robin").await;
     assert_eq!(p.rt.policy().strategy, Strategy::RoundRobin);
     let unset = yaml(&p.base, "", &p._dir.join("auths"));
-    let res = wreq::Client::new()
-        .put(format!("{}/v0/management/config.yaml", p.url))
-        .bearer_auth(PASSWORD)
-        .body(unset.clone())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status().as_u16(), 200, "{}", res.text().await.unwrap());
+    p.state.config_store().import_yaml(&unset, "test", "").unwrap();
+    cpa_server::watching::reload(&p.state).unwrap();
     assert_eq!(p.rt.policy().strategy, Strategy::SoonestReset);
-    let (status, body) = p.management("GET", "/v0/management/routing/strategy", None).await;
-    assert_eq!((status, body), (200, json!({"strategy": "soonest-reset"})));
-    let saved = std::fs::read_to_string(p._dir.join("config.yaml")).unwrap();
-    assert!(!saved.contains("soonest-reset"), "{saved}");
 }

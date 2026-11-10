@@ -4,9 +4,16 @@ import type { Buckets } from "../../lib/credentials.ts";
 import { families, type Family } from "../../components/keyFamilies.ts";
 
 export type Model = { name?: string; alias?: string };
-export type Key = { "api-key"?: string; weight?: number };
-/** A group as config.yaml holds it; fields this page does not edit travel through writes unchanged. */
+export type Key = {
+  "@id"?: string;
+  auth_index?: string;
+  "api-key"?: string;
+  weight?: number;
+  [field: string]: unknown;
+};
+/** Stored provider fields this page does not edit travel through writes unchanged. */
 export type Group = {
+  "@id"?: string;
   name?: string;
   "base-url"?: string;
   disabled?: boolean;
@@ -16,9 +23,8 @@ export type Group = {
 };
 
 /**
- * One family's value exactly as the server holds it, for the compare in `replaceConfigValue`:
- * `null` stays `null`, and a family the file lacks reads as the empty list, which is what the
- * server's 404 fallback reads as.
+ * One family's effective value for the write precondition: `null` stays `null`, and an absent
+ * family reads as the empty list.
  */
 export function storedGroups(config: Config, family: Family): unknown {
   const section = config["api-keys"] as Record<string, unknown> | null | undefined;
@@ -53,7 +59,7 @@ export type KeyTraffic = Buckets & { times: string[] };
 
 /**
  * The usage report is keyed by family (by lower-cased group name for OpenAI-compatible groups),
- * then by "<base-url>|<api-key>". Null when the server reported nothing for this key.
+ * then by auth_index. Null when the server reported nothing for this key.
  */
 export function keyTraffic(
   usage: ApiKeyUsage | undefined,
@@ -63,7 +69,7 @@ export function keyTraffic(
 ): KeyTraffic | null {
   const provider =
     family === "openai-compatibility" ? String(group.name ?? "").toLowerCase() : family;
-  const hit = usage?.[provider]?.[`${group["base-url"] ?? ""}|${key["api-key"]}`];
+  const hit = key.auth_index ? usage?.[provider]?.[key.auth_index] : undefined;
   if (!hit || !Array.isArray(hit.recent_requests)) return null;
   return {
     total: hit.recent_requests.map((b) => (b.success || 0) + (b.failed || 0)),
@@ -83,7 +89,11 @@ export type Entry = {
   traffic: KeyTraffic | null;
 };
 
-export const entryId = (e: Pick<Entry, "family" | "index">) => `${e.family}:${e.index}`;
+export function entryId(e: Pick<Entry, "family" | "group">): string {
+  const id = e.group["@id"];
+  if (!id) throw new Error("Provider group has no persisted identity");
+  return `${e.family}:${id}`;
+}
 
 /** Every key's buckets added up, with the first reported key's bucket spans. */
 function addUp(list: (KeyTraffic | null)[]): KeyTraffic | null {
@@ -158,6 +168,6 @@ export function formErrors(
   if (!fields.baseUrl) {
     if (compat) errors.baseUrl = "required";
   } else if (!isHttpUrl(fields.baseUrl)) errors.baseUrl = "invalid";
-  if (!fields.key) errors.key = true;
+  if (!fields.key || fields.key === "$secret") errors.key = true;
   return errors;
 }

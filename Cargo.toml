@@ -24,7 +24,6 @@ cpa-exec = { path = "crates/cpa-exec", version = "0.4.1" }
 cpa-home = { path = "crates/cpa-home", version = "0.4.1" }
 cpa-plugin = { path = "crates/cpa-plugin", version = "0.4.1" }
 cpa-server = { path = "crates/cpa-server", version = "0.4.1" }
-cpa-store = { path = "crates/cpa-store", version = "0.4.1" }
 cpa-translate = { path = "crates/cpa-translate", version = "0.4.1" }
 
 anyhow = "1"

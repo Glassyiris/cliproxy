@@ -31,7 +31,6 @@ cpa-exec.workspace = true
 cpa-home.workspace = true
 cpa-plugin.workspace = true
 cpa-server.workspace = true
-cpa-store.workspace = true
 getrandom = "0.3"
 libc.workspace = true
 # The -tui management client: the crossterm backend only.

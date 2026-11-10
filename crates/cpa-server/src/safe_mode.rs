@@ -145,7 +145,7 @@ mod tests {
                     ("PUT", "/openai/v1/test", true, false),
                     ("GET", "/backend-api/codex", true, false),
                     ("GET", "/v11/models", false, false),
-                    ("GET", "/v8/management/config", false, false),
+                    ("GET", "/admin/v1/effective/config", false, false),
                     ("GET", "/healthz", false, false),
                     ("GET", "/", false, true),
                     ("HEAD", "/management.html", false, true),

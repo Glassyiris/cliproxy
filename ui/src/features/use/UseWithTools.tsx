@@ -29,13 +29,14 @@ import {
 } from "@astryxdesign/core/Layout";
 import { Step, Stepper } from "@astryxdesign/core/Stepper";
 import { icons } from "../../components/icons.ts";
-import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
+import { useClientKeys, useClientKeyWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
 import { base } from "../../lib/api/client.ts";
+import { createClientKey, type ClientKey } from "../../lib/api/clientKeys.ts";
+import { isUsableSecret } from "../../lib/api/config.ts";
 import { newKey } from "../../lib/clientKeys.ts";
-import { readPath } from "../../lib/configPath.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
 import { roles } from "../../themes/site/roles.ts";
@@ -44,9 +45,8 @@ import { ChooseTool } from "./ChooseTool.tsx";
 import { TestConnection } from "./TestConnection.tsx";
 import { toolFromParam, toolParam } from "./tool.ts";
 import { ToolSettings } from "./ToolSettings.tsx";
-import { useKeyChoice } from "./useKeyChoice.ts";
+import { useKeyChoice, type KeyChoice } from "./useKeyChoice.ts";
 
-const KEYS_PATH = "access/api-keys";
 const local = isLocalHost(location.hostname);
 const LAST_STEP = 2;
 
@@ -73,19 +73,10 @@ function NoKey({ busy, create }: { busy: boolean; create: () => void }) {
  * The step and whether Continue was refused; both start over each time the dialog opens, on the
  * test step when the hash asks for it (`step=test`, from Overview's first run).
  */
-function useDraft(isOpen: boolean) {
+function useDraft() {
   const [params] = useHashParams();
-  const first = params.step === "test" ? LAST_STEP : 0;
-  const [step, setStep] = useState(first);
+  const [step, setStep] = useState(params.step === "test" ? LAST_STEP : 0);
   const [blocked, setBlocked] = useState(false);
-  const [shownOpen, setShownOpen] = useState(isOpen);
-  if (shownOpen !== isOpen) {
-    setShownOpen(isOpen);
-    if (isOpen) {
-      setStep(first);
-      setBlocked(false);
-    }
-  }
   return { step, setStep, blocked, setBlocked };
 }
 
@@ -119,11 +110,13 @@ function ProgressHeader({
 function StepFooter({
   step,
   blocked,
+  busy,
   onBack,
   onNext,
 }: {
   step: number;
   blocked: boolean;
+  busy: boolean;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -143,6 +136,7 @@ function StepFooter({
         <Button
           label={step === LAST_STEP ? t("use.steps.done") : t("use.steps.continue")}
           variant={roles.primaryAction.variant}
+          isLoading={busy}
           onClick={onNext}
         />
       </HStack>
@@ -153,36 +147,31 @@ function StepFooter({
 /** The current step's body; steps 2 and 3 need a key, and a missing one is created here. */
 function StepBody({
   step,
-  isOpen,
+  keys,
+  choice,
   onCreated,
 }: {
   step: number;
-  isOpen: boolean;
+  keys: ClientKey[] | undefined;
+  choice: KeyChoice;
   onCreated: () => void;
 }) {
-  const config = useConfig();
+  const query = useClientKeys();
   const action = useAction();
-  const write = useConfigWrite(action);
+  const write = useClientKeyWrite(action);
   const [params, setParams] = useHashParams();
   const tool = toolFromParam(params.tool);
-  // A key the file lacks and an explicit null both show as no keys.
-  const keys = config.data ? (readPath(config.data, KEYS_PATH, []) as string[]) : undefined;
-  const choice = useKeyChoice(isOpen ? keys : undefined, params.key);
   const create = async () => {
-    if (keys && (await write(KEYS_PATH, [...keys, newKey()], t("use.empty.created")))) onCreated();
+    if (await write(() => createClientKey(newKey()), t("use.empty.created"))) onCreated();
   };
 
   if (step === 0)
     return (
       <ChooseTool tool={tool} onTool={(next) => setParams({ tool: toolParam(next) }, "replace")} />
     );
-  if (config.isError)
+  if (query.isError)
     return (
-      <ReadError
-        error={config.error}
-        what={t("use.page.what")}
-        retry={() => void config.refetch()}
-      />
+      <ReadError error={query.error} what={t("use.page.what")} retry={() => void query.refetch()} />
     );
   if (keys?.length === 0) return <NoKey busy={action.busy} create={() => void create()} />;
   if (step === 1)
@@ -192,27 +181,40 @@ function StepBody({
         target={toolTarget(tool, base, local)}
         keys={keys}
         choice={choice}
-        onKey={(index) => setParams({ key: String(index) }, "replace")}
+        onKey={(id) => setParams({ key: id }, "replace")}
         local={local}
       />
     );
-  return choice.key ? <TestConnection base={base} clientKey={choice.key} /> : null;
+  return isUsableSecret(choice.key) ? (
+    <TestConnection base={base} clientKey={choice.key} />
+  ) : (
+    <Button
+      label={t("keys.row.show")}
+      variant="secondary"
+      isLoading={choice.revealing}
+      onClick={() => void choice.reveal()}
+    />
+  );
 }
 
-export function UseWithTools({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const config = useConfig();
-  const { step, setStep, blocked, setBlocked } = useDraft(isOpen);
-  const hasKey = !!config.data && (readPath(config.data, KEYS_PATH, []) as string[]).length > 0;
+function UseDialog({ onClose }: { onClose: () => void }) {
+  const query = useClientKeys();
+  const [params] = useHashParams();
+  const { step, setStep, blocked, setBlocked } = useDraft();
+  const keys = query.data?.items;
+  const choice = useKeyChoice(keys, params.key);
+  const hasKey = !!keys?.length;
   const onOpenChange = (open: boolean) => !open && onClose();
-  const next = () => {
-    if (step > 0 && !hasKey) return setBlocked(true);
+  const next = async () => {
     if (step === LAST_STEP) return onClose();
+    if (step > 0 && !hasKey) return setBlocked(true);
+    if (step > 0 && hasKey && !isUsableSecret(await choice.reveal())) return;
     setStep(step + 1);
   };
 
   return (
     <Dialog
-      isOpen={isOpen}
+      isOpen
       onOpenChange={onOpenChange}
       width={roles.content.formWidth}
       maxHeight={layout.pageDialog.height}
@@ -226,19 +228,29 @@ export function UseWithTools({ isOpen, onClose }: { isOpen: boolean; onClose: ()
           header={<ProgressHeader step={step} onOpenChange={onOpenChange} />}
           content={
             <LayoutContent>
-              <StepBody step={step} isOpen={isOpen} onCreated={() => setBlocked(false)} />
+              <StepBody
+                step={step}
+                keys={keys}
+                choice={choice}
+                onCreated={() => setBlocked(false)}
+              />
             </LayoutContent>
           }
           footer={
             <StepFooter
               step={step}
               blocked={blocked && !hasKey}
+              busy={choice.revealing}
               onBack={() => setStep(Math.max(0, step - 1))}
-              onNext={next}
+              onNext={() => void next()}
             />
           }
         />
       </VStack>
     </Dialog>
   );
+}
+
+export function UseWithTools({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  return isOpen ? <UseDialog onClose={onClose} /> : null;
 }

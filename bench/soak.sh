@@ -83,6 +83,8 @@ case $MIX in
   *) echo "MIX must be claude, field or cloak" >&2; exit 2 ;;
 esac
 mkdir -p "$OUT/bin" "$OUT/auth"
+# A reused output directory must still import this run's regenerated config.
+DB_DIR=$(mktemp -d "$OUT/db.XXXXXX")
 [[ -x $OUT/bin/messages ]] || go build -o "$OUT/bin/messages" "$HERE/messages/main.go"
 
 "$OUT/bin/messages" upstream -addr "127.0.0.1:$UP_PORT" "${UPSTREAM[@]}" > "$OUT/upstream.log" 2>&1 &
@@ -123,7 +125,7 @@ if [[ $MIX == field ]]; then
         - api-key: "sk-FAKE-bench-codex-key"
 EOF
 fi
-"$BIN" -config "$OUT/config.yaml" -local-model > "$OUT/server.log" 2>&1 &
+COOK_DB="$DB_DIR/cook.db" "$BIN" -config "$OUT/config.yaml" -local-model > "$OUT/server.log" 2>&1 &
 SRV_PID=$!
 ready=false
 for _ in $(seq 1 400); do

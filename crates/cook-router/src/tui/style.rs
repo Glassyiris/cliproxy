@@ -221,7 +221,8 @@ fn go_g(f: f64) -> String {
     format!("{mantissa}e{sign}{:02}", exp.abs())
 }
 
-/// Go `maskKey`.
+/// Historical fixture masking, never used for live resource rendering.
+#[cfg(test)]
 pub fn mask_key(key: &str) -> String {
     let b = key.as_bytes();
     if b.len() <= 8 {

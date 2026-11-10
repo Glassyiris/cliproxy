@@ -8,14 +8,12 @@ import { t } from "../../lib/i18n.ts";
 
 /** The add-key form. Mounted only while open, so every opening starts empty. */
 export function AddKeyDialog({
-  keys,
   busy,
   add,
   onClose,
 }: {
-  keys: string[];
   busy: boolean;
-  /** Writes the new list; true when it was stored. */
+  /** Creates one resource; true when it was stored. */
   add: (key: string) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -24,8 +22,7 @@ export function AddKeyDialog({
 
   const submit = async () => {
     const key = draft.trim();
-    if (!key) return setError(t("keys.add.required"));
-    if (keys.includes(key)) return setError(t("keys.add.duplicate"));
+    if (!key || key === "$secret") return setError(t("keys.add.required"));
     if (await add(key)) onClose();
   };
 

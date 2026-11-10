@@ -1,13 +1,11 @@
-// The one editor for a config value as JSON or the whole file as YAML, in a form dialog (a
-// plugin's settings; a section or the file under Settings, Advanced). Review shows the change as a
-// diff and Save rereads the server copy first, refusing when it changed since the editor opened
-// (REQUIREMENTS intentional design).
+// Edit a config value as JSON in a form dialog. Review shows the change as a diff, and Save
+// refuses when the server value changed since the editor opened.
 // Template: the DialogFormDialog block: Dialog `purpose="form"`, a Layout with the DialogHeader,
 // the content, and Cancel beside the primary action at the end of a LayoutFooter; only the content
 // scrolls. Deviation: the preferences dialog's size (layout.settingsDialog), not the block's 480,
 // for every editor, since code lines are long.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Icon } from "@astryxdesign/core/Icon";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -22,14 +20,9 @@ import { icons } from "./icons.ts";
 import { serverKeys } from "../app/serverQueries.ts";
 import { failureNotice, type Action } from "../app/useAction.ts";
 import { useUnsavedChanges } from "../app/useHashRoute.ts";
-import {
-  ConfigChangedError,
-  readConfigValue,
-  readConfigYaml,
-  replaceConfigValue,
-  writeConfigYaml,
-} from "../lib/api/config.ts";
+import { ConfigChangedError, readConfigValue, replaceConfigValue } from "../lib/api/config.ts";
 import { lineDiff } from "../lib/compare.ts";
+import { configSaveFailure } from "../lib/configSaveFailure.ts";
 import { t } from "../lib/i18n.ts";
 import { notify } from "../lib/notify.ts";
 import { layout } from "../themes/site/layout.ts";
@@ -37,29 +30,11 @@ import { CodeColors, CodeEditor } from "./CodeEditor.tsx";
 import { FormDialogHeader } from "./FormDialog.tsx";
 import { ReadError } from "./ReadError.tsx";
 
-/** A config key path such as "routing/strategy" (edited as JSON), or the whole file as YAML. */
-type ConfigSource = { path: string } | { yaml: true };
+/** A config key path such as "routing/strategy", edited as JSON. */
+type ConfigSource = { path: string };
 
-const sourceName = (source: ConfigSource) => ("path" in source ? source.path : "config.yaml");
-const format = (source: ConfigSource) => ("path" in source ? "JSON" : "YAML");
-
-/** What the editor opens for a key the file lacks: an empty object, told apart by identity. */
+/** What the editor opens for an absent key: an empty object, told apart by identity. */
 const absent = {};
-
-const readSource = (source: ConfigSource, signal: AbortSignal): Promise<unknown> =>
-  "path" in source
-    ? readConfigValue(source.path, { signal, fallback: absent })
-    : readConfigYaml(signal);
-
-const asText = (source: ConfigSource, value: unknown) =>
-  "path" in source ? JSON.stringify(value, null, 2) : String(value);
-
-/** Write `text` only while the server still holds `baseline`, the copy the editor opened. */
-async function write(source: ConfigSource, baseline: unknown, text: string) {
-  if ("path" in source) return replaceConfigValue(source.path, baseline, JSON.parse(text));
-  if ((await readConfigYaml()) !== baseline) throw new ConfigChangedError("config.yaml");
-  return writeConfigYaml(text);
-}
 
 const diffText = (before: string, after: string) =>
   lineDiff(before, after)
@@ -68,7 +43,7 @@ const diffText = (before: string, after: string) =>
 
 /** Plugins read their switches from config, so these writes also change the plugin list. */
 const touchesPlugins = (source: ConfigSource) =>
-  "yaml" in source || source.path === "plugins" || source.path.startsWith("plugins/");
+  source.path === "plugins" || source.path.startsWith("plugins/");
 
 /**
  * Edit `source`; `onClose` runs after a save or when the user leaves without one. Save runs
@@ -91,7 +66,7 @@ export function ConfigEditor({
   if (!source) return null;
   return (
     <Editor
-      key={sourceName(source)}
+      key={source.path}
       source={source}
       title={title}
       hashKey={hashKey}
@@ -102,45 +77,82 @@ export function ConfigEditor({
 }
 
 function useEditor(source: ConfigSource, action: Action, hashKey: string, onSaved: () => void) {
-  // Read when the editor opens, and again after a save or when one is refused: this copy is what
-  // Save compares the server against.
   const read = useQuery({
-    queryKey: ["config-editor", sourceName(source)],
-    queryFn: ({ signal }) => readSource(source, signal),
+    queryKey: ["config-editor", source.path],
+    queryFn: ({ signal }) => readConfigValue(source.path, { signal, fallback: absent }),
     staleTime: Infinity,
     gcTime: 0,
     refetchOnWindowFocus: false,
   });
-  const before = read.isSuccess ? asText(source, read.data) : "";
+  const editor = useJsonEditor(source.path, read, read.data, action, hashKey, onSaved, (spec) =>
+    replaceConfigValue(source.path, read.data, spec, absent),
+  );
+  return { ...editor, isAbsent: read.data === absent };
+}
+
+/** Shared JSON review, refusal handling and unsaved-change protection. */
+export function useJsonEditor(
+  path: string,
+  read: UseQueryResult<unknown, Error>,
+  baseline: unknown,
+  action: Action,
+  hashKey: string,
+  onSaved: () => void,
+  write: (spec: unknown) => Promise<unknown>,
+  onReset: () => void = () => {},
+) {
+  const before = read.isSuccess ? JSON.stringify(baseline, null, 2) : "";
   const [draft, setDraft] = useState<string | null>(null);
   const text = draft ?? before;
   const isDirty = text !== before;
   const release = useUnsavedChanges(isDirty, hashKey);
-  const saving = useSave(source, read.data, action, {
+  const saving = useSave({ path }, write, action, {
     // The saved text is the new server copy, and the next edit starts from it.
     onSaved: () => {
       setDraft(null);
       void read.refetch();
+      onReset();
       release();
       onSaved();
     },
     // The draft stays, so Review shows it against the new server copy.
-    onRefused: () => void read.refetch(),
+    onRefused: () => {
+      void read.refetch();
+      onReset();
+    },
+    onRejected: setDraft,
   });
-  const isAbsent = read.data === absent;
-  return { read, before, text, isDirty, isAbsent, setDraft, release, ...saving };
+  return {
+    read,
+    before,
+    text,
+    isDirty,
+    setDraft,
+    release,
+    ...saving,
+  };
 }
 
-type EditorState = ReturnType<typeof useEditor>;
+type EditorState = {
+  read: UseQueryResult<unknown, Error>;
+  before: string;
+  text: string;
+  isDirty: boolean;
+  setDraft: (draft: string) => void;
+  release: () => void;
+  save: (next: string) => Promise<void>;
+  isSaving: boolean;
+  error: string;
+  isAbsent?: boolean;
+  prompt?: (header: ReactNode, onCancel: () => void) => ReactNode;
+};
 
 function EditorContent({
-  source,
   title,
   header,
   editor,
   onCancel,
 }: {
-  source: ConfigSource;
   title: string;
   header: ReactNode;
   editor: EditorState;
@@ -164,11 +176,11 @@ function EditorContent({
         }
       />
     );
+  if (editor.prompt) return editor.prompt(header, onCancel);
   // Keyed on the server copy, so a save or a refusal returns to the text from review.
   return (
     <EditorBody
       key={editor.before}
-      source={source}
       header={header}
       before={editor.before}
       text={editor.text}
@@ -195,6 +207,20 @@ function Editor({
   onClose: () => void;
 }) {
   const editor = useEditor(source, action, hashKey, onClose);
+  return <JsonEditorDialog path={source.path} title={title} editor={editor} onClose={onClose} />;
+}
+
+export function JsonEditorDialog({
+  path,
+  title,
+  editor,
+  onClose,
+}: {
+  path: string;
+  title: string;
+  editor: EditorState;
+  onClose: () => void;
+}) {
   const [isAsking, setAsking] = useState(false);
   // A save cannot be called back once sent, so the editor stays open until it ends.
   const close = () => !editor.isSaving && (editor.isDirty ? setAsking(true) : onClose());
@@ -202,10 +228,9 @@ function Editor({
     editor.release();
     onClose();
   };
-  // A plugin's title is its name, so the path follows; a section's title is its path already.
   const subtitle =
-    title !== sourceName(source) ? (
-      <Text type="code">{sourceName(source)}</Text>
+    title !== path ? (
+      <Text type="code">{path}</Text>
     ) : editor.isAbsent ? (
       t("app.editor.absent")
     ) : undefined;
@@ -219,7 +244,6 @@ function Editor({
       purpose="form"
     >
       <EditorContent
-        source={source}
         title={title}
         header={
           <FormDialogHeader
@@ -252,9 +276,9 @@ function Editor({
  */
 function useSave(
   source: ConfigSource,
-  baseline: unknown,
+  write: (spec: unknown) => Promise<unknown>,
   action: Action,
-  then: { onSaved: () => void; onRefused: () => void },
+  then: { onSaved: () => void; onRefused: () => void; onRejected: (draft: string) => void },
 ) {
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
@@ -270,7 +294,7 @@ function useSave(
       setSaving(true);
       setError("");
       try {
-        await write(source, baseline, next);
+        await write(JSON.parse(next));
         saved = true;
       } catch (e) {
         if (!mounted.current) return;
@@ -278,7 +302,9 @@ function useSave(
           then.onRefused();
           throw e;
         }
-        setError(failureNotice(e)?.message ?? "");
+        const failure = configSaveFailure(e, next);
+        setError(failure?.message ?? failureNotice(e)?.message ?? "");
+        if (failure) then.onRejected(failure.draft);
       } finally {
         if (mounted.current) setSaving(false);
         await queryClient.invalidateQueries({ queryKey: serverKeys.config });
@@ -294,7 +320,6 @@ function useSave(
 }
 
 function EditorBody({
-  source,
   header,
   before,
   text,
@@ -304,7 +329,6 @@ function EditorBody({
   isSaving,
   error,
 }: {
-  source: ConfigSource;
   header: ReactNode;
   before: string;
   text: string;
@@ -320,12 +344,11 @@ function EditorBody({
 
   const review = () => {
     if (text === before) return setFieldError(t("app.editor.noChanges"));
-    if ("path" in source)
-      try {
-        JSON.parse(text);
-      } catch {
-        return setFieldError(t("app.editor.invalidJson"));
-      }
+    try {
+      JSON.parse(text);
+    } catch {
+      return setFieldError(t("app.editor.invalidJson"));
+    }
     setReviewed(text);
   };
 
@@ -338,9 +361,9 @@ function EditorBody({
             {error && <Banner status="error" title={error} />}
             {reviewed === null ? (
               <CodeEditor
-                label={t("app.editor.text", { format: format(source) })}
+                label={t("app.editor.text", { format: "JSON" })}
                 isLabelHidden
-                language={"path" in source ? "json" : "yaml"}
+                language="json"
                 value={text}
                 onChange={(value) => {
                   onEdit(value);
@@ -349,7 +372,7 @@ function EditorBody({
                 status={fieldError ? { type: "error", message: fieldError } : undefined}
               />
             ) : (
-              <ReviewPane source={source} diff={diffText(before, reviewed)} />
+              <ReviewPane diff={diffText(before, reviewed)} />
             )}
           </VStack>
         </LayoutContent>
@@ -413,16 +436,10 @@ function EditorFooter({
   );
 }
 
-function ReviewPane({ source, diff }: { source: ConfigSource; diff: string }) {
+function ReviewPane({ diff }: { diff: string }) {
   return (
     <CodeColors>
-      <CodeBlock
-        code={diff}
-        language={format(source).toLowerCase()}
-        isDiff
-        hasCopyButton={false}
-        width="100%"
-      />
+      <CodeBlock code={diff} language="json" isDiff hasCopyButton={false} width="100%" />
     </CodeColors>
   );
 }

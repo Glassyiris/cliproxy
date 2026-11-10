@@ -25,20 +25,20 @@ reviews:
   path_instructions:
     - path: "crates/**/*.rs"
       instructions: |
-        - Check that behaviour matches Go CLIProxyAPI v8.0.35 (commit ae3ee3be): HTTP routes, status codes, response shapes and headers, config.yaml and credential file formats, and the v8 Management API. Flag a difference that has no entry in docs/DIFFERENCES-FROM-GO.md or an explicit partial or missing item in docs/parity-audit/manual.tsv.
-        - Check that a Rust value never silently differs from Go's for the same input. Refusing an input Go accepts is acceptable only with a DIFFERENCES-FROM-GO.md entry.
+        - Go CLIProxyAPI parity is not required. Review the current contract in AGENTS.md; changes to routes, configuration or responses must migrate every affected dashboard, TUI, test and documentation caller. Existing Go goldens may be updated or deleted without adding a differences document entry.
+        - Check that SQLite remains the sole durable authority for configuration and OAuth credentials: YAML is a one-time import, config writes use /admin/v1 resources and atomic revisions, and configuration restore cannot restore revoked credentials. Preserve versioned plugin raw configuration and OAuth-only import scope.
         - Check that request preparation and config loading stay linear in input size: flag code that rescans a JSON body or YAML document for each element.
-        - Check that tests use local mock upstreams and a private auth-dir, and cannot reach the network or ~/.cli-proxy-api.
+        - Check that tests use local mock upstreams, a private SQLite database and a private auth-dir for legacy imports, and cannot reach the network, real databases or ~/.cli-proxy-api.
     - path: "{crates/cpa-exec/src/claude.rs,crates/cpa-exec/src/claude/**,crates/cpa-translate/src/*claude*.rs,crates/cpa-server/src/claude.rs,crates/cpa-common/src/cache.rs,crates/cpa-common/src/signature/claude*.rs}"
       instructions: |
         - Check every change to the bytes sent to Claude upstream: system blocks, tool order and definitions, message content, cache_control placement, headers and beta flags, field order and whitespace. Any change before the last cache breakpoint invalidates prompt caching for existing sessions; flag it unless the PR description states it.
         - Check that bodies that pass through are forwarded byte for byte and not re-serialized.
         - Check that no keepalive or other extra inference request is added.
-    - path: "{crates/cpa-core/src/credential.rs,crates/cpa-core/src/config.rs,crates/cpa-core/src/config/**,crates/cpa-server/src/management.rs,crates/cpa-server/src/management/**,crates/cpa-store/**,crates/**/*auth*.rs,crates/**/*oauth*.rs,crates/**/*login*.rs,crates/**/*tokens*.rs,crates/**/*siwc*.rs,crates/cpa-server/src/realtime/secrets.rs}"
+    - path: "{crates/cpa-core/src/credential.rs,crates/cpa-core/src/config.rs,crates/cpa-core/src/config/**,crates/cpa-server/src/management.rs,crates/cpa-server/src/management/**,crates/cpa-server/src/config_store.rs,crates/cpa-server/src/config_store/**,crates/cpa-server/src/credential_store.rs,crates/**/*auth*.rs,crates/**/*oauth*.rs,crates/**/*login*.rs,crates/**/*tokens*.rs,crates/**/*siwc*.rs,crates/cpa-server/src/realtime/secrets.rs}"
       instructions: |
-        - Check that credential and config writes never log, echo or return secrets: API keys, client keys, tokens, refresh tokens, cookies and management keys.
-        - Check that credential and config writes are safe against concurrent edits: another writer, a reload or a token refresh must not lose an update or leave a partly written file.
-        - Check that a refresh token is never spent twice where Go would spend it once.
+        - Check that credentials and client keys never reach logs or the wrong side. Ordinary /admin/v1 reads, revisions, effective config, credential-list API-key account values and per-key usage must stay masked; explicit secret exports, credential downloads, usage queue/RESP records and trusted plugin host callbacks retain their documented plaintext access.
+        - Check that SQLite config commits and credential writes are atomic and safe against concurrent writers, runtime publication and token refresh. Credential state must remain separate from config revisions, and retained secrets must not move to a changed destination without plaintext re-entry. Plugin configs may retain $secret only as the whole opaque config; reject nested placeholders.
+        - Check that refresh-token rotation is serialized across processes sharing a database, so a refresh token is never spent twice.
     - path: "{crates/**/*refresh*.rs,crates/**/watching.rs,crates/**/runtime.rs,crates/**/*siwc*.rs,crates/cpa-server/src/cooldown_store.rs,crates/cpa-server/src/management.rs,crates/cpa-plugin/src/**,crates/cpa-home/src/**}"
       instructions: |
         - Check lock, refresh and reload code for races and deadlocks: lock order, locks held across an await or blocking I/O, waits that shutdown cannot cancel, and state read before a lock and used after it.

@@ -1,409 +1,61 @@
-//! Hot reload of the auth directory and of config revisions committed by another
-//! process (Go internal/watcher, for the auth part).
+//! Reloads committed SQLite configuration and credentials, plus plugin auth changes.
 //!
-//! The watcher sleeps until the operating system reports a change in the auth folder or
-//! the config database's folder ([`crate::fs_events`]). It then stats the top-level
-//! `*.json` auth files every 50 ms, hashing only files whose metadata changed or that
-//! were modified in the last two seconds (git's racy timestamp rule), until the change
-//! has been stable for one tick and is applied; removals wait 50 ms for a replacement
-//! (Go `replaceCheckDelay`). While nothing changes it does no file work and sets no
-//! timer. As in Go, changes made by another machine on a network or FUSE file system
-//! raise no event and are seen with the next local change.
+//! One task checks the config store's `data_version` every second. Management writes
+//! publish configuration when they commit; commits from another connection wake the
+//! credential reload through `Management::reload_config`. Plugin auth changes and
+//! credential notifications wake the same task without polling working files.
 //!
-//! Config writes through the management API publish when they commit. A revision
-//! another process commits is noticed within a second ([`poll_config`]).
-use cpa_core::gostr::GoStr;
-use std::collections::{BTreeMap, HashSet};
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::{Path, PathBuf};
+//! Credential working files are caches for provider/plugin APIs that require paths.
+//! They are restored and written under the database's write lock; hand edits are not
+//! supported or observed. Scans read SQLite source documents. Plugin parsing runs
+//! outside management/runtime locks, then publication under `Management::disk` keeps
+//! incomplete documents and rejects scans made stale by a concurrent credential save.
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::{Arc, PoisonError};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
 
-use cpa_core::config::{Config, credentials};
+use cpa_core::config::credentials;
 use cpa_core::credential::{Credential, Source};
-use sha2::{Digest, Sha256};
 
-use crate::fs_events::{Events, Targets};
 use crate::management::Management;
 
-const TICK: Duration = Duration::from_millis(50);
-/// Go `configReloadDebounce`.
-const CONFIG_SETTLE: Duration = Duration::from_millis(150);
-/// Go `replaceCheckDelay`: one tick.
-const AUTH_SETTLE: Duration = Duration::from_millis(50);
-/// Files modified this recently are re-hashed even when their metadata is unchanged:
-/// coarse file timestamps cannot tell two quick same-size writes apart.
-const RACY: Duration = Duration::from_secs(2);
-
-type Hash = [u8; 32];
-
-/// Content identity of the auth files the watcher observes.
-#[derive(Clone, Default, PartialEq, Eq)]
-struct Snapshot {
-    auth: BTreeMap<PathBuf, Hash>,
-}
-
-/// File metadata that changes with any write or replacement.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Stat {
-    len: u64,
-    ino: u64,
-    mtime: (i64, i64),
-    ctime: (i64, i64),
-}
-
-impl Stat {
-    #[cfg(unix)]
-    fn of(meta: &std::fs::Metadata) -> Self {
-        use std::os::unix::fs::MetadataExt;
-        Self {
-            len: meta.len(),
-            ino: meta.ino(),
-            mtime: (meta.mtime(), meta.mtime_nsec()),
-            ctime: (meta.ctime(), meta.ctime_nsec()),
-        }
-    }
-
-    /// ponytail: Windows exposes no stable file identity or change time here, so a
-    /// same-size replacement with an unchanged modification time older than two
-    /// seconds goes unnoticed until its next change.
-    #[cfg(not(unix))]
-    fn of(meta: &std::fs::Metadata) -> Self {
-        let mtime = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or((0, 0), |d| (d.as_secs() as i64, i64::from(d.subsec_nanos())));
-        Self {
-            len: meta.len(),
-            ino: 0,
-            mtime,
-            ctime: (0, 0),
-        }
-    }
-}
-
-/// Hashes by path, reused while a file's metadata is unchanged and not racy.
-#[derive(Default)]
-struct HashCache(BTreeMap<PathBuf, (Stat, Hash)>);
-
-impl HashCache {
-    /// The content hash of `path`, or `None` when it cannot be read.
-    fn hash(&mut self, path: &Path, meta: &std::fs::Metadata, now: SystemTime) -> Option<Hash> {
-        let stat = Stat::of(meta);
-        let racy = meta
-            .modified()
-            .map_or(true, |m| now.duration_since(m).map_or(true, |age| age < RACY));
-        if let Some((cached, hash)) = self.0.get(path)
-            && *cached == stat
-            && !racy
-        {
-            return Some(*hash);
-        }
-        let data = std::fs::read(path).ok()?;
-        let hash: Hash = Sha256::digest(&data).into();
-        self.0.insert(path.to_owned(), (stat, hash));
-        Some(hash)
-    }
-}
-
-fn is_auth_json(path: &Path) -> bool {
-    // Go matches the extension case-insensitively when scanning.
-    path.file_name()
-        .is_some_and(|n| n.to_string_lossy().go_lower().ends_with(".json"))
-}
-
-fn observe(state: &Management, cache: &mut HashCache) -> Snapshot {
-    let now = SystemTime::now();
-    let mut seen = Vec::new();
-    let mut auth = BTreeMap::new();
-    let dir = state.rt.config().auth_dir.clone();
-    // An unreadable auth dir is an empty set, as in reload.
-    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let path = entry.path();
-        let Ok(meta) = std::fs::metadata(&path) else { continue };
-        if !meta.is_file() || !is_auth_json(&path) {
-            continue;
-        }
-        // An unreadable file is present but unknown; reload skips it.
-        let hash = cache.hash(&path, &meta, now).unwrap_or_default();
-        seen.push(path.clone());
-        auth.insert(path, hash);
-    }
-    cache.0.retain(|path, _| seen.contains(path));
-    Snapshot { auth }
-}
-
-/// Go's per-event log lines for auth files that changed between two snapshots.
-fn log_auth_changes(before: &Snapshot, after: &Snapshot) {
-    let name = |p: &Path| p.file_name().unwrap_or_default().to_string_lossy().into_owned();
-    for (path, hash) in &after.auth {
-        let op = match before.auth.get(path) {
-            None => "CREATE",
-            Some(old) if old != hash => "WRITE",
-            Some(_) => continue,
-        };
-        tracing::info!("auth file changed ({op}): {}, processing incrementally", name(path));
-    }
-    for path in before.auth.keys().filter(|p| !after.auth.contains_key(*p)) {
-        tracing::info!("auth file changed (REMOVE): {}, processing incrementally", name(path));
-    }
-}
+const CONFIG_POLL: Duration = Duration::from_secs(1);
 
 pub fn start(state: &Arc<Management>) -> tokio::task::JoinHandle<()> {
-    let first = targets(state, None);
-    // A plugin auth provider loaded, unloaded or fused changes what auth files load to
-    // with no file changing: the change wakes this task, which reloads the auth folder.
     let plugin_auth = Arc::new(tokio::sync::Notify::new());
     credentials::on_plugin_auth_change(Some(Arc::new({
         let plugin_auth = plugin_auth.clone();
         move || plugin_auth.notify_one()
     })));
-    let weak = Arc::downgrade(state);
-    poll_config(weak.clone());
-    let state = state.clone();
+    let credential_changes = state.credential_changes.clone();
+    let state = Arc::downgrade(state);
+    // Load once at startup, including any plugin providers installed before the hook.
+    plugin_auth.notify_one();
     tokio::spawn(async move {
-        // Off the request threads: setup can block on a slow network path, and on
-        // Windows it waits for the watch thread. A panic in the setup leaves the
-        // 2-second poll.
-        let started = tokio::task::spawn_blocking(move || {
-            let snapshot = {
-                let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-                state.rt.config()
-            };
-            let events = catch_unwind(AssertUnwindSafe(|| Events::new(&first))).unwrap_or_default();
-            (snapshot, events)
-        })
-        .await;
-        let Ok((mut previous_config, mut events)) = started else {
-            return;
-        };
-        let state = weak;
-        let mut cache = HashCache::default();
-        // The state last reloaded; the first stable observation reloads once, as Go's
-        // watcher reloads clients when it starts.
-        let mut applied: Option<Snapshot> = None;
-        let mut observed: Option<Snapshot> = None;
-        let mut since = Instant::now();
-        // `credentials::plugin_auth_epoch` when the last reload started.
-        let mut applied_epoch = credentials::plugin_auth_epoch();
+        let mut poll = tokio::time::interval_at(tokio::time::Instant::now() + CONFIG_POLL, CONFIG_POLL);
+        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            let woke = applied.is_some() && applied == observed && applied_epoch == credentials::plugin_auth_epoch();
-            if woke {
-                tokio::select! {
-                    () = events.changed() => {}
-                    () = plugin_auth.notified() => {}
-                }
-            } else {
-                tokio::time::sleep(TICK).await;
-            }
-            let Some(state) = state.upgrade() else {
-                return;
+            let poll_config = tokio::select! {
+                _ = poll.tick() => true,
+                () = plugin_auth.notified() => false,
+                () = credential_changes.notified() => false,
             };
-            // After an event, retarget before looking: a file that lands before the new
-            // watch exists shows up in this look, and one that lands after raises an
-            // event. Cost per wake: a few watch calls (one stat per watched file on
-            // macOS), on the blocking pool.
-            let wake_targets = woke.then(|| targets(&state, observed.as_ref()));
-            // A panic in the work is caught inside the closure, so `events` always comes
-            // back and notifications stay on.
-            let looked = tokio::task::spawn_blocking({
-                let state = state.clone();
-                move || {
-                    let snapshot = catch_unwind(AssertUnwindSafe(|| {
-                        if let Some(t) = wake_targets {
-                            events.retarget(&t);
-                        }
-                        let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-                        observe(&state, &mut cache)
-                    }));
-                    (snapshot.ok(), cache, events)
+            let Some(state) = state.upgrade() else { return };
+            let plugin_auth = plugin_auth.clone();
+            let reloaded = tokio::task::spawn_blocking(move || {
+                if poll_config {
+                    state.reload_config();
+                } else if let Err(error) = reload_with_notify(&state, Some(&plugin_auth)) {
+                    tracing::error!("failed to reload config: {error}");
                 }
             })
             .await;
-            let snapshot = match looked {
-                Ok((snapshot, returned_cache, returned_events)) => {
-                    cache = returned_cache;
-                    events = returned_events;
-                    snapshot
-                }
-                // Cancelled at shutdown.
-                Err(_) => {
-                    cache = HashCache::default();
-                    events = Events::default();
-                    None
-                }
-            };
-            let Some(snapshot) = snapshot else {
-                tracing::error!(
-                    "config watcher: looking at the config and auth files failed; retrying on the next change"
-                );
-                continue;
-            };
-            if observed.as_ref() != Some(&snapshot) {
-                observed = Some(snapshot);
-                since = Instant::now();
-                continue;
+            if let Err(error) = reloaded {
+                tracing::error!("config watcher: reload failed unexpectedly: {error}");
             }
-            let Some(current) = observed.clone() else { continue };
-            let epoch = credentials::plugin_auth_epoch();
-            if applied.as_ref() == Some(&current) && applied_epoch == epoch {
-                continue;
-            }
-            // The first observation reads the stored config once, as Go's watcher reloads
-            // clients when it starts.
-            let read_config = applied.is_none();
-            if since.elapsed() < if read_config { CONFIG_SETTLE } else { AUTH_SETTLE } {
-                continue;
-            }
-            if let Some(before) = &applied {
-                log_auth_changes(before, &current);
-            }
-            // The reload may move auth-dir, and new auth files need their own watches on
-            // macOS: retarget after it, on the same blocking thread. A change that lands
-            // before a new watch exists is caught by the extra look `Events` then makes.
-            applied_epoch = epoch;
-            let reloaded = tokio::task::spawn_blocking({
-                let state = state.clone();
-                let current = current.clone();
-                move || {
-                    let loaded = catch_unwind(AssertUnwindSafe(|| reload_config(&state, read_config, &current)));
-                    let _ = catch_unwind(AssertUnwindSafe(|| {
-                        events.retarget(&targets(&state, Some(&current)));
-                    }));
-                    (loaded.map_err(|_| ()), events)
-                }
-            })
-            .await;
-            let (loaded, read) = match reloaded {
-                Ok((loaded, returned)) => {
-                    events = returned;
-                    match loaded {
-                        Ok((loaded, read)) => (Ok(loaded), Some(read)),
-                        Err(()) => (Err(()), None),
-                    }
-                }
-                Err(_) => {
-                    events = Events::default();
-                    (Err(()), None)
-                }
-            };
-            if loaded.is_err() {
-                tracing::error!("config watcher: reload failed unexpectedly; retrying on the next change");
-            }
-            if let Some(before) = &applied {
-                persist_changes(&state, before, &current);
-            }
-            match loaded {
-                Ok(Ok(Some(next_config))) => {
-                    // The first look at the config the runtime started with is quiet.
-                    if next_config.document != previous_config.document {
-                        crate::config_diff::log(&previous_config, &next_config);
-                        tracing::info!("config successfully reloaded, triggering client reload");
-                    }
-                    previous_config = Arc::new(next_config);
-                }
-                Ok(Err(error)) if applied.is_none() => tracing::error!("failed to reload config: {error}"),
-                _ => {}
-            }
-            // Applied once either way: a failed config load retries on its next change,
-            // as Go retries on its next file event, rather than every tick.
-            applied = Some(record(&mut cache, current, read));
         }
     })
-}
-
-/// What a reload applied: what it read, not what was observed before it, so a write
-/// landing in between is reloaded when it is next observed (Go records the parsed
-/// config's `SourceHash` and forgets the hash of an incomplete auth read). When the two
-/// differ, cached hashes may be the stale ones (a same-size write with the same
-/// modification time, or a lasting read denial), so the next observation reads afresh.
-fn record(cache: &mut HashCache, observed: Snapshot, read: Option<Snapshot>) -> Snapshot {
-    let read = read.unwrap_or_else(|| observed.clone());
-    if read != observed {
-        *cache = HashCache::default();
-    }
-    read
-}
-
-/// What the watch should cover: the auth folder of the published config and the auth
-/// files last seen there. The config database's folder is watched too; its writes are
-/// noticed by [`poll_config`].
-fn targets(state: &Management, current: Option<&Snapshot>) -> Targets {
-    let auth_dir = state.rt.config().auth_dir.clone();
-    Targets {
-        // An in-memory store (tests) has no file: a name in the auth folder stands in.
-        config: state
-            .config
-            .path()
-            .map_or_else(|| auth_dir.join(".config-store"), Path::to_owned),
-        auth_dir,
-        files: current.map(|s| s.auth.keys().cloned().collect()).unwrap_or_default(),
-    }
-}
-
-/// How often [`poll_config`] asks the database whether another process committed.
-const CONFIG_POLL: Duration = Duration::from_secs(1);
-
-/// Publishes config revisions another process (the CLI) commits, within a second.
-/// One `PRAGMA data_version` per tick; nothing runs for an in-memory store.
-fn poll_config(state: std::sync::Weak<Management>) {
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(CONFIG_POLL).await;
-            let Some(state) = state.upgrade() else { return };
-            if state.config.path().is_none() {
-                return;
-            }
-            let _ = tokio::task::spawn_blocking(move || state.reload_config()).await;
-        }
-    });
-}
-
-/// Go `persistAuthAsync`: with a remote store, the auth files that changed between two
-/// applied snapshots are pushed in the background. A write goes as "Sync auth <name>"
-/// unless the file is empty or not a JSON object; a removal goes as "Remove auth
-/// <name>". The config lives in the config database and is not pushed.
-// ponytail: Go also skips files whose JSON does not decode into its `Auth` struct or
-// whose weight is invalid; here any JSON object is pushed.
-fn persist_changes(state: &Management, before: &Snapshot, after: &Snapshot) {
-    let Some(store) = state.store.clone() else {
-        return;
-    };
-    let mut auth = Vec::new();
-    for (path, hash) in &after.auth {
-        if before.auth.get(path) == Some(hash) {
-            continue;
-        }
-        let object = std::fs::read(path)
-            .ok()
-            .filter(|data| !data.is_empty())
-            .is_some_and(|data| serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&data).is_ok());
-        if object {
-            auth.push(("Sync", path.clone()));
-        }
-    }
-    for path in before.auth.keys().filter(|p| !after.auth.contains_key(*p)) {
-        auth.push(("Remove", path.clone()));
-    }
-    if auth.is_empty() {
-        return;
-    }
-    tokio::spawn(async move {
-        let bound = Duration::from_secs(30);
-        for (verb, path) in auth {
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let message = format!("{verb} auth {name}");
-            match tokio::time::timeout(bound, store.persist_auth_files(message, vec![path])).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => tracing::error!("failed to persist auth changes: {error:#}"),
-                Err(_) => tracing::error!("failed to persist auth changes: context deadline exceeded"),
-            }
-        }
-    });
 }
 
 /// Why [`reload`] kept the last good config: the stored one does not compile.
@@ -418,65 +70,44 @@ impl std::fmt::Display for ReloadError {
 
 impl std::error::Error for ReloadError {}
 
-/// Blocking reload of the stored config and the auth folder. Shared with
-/// deterministic tests; no provider calls are made.
-///
-/// A config that does not compile keeps the last good config, and the auth directory
-/// is reconciled against it anyway.
+/// Blocking reload of stored config and credential documents, shared with deterministic
+/// tests. An invalid config keeps the last good config while credentials reconcile.
 pub fn reload(state: &Management) -> Result<(), ReloadError> {
-    reload_config(state, true, &Snapshot::default()).0.map(|_| ())
+    reload_with_notify(state, None)
 }
 
-/// Return the config actually accepted under the disk lock, not a later runtime
-/// snapshot possibly replaced by management (None is an auth-only or empty reload), and
-/// the hashes of what this reload read. Entries it did not read are as `observed`.
-fn reload_config(
-    state: &Management,
-    read_config: bool,
-    observed: &Snapshot,
-) -> (Result<Option<Config>, ReloadError>, Snapshot) {
-    // Plugin auth providers parse before the lock is taken, so one can save an auth or
-    // wait on its own locks meanwhile; the scan under the lock takes their answers for
-    // the bytes it reads and defers a file changed since (Go's synthesizer holds no
-    // lock). One atomic load while no plugin offers an auth provider.
-    if credentials::plugin_auth_parser_active() {
-        credentials::preparse_auth_dir(&state.rt.config());
-    }
-    let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-    let mut read = Snapshot { auth: BTreeMap::new() };
-    let (mut config, config_error, accepted) = match read_config.then(|| state.stored_config()) {
-        None => ((*state.rt.config()).clone(), None, false),
-        Some(Ok(config)) => (config, None, true),
-        Some(Err(fault)) => ((*state.rt.config()).clone(), Some(ReloadError(fault)), false),
-    };
-    state.lock_auth_dir(&mut config);
-    let mut scan = credentials::scan_auth_dir(&config);
-    keep_incomplete(state, &mut scan.credentials, &scan.incomplete);
-    read.auth = scan.read.clone();
-    for path in &scan.unapplied {
-        read.auth.remove(path);
-    }
-    // A file neither could read stays as observed; recording it as missing would
-    // reload it on every tick.
-    for (path, hash) in &observed.auth {
-        if *hash == Hash::default() {
-            read.auth.entry(path.clone()).or_insert(*hash);
+fn reload_with_notify(state: &Management, plugin_auth: Option<&tokio::sync::Notify>) -> Result<(), ReloadError> {
+    // Plugin callbacks may save credentials or wait on the async runtime. Never parse
+    // while holding `disk` or the store's reconciliation gate.
+    if !state.rt.store().is_home() && credentials::plugin_auth_parser_active() {
+        let db = state.rt.store().credential_backend();
+        if let Err(error) = db.preparse(&state.rt.config()) {
+            tracing::error!("credential database: preparsing source documents failed: {error:#}");
         }
     }
-    let result = accepted.then(|| config.clone());
-    state.publish(config, Some(scan));
-    let result = match config_error {
-        Some(error) => Err(error),
-        None => Ok(result),
+    let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+    let (mut config, error) = match state.stored_config() {
+        Ok(config) => (config, None),
+        Err(fault) => ((*state.rt.config()).clone(), Some(ReloadError(fault))),
     };
-    (result, read)
+    state.lock_auth_dir(&mut config);
+    let mut scan = state.scan_credentials(&config);
+    keep_incomplete(state, &mut scan.credentials, &scan.incomplete);
+    // A source can change between preparse and scan, including through a plugin's
+    // own save callback. Retry via Notify even when no later database commit occurs.
+    let retry = !scan.deferred.is_empty() || !scan.unapplied.is_empty();
+    state.publish(config, Some(scan));
+    if retry && let Some(plugin_auth) = plugin_auth {
+        plugin_auth.notify_one();
+    }
+    match error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
-/// An empty or half-written file is not a deletion (Go 7484a521): keep the
-/// last good credentials of the files the scan found incomplete. Deciding from the scan's
-/// own read, never a second one, means a file completed after the scan is picked up by
-/// the reload its write triggers instead of being dropped now. Removal and valid JSON
-/// without a credential are reconciled normally.
+/// Keep the last good credentials for source documents this scan found incomplete.
+/// Use the scan's own result: another save may have completed the document since.
 fn keep_incomplete(state: &Management, files: &mut Vec<Credential>, incomplete: &HashSet<PathBuf>) {
     for existing in state.rt.store().snapshot() {
         if let Source::File(path) = &existing.source
@@ -492,13 +123,16 @@ fn keep_incomplete(state: &Management, files: &mut Vec<Credential>, incomplete: 
 mod tests {
     use super::*;
 
-    fn state() -> (Arc<Management>, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("cpa-watch-outcome-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("config.yaml");
-        std::fs::write(&path, format!("oauth: {{auth-dir: {}}}\n", dir.display())).unwrap();
-        let rt = Arc::new(crate::testing::runtime(
-            Config::load(&path).unwrap(),
+    fn state() -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>, PathBuf) {
+        let root = std::env::temp_dir().join(format!("cpa-watch-outcome-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Arc::new(crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap());
+        store.import_yaml("oauth: {}\n", "test", "").unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let mut config = store.load().unwrap().config;
+        config.auth_dir = db.auth_dir();
+        let rt = Arc::new(crate::testing::runtime_with_db(
+            config,
             Vec::new(),
             cpa_exec::Executors {
                 claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
@@ -507,164 +141,167 @@ mod tests {
                 openai: Default::default(),
                 google: Default::default(),
             },
+            db.clone(),
         ));
-        (Management::new(rt, path), dir)
+        (Management::new(rt, store), db, root)
     }
 
-    /// Also Go `TestSetConfigAppliesCurrentFileAndNonFileConfigs_Issue6631`: an external
-    /// edit is published by the reload that read it, and a config that did not come from
-    /// the file (a management or Home publication) still applies.
     #[tokio::test]
-    async fn accepted_config_is_captured_and_skipped_reloads_do_not_advance_it() {
-        let (state, dir) = state();
-        let config = |port| format!("port: {port}\noauth: {{auth-dir: {}}}\n", dir.display());
-        std::fs::write(&state.path, config(9001)).unwrap();
-        let accepted = reload_config(&state, true, &Snapshot::default()).0.unwrap().unwrap();
-        state.rt.publish_config(Config::parse(&config(9002)).unwrap());
-        assert_eq!(accepted.port, 9001); // Not the later management publication.
-        std::fs::write(&state.path, "").unwrap();
-        assert!(reload_config(&state, true, &Snapshot::default()).0.unwrap().is_none());
-        assert_eq!(state.rt.config().port, 9002);
-        std::fs::write(&state.path, config(9003)).unwrap();
-        assert!(reload_config(&state, false, &Snapshot::default()).0.unwrap().is_none()); // Auth-only event.
-        assert_eq!(state.rt.config().port, 9002);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// One watcher reload as `start` makes it: reload what was observed, then record
-    /// what was applied.
-    fn step(state: &Management, cache: &mut HashCache, read_config: bool, observed: &Snapshot) -> Snapshot {
-        let (_, read) = reload_config(state, read_config, observed);
-        record(cache, observed.clone(), Some(read))
-    }
-
-    /// The watcher records what its reload read, not what it observed before: a write
-    /// landing after the read is reloaded when next observed, even when it restores
-    /// bytes observed earlier (Go 1631875b
-    /// `TestReloadConfigIfChangedReloadsWriteLandingDuringReload_Issue6631` and
-    /// `TestReloadConfigIfChangedReloadsAfterWriteBetweenHashAndLoad_Issue6631`), and an
-    /// auth file truncated before the scan and finished after it is reloaded (Go
-    /// 7484a521 forgets the hash of an incomplete read). Go
-    /// `TestReloadConfigIfChangedSerializesConcurrentReloads_Issue6631` has no Rust
-    /// interleaving: one watcher task reloads, under the disk lock.
-    #[tokio::test]
-    async fn the_watcher_records_what_its_reload_read_not_what_it_observed() {
-        let (state, dir) = state();
-        let mut cache = HashCache::default();
-        let config = |port| format!("port: {port}\noauth: {{auth-dir: {}}}\n", dir.display());
-        std::fs::write(&state.path, config(9001)).unwrap();
-        let observed = observe(&state, &mut cache);
-        std::fs::write(&state.path, config(9002)).unwrap(); // Lands before the reload reads.
-        let applied = step(&state, &mut cache, true, &observed);
-        assert_eq!(state.rt.config().port, 9002);
-        std::fs::write(&state.path, config(9001)).unwrap(); // Restores the observed bytes.
-        let restored = observe(&state, &mut cache);
-        assert!(restored != applied, "the restore must be reloaded");
-        step(&state, &mut cache, true, &restored);
-        assert_eq!(state.rt.config().port, 9001);
-
-        let file = dir.join("a.json");
-        let account = |email: &str| format!(r#"{{"type":"codex","email":"{email}"}}"#);
-        let email = |state: &Management| {
-            let creds = state.rt.store().snapshot();
-            let cred = creds.iter().find(|c| c.id == "a.json").expect("a.json is loaded");
-            cred.str("email").unwrap_or_default().to_owned()
-        };
-        std::fs::write(&file, account("a@example.com")).unwrap();
-        reload(&state).unwrap();
-        std::fs::write(&file, account("b@example.com")).unwrap();
-        let observed = observe(&state, &mut cache);
-        std::fs::write(&file, "").unwrap(); // Truncated before the scan.
-        let applied = step(&state, &mut cache, false, &observed);
-        assert_eq!(email(&state), "a@example.com"); // Kept while incomplete.
-        std::fs::write(&file, account("b@example.com")).unwrap(); // Finished after it.
-        let finished = observe(&state, &mut cache);
-        assert!(
-            finished == observed && finished != applied,
-            "the finished write must be reloaded"
-        );
-        let applied = step(&state, &mut cache, false, &finished);
-        assert_eq!(email(&state), "b@example.com");
-        assert!(observe(&state, &mut cache) == applied, "nothing left to reload");
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// A config whose metadata reads as empty but whose contents cannot be read is
-    /// recorded as the observation sees it, unreadable, so it does not reload every
-    /// tick; it reloads once it changes.
-    #[cfg(target_os = "linux")]
-    #[tokio::test]
-    async fn an_unreadable_empty_config_converges() {
-        let (state, dir) = state();
-        let mut cache = HashCache::default();
-        let port = state.rt.config().port;
-        std::fs::remove_file(&state.path).unwrap();
-        // Zero bytes by its metadata, and every read fails (EIO), even for root.
-        std::os::unix::fs::symlink("/proc/self/mem", &state.path).unwrap();
-        let observed = observe(&state, &mut cache);
-        assert_eq!(observed.config, None);
-        let applied = step(&state, &mut cache, true, &observed);
-        assert!(observe(&state, &mut cache) == applied, "no reload without a change");
-        assert_eq!(state.rt.config().port, port);
-        std::fs::remove_file(&state.path).unwrap();
-        std::fs::write(
-            &state.path,
-            format!("port: 9005\noauth: {{auth-dir: {}}}\n", dir.display()),
-        )
-        .unwrap();
-        let changed = observe(&state, &mut cache);
-        assert!(changed != applied);
-        step(&state, &mut cache, true, &changed);
-        assert_eq!(state.rt.config().port, 9005);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// A cached hash can be stale when a same-size write keeps the metadata (Windows has
-    /// no inode or change time): once the reload read something else, the next
-    /// observation reads afresh and agrees with it instead of reloading every tick.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_stale_cached_hash_does_not_reload_forever() {
-        let (state, dir) = state();
-        let mut cache = HashCache::default();
-        let file = dir.join("a.json");
-        std::fs::write(&file, r#"{"type":"codex","email":"b@example.com"}"#).unwrap();
-        let old = SystemTime::now() - Duration::from_secs(60);
-        std::fs::File::options()
-            .write(true)
-            .open(&file)
-            .unwrap()
-            .set_modified(old)
+    async fn worker_threads_changes_report_restart_required() {
+        let (state, db, root) = state();
+        let (_, restart) = state
+            .commit_with(|store| {
+                store.import_yaml("worker-threads: 4\noauth: {}\n", "test", "change startup worker count")
+            })
             .unwrap();
-        // Not racy, and cached for an earlier same-size write with the same metadata.
-        let meta = std::fs::metadata(&file).unwrap();
-        cache.0.insert(file.clone(), (Stat::of(&meta), [7; 32]));
-        let observed = observe(&state, &mut cache);
-        assert_eq!(observed.auth[&file], [7; 32]);
-        let applied = step(&state, &mut cache, false, &observed);
+        assert_eq!(restart, std::env::var_os("TOKIO_WORKER_THREADS").is_none());
+        let (_, restart) = state
+            .commit_with(|store| store.import_yaml("oauth: {}\n", "test", "restore startup worker count"))
+            .unwrap();
+        assert!(!restart, "restoring the startup worker setting needs no restart");
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn database_watcher_parks_and_polls_credential_commits() {
+        let (state, db, root) = state();
+        let canonical = br#"{"type":"codex","email":"canonical@example.invalid"}"#;
+        db.save(&db.auth_dir().join("a.json"), canonical).unwrap();
+        db.save(&db.auth_dir().join("sub/nested.json"), canonical).unwrap();
+        db.save(&root.join("external.json"), canonical).unwrap();
+        let watcher = start(&state);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while state.rt.store().get("sub/nested.json").is_none() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("nested database document was not loaded");
+        let parked = state.rt.config();
+        tokio::time::sleep(CONFIG_POLL * 2).await;
         assert!(
-            state
+            Arc::ptr_eq(&parked, &state.rt.config()),
+            "an idle database republished config"
+        );
+        let external = crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap();
+        let head = external.snapshot().unwrap().0;
+        external
+            .conn()
+            .execute(
+                "UPDATE credential_document SET bytes = ?1 WHERE name = 'local:sub/nested.json'",
+                [br#"{"type":"codex","email":"external@example.invalid"}"#.as_slice()],
+            )
+            .unwrap();
+        assert_eq!(
+            external.snapshot().unwrap().0,
+            head,
+            "credentials do not create config revisions"
+        );
+        tokio::time::timeout(Duration::from_secs(4), async {
+            while state
                 .rt
                 .store()
-                .snapshot()
-                .iter()
-                .any(|c| c.str("email") == Some("b@example.com"))
+                .get("sub/nested.json")
+                .is_none_or(|c| c.str("email") != Some("external@example.invalid"))
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("credential-only commit was not picked up by the database poll");
+        assert_eq!(
+            state.rt.store().get("a.json").unwrap().str("email"),
+            Some("canonical@example.invalid")
         );
-        assert!(observe(&state, &mut cache) == applied, "converges after one reload");
-        std::fs::remove_dir_all(dir).unwrap();
+        assert!(
+            Arc::ptr_eq(&parked, &state.rt.config()),
+            "a credential commit republished config"
+        );
+        watcher.abort();
+        let _ = watcher.await;
+        drop(external);
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
-    /// Go 7484a521: an empty or partial in-place write keeps the credential; valid
-    /// JSON without one, or a removed file, deletes it (also the empty, partial and
-    /// valid-but-empty files of Go `TestFileSynthesizerRecordsIncompleteFiles`).
     #[tokio::test]
-    async fn incomplete_auth_writes_keep_the_credential_until_the_file_is_valid_json() {
-        let (state, dir) = state();
-        let file = dir.join("a.json");
-        let loaded = |state: &Management| state.rt.store().snapshot().iter().any(|c| c.id == "a.json");
-        std::fs::write(&file, r#"{"type":"codex","email":"a@example.com"}"#).unwrap();
-        reload(&state).unwrap();
-        assert!(loaded(&state));
+    async fn credential_notification_reloads_same_connection_saves() {
+        let (state, db, root) = state();
+        let config = state.rt.config();
+        let config_changes = state.rt.subscribe_config();
+        let watcher = start(&state);
+        db.save(
+            &db.auth_dir().join("a.json"),
+            br#"{"type":"codex","email":"a@example.invalid"}"#,
+        )
+        .unwrap();
+        state.credential_changes.notify_one();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while state.rt.store().get("a.json").is_none() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            Arc::ptr_eq(&config, &state.rt.config()),
+            "a credential notification republished config"
+        );
+        assert!(
+            !config_changes.has_changed().unwrap(),
+            "a credential notification woke config subscribers"
+        );
+        watcher.abort();
+        let _ = watcher.await;
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn database_upload_fallback_uses_committed_bytes_without_a_working_file() {
+        let (state, db, root) = state();
+        let path = db.auth_dir().join("fallback.json");
+        let canonical = br#"{"type":"gemini","v":"committed"}"#;
+        db.save(&path, canonical).unwrap();
+        state.fallbacks.lock().unwrap().insert(path.clone());
+        std::fs::remove_file(&path).unwrap();
+        state.publish((*state.rt.config()).clone(), None);
+        assert_eq!(
+            state.rt.store().get("fallback.json").unwrap().metadata["v"],
+            "committed"
+        );
+        assert!(state.fallbacks.lock().unwrap().contains(&path));
+        assert_eq!(db.read(&path).unwrap().unwrap(), canonical);
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_second_store_connection_publishes_on_reload() {
+        let (state, db, root) = state();
+        let external = crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap();
+        external
+            .import_yaml("server: {port: 9002}\noauth: {}\n", "test", "")
+            .unwrap();
+        assert_ne!(state.rt.config().port, 9002);
+        state.reload_config();
+        assert_eq!(state.rt.config().port, 9002);
+        drop(external);
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn incomplete_documents_keep_the_credential_until_valid_json() {
+        let (state, db, root) = state();
+        let file = db.auth_dir().join("a.json");
+        let loaded = || state.rt.store().get("a.json").is_some();
         for (contents, kept) in [
             ("", true),
             (r#"{"type":"codex""#, true),
@@ -672,91 +309,52 @@ mod tests {
             ("null", false),
             ("{}", false),
         ] {
-            std::fs::write(&file, r#"{"type":"codex","email":"a@example.com"}"#).unwrap();
+            db.save(&file, br#"{"type":"codex","email":"a@example.com"}"#).unwrap();
             reload(&state).unwrap();
-            std::fs::write(&file, contents).unwrap();
+            db.save(&file, contents.as_bytes()).unwrap();
             reload(&state).unwrap();
-            assert_eq!(loaded(&state), kept, "{contents:?}");
+            assert_eq!(loaded(), kept, "{contents:?}");
         }
-        std::fs::write(&file, r#"{"type":"codex"}"#).unwrap();
+        db.save(&file, br#"{"type":"codex"}"#).unwrap();
         reload(&state).unwrap();
-        std::fs::remove_file(&file).unwrap();
+        db.delete(&file).unwrap();
         reload(&state).unwrap();
-        assert!(!loaded(&state));
-        std::fs::remove_dir_all(dir).unwrap();
+        assert!(!loaded());
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
-    /// Go 5fc580b1 (TestAuthDeleteFileRemovalClassification, the service delete recheck):
-    /// a removal is decided from the folder when the reload reads it, so a file removed
-    /// and re-created before the reload keeps its credential, and one re-created after a
-    /// reload that dropped it comes back.
     #[tokio::test]
-    async fn a_removed_and_recreated_file_keeps_its_credential() {
-        let (state, dir) = state();
-        let file = dir.join("a.json");
-        let good = |email: &str| format!(r#"{{"type":"codex","email":"{email}"}}"#);
-        let loaded = |state: &Management| {
-            state
-                .rt
-                .store()
-                .snapshot()
-                .iter()
-                .find(|c| c.id == "a.json")
-                .and_then(|c| c.str("email").map(str::to_owned))
-        };
-        std::fs::write(&file, good("a@example.com")).unwrap();
+    async fn a_document_completed_after_the_scan_keeps_its_credential() {
+        let (state, db, root) = state();
+        let file = db.auth_dir().join("a.json");
+        let good = br#"{"type":"codex","email":"a@example.com"}"#;
+        db.save(&file, good).unwrap();
         reload(&state).unwrap();
-        assert_eq!(loaded(&state).as_deref(), Some("a@example.com"));
-        std::fs::remove_file(&file).unwrap();
-        std::fs::write(&file, good("b@example.com")).unwrap();
-        reload(&state).unwrap();
-        assert_eq!(
-            loaded(&state).as_deref(),
-            Some("b@example.com"),
-            "re-created before the reload"
-        );
-        std::fs::remove_file(&file).unwrap();
-        reload(&state).unwrap();
-        assert_eq!(loaded(&state), None, "removed");
-        std::fs::write(&file, good("c@example.com")).unwrap();
-        reload(&state).unwrap();
-        assert_eq!(
-            loaded(&state).as_deref(),
-            Some("c@example.com"),
-            "re-created after the reload"
-        );
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// The editor finishes the file after the scan read it half-written and before the
-    /// reload publishes: the old credential is kept (a second read would see valid JSON,
-    /// keep nothing and drop the credential until the next reload).
-    #[tokio::test]
-    async fn a_file_completed_after_the_scan_keeps_its_credential() {
-        let (state, dir) = state();
-        let file = dir.join("a.json");
-        let good = r#"{"type":"codex","email":"a@example.com"}"#;
-        std::fs::write(&file, good).unwrap();
-        reload(&state).unwrap();
-        std::fs::write(&file, r#"{"type":"codex""#).unwrap();
-        let scan = credentials::scan_auth_dir(&state.rt.config());
+        db.save(&file, br#"{"type":"codex""#).unwrap();
+        let scan = db.scan(&state.rt.config()).unwrap();
         let mut files = scan.credentials;
         assert!(scan.incomplete.contains(&file) && files.is_empty());
-        std::fs::write(&file, good).unwrap();
+        db.save(&file, good).unwrap();
         keep_incomplete(&state, &mut files, &scan.incomplete);
         assert_eq!(files.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["a.json"]);
-        std::fs::remove_dir_all(dir).unwrap();
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
-    /// Go c4c1d43e through the publication the watcher makes: a token refresh committed
-    /// after the reload's scan read the file is kept, not replaced by the scanned token.
     #[tokio::test]
     async fn a_reload_scan_does_not_undo_a_refresh_committed_after_it() {
-        let (state, dir) = state();
-        std::fs::write(dir.join("a.json"), r#"{"type":"codex","access_token":"old"}"#).unwrap();
+        let (state, db, root) = state();
+        db.save(
+            &db.auth_dir().join("a.json"),
+            br#"{"type":"codex","access_token":"old"}"#,
+        )
+        .unwrap();
         reload(&state).unwrap();
         let config = (*state.rt.config()).clone();
-        let scan = credentials::scan_auth_dir(&config);
+        let scan = db.scan(&config).unwrap();
         let store = state.rt.store();
         let revision = store.get("a.json").unwrap().revision;
         let mut patch = cpa_core::credential::MetadataPatch::default();
@@ -766,397 +364,13 @@ mod tests {
         assert_eq!(store.get("a.json").unwrap().metadata["access_token"], "refreshed");
         reload(&state).unwrap();
         assert_eq!(store.get("a.json").unwrap().metadata["access_token"], "refreshed");
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// Go c4c1d43e for upload fallbacks, which are rebuilt from a second read: a scan
-    /// taken before an external edit (B) and a persist of the current credential (A)
-    /// does not publish B over A, whether the auth-dir is absolute or relative (where
-    /// the scan's paths are relative and the fallback's absolute).
-    #[tokio::test]
-    async fn a_reload_does_not_undo_a_write_to_an_upload_fallback() {
-        for relative in [false, true] {
-            let (state, dir) = state();
-            // A relative auth-dir lives under the working directory: no relative path
-            // reaches a temp folder on another Windows drive.
-            let local = PathBuf::from(format!("cpa-watch-relative-{}", uuid::Uuid::new_v4()));
-            if relative {
-                std::fs::create_dir_all(&local).unwrap();
-                std::fs::write(&state.path, format!("oauth: {{auth-dir: {}}}\n", local.display())).unwrap();
-            }
-            reload(&state).unwrap();
-            let config = (*state.rt.config()).clone();
-            assert_eq!(config.auth_dir.is_relative(), relative);
-            // The path an upload records.
-            let file = std::path::absolute(config.auth_dir.join("a.json")).unwrap();
-            let a = r#"{"type":"gemini","v":"A"}"#;
-            std::fs::write(&file, a).unwrap();
-            state.fallbacks.lock().unwrap().insert(file.clone());
-            reload(&state).unwrap();
-            let store = state.rt.store();
-            let before = store.get("a.json").unwrap();
-            assert_eq!(before.metadata["v"], "A");
-            let scan = credentials::scan_auth_dir(&config);
-            std::fs::write(&file, r#"{"type":"gemini","v":"B"}"#).unwrap();
-            let persisted = file.clone();
-            crate::management::BEFORE_RECONCILE.lock().unwrap().push((
-                config.auth_dir.clone(),
-                Box::new(move || std::fs::write(persisted, a).unwrap()),
-            ));
-            state.publish(config, Some(scan));
-            let after = store.get("a.json").unwrap();
-            assert_eq!(
-                (&after.metadata["v"], after.revision),
-                (&"A".into(), before.revision),
-                "relative: {relative}"
-            );
-            std::fs::remove_dir_all(dir).unwrap();
-            if relative {
-                std::fs::remove_dir_all(local).unwrap();
-            }
-        }
-    }
-
-    /// A fallback stays tracked while its file still holds it: when the scan read a
-    /// synthesizable rewrite that the freshness check rejects, the next reload keeps the
-    /// fallback; an accepted rewrite still retires it.
-    #[tokio::test]
-    async fn a_fallback_whose_replacement_was_rejected_stays_tracked() {
-        let (state, dir) = state();
-        let file = dir.join("a.json");
-        let a = r#"{"type":"gemini","v":"A"}"#;
-        std::fs::write(&file, a).unwrap();
-        state.fallbacks.lock().unwrap().insert(file.clone());
-        reload(&state).unwrap();
-        let store = state.rt.store();
-        let before = store.get("a.json").unwrap();
-        let codex = r#"{"type":"codex","access_token":"B"}"#;
-        std::fs::write(&file, codex).unwrap();
-        let config = (*state.rt.config()).clone();
-        let scan = credentials::scan_auth_dir(&config);
-        let persisted = file.clone();
-        crate::management::BEFORE_RECONCILE.lock().unwrap().push((
-            config.auth_dir.clone(),
-            Box::new(move || std::fs::write(persisted, a).unwrap()),
-        ));
-        state.publish(config, Some(scan));
-        let kept = store.get("a.json").unwrap();
-        assert_eq!((kept.provider.as_str(), kept.revision), ("gemini", before.revision));
-        reload(&state).unwrap();
-        assert_eq!(store.get("a.json").unwrap().provider, "gemini");
-        assert!(state.fallbacks.lock().unwrap().contains(&file));
-        std::fs::write(&file, codex).unwrap();
-        reload(&state).unwrap();
-        assert_eq!(store.get("a.json").unwrap().provider, "codex");
-        assert!(state.fallbacks.lock().unwrap().is_empty());
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// A file that cannot be read (here a symlink loop, for every user) drops its
-    /// credential, as Go's full scan does; only a read that succeeded can mark a file
-    /// incomplete. The watcher does not observe such an entry, so keeping it would
-    /// leave the credential live after the entry is deleted.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn an_unreadable_file_drops_its_credential() {
-        let (state, dir) = state();
-        let file = dir.join("a.json");
-        std::fs::write(&file, r#"{"type":"codex","email":"a@example.com"}"#).unwrap();
-        reload(&state).unwrap();
-        std::fs::remove_file(&file).unwrap();
-        std::os::unix::fs::symlink(&file, &file).unwrap();
-        assert!(std::fs::read(&file).is_err());
-        reload(&state).unwrap();
-        assert!(!state.rt.store().snapshot().iter().any(|c| c.id == "a.json"));
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// The scan counts the entries the watcher observes: a credential whose file is
-    /// replaced by a link to `/dev/null` is dropped by the reload that replacement
-    /// triggers, so deleting the link (which the watcher cannot see, having never
-    /// observed it) leaves nothing live.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_file_replaced_by_a_special_file_link_drops_its_credential() {
-        let (state, dir) = state();
-        let file = dir.join("a.json");
-        std::fs::write(&file, r#"{"type":"codex","email":"a@example.com"}"#).unwrap();
-        reload(&state).unwrap();
-        let loaded = |state: &Management| state.rt.store().snapshot().iter().any(|c| c.id == "a.json");
-        assert!(loaded(&state));
-        let capture = Capture::default();
-        let _guard = capture.install();
-        let watcher = start(&state);
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        std::fs::remove_file(&file).unwrap();
-        std::os::unix::fs::symlink("/dev/null", &file).unwrap();
-        capture.wait_for("auth file changed (REMOVE): a.json").await;
-        tokio::time::timeout(Duration::from_secs(3), async {
-            while loaded(&state) {
-                tokio::time::sleep(TICK).await;
-            }
-        })
-        .await
-        .expect("the reload the replacement triggered drops the credential");
-        std::fs::remove_file(&file).unwrap();
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        assert!(!loaded(&state));
-        watcher.abort();
-        let _ = watcher.await;
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[derive(Clone, Default)]
-    struct Capture(Arc<std::sync::Mutex<Vec<u8>>>, Arc<tokio::sync::Notify>);
-    impl std::io::Write for Capture {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(bytes);
-            self.1.notify_one();
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl Capture {
-        fn install(&self) -> tracing::subscriber::DefaultGuard {
-            let writer = self.clone();
-            let subscriber = tracing_subscriber::fmt()
-                .with_ansi(false)
-                .without_time()
-                .with_writer(move || writer.clone())
-                .finish();
-            tracing::subscriber::set_default(subscriber)
-        }
-
-        fn text(&self) -> String {
-            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
-        }
-
-        async fn wait_for(&self, needle: &str) {
-            tokio::time::timeout(Duration::from_secs(3), async {
-                loop {
-                    let notified = self.1.notified();
-                    if self.text().contains(needle) {
-                        break;
-                    }
-                    notified.await;
-                }
-            })
-            .await
-            .unwrap_or_else(|_| panic!("{needle:?} was not logged:\n{}", self.text()));
-        }
-    }
-
-    /// Go `updateInternalLocked` through the watcher's incremental reload: a credential
-    /// an upstream 401 blocked is selectable as soon as its file holds a new access token
-    /// (a re-login), with no restart, and a model's 429 cooldown on it stays. An edit
-    /// that keeps the tokens keeps the block.
-    #[tokio::test]
-    async fn a_rewritten_token_clears_its_401_block_and_keeps_a_429() {
-        use crate::runtime::{Outcome, Selection};
-        use cpa_core::exec::{ExecError, FailureScope};
-        let (state, dir) = state();
-        let file = dir.join("claude-a.json");
-        let doc = |token: &str, email: &str| {
-            serde_json::json!({"type": "claude", "access_token": token, "refresh_token": "fake-rt", "email": email})
-                .to_string()
-        };
-        std::fs::write(&file, doc("sk-ant-oat-old-fake", "a@example.invalid")).unwrap();
-        let watcher = start(&state);
-        let store = state.rt.store();
-        let wait = |want: &'static str| {
-            let store = store.clone();
-            async move {
-                tokio::time::timeout(Duration::from_secs(5), async {
-                    while store.get("claude-a.json").is_none_or(|c| c.str("email") != Some(want)) {
-                        tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
-                })
-                .await
-                .unwrap_or_else(|_| panic!("{want} was not reloaded"));
-            }
-        };
-        wait("a@example.invalid").await;
-        let select = |model: &str| store.select(Selection::new("claude", model));
-        let mut quota = ExecError::local(429, FailureScope::Model, "rate limited");
-        quota.retry_after = Some(Duration::from_secs(3600));
-        select("q").unwrap().complete(Outcome::Failure(quota));
-        let unauthorized = ExecError::local(
-            401,
-            FailureScope::Credential,
-            "authentication_error: OAuth access token",
-        );
-        select("m").unwrap().complete(Outcome::Failure(unauthorized));
-        assert!(select("m").is_none(), "the 401 blocks the credential");
-        // Same tokens, another email: Go keeps the block.
-        std::fs::write(&file, doc("sk-ant-oat-old-fake", "b@example.invalid")).unwrap();
-        wait("b@example.invalid").await;
-        assert!(select("m").is_none(), "an edit that keeps the tokens keeps the block");
-        std::fs::write(&file, doc("sk-ant-oat-new-fake", "c@example.invalid")).unwrap();
-        wait("c@example.invalid").await;
-        let lease = select("m").expect("the new token is selectable at once");
-        assert_eq!(lease.credential.str("access_token"), Some("sk-ant-oat-new-fake"));
-        drop(lease);
-        assert!(select("q").is_none(), "the 429 cooldown survives the reload");
-        let left = store.cooldowns("claude-a.json");
-        assert_eq!(
-            left.iter().map(|c| (c.model.as_str(), c.status)).collect::<Vec<_>>(),
-            [("q", 429)]
-        );
-        watcher.abort();
-        let _ = watcher.await;
-        std::fs::remove_dir_all(dir).unwrap();
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
-    async fn edit_before_first_stable_observation_is_logged_once() {
-        let (state, dir) = state();
-        let capture = Capture::default();
-        let _guard = capture.install();
-        let watcher = start(&state);
-        std::fs::write(
-            &state.path,
-            format!("port: 9001\noauth: {{auth-dir: {}}}\n", dir.display()),
-        )
-        .unwrap();
-        capture.wait_for("port: 0 -> 9001").await;
-        watcher.abort();
-        let _ = watcher.await;
-        assert_eq!(capture.text().matches("port: 0 -> 9001").count(), 1);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[tokio::test]
-    async fn edit_between_runtime_load_and_start_is_applied() {
-        let (state, dir) = state();
-        let capture = Capture::default();
-        let _guard = capture.install();
-        // The runtime holds port 0; the file changes before the watcher hashes it.
-        std::fs::write(
-            &state.path,
-            format!("port: 9001\noauth: {{auth-dir: {}}}\n", dir.display()),
-        )
-        .unwrap();
-        let watcher = start(&state);
-        capture.wait_for("config successfully reloaded").await;
-        assert_eq!(state.rt.config().port, 9001);
-        watcher.abort();
-        let _ = watcher.await;
-        let text = capture.text();
-        assert_eq!(text.matches("port: 0 -> 9001").count(), 1);
-        assert_eq!(text.matches("config successfully reloaded").count(), 1);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[tokio::test]
-    async fn unchanged_config_is_read_quietly_on_first_observation() {
-        let (state, dir) = state();
-        let capture = Capture::default();
-        let _guard = capture.install();
-        let initial = state.rt.config();
-        let watcher = start(&state);
-        // The first reload publishes a new snapshot. An auth file created after that
-        // is logged by a later pass of the loop, so every line of the first pass
-        // precedes its log line.
-        tokio::time::timeout(Duration::from_secs(3), async {
-            while Arc::ptr_eq(&state.rt.config(), &initial) {
-                tokio::time::sleep(TICK).await;
-            }
-        })
-        .await
-        .unwrap();
-        std::fs::write(dir.join("a.json"), "{}").unwrap();
-        capture.wait_for("auth file changed (CREATE): a.json").await;
-        watcher.abort();
-        let _ = watcher.await;
-        let text = capture.text();
-        assert!(!text.contains("config successfully reloaded"), "{text}");
-        assert!(!text.contains("config changes detected"), "{text}");
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// A missing auth folder is watched through its parent; once it is created (empty,
-    /// so nothing reloads), files written into it are still seen.
-    #[tokio::test]
-    async fn auth_folder_created_after_start_is_followed() {
-        let (state, dir) = state();
-        let auth = dir.join("later");
-        std::fs::write(&state.path, format!("oauth: {{auth-dir: {}}}\n", auth.display())).unwrap();
-        reload(&state).unwrap();
-        let capture = Capture::default();
-        let _guard = capture.install();
-        let initial = state.rt.config();
-        let watcher = start(&state);
-        tokio::time::timeout(Duration::from_secs(3), async {
-            while Arc::ptr_eq(&state.rt.config(), &initial) {
-                tokio::time::sleep(TICK).await;
-            }
-        })
-        .await
-        .unwrap();
-        std::fs::create_dir(&auth).unwrap();
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        std::fs::write(auth.join("a.json"), "{}").unwrap();
-        capture.wait_for("auth file changed (CREATE): a.json").await;
-        watcher.abort();
-        let _ = watcher.await;
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn hash_cache_rereads_only_changed_or_racy_files() {
-        let dir = std::env::temp_dir().join(format!("cpa-watch-cache-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("a.json");
-        std::fs::write(&path, b"one").unwrap();
-        let old = SystemTime::now() - Duration::from_secs(60);
-        std::fs::File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
-        let mut cache = HashCache::default();
-        let now = SystemTime::now();
-        let first = cache.hash(&path, &std::fs::metadata(&path).unwrap(), now).unwrap();
-        // Same metadata, old mtime: the cached hash is reused even if the bytes were
-        // swapped behind the cache's back (proves no re-read happens).
-        let stat = cache.0[&path].0;
-        cache.0.insert(path.clone(), (stat, [7; 32]));
-        assert_eq!(
-            cache.hash(&path, &std::fs::metadata(&path).unwrap(), now),
-            Some([7; 32])
-        );
-        // A real change alters the metadata and is hashed again.
-        std::fs::write(&path, b"two!").unwrap();
-        std::fs::File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
-        let second = cache.hash(&path, &std::fs::metadata(&path).unwrap(), now).unwrap();
-        assert_ne!(first, second);
-        assert_eq!(second, <Hash>::from(Sha256::digest(b"two!")));
-        // A recently modified file is re-read even with identical cached metadata.
-        std::fs::write(&path, b"thr!").unwrap();
-        let meta = std::fs::metadata(&path).unwrap();
-        cache.0.insert(path.clone(), (Stat::of(&meta), [7; 32]));
-        assert_eq!(
-            cache.hash(&path, &meta, SystemTime::now()),
-            Some(Sha256::digest(b"thr!").into())
-        );
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// A file whose bytes no plugin auth provider has parsed yet keeps the credential
-    /// the store holds when the scan is published, not when it was read: a refresh that
-    /// commits in between survives (the kept credential is taken under the store's
-    /// reconciliation gate).
-    #[tokio::test]
-    async fn a_deferred_file_keeps_a_refresh_committed_before_publication() {
+    async fn a_deferred_document_keeps_a_refresh_committed_before_publication() {
         use cpa_core::config::credentials::{ParseRequest, Parsed, ParsedAuth, PluginAuthParser};
         struct Acme;
         impl PluginAuthParser for Acme {
@@ -1172,18 +386,16 @@ mod tests {
                 }])
             }
         }
-        // This thread only: tests sharing the process never see the parser.
         credentials::with_thread_plugin_auth_parser(Arc::new(Acme), || {
-            let (state, dir) = state();
-            let file = dir.join("acme.json");
-            std::fs::write(&file, r#"{"type":"acme","v":1}"#).unwrap();
+            let (state, db, root) = state();
+            let file = db.auth_dir().join("acme.json");
+            db.save(&file, br#"{"type":"acme","v":1}"#).unwrap();
             reload(&state).unwrap();
             let store = state.rt.store().clone();
             assert_eq!(store.get("acme-a").unwrap().metadata["token"], "old");
-            // Changed after the parse: the locked scan defers it.
-            std::fs::write(&file, r#"{"type":"acme","v":2}"#).unwrap();
+            db.save(&file, br#"{"type":"acme","v":2}"#).unwrap();
             let config = (*state.rt.config()).clone();
-            let scan = credentials::scan_auth_dir(&config);
+            let scan = db.scan(&config).unwrap();
             assert!(scan.deferred.contains(&file));
             let refreshed = store.clone();
             crate::management::BEFORE_RECONCILE.lock().unwrap().push((
@@ -1197,16 +409,14 @@ mod tests {
             ));
             state.publish(config, Some(scan));
             assert_eq!(store.get("acme-a").unwrap().metadata["token"], "refreshed");
-            std::fs::remove_dir_all(dir).unwrap();
+            drop(state);
+            drop(db);
+            std::fs::remove_dir_all(root).unwrap();
         });
     }
 
-    /// A new auth-dir whose files plugins have not parsed yet publishes nothing for
-    /// them, never the built-in reading: Go's watcher asks the plugin first. Here a
-    /// Claude multi-auth bundle a plugin parses into two credentials; the reload that
-    /// switches to its folder preparsed the old one, and the next reload parses it.
     #[tokio::test]
-    async fn a_new_auth_dir_publishes_a_plugin_bundle_only_once_parsed() {
+    async fn a_plugin_bundle_publishes_only_once_parsed() {
         use cpa_core::config::credentials::{ParseRequest, Parsed, ParsedAuth, PluginAuthParser};
         struct Bundles;
         impl PluginAuthParser for Bundles {
@@ -1226,28 +436,126 @@ mod tests {
                 Parsed::Handled(vec![auth("claude-a"), auth("claude-b")])
             }
         }
-        // This thread only: tests sharing the process never see the parser.
         credentials::with_thread_plugin_auth_parser(Arc::new(Bundles), || {
-            let (state, dir) = state();
-            reload(&state).unwrap();
-            let other = dir.join("other");
-            std::fs::create_dir_all(&other).unwrap();
-            std::fs::write(
-                other.join("bundle.json"),
-                r#"{"type":"claude","accounts":[{"access_token":"a"},{"access_token":"b"}]}"#,
+            let (state, db, root) = state();
+            let file = db.auth_dir().join("bundle.json");
+            db.save(
+                &file,
+                br#"{"type":"claude","accounts":[{"access_token":"a"},{"access_token":"b"}]}"#,
             )
             .unwrap();
-            std::fs::write(&state.path, format!("oauth: {{auth-dir: {}}}\n", other.display())).unwrap();
+            let config = (*state.rt.config()).clone();
+            let scan = db.scan(&config).unwrap();
+            assert!(scan.deferred.contains(&file));
+            state.publish(config, Some(scan));
+            assert!(
+                state.rt.store().snapshot().is_empty(),
+                "published before plugin parsing"
+            );
             reload(&state).unwrap();
-            let ids = || -> Vec<String> {
-                let mut ids: Vec<String> = state.rt.store().snapshot().iter().map(|c| c.id.clone()).collect();
-                ids.sort();
-                ids
-            };
-            assert!(ids().is_empty(), "published before it was parsed: {:?}", ids());
-            reload(&state).unwrap();
-            assert_eq!(ids(), ["claude-a", "claude-b"]);
-            std::fs::remove_dir_all(dir).unwrap();
+            let mut ids: Vec<String> = state.rt.store().snapshot().iter().map(|c| c.id.clone()).collect();
+            ids.sort();
+            assert_eq!(ids, ["claude-a", "claude-b"]);
+            drop(state);
+            drop(db);
+            std::fs::remove_dir_all(root).unwrap();
         });
+    }
+
+    #[tokio::test]
+    async fn a_deferred_parse_notifies_the_reload_loop_to_retry() {
+        use cpa_core::config::credentials::{ParseRequest, Parsed, ParsedAuth, PluginAuthParser};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct SavingParser {
+            db: Arc<crate::credential_store::CredentialDb>,
+            saved: AtomicBool,
+        }
+        impl PluginAuthParser for SavingParser {
+            fn parse_auths(&self, req: &ParseRequest<'_>) -> Parsed {
+                if !self.saved.swap(true, Ordering::Relaxed) {
+                    self.db.save(req.path, br#"{"type":"acme","token":"new"}"#).unwrap();
+                }
+                Parsed::Handled(vec![ParsedAuth {
+                    provider: "acme".into(),
+                    id: "acme-a".into(),
+                    metadata: serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(req.raw_json)
+                        .unwrap(),
+                    ..Default::default()
+                }])
+            }
+        }
+        let (state, db, root) = state();
+        db.save(&db.auth_dir().join("acme.json"), br#"{"type":"acme","token":"old"}"#)
+            .unwrap();
+        let parser = Arc::new(SavingParser {
+            db: db.clone(),
+            saved: AtomicBool::new(false),
+        });
+        credentials::with_thread_plugin_auth_parser(parser, || {
+            let retry = tokio::sync::Notify::new();
+            reload_with_notify(&state, Some(&retry)).unwrap();
+            assert!(
+                state.rt.store().snapshot().is_empty(),
+                "the changed document must wait for a new parse"
+            );
+            let notified = retry.notified();
+            tokio::pin!(notified);
+            assert!(
+                notified.as_mut().enable(),
+                "a deferred scan did not notify the reload loop"
+            );
+            reload_with_notify(&state, Some(&retry)).unwrap();
+            assert_eq!(state.rt.store().get("acme-a").unwrap().str("token"), Some("new"));
+        });
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_committed_token_clears_its_401_block_and_keeps_a_429() {
+        use crate::runtime::{Outcome, Selection};
+        use cpa_core::exec::{ExecError, FailureScope};
+        let (state, db, root) = state();
+        let file = db.auth_dir().join("claude-a.json");
+        let doc = |token: &str, email: &str| {
+            serde_json::to_vec(&serde_json::json!({"type": "claude", "access_token": token,
+                "refresh_token": "fake-rt", "email": email}))
+            .unwrap()
+        };
+        db.save(&file, &doc("sk-ant-oat-old-fake", "a@example.invalid"))
+            .unwrap();
+        reload(&state).unwrap();
+        let store = state.rt.store();
+        let select = |model: &str| store.select(Selection::new("claude", model));
+        let mut quota = ExecError::local(429, FailureScope::Model, "rate limited");
+        quota.retry_after = Some(Duration::from_secs(3600));
+        select("q").unwrap().complete(Outcome::Failure(quota));
+        let unauthorized = ExecError::local(
+            401,
+            FailureScope::Credential,
+            "authentication_error: OAuth access token",
+        );
+        select("m").unwrap().complete(Outcome::Failure(unauthorized));
+        assert!(select("m").is_none(), "the 401 blocks the credential");
+        db.save(&file, &doc("sk-ant-oat-old-fake", "b@example.invalid"))
+            .unwrap();
+        reload(&state).unwrap();
+        assert!(select("m").is_none(), "keeping the tokens keeps the block");
+        db.save(&file, &doc("sk-ant-oat-new-fake", "c@example.invalid"))
+            .unwrap();
+        reload(&state).unwrap();
+        let lease = select("m").expect("the new token is selectable at once");
+        assert_eq!(lease.credential.str("access_token"), Some("sk-ant-oat-new-fake"));
+        drop(lease);
+        assert!(select("q").is_none(), "the 429 cooldown survives the reload");
+        let left = store.cooldowns("claude-a.json");
+        assert_eq!(
+            left.iter().map(|c| (c.model.as_str(), c.status)).collect::<Vec<_>>(),
+            [("q", 429)]
+        );
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

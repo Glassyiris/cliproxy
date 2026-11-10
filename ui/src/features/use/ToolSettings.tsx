@@ -9,6 +9,8 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { HStack } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
+import type { ClientKey } from "../../lib/api/clientKeys.ts";
+import { isUsableSecret } from "../../lib/api/config.ts";
 import { mask } from "../../lib/clientKeys.ts";
 import { flag } from "../../lib/firstRun.ts";
 import { t } from "../../lib/i18n.ts";
@@ -51,17 +53,46 @@ const language = (tool: Tool) => {
 };
 
 function modelHint(choice: KeyChoice) {
+  if (!choice.key) return undefined;
   if (choice.checking) return t("use.settings.checking");
   if (choice.failed) return t("use.settings.modelsFailed");
   if (!choice.models.length) return t("use.settings.noModels");
   return undefined;
 }
 
-/**
- * Step 2: the key and model, then the tool's setup text with the key masked, and Copy with the
- * full key. Both selectors stay mounted through a key change; the model list of the previous key
- * stays until the new one answers, marked as checking.
- */
+function SettingsSelectors({
+  keys,
+  choice,
+  onKey,
+  isMobile,
+}: {
+  keys: ClientKey[] | undefined;
+  choice: KeyChoice;
+  onKey: (id: string) => void;
+  isMobile: boolean;
+}) {
+  return (
+    <FormLayout direction={isMobile ? "vertical" : "horizontal"} defaultOptionality="optional">
+      <Selector
+        label={t("use.settings.key")}
+        options={(keys ?? []).map((resource) => ({ value: resource.id, label: resource.id }))}
+        value={choice.id}
+        isLoading={!keys}
+        onChange={onKey}
+      />
+      <Selector
+        label={t("use.settings.model")}
+        options={choice.models}
+        value={choice.model || undefined}
+        isLoading={choice.checking}
+        description={modelHint(choice)}
+        onChange={choice.onModel}
+      />
+    </FormLayout>
+  );
+}
+
+/** Step 2 keeps the selected resource ID separate from explicitly revealed plaintext. */
 export function ToolSettings({
   tool,
   target,
@@ -72,40 +103,26 @@ export function ToolSettings({
 }: {
   tool: Tool;
   target: string;
-  /** Undefined while the config loads. */
-  keys: string[] | undefined;
+  /** Undefined while resources load. */
+  keys: ClientKey[] | undefined;
   choice: KeyChoice;
-  onKey: (index: number) => void;
+  onKey: (id: string) => void;
   local: boolean;
 }) {
   const isMobile = useAppShellMobile().isMobile;
   const { copy, isCopied } = useClipboard();
   const modelId = choice.model || "MODEL_ID";
-  const copySetup = () =>
-    void copy(snippet(tool, target, choice.key, modelId)).then((ok) => {
-      if (!ok) return notify("error", t("use.settings.copyFailed"));
-      notify("success", t("use.settings.copied"));
-      flag.set("start-tool", "1");
-    });
+  const copySetup = async () => {
+    const key = await choice.reveal();
+    if (!isUsableSecret(key)) return;
+    const ok = await copy(snippet(tool, target, key, modelId));
+    if (!ok) return notify("error", t("use.settings.copyFailed"));
+    notify("success", t("use.settings.copied"));
+    flag.set("start-tool", "1");
+  };
   return (
     <FormLayout defaultOptionality="optional">
-      <FormLayout direction={isMobile ? "vertical" : "horizontal"} defaultOptionality="optional">
-        <Selector
-          label={t("use.settings.key")}
-          options={(keys ?? []).map((key, i) => ({ value: String(i), label: mask(key) }))}
-          value={keys ? String(choice.index) : undefined}
-          isLoading={!keys}
-          onChange={(value) => onKey(Number(value))}
-        />
-        <Selector
-          label={t("use.settings.model")}
-          options={choice.models}
-          value={choice.model || undefined}
-          isLoading={choice.checking}
-          description={modelHint(choice)}
-          onChange={choice.onModel}
-        />
-      </FormLayout>
+      <SettingsSelectors keys={keys} choice={choice} onKey={onKey} isMobile={isMobile} />
       {local && (
         <Banner
           status="warning"
@@ -121,11 +138,19 @@ export function ToolSettings({
         width="100%"
       />
       <HStack gap={3} vAlign="center" wrap="wrap">
+        {!choice.key && (
+          <Button
+            label={t("keys.row.show")}
+            variant="secondary"
+            isLoading={choice.revealing}
+            onClick={() => void choice.reveal()}
+          />
+        )}
         <Button
           label={t("use.settings.copy")}
           variant="secondary"
           icon={<Icon icon={isCopied ? "check" : "copy"} />}
-          onClick={copySetup}
+          onClick={() => void copySetup()}
         />
         <Text type={roles.textType.supporting} color="secondary">
           {t("use.settings.copyNote")}

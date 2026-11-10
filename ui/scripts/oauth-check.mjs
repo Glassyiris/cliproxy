@@ -79,10 +79,10 @@ try {
     await page.context().route("**/*", async (route) => {
       const request = new URL(route.request().url());
       if (request.origin !== new URL(url).origin) return route.abort();
-      const path = request.pathname.split("/v8/management/")[1];
+      const path = request.pathname.split("/v8/management/")[1] ?? request.pathname.split("/admin/v1/")[1];
       if (path !== undefined) {
         let body;
-        if (path === "config") body = {};
+        if (path === "effective/config") body = {};
         else if (path === "credentials") {
           // credsLeft: how many more account-list reads succeed before they start failing.
           if (credsFail || credsLeft-- <= 0) return route.fulfill({ status: 500, json: { error: "fixture: read failed" } });

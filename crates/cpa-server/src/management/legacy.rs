@@ -1,20 +1,11 @@
 //! The v0 routes that remain: the `*-auth-url` sign-in starts and the Vertex import,
-//! both over their v8 handlers. [`view`] renders a config as Go's `Config` JSON for
-//! the reload diff log.
+//! both over their v8 handlers.
 use std::sync::Arc;
 
 use axum::extract::{OriginalUri, RawQuery, State};
 use axum::response::Response;
 
 use super::Management;
-
-mod keys;
-pub(crate) mod view;
-
-/// Go `strings.TrimSpace`.
-pub(crate) fn go_trim(s: &str) -> &str {
-    std::str::from_utf8(cpa_core::config::go_trim_space(s.as_bytes())).unwrap_or(s)
-}
 
 /// v0 `*-auth-url` routes and the provider the v8 handler dispatches them to.
 pub(crate) const AUTH_URL_ROUTES: [(&str, &str); 8] = [

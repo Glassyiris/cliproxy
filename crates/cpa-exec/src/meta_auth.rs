@@ -835,7 +835,12 @@ pub struct LoginOutcome {
 /// Builds and writes the credential for `bundle` the way Manager.Login and the file
 /// token store do: merge an existing file's settings, normalize keys, validate the weight,
 /// stamp `disabled`, then the custom writer.
-pub fn save_login(auth_dir: &Path, bundle: &Bundle, now: DateTime<Utc>) -> Result<LoginOutcome, String> {
+pub fn save_login(
+    auth_dir: &Path,
+    bundle: &Bundle,
+    now: DateTime<Utc>,
+    save: Option<&crate::login_store::LoginSave>,
+) -> Result<LoginOutcome, String> {
     let storage = create_token_storage(bundle, now);
     if storage.access_token.trim().is_empty() {
         return Err("meta token storage missing access token".into());
@@ -845,31 +850,37 @@ pub fn save_login(auth_dir: &Path, bundle: &Bundle, now: DateTime<Utc>) -> Resul
         "" => "Meta".to_owned(),
         email => email.to_owned(),
     };
-    let mut metadata = login_metadata(&storage, bundle);
     let path = auth_dir.join(&file_name);
-    let mut disabled = false;
-    // Manager.Login merges only a cleanly decoded, non-empty existing file.
-    if let Ok(raw) = std::fs::read(&path)
-        && let Some((existing, true)) = go_map_from_json(&raw)
-        && !existing.is_empty()
-        && let Some(flag) = merge_existing(&mut metadata, &existing, "meta")
-    {
-        disabled = flag;
-    }
-    normalize_metadata(&mut metadata);
-    if let Some(weight) = metadata.get("weight") {
-        let json: Value = serde_json::from_slice(&weight.marshal()).unwrap_or(Value::Null);
-        cpa_core::config::credentials::parse_weight(&json)
-            .map_err(|e| format!("auth filestore: invalid metadata weight: {e}"))?;
-    }
-    metadata.insert("disabled".into(), GoValue::Bool(disabled));
-    save_token_file(&path, &storage, Some(&metadata)).map_err(|e| format!("meta token storage: {e}"))?;
+    crate::login_store::save_login(save, std::slice::from_ref(&path), || {
+        let mut metadata = login_metadata(&storage, bundle);
+        let mut disabled = false;
+        // Manager.Login merges only a cleanly decoded, non-empty existing file.
+        if let Ok(raw) = std::fs::read(&path)
+            && let Some((existing, true)) = go_map_from_json(&raw)
+            && !existing.is_empty()
+            && let Some(flag) = merge_existing(&mut metadata, &existing, "meta")
+        {
+            disabled = flag;
+        }
+        normalize_metadata(&mut metadata);
+        if let Some(weight) = metadata.get("weight") {
+            let json: Value = serde_json::from_slice(&weight.marshal()).unwrap_or(Value::Null);
+            cpa_core::config::credentials::parse_weight(&json)
+                .map_err(|e| format!("auth filestore: invalid metadata weight: {e}"))?;
+        }
+        metadata.insert("disabled".into(), GoValue::Bool(disabled));
+        save_token_file(&path, &storage, Some(&metadata)).map_err(|e| format!("meta token storage: {e}"))
+    })?;
     Ok(LoginOutcome { path, label })
 }
 
 /// `--meta-login`: device flow through `requests.proxy-url`, then the credential file in
 /// `auth-dir`.
-pub async fn login(cfg: &cpa_core::config::Config, no_browser: bool) -> Result<PathBuf, ExecError> {
+pub async fn login(
+    cfg: &cpa_core::config::Config,
+    no_browser: bool,
+    save: Option<crate::login_store::LoginSave>,
+) -> Result<PathBuf, ExecError> {
     let proxy = cfg
         .document
         .get("requests")
@@ -877,7 +888,7 @@ pub async fn login(cfg: &cpa_core::config::Config, no_browser: bool) -> Result<P
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     let client = crate::proxy::GoClients::new(crate::proxy::Hooks::default()).get(&crate::proxy::Proxy::parse(proxy));
-    let outcome = login_with(MetaAuth::new(client), &cfg.auth_dir, no_browser)
+    let outcome = login_with(MetaAuth::new(client), &cfg.auth_dir, no_browser, save)
         .await
         .map_err(|e| {
             ExecError::local(
@@ -886,13 +897,15 @@ pub async fn login(cfg: &cpa_core::config::Config, no_browser: bool) -> Result<P
                 format!("Meta authentication failed: {e}"),
             )
         })?;
-    println!("Authentication saved to {}", outcome.path.display());
-    println!("Authenticated as {}", outcome.label);
-    println!("Meta authentication successful!");
     Ok(outcome.path)
 }
 
-pub(crate) async fn login_with(auth: MetaAuth, auth_dir: &Path, no_browser: bool) -> Result<LoginOutcome, String> {
+pub(crate) async fn login_with(
+    auth: MetaAuth,
+    auth_dir: &Path,
+    no_browser: bool,
+    save: Option<crate::login_store::LoginSave>,
+) -> Result<LoginOutcome, String> {
     println!("Starting Meta (Muse) authentication...");
     let code = auth
         .start_device_flow()
@@ -921,10 +934,9 @@ pub(crate) async fn login_with(auth: MetaAuth, auth_dir: &Path, no_browser: bool
         .wait_for_authorization(&code)
         .await
         .map_err(|e| format!("meta: {e}"))?;
-    println!("Meta authentication successful");
     let auth_dir = auth_dir.to_owned();
     let now = auth.now();
-    tokio::task::spawn_blocking(move || save_login(&auth_dir, &bundle, now))
+    tokio::task::spawn_blocking(move || save_login(&auth_dir, &bundle, now, save.as_ref()))
         .await
         .map_err(|_| "meta: credential publication failed".to_owned())?
 }

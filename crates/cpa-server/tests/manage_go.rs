@@ -6,6 +6,7 @@ use std::path::Path;
 
 use cpa_core::config::{Config, TrustedProxies, credentials};
 use cpa_core::credential::{Credential, Source};
+use cpa_server::config_store::ConfigStore;
 use serde_json::{Value, json};
 
 fn fixture() -> &'static Value {
@@ -31,6 +32,13 @@ fn first_header<'a>(headers: &'a Value, name: &str) -> Option<&'a [u8]> {
         .first()?
         .as_str()
         .map(str::as_bytes)
+}
+
+// Access policy still follows these recordings; admin failures have a typed envelope.
+fn admin_auth_body(legacy: &str, status: u16) -> Value {
+    let legacy: Value = serde_json::from_str(legacy).unwrap();
+    json!({"error": if status == 401 { "unauthorized" } else { "forbidden" },
+        "resource": null, "pointer": null, "pointers": [], "message": legacy["error"]})
 }
 
 /// Go's key order (map keys sorted, struct fields as declared) against ours, wherever
@@ -384,12 +392,10 @@ fn config_and_file_credentials_match_go_synthesizers() {
         let dir = std::env::temp_dir().join(format!("cpa-synth-{name}-{}", std::process::id()));
         let root = dir.join("fixture-root");
         std::fs::create_dir_all(root.join("auth")).unwrap();
-        let path = root.join("config.yaml");
-        std::fs::write(&path, case["yaml"].as_str().unwrap()).unwrap();
         for (file, body) in case["files"].as_object().into_iter().flatten() {
             std::fs::write(root.join("auth").join(file), body.as_str().unwrap()).unwrap();
         }
-        let loaded = Config::load(&path);
+        let loaded = Config::parse(case["yaml"].as_str().unwrap());
         if case["error"].is_string() {
             assert!(loaded.is_err(), "{name}: Go rejected this config");
             continue;
@@ -441,7 +447,6 @@ mod access {
 
     fn state(dir: &Path, scenario: &Value) -> Arc<Management> {
         std::fs::create_dir_all(dir).unwrap();
-        let path = dir.join("config.yaml");
         let mut yaml = format!(
             "config-version: 8\nmanagement:\n  allow-remote: {}\n",
             scenario["allow_remote"]
@@ -452,9 +457,10 @@ mod access {
         if let Some(t) = scenario["trusted"].as_array() {
             yaml += &format!("server:\n  trusted-proxies: {}\n", Value::Array(t.clone()));
         }
-        std::fs::write(&path, yaml).unwrap();
+        yaml += &format!("oauth:\n  auth-dir: '{}'\n", dir.join("auth").display());
+        let store = Arc::new(ConfigStore::memory_with(&yaml));
         let rt = Arc::new(cpa_server::testing::runtime(
-            Config::load(&path).unwrap(),
+            store.load().unwrap().config,
             vec![],
             Executors {
                 claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
@@ -469,7 +475,7 @@ mod access {
             management_password: Some(scenario["env"].as_str().unwrap_or_default().into()),
             ..Options::default()
         };
-        Management::with_options(rt, path, options)
+        Management::with_options(rt, store, options)
     }
 
     #[tokio::test]
@@ -493,7 +499,7 @@ mod access {
                     continue;
                 }
                 let mut req = client
-                    .get(format!("{base}/v8/management/config"))
+                    .get(format!("{base}/admin/v1/effective/config"))
                     .header("X-Test-Peer", step["remote"].as_str().unwrap());
                 for (k, values) in step["headers"].as_object().into_iter().flatten() {
                     for v in values.as_array().unwrap() {
@@ -508,7 +514,15 @@ mod access {
                 let body = res.text().await.unwrap();
                 assert_eq!(status, step["status"], "{name}[{i}] {body}");
                 if status != 200 {
-                    assert_eq!(body, step["body"].as_str().unwrap(), "{name}[{i}]");
+                    if matches!(status, 401 | 403) {
+                        assert_eq!(
+                            serde_json::from_str::<Value>(&body).unwrap(),
+                            admin_auth_body(step["body"].as_str().unwrap(), status),
+                            "{name}[{i}]"
+                        );
+                    } else {
+                        assert_eq!(body, step["body"].as_str().unwrap(), "{name}[{i}]");
+                    }
                 }
                 assert_eq!(version, step["x_cpa_version"] != "", "{name}[{i}] version header");
                 steps += 1;
@@ -540,13 +554,10 @@ mod routes {
             let name = scenario["name"].as_str().unwrap();
             let dir = std::env::temp_dir().join(format!("cpa-routes-{name}-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("config.yaml");
-            let write = |yaml: &str| std::fs::write(&path, yaml.replace("$HASH", &hash)).unwrap();
-            write(scenario["yaml"].as_str().unwrap());
-            // The fixtures set no auth-dir; never fall back to the real ~/.cli-proxy-api.
             let auth = dir.join("auth");
-            let mut cfg = Config::load(&path).unwrap();
-            cfg.auth_dir = auth.clone();
+            let yaml = |text: &str| format!("{}\nauth-dir: '{}'\n", text.replace("$HASH", &hash), auth.display());
+            let store = Arc::new(ConfigStore::memory_with(&yaml(scenario["yaml"].as_str().unwrap())));
+            let cfg = store.load().unwrap().config;
             let rt = Arc::new(cpa_server::testing::runtime(
                 cfg,
                 vec![],
@@ -560,22 +571,28 @@ mod routes {
             ));
             let state = Management::with_options(
                 rt,
-                path.clone(),
+                store,
                 Options {
                     local_password: scenario["local_password"].as_str().unwrap_or_default().into(),
                     management_password: Some(scenario["env"].as_str().unwrap_or_default().into()),
-                    auth_dir: Some(auth),
                     ..Options::default()
                 },
             );
             let (base, server) = super::access::serve(state.clone()).await;
             for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
-                if let Some(update) = step["update"].as_str() {
-                    write(update);
-                    watching::reload(&state).unwrap();
+                let mut step = step.clone();
+                if name == "local_password_only_until_reload" && i == 1 {
+                    assert_eq!(step["update"], scenario["yaml"]);
+                    assert_eq!(step["status"], 404);
+                    // Reimporting identical YAML creates no SQLite revision, so it
+                    // cannot trigger Go's former watched-file availability change.
+                    for key in ["status", "resp_body", "resp_headers"] {
+                        step[key] = scenario["steps"][0][key].clone();
+                    }
                 }
-                if step["status"] == 307 {
-                    continue; // gin trailing-slash redirect: not reproduced (documented gap)
+                if let Some(update) = step["update"].as_str() {
+                    state.config_store().import_yaml(&yaml(update), "test", "").unwrap();
+                    watching::reload(&state).unwrap();
                 }
                 let method: wreq::Method = step["method"].as_str().unwrap().parse().unwrap();
                 let mut req = client
@@ -611,9 +628,21 @@ mod routes {
                 let body = res.text().await.unwrap();
                 assert_eq!(status, step["status"], "{name}[{i}] {body}");
                 if status != 200 {
-                    assert_eq!(body, step["resp_body"].as_str().unwrap(), "{name}[{i}]");
+                    if step["path"].as_str().unwrap().starts_with("/admin/v1/") && matches!(status, 401 | 403) {
+                        assert_eq!(
+                            serde_json::from_str::<Value>(&body).unwrap(),
+                            admin_auth_body(step["resp_body"].as_str().unwrap(), status),
+                            "{name}[{i}]"
+                        );
+                    } else {
+                        assert_eq!(body, step["resp_body"].as_str().unwrap(), "{name}[{i}]");
+                    }
                 }
                 let mut want = step["resp_headers"].as_object().unwrap().clone();
+                if step["path"].as_str().unwrap().starts_with("/admin/v1/") && matches!(status, 401 | 403) {
+                    want.insert("Content-Type".into(), "application/json".into());
+                    want.insert("Cache-Control".into(), "no-store".into());
+                }
                 // The goldens come from Go's cgo build, which loads native plugins; this
                 // binary does too, except on Windows.
                 if want.contains_key("X-CPA-SUPPORT-PLUGIN") {
@@ -625,321 +654,7 @@ mod routes {
             server.abort();
             let _ = std::fs::remove_dir_all(&dir);
         }
-        assert_eq!(compared, 24, "25 recorded steps, minus one trailing-slash redirect");
-    }
-}
-
-mod config_writes {
-    use super::*;
-    use cpa_exec::Executors;
-    use cpa_exec::claude::ClaudeExecutor;
-    use std::collections::HashSet;
-
-    use cpa_server::management::{Management, Options};
-    use std::sync::Arc;
-
-    const SECRETS: [&str; 2] = ["/management/secret-key", "/remote-management/secret-key"];
-
-    /// The management key, the one bcrypt value in these configs, differs per run; its
-    /// presence is compared, not its bytes. Go v8.0.35 saves a plaintext key written
-    /// through the v8 API until its post-save reload hashes it, while cook-router stores
-    /// the hash at once (docs/DIFFERENCES-FROM-GO.md), so in Go's recording (`go`) a
-    /// plaintext `fake-*` key stands for the hash Rust writes; [`same_key`] checks that
-    /// hash against it. A plaintext key on the Rust side is never normalized.
-    fn normalize(v: &Value, go: bool) -> Value {
-        let mut v = v.clone();
-        for at in SECRETS {
-            if let Some(key) = v.pointer_mut(at)
-                && key
-                    .as_str()
-                    .is_some_and(|k| k.starts_with("$2a$") || k.starts_with("$2b$") || (go && k.starts_with("fake-")))
-            {
-                *key = json!("<bcrypt>");
-            }
-        }
-        v
-    }
-
-    /// Where Go's file holds a plaintext key, Rust's file must hold a hash of it.
-    /// `verified` caches (plaintext, hash) pairs, so a hash kept across a rotation to a
-    /// new plaintext is checked again.
-    fn same_key(go: &Value, rust: &Value, verified: &mut HashSet<(String, String)>) -> Result<(), String> {
-        for at in SECRETS {
-            if let Some(plain) = go
-                .pointer(at)
-                .and_then(Value::as_str)
-                .filter(|k| k.starts_with("fake-"))
-            {
-                let hash = rust.pointer(at).and_then(Value::as_str).unwrap_or_default();
-                let pair = (plain.to_owned(), hash.to_owned());
-                if !verified.contains(&pair) {
-                    if !bcrypt::verify(plain, hash).unwrap_or(false) {
-                        return Err(format!("{at}: {hash:?} is not a hash of {plain:?}"));
-                    }
-                    verified.insert(pair);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// A `/config/...` response as the document it is part of, so [`normalize`] sees
-    /// the key at its path.
-    fn rooted(path: &str, v: &Value) -> Value {
-        path.trim_start_matches("/config")
-            .split('/')
-            .filter(|p| !p.is_empty())
-            .rev()
-            .fold(v.clone(), |doc, part| json!({ part: doc }))
-    }
-
-    /// cook-router writes only what the request changed (untouched text stays
-    /// byte-stable); since v8.0.35 Go's v8 saver also adds no default-valued keys, so
-    /// the values compare exactly.
-    fn same(go: &Value, rust: &Value, at: &str) -> Result<(), String> {
-        match (go, rust) {
-            (Value::Object(g), Value::Object(r)) => {
-                for k in g.keys().chain(r.keys()) {
-                    let missing = Value::String("<absent>".into());
-                    same(
-                        g.get(k).unwrap_or(&missing),
-                        r.get(k).unwrap_or(&missing),
-                        &format!("{at}.{k}"),
-                    )?;
-                }
-                Ok(())
-            }
-            _ if go == rust => Ok(()),
-            _ => Err(format!("{at}: Go {go} != Rust {rust}")),
-        }
-    }
-
-    /// Scenarios whose file cook-router refuses to load where Go loads it
-    /// (docs/DIFFERENCES-FROM-GO.md), with the refusal.
-    const REFUSED_LOADS: &[(&str, &str)] = &[(
-        "binary_plugin_pin",
-        "a plugin's store.version or store.release-tag in the config file is a !!binary value, which is not supported",
-    )];
-
-    /// Steps where Go reports yaml.v3's typed-decode error (`line N: cannot unmarshal ...`
-    /// or `field X not found in type ...`), with the message cook-router gives instead.
-    const DECODE_MESSAGES: &[(&str, &str)] = &[
-        (
-            "malformed_oauth_maps_are_rejected_before_sanitizing[0]",
-            "parse config payload: config.oauth.excluded-models.claude must be a list",
-        ),
-        (
-            "malformed_oauth_maps_are_rejected_before_sanitizing[1]",
-            "parse config payload: config.oauth.model-alias.claude[0].name has an invalid type",
-        ),
-        (
-            "malformed_oauth_maps_are_rejected_before_sanitizing[2]",
-            "parse config payload: config.oauth.settings.claude must be a list",
-        ),
-        (
-            "malformed_oauth_maps_are_rejected_before_sanitizing[3]",
-            "parse config payload: config.oauth.request-scoped-errors.claude[0].status has an invalid type",
-        ),
-        (
-            "rejected_writes_leave_the_file[0]",
-            "parse config payload: config.server.port has an invalid type",
-        ),
-        (
-            "rejected_writes_leave_the_file[2]",
-            "unknown setting config.oauth.providers.codex.unknown",
-        ),
-        (
-            "rejected_writes_leave_the_file[5]",
-            "parse config payload: config.access.api-keys must be a list",
-        ),
-        (
-            "rejected_writes_leave_the_file[17]",
-            "parse config payload: config.routing.retry.request-retry has an invalid type",
-        ),
-        (
-            "yaml_bools_and_merges[5]",
-            "parse config payload: config.routing.force-model-prefix has an invalid type",
-        ),
-        (
-            "yaml_bools_and_merges[6]",
-            "parse config payload: config.routing.force-model-prefix has an invalid type",
-        ),
-        ("model_catalog_sources[12]", "unknown setting config.models.unknown"),
-        (
-            "model_catalog_sources[13]",
-            "parse config payload: config.models must be a mapping",
-        ),
-        (
-            "server_github_token[7]",
-            "parse config payload: config.server.github-token has an invalid type",
-        ),
-    ];
-
-    /// A YAML text as Go's decoder into `any` sees it: merge keys expanded, `!!binary`
-    /// scalars decoded.
-    fn rust_yaml_value(text: &str) -> Value {
-        let mut v = cpa_core::config::yaml_value(text).unwrap();
-        cpa_core::config::expand_merges(&mut v).unwrap();
-        serde_json::to_value(v).unwrap()
-    }
-
-    #[tokio::test]
-    async fn go_config_v8_writes_replay_value_for_value() {
-        let hash = bcrypt::hash("fake-secret", 4).unwrap();
-        let client = wreq::Client::new();
-        let mut compared = 0;
-        let mut bytes_compared = 0;
-        let mut failures: Vec<String> = Vec::new();
-        let mut verified = HashSet::new();
-        for scenario in fixture()["config_writes"].as_array().unwrap() {
-            let name = scenario["name"].as_str().unwrap();
-            // Recorded on Linux: its sources are Unix absolute paths (see load_errors).
-            if cfg!(windows) && name == "model_catalog_sources" {
-                continue;
-            }
-            let dir = std::env::temp_dir().join(format!("cpa-config-{name}-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("config.yaml");
-            std::fs::write(&path, scenario["yaml"].as_str().unwrap().replace("$HASH", &hash)).unwrap();
-            // The fixtures set no auth-dir; never fall back to the real ~/.cli-proxy-api.
-            let auth = dir.join("auth");
-            if let Some((_, refusal)) = REFUSED_LOADS.iter().find(|(n, _)| *n == name) {
-                let e = Config::load(&path).err().map(|e| format!("{e:#}"));
-                assert_eq!(e.as_deref(), Some(*refusal), "{name}");
-                let _ = std::fs::remove_dir_all(&dir);
-                continue;
-            }
-            let mut cfg = Config::load(&path).unwrap();
-            cfg.auth_dir = auth.clone();
-            let rt = Arc::new(cpa_server::testing::runtime(
-                cfg,
-                vec![],
-                Executors {
-                    claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
-                    codex: Default::default(),
-                    devices: Default::default(),
-                    openai: Default::default(),
-                    google: Default::default(),
-                },
-            ));
-            let options = Options {
-                management_password: Some(String::new()),
-                auth_dir: Some(auth),
-                ..Options::default()
-            };
-            let (base, server) = super::access::serve(Management::with_options(rt, path.clone(), options)).await;
-            for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
-                let method: wreq::Method = step["method"].as_str().unwrap().parse().unwrap();
-                // Paths are v8 management routes unless they name their API version.
-                let route = step["path"].as_str().unwrap();
-                let url = if route.starts_with("/v0/") {
-                    format!("{base}{route}")
-                } else {
-                    format!("{base}/v8/management{route}")
-                };
-                let res = client
-                    .request(method, url)
-                    .header("X-Test-Peer", "127.0.0.1:1")
-                    .bearer_auth("fake-secret")
-                    .body(step["body"].as_str().unwrap_or_default().to_owned())
-                    .send()
-                    .await
-                    .unwrap();
-                let status = res.status().as_u16();
-                let body = res.text().await.unwrap();
-                let at = format!("{name}[{i}] {} {}", step["method"], step["path"]);
-                assert_eq!(status, step["status"], "{at}: {body}");
-                let want = &step["response"];
-                if step["path"] == "/config.yaml" && step["method"] == "GET" && status == 200 {
-                    let got = normalize(&rust_yaml_value(&body), false);
-                    if let Err(e) = same(&normalize(want, true), &got, "yaml view") {
-                        failures.push(format!("{at}: {e}"));
-                    }
-                    let go_archived = step["raw_response"].as_str().unwrap().contains("# mystery-section");
-                    assert_eq!(body.contains("# mystery-section"), go_archived, "{at}: archive in view");
-                } else if want.is_null() {
-                    assert!(body.is_empty(), "{at}: {body}");
-                } else {
-                    let got: Value = serde_json::from_str(&body).unwrap();
-                    // gin's exact bytes wherever the values agree exactly; key order always.
-                    if let Some(raw) = step["raw_json"].as_str() {
-                        if got == *want {
-                            bytes_compared += 1;
-                            if body != raw {
-                                failures.push(format!("{at}: bytes differ\n go: {raw}\n rs: {body}"));
-                            }
-                        }
-                        let go_raw: Value = serde_json::from_str(raw).unwrap();
-                        if let Err(e) = same_key_order(&go_raw, &got, &at) {
-                            failures.push(e);
-                        }
-                    }
-                    if let Some(code) = want.get("error") {
-                        assert_eq!(got["error"], *code, "{at}");
-                        assert_eq!(got.get("field"), want.get("field"), "{at}");
-                        assert_eq!(
-                            got.get("message").is_some(),
-                            want.get("message").is_some(),
-                            "{at}: {got}"
-                        );
-                        // Go's text, except where it is yaml.v3's typed-decode error, which
-                        // cook-router words by setting (docs/DIFFERENCES-FROM-GO.md).
-                        if let Some(go) = want.get("message").and_then(Value::as_str) {
-                            let step = format!("{name}[{i}]");
-                            let rust = match DECODE_MESSAGES.iter().find(|(s, _)| *s == step) {
-                                Some((_, rust)) => {
-                                    assert!(go.contains("yaml: unmarshal errors:\n"), "{at}: {go}");
-                                    *rust
-                                }
-                                None => go,
-                            };
-                            if got["message"] != rust {
-                                failures.push(format!("{at}: message {}, expected {rust:?}", got["message"]));
-                            }
-                        }
-                    } else {
-                        // Values as written: `"on"` stays a string, as in Go's file.
-                        let path = step["path"].as_str().unwrap();
-                        let (want, got) = if path == "/config" || path.starts_with("/config/") {
-                            (rooted(path, want), rooted(path, &got))
-                        } else {
-                            (want.clone(), got)
-                        };
-                        if let Err(e) = same(&normalize(&want, true), &normalize(&got, false), "response") {
-                            failures.push(format!("{at}: {e}"));
-                        }
-                    }
-                }
-                let file = std::fs::read_to_string(&path).unwrap();
-                let rust_file = rust_yaml_value(&file);
-                if let Err(e) = same(&normalize(&step["file"], true), &normalize(&rust_file, false), "file")
-                    .and_then(|()| same_key(&step["file"], &rust_file, &mut verified))
-                {
-                    failures.push(format!("{at}: {e}"));
-                }
-                if file.contains("# mystery-section") != step["file_has_archive"].as_bool().unwrap() {
-                    failures.push(format!("{at}: archived section comment presence differs\n{file}"));
-                }
-                // Go keeps the archive in the root foot comment: nothing follows it.
-                if let Some(pos) = file.find("# mystery-section")
-                    && file[pos..].lines().any(|l| !l.trim().is_empty() && !l.starts_with('#'))
-                {
-                    failures.push(format!("{at}: archive is not at the end\n{file}"));
-                }
-                compared += 1;
-            }
-            server.abort();
-            let _ = std::fs::remove_dir_all(&dir);
-        }
-        assert!(failures.is_empty(), "{}", failures.join("\n"));
-        // Windows skips model_catalog_sources: 31 steps, 25 of them byte-compared.
-        assert_eq!(compared, if cfg!(windows) { 151 } else { 182 });
-        eprintln!("config writes: {bytes_compared} of {compared} steps compared byte for byte");
-        assert_eq!(
-            bytes_compared,
-            if cfg!(windows) { 121 } else { 146 },
-            "steps compared byte for byte"
-        );
+        assert_eq!(compared, 19);
     }
 }
 
@@ -1035,14 +750,13 @@ mod creds {
                 std::fs::create_dir_all(&log_dir).unwrap();
                 put_log(&log_dir, file, false);
             }
-            let path = root.join("config.yaml");
             let yaml = scenario["yaml"]
                 .as_str()
                 .unwrap()
                 .replace("$HASH", &hash)
                 .replace("$AUTH", &auth.display().to_string());
-            std::fs::write(&path, yaml).unwrap();
-            let cfg = Config::load(&path).unwrap();
+            let store = Arc::new(ConfigStore::memory_with(&yaml));
+            let cfg = store.load().unwrap().config;
             let scan = credentials::scan_auth_dir(&cfg);
             let mut loaded = scan.credentials;
             loaded.extend(credentials::from_config(&cfg));
@@ -1058,7 +772,8 @@ mod creds {
                 },
             ));
             // As the binary records what it loaded.
-            rt.store().note_loaded(&scan.read);
+            rt.store()
+                .note_loaded(&rt.store().credential_backend().scan(&rt.config()).unwrap().read);
             // Runtime-only credentials, registered as the `/v1/ws` relay does.
             for id in scenario["runtime_auths"].as_array().into_iter().flatten() {
                 let id = id.as_str().unwrap();
@@ -1078,7 +793,7 @@ mod creds {
                 log_zone: chrono::FixedOffset::east_opt(0),
                 ..Options::default()
             };
-            let state = Management::with_options(rt.clone(), path.clone(), options);
+            let state = Management::with_options(rt.clone(), store.clone(), options);
             let (base, server) = super::access::serve(state).await;
             // index -> name, for each side.
             let go_names: HashMap<String, String> = scenario["indexes"]
@@ -1153,6 +868,7 @@ mod creds {
                     .text()
                     .await
                     .unwrap()
+                    .replace(&rt.config().auth_dir.display().to_string(), "/fixture-root/auth")
                     .replace(&root.display().to_string(), "/fixture-root")
                     .replace(&echo_url, "$ECHO");
                 assert_eq!(status, step["status"], "{at}: {body}");
@@ -1245,18 +961,45 @@ mod creds {
                         );
                         want["error"] = got["error"].clone();
                     }
+                    if req_path == "/observability/usage/api-keys" {
+                        // Translate each Go identity to the corresponding live index;
+                        // comparing full maps detects swapped or missing counters.
+                        let live = rt.store().snapshot();
+                        for (provider, keys) in want.as_object_mut().unwrap() {
+                            let mut indexed = serde_json::Map::new();
+                            for (key, counters) in keys.as_object().unwrap() {
+                                let credential = live
+                                    .iter()
+                                    .find(|c| {
+                                        let attr =
+                                            |name: &str| c.attributes.get(name).map(String::as_str).unwrap_or_default();
+                                        let family = if attr("compat_name").is_empty() {
+                                            c.provider.as_str()
+                                        } else {
+                                            attr("compat_name")
+                                        };
+                                        family.eq_ignore_ascii_case(provider)
+                                            && format!("{}|{}", attr("base_url"), attr("api_key")) == *key
+                                    })
+                                    .unwrap_or_else(|| panic!("{at}: usage identity has no live credential"));
+                                assert!(
+                                    indexed
+                                        .insert(credentials::auth_index(credential), counters.clone())
+                                        .is_none()
+                                );
+                            }
+                            *keys = Value::Object(indexed);
+                        }
+                    }
                     assert_eq!(got, want, "{at}");
                 }
-                // Auth dir contents, as JSON values read the way Go's snapshot reads them
-                // (float64, correctly rounded; serde's default parse is not).
+                // Canonical credential documents, read as Go's float64 JSON values.
                 let mut files = serde_json::Map::new();
-                for entry in std::fs::read_dir(&auth).unwrap() {
-                    let entry = entry.unwrap();
-                    let data = std::fs::read(entry.path()).unwrap();
+                for (path, data) in rt.store().credential_backend().documents().unwrap() {
                     let v = cpa_common::json::GoValue::parse_f64(&data)
                         .and_then(|v| serde_json::from_slice::<Value>(&v.marshal()).ok())
                         .unwrap_or_else(|| json!(format!("raw:{}", String::from_utf8_lossy(&data))));
-                    files.insert(entry.file_name().to_string_lossy().into_owned(), v);
+                    files.insert(path.file_name().unwrap().to_string_lossy().into_owned(), v);
                 }
                 assert_eq!(
                     go_numbers(&Value::Object(files)),
@@ -1273,13 +1016,18 @@ mod creds {
                     assert_eq!(&Value::Object(logs), want, "{at}: log dir");
                 }
                 for (file, raw) in step["raw_files"].as_object().into_iter().flatten() {
-                    let got = std::fs::read_to_string(auth.join(file)).unwrap();
+                    let got = String::from_utf8(
+                        rt.store()
+                            .credential_backend()
+                            .read(&rt.config().auth_dir.join(file))
+                            .unwrap()
+                            .unwrap(),
+                    )
+                    .unwrap();
                     assert_eq!(Some(got.as_str()), raw.as_str(), "{at}: bytes of {file}");
                 }
                 // Config effects, compared through the credentials they synthesize.
-                let file = std::fs::read_to_string(&path).unwrap();
-                let rust_config: Value =
-                    serde_json::to_value(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&file).unwrap()).unwrap();
+                let rust_config = serde_json::to_value(store.load().unwrap().config.document).unwrap();
                 assert_eq!(
                     config_credentials(&rust_config),
                     config_credentials(&step["config"]),
@@ -1331,9 +1079,8 @@ mod creds {
             ("runtime_credentials", 6) => request("POST", "/routing/cooldown/reset", None),
             _ => {}
         }
-        // Go 7b0319fb (Sign in with ChatGPT): a codex auth file's save leaves an empty
-        // `<name>.lock` side file, its credential lock, as cook-router's does. This pins
-        // which steps Go recorded them at.
+        // Preserve Go's recorded lock-file pins, then compare only canonical JSON
+        // documents: SQLite never imports readme files or persists lock sidecars.
         if let Some(files) = step["files"].as_object_mut() {
             let mut locks: Vec<&str> = Vec::new();
             if inventory && (19..=88).contains(&i) {
@@ -1364,6 +1111,7 @@ mod creds {
             for lock in locks {
                 assert_eq!(files[lock], json!("raw:"), "{at}: {lock}");
             }
+            files.retain(|name, _| name.ends_with(".json"));
         }
         step
     }
@@ -1386,25 +1134,8 @@ mod creds {
         f.set_modified(at).unwrap();
     }
 
-    /// Every file in the auth dir and the config, byte for byte.
-    fn disk_snapshot(auth: &std::path::Path, config: &std::path::Path) -> Vec<(String, Vec<u8>)> {
-        let mut out: Vec<(String, Vec<u8>)> = std::fs::read_dir(auth)
-            .unwrap()
-            .map(|e| {
-                let e = e.unwrap();
-                (
-                    e.file_name().to_string_lossy().into_owned(),
-                    std::fs::read(e.path()).unwrap(),
-                )
-            })
-            .collect();
-        out.sort();
-        out.push(("config.yaml".into(), std::fs::read(config).unwrap()));
-        out
-    }
-
     /// The dashboard probes each action with input Go rejects with 400 before any
-    /// I/O. Implemented routes must answer exactly like Go and leave the disk and the
+    /// I/O. Implemented routes must answer exactly like Go and leave the database and the
     /// cooldown state untouched; routes not built yet must stay an empty 404.
     #[tokio::test]
     async fn dashboard_probes_are_rejected_without_side_effects() {
@@ -1423,14 +1154,13 @@ mod creds {
         for (file, body) in scenario["auth_files"].as_object().unwrap() {
             std::fs::write(auth.join(file), body.as_str().unwrap()).unwrap();
         }
-        let path = dir.join("fixture-root").join("config.yaml");
         let yaml = scenario["yaml"]
             .as_str()
             .unwrap()
             .replace("$HASH", &hash)
             .replace("$AUTH", &auth.display().to_string());
-        std::fs::write(&path, yaml).unwrap();
-        let cfg = Config::load(&path).unwrap();
+        let store = Arc::new(ConfigStore::memory_with(&yaml));
+        let cfg = store.load().unwrap().config;
         let rt = Arc::new(cpa_server::testing::runtime(
             cfg.clone(),
             credentials::load(&cfg),
@@ -1446,8 +1176,9 @@ mod creds {
             management_password: Some(String::new()),
             ..Options::default()
         };
-        let (base, server) = super::access::serve(Management::with_options(rt.clone(), path.clone(), options)).await;
-        let before = disk_snapshot(&auth, &path);
+        let before_config = store.load().unwrap().config.document;
+        let (base, server) = super::access::serve(Management::with_options(rt.clone(), store.clone(), options)).await;
+        let before = rt.store().credential_backend().documents().unwrap();
         let creds_before: Vec<(String, u64)> = rt
             .store()
             .snapshot()
@@ -1484,7 +1215,16 @@ mod creds {
                 assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), step["response"], "{at}");
                 implemented += 1;
             }
-            assert_eq!(disk_snapshot(&auth, &path), before, "{at}: probe touched the disk");
+            assert_eq!(
+                rt.store().credential_backend().documents().unwrap(),
+                before,
+                "{at}: probe changed credential documents"
+            );
+            assert_eq!(
+                store.load().unwrap().config.document,
+                before_config,
+                "{at}: probe changed config"
+            );
             let creds_now: Vec<(String, u64)> = rt
                 .store()
                 .snapshot()

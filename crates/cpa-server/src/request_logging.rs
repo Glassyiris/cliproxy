@@ -1679,7 +1679,7 @@ mod tests {
 
     fn management(dir: &Path, enabled: bool, commercial: bool) -> Arc<Management> {
         let config = cpa_core::config::Config::parse(&format!(
-            "observability: {{logs: {{request-log: {enabled}}}}}\nserver: {{commercial-mode: {commercial}}}\n"
+            "oauth: {{auth-dir: {}}}\nobservability: {{logs: {{request-log: {enabled}}}}}\nserver: {{commercial-mode: {commercial}}}\n", dir.display()
         ))
         .unwrap();
         let rt = Arc::new(crate::testing::runtime(
@@ -1695,7 +1695,7 @@ mod tests {
         ));
         Management::with_options(
             rt,
-            dir.join("config.yaml"),
+            Arc::new(crate::config_store::ConfigStore::memory()),
             crate::management::Options {
                 log_dir: Some(dir.to_owned()),
                 management_password: Some(String::new()),

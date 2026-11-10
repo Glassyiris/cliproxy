@@ -25,7 +25,7 @@
     "src/lib/api/fakeServer.testSupport.ts": 1
   },
   "complexity": {
-    "src/lib/api/client.ts": 2,
+    "src/lib/api/client.ts": 1,
     "src/lib/credentials.ts": 2,
     "src/lib/quotaWindows.ts": 3,
     "src/lib/usage.ts": 1,
@@ -47,8 +47,5 @@
   "no-empty": {
     "src/lib/firstRun.ts": 1,
     "tools/perf/run.mjs": 3
-  },
-  "no-unused-vars": {
-    "tools/mock/server.mjs": 2
   }
 }

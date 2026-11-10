@@ -1,4 +1,5 @@
 use super::*;
+use cpa_core::config::Config;
 use serde_json::json;
 
 /// Every config the Go config-diff fixture holds, plus one with every split-out
@@ -56,6 +57,13 @@ plugins:
 fn an_imported_config_compiles_to_what_the_file_loads_to() {
     for text in corpus() {
         let Ok(original) = Config::parse(&text) else { continue };
+        if cpa_core::config::validate_config_fields(&original.document, true).is_err() {
+            assert!(
+                import_yaml(&text).is_err(),
+                "unsupported fields must not be dropped: {text}"
+            );
+            continue;
+        }
         let resources = import_yaml(&text).unwrap_or_else(|e| panic!("import failed: {e:#}\n{text}"));
         let (compiled, _) = config(&resources).unwrap_or_else(|e| panic!("compile failed: {e}\n{text}"));
         let mut want = original.clone();
@@ -75,35 +83,13 @@ fn an_imported_config_compiles_to_what_the_file_loads_to() {
                 }
             }
         }
-        // A file in the v8 layout keeps its scope exactly. Flat legacy settings that
-        // land under `oauth.providers` apply to sign-ins only (the import warns);
-        // nothing loses its scope.
-        let raw: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).unwrap_or_default();
-        let keys = |v: &serde_yaml_ng::Value| -> std::collections::BTreeSet<String> {
-            v.as_mapping()
-                .into_iter()
-                .flatten()
-                .filter_map(|(k, _)| k.as_str().map(str::to_owned))
-                .filter(|k| k != "config-version")
-                .collect()
-        };
-        if keys(&raw) == keys(&want.document) {
-            assert_eq!(got.oauth_only, want.oauth_only, "{text}");
-        } else {
-            assert!(got.oauth_only.is_superset(&want.oauth_only), "{text}");
-            for c in [&mut want, &mut got] {
-                c.oauth_only.clear();
-            }
-        }
+        assert_eq!(got.oauth_only, want.oauth_only, "{text}");
+        assert_eq!(got.plugin_configs, want.plugin_configs, "{text}");
         assert_eq!(got.api_keys, want.api_keys, "{text}");
         assert_eq!(got.routing, want.routing, "{text}");
         assert_eq!((got.host.clone(), got.port), (want.host.clone(), want.port), "{text}");
         assert_eq!(got.auth_dir, want.auth_dir, "{text}");
-        // The import drops what the schema does not know; the rest is the same.
-        let mut known = cpa_core::config::ConfigDocument::unmigrated(want.document.clone());
-        known.archive_unknown();
-        let mut known = serde_json::to_value(cpa_core::config::AsJson(known.value())).unwrap();
-        drop_unknown_fields(&mut known);
+        let known = serde_json::to_value(cpa_core::config::AsJson(&want.document)).unwrap();
         assert_eq!(
             serde_json::to_value(cpa_core::config::AsJson(&got.document)).unwrap(),
             known,
@@ -159,17 +145,23 @@ fn secrets_are_hidden_in_history_and_kept_on_write_back() {
     let stored = provider("main", "claude", "sk-live");
     let hidden = redacted(&stored);
     assert_eq!(hidden.spec["keys"][0]["api-key"], SECRET);
-    // Reads show provider keys: the dashboard matches usage by them.
-    assert_eq!(for_read(&stored).spec, stored.spec);
     let mut back = hidden.clone();
     back.spec["base-url"] = "https://y.example.invalid".into();
+    let err = resolve_secrets(&mut back, Some(&stored)).unwrap_err();
+    assert_eq!(err.code, Some("secret_destination_changed"));
+    assert_eq!(err.pointers, vec!["/keys/0/api-key"]);
+    back.spec["keys"][0]["api-key"] = "sk-live".into();
     resolve_secrets(&mut back, Some(&stored)).unwrap();
     assert_eq!(back.spec["keys"][0]["api-key"], "sk-live");
     // A placeholder where nothing is stored is refused, naming the place.
     let mut two = hidden;
     two.spec["keys"] = json!([{"api-key": SECRET}, {"api-key": SECRET}]);
     let err = resolve_secrets(&mut two, Some(&stored)).unwrap_err();
-    assert!(err.message.starts_with("/keys/1/api-key"), "{}", err.message);
+    assert!(
+        err.pointer.as_deref().is_some_and(|p| p.starts_with("/keys/")),
+        "{}",
+        err.message
+    );
 }
 
 #[test]
@@ -178,7 +170,7 @@ fn the_management_key_is_hashed_and_hidden_on_read() {
     hash_management_key(&mut m).unwrap();
     let hash = m.spec["secret-key"].as_str().unwrap().to_owned();
     assert!(bcrypt::verify("hunter2", &hash).unwrap());
-    assert_eq!(for_read(&m).spec["secret-key"], SECRET);
+    assert_eq!(redacted(&m).spec["secret-key"], SECRET);
     // Hashing an existing hash or the placeholder changes nothing.
     hash_management_key(&mut m).unwrap();
     assert_eq!(m.spec["secret-key"], hash.as_str());
@@ -203,4 +195,214 @@ fn resources_that_cannot_compile_are_named() {
     assert!(config(&[keys_in_access]).is_err());
     let unknown = Resource::new(Kind::Setting, "routing", 0, json!({"no-such-setting": 1}));
     assert!(config(&[unknown]).is_err());
+}
+
+#[test]
+fn legacy_and_mixed_oauth_scopes_survive_import_and_unrelated_edits() {
+    let source = "codex:\n  chatgpt-keep-alive: true\noauth:\n  providers:\n    codex:\n      header-defaults: {user-agent: scoped-agent}\n";
+    let original = Config::parse(source).unwrap();
+    let resources = import_yaml(source).unwrap();
+    let (compiled, _) = config(&resources).unwrap();
+    assert_eq!(compiled.oauth_only, original.oauth_only);
+    assert_eq!(compiled.for_api_key().document, original.for_api_key().document);
+    let mut doc = document(&resources, true);
+    set_path(&mut doc, &["server", "port"], Some(json!(9001))).unwrap();
+    let next = split(&doc, &resources).unwrap();
+    assert_eq!(config(&next).unwrap().0.oauth_only, original.oauth_only);
+    set_path(
+        &mut doc,
+        &["oauth", "providers", "codex", "chatgpt-keep-alive"],
+        Some(json!(false)),
+    )
+    .unwrap();
+    let next = split(&doc, &resources).unwrap();
+    assert!(
+        config(&next)
+            .unwrap()
+            .0
+            .oauth_only
+            .contains("oauth.providers.codex.chatgpt-keep-alive")
+    );
+}
+
+#[test]
+fn unknown_sections_and_nested_fields_are_rejected_not_discarded() {
+    for source in [
+        "unknown-section: true\n",
+        "server: {unknown-field: 1}\n",
+        "api-keys: {claude: [{keys: [{api-key: x, unknown-field: true}]}]}\n",
+    ] {
+        assert!(import_yaml(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn plugin_raw_scalar_and_binary_semantics_survive_every_round_trip() {
+    let source = "plugins:\n  enabled: true\n  configs:\n    acme:\n      ratio: 1.50\n      exponent: 1e3\n      hex: 0x1F\n      octal: 007\n      tagged: !!float 1\n      binary: !!binary YWJj\n      quoted: '007'\n      payload: {auth_index: keep, auth-index: keep, '@id': keep}\n";
+    let original = Config::parse(source).unwrap();
+    let resources = import_yaml(source).unwrap();
+    assert_eq!(config(&resources).unwrap().0.plugin_configs, original.plugin_configs);
+    let serialized = serde_json::to_string(&resources[0].spec).unwrap();
+    assert!(serialized.contains("@raw-yaml") || resources.iter().any(|r| r.spec.get(RAW_YAML).is_some()));
+    let again = split(&document(&resources, true), &resources).unwrap();
+    assert_eq!(config(&again).unwrap().0.plugin_configs, original.plugin_configs);
+    let plugin = resources.iter().find(|r| r.kind == Kind::Plugin).unwrap();
+    assert_eq!(redacted(plugin).spec, SECRET);
+    let mut back = redacted(plugin);
+    resolve_secrets(&mut back, Some(plugin)).unwrap();
+    assert_eq!(back, *plugin);
+    let mut forged = plugin.clone();
+    forged.spec[RAW_YAML]["value"] = "ratio: 999\n".into();
+    assert!(config(&[forged]).is_err());
+}
+
+#[test]
+fn null_plugin_configs_round_trip_and_accept_control_patches() {
+    for value in ["null", ""] {
+        let source = format!("plugins:\n  enabled: true\n  configs:\n    sample: {value}\n");
+        let original = Config::parse(&source).unwrap();
+        let resources = import_yaml(&source).unwrap();
+        let plugin = resources.iter().find(|r| r.kind == Kind::Plugin).unwrap();
+        assert!(plugin.spec.is_null());
+        let exported = export_json(1, &resources, true);
+        let restored = import_json(&exported.to_string()).unwrap();
+        let (compiled, _) = config(&restored).unwrap();
+        assert_eq!(compiled.plugin_configs, original.plugin_configs);
+        assert!(compiled.document["plugins"]["configs"]["sample"].is_null());
+        let runtime = cpa_plugin::config::runtime_config(&compiled.document, &compiled.plugin_configs).unwrap();
+        assert!(!runtime.items["sample"].enabled);
+        assert_eq!(runtime.items["sample"].priority, 0);
+        let split = split(&document(&restored, true), &restored).unwrap();
+        assert!(split.iter().find(|r| r.kind == Kind::Plugin).unwrap().spec.is_null());
+
+        let mut patched = plugin.clone();
+        for patch in [json!({}), json!({"enabled": null, "priority": null})] {
+            patch_plugin_controls(&mut patched, &patch).unwrap();
+            assert!(patched.spec.is_null());
+        }
+        patch_plugin_controls(&mut patched, &json!({"enabled": true, "priority": 5})).unwrap();
+        let mut changed = restored;
+        *changed.iter_mut().find(|r| r.kind == Kind::Plugin).unwrap() = patched.clone();
+        let (compiled, _) = config(&changed).unwrap();
+        let runtime = cpa_plugin::config::runtime_config(&compiled.document, &compiled.plugin_configs).unwrap();
+        assert!(runtime.items["sample"].enabled);
+        assert_eq!(runtime.items["sample"].priority, 5);
+        patch_plugin_controls(&mut patched, &json!({"enabled": null, "priority": null})).unwrap();
+        assert_eq!(patched.spec, json!({}));
+        *changed.iter_mut().find(|r| r.kind == Kind::Plugin).unwrap() = patched;
+        let (compiled, _) = config(&changed).unwrap();
+        let runtime = cpa_plugin::config::runtime_config(&compiled.document, &compiled.plugin_configs).unwrap();
+        assert!(!runtime.items["sample"].enabled);
+        assert_eq!(runtime.items["sample"].priority, 0);
+    }
+}
+
+#[test]
+fn masked_nested_keys_follow_identity_when_reordered_and_reject_ambiguity() {
+    let mut stored = provider("main", "claude", "sk-a");
+    stored.spec["keys"] = json!([{"api-key":"sk-a"},{"api-key":"sk-b"}]);
+    resolve_secrets(&mut stored, None).unwrap();
+    let mut edit = redacted(&stored);
+    edit.spec["keys"].as_array_mut().unwrap().swap(0, 1);
+    resolve_secrets(&mut edit, Some(&stored)).unwrap();
+    assert_eq!(edit.spec["keys"][0]["api-key"], "sk-b");
+    assert_eq!(edit.spec["keys"][1]["api-key"], "sk-a");
+    let mut ambiguous = redacted(&stored);
+    for key in ambiguous.spec["keys"].as_array_mut().unwrap() {
+        key.as_object_mut().unwrap().remove("@id");
+    }
+    assert!(resolve_secrets(&mut ambiguous, Some(&stored)).is_err());
+    let mut duplicate = redacted(&stored);
+    duplicate.spec["keys"][1]["@id"] = duplicate.spec["keys"][0]["@id"].clone();
+    assert!(resolve_secrets(&mut duplicate, Some(&stored)).is_err());
+}
+
+#[test]
+fn all_secret_carriers_are_masked_and_annotation_stripping_is_positioned() {
+    let mut r = provider("main", "claude", "sk-a");
+    r.spec["headers"] = json!({"Authorization":"Bearer hidden", "X-Custom":"hidden-header", "@id":"hidden-id-header"});
+    r.spec["proxy-url"] = "https://user:password@proxy.invalid".into();
+    r.spec["base-url"] = "https://api.invalid/v1?token=hidden-query".into();
+    let shown = redacted(&r);
+    for pointer in [
+        "/keys/0/api-key",
+        "/headers/Authorization",
+        "/headers/X-Custom",
+        "/headers/@id",
+        "/proxy-url",
+        "/base-url",
+    ] {
+        assert_eq!(shown.spec.pointer(pointer).unwrap(), SECRET);
+    }
+    let doc = json!({"api-keys":{"claude":[{"auth_index":"drop", "keys":[{"auth-index":"drop", "api-key":"x"}], "payload":{"auth_index":"keep"}}]}, "requests":{"payload":{"auth_index":"keep","auth-index":"keep"}}, "plugins":{"configs":{"acme":{"auth_index":"keep"}}}});
+    let clean = strip_read_annotations_at(doc, &[]);
+    assert!(clean["api-keys"]["claude"][0].get("auth_index").is_none());
+    assert_eq!(clean["api-keys"]["claude"][0]["payload"]["auth_index"], "keep");
+    assert_eq!(clean["requests"]["payload"]["auth_index"], "keep");
+    assert_eq!(clean["plugins"]["configs"]["acme"]["auth_index"], "keep");
+}
+
+#[test]
+fn duplicate_and_invalid_document_annotations_are_errors() {
+    for ids in [
+        [json!("same"), json!("same")],
+        [json!("bad/id"), json!("ok")],
+        [json!(4), json!("ok")],
+    ] {
+        let doc = json!({"api-keys":{"claude":[{"@id":ids[0],"keys":[{"api-key":"a"}]},{"@id":ids[1],"keys":[{"api-key":"b"}]}]}});
+        assert!(split(&doc, &[]).is_err());
+    }
+    assert!(split(&json!({"model-routers": {"not":"a list"}}), &[]).is_err());
+    assert!(split(&json!({"access": {"api-keys": [SECRET]}}), &[]).is_err());
+}
+
+#[test]
+fn resource_and_depth_limits_are_checked_before_compilation() {
+    let huge = Resource::new(Kind::Plugin, "huge", 0, json!({"value":"x".repeat(MAX_SPEC_BYTES)}));
+    assert!(check(&huge).is_err());
+    let mut deep = json!(0);
+    for _ in 0..=MAX_DEPTH {
+        deep = json!({"nested":deep});
+    }
+    assert!(!bounded(&deep));
+}
+
+#[test]
+fn expected_collection_annotations_are_stripped_without_touching_payloads() {
+    let annotated =
+        json!([{"auth_index":"drop","keys":[{"auth-index":"drop","api-key":SECRET}],"payload":{"auth_index":"keep"}}]);
+    let clean = strip_read_annotations_at(annotated, &["api-keys", "claude"]);
+    assert!(clean[0].get("auth_index").is_none());
+    assert!(clean[0]["keys"][0].get("auth-index").is_none());
+    assert_eq!(clean[0]["payload"]["auth_index"], "keep");
+    let payload = json!({"auth_index":"keep", "auth-index":"keep"});
+    assert_eq!(
+        strip_read_annotations_at(payload.clone(), &["requests", "payload"]),
+        payload
+    );
+}
+
+#[test]
+fn effective_redaction_keeps_injected_identity_and_hides_opaque_configs() {
+    let mut doc = json!({"api-keys":{"gemini":[{"@id":"provider:owner@example.invalid","auth_index":"index:owner@example.invalid","keys":[{"@id":"key:owner@example.invalid","auth_index":"key-index","api-key":"sk-live"}],"headers":{"Authorization":"Bearer live"},"payload":{"auth_index":"https://user:password@example.invalid"}}]},"plugins":{"configs":{"acme":{"enabled":true,"opaque":"plugin-secret"}}}});
+    doc["access"] = json!({"api-keys":[{"@id":"client:alice@example.com","key":"fake-key"}]});
+    doc["model-routers"] = json!([{"@id":"router:alice@example.com","name":"route"}]);
+    redact_document(&mut doc);
+    assert_eq!(
+        doc["api-keys"]["gemini"][0]["auth_index"],
+        "index:owner@example.invalid"
+    );
+    assert_eq!(doc["api-keys"]["gemini"][0]["@id"], "provider:owner@example.invalid");
+    assert_eq!(doc["api-keys"]["gemini"][0]["keys"][0]["auth_index"], "key-index");
+    assert_eq!(
+        doc["api-keys"]["gemini"][0]["keys"][0]["@id"],
+        "key:owner@example.invalid"
+    );
+    assert_eq!(doc["api-keys"]["gemini"][0]["keys"][0]["api-key"], SECRET);
+    assert_eq!(doc["api-keys"]["gemini"][0]["headers"]["Authorization"], SECRET);
+    assert_eq!(doc["api-keys"]["gemini"][0]["payload"]["auth_index"], SECRET);
+    assert_eq!(doc["plugins"]["configs"]["acme"], SECRET);
+    assert_eq!(doc["access"]["api-keys"][0]["@id"], "client:alice@example.com");
+    assert_eq!(doc["access"]["api-keys"][0]["key"], SECRET);
+    assert_eq!(doc["model-routers"][0]["@id"], "router:alice@example.com");
 }

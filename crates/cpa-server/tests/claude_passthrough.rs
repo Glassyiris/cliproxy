@@ -395,11 +395,10 @@ async fn request_log_masks_upstream_credentials() {
     cpa_server::install_registry(&rt);
     let management = cpa_server::management::Management::with_options(
         rt.clone(),
-        dir.join("config.yaml"),
+        Arc::new(cpa_server::config_store::ConfigStore::memory()),
         cpa_server::management::Options {
             log_dir: Some(logs.clone()),
             management_password: Some(String::new()),
-            auth_dir: Some(dir.clone()),
             ..Default::default()
         },
     );

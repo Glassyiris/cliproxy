@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { ApiKeyUsage } from "../../lib/api/observability.ts";
 import {
   entriesOf,
+  entryId,
   formErrors,
   groupNames,
   groupsOf,
@@ -15,10 +16,22 @@ import {
 } from "./groups.ts";
 
 const bucket = (success: number, failed: number) => ({ time: "", success, failed });
+
+test("entryId follows the persisted provider when groups reorder and rejects missing IDs", () => {
+  const first = { "@id": "provider-a", name: "a", keys: [] };
+  const second = { "@id": "provider-b", name: "b", keys: [] };
+  const before = entriesOf({ "api-keys": { claude: [first, second] } }, undefined, String)[0][1];
+  const after = entriesOf({ "api-keys": { claude: [second, first] } }, undefined, String)[0][1];
+  assert.equal(entryId(before[0]), "claude:provider-a");
+  assert.equal(entryId(after[1]), entryId(before[0]));
+  assert.notEqual(entryId(after[0]), entryId(before[0]));
+  assert.throws(() => entryId({ family: "claude", group: {} }), /persisted identity/);
+});
+
 const usage: ApiKeyUsage = {
-  claude: { "|sk-a": { success: 1, failed: 0, recent_requests: [bucket(2, 1), bucket(0, 0)] } },
+  claude: { "auth-a": { success: 1, failed: 0, recent_requests: [bucket(2, 1), bucket(0, 0)] } },
   openrouter: {
-    "https://r.example/v1|sk-b": { success: 5, failed: 0, recent_requests: [bucket(9, 0)] },
+    "auth-b": { success: 5, failed: 0, recent_requests: [bucket(9, 0)] },
   },
 };
 
@@ -54,24 +67,46 @@ test("modelText shows an alias only when it differs", () => {
   assert.equal(modelText({ name: "m" }), "m");
 });
 
-test("keyTraffic finds usage by family, or by lower-cased name for OpenAI-compatible groups", () => {
-  const claude = keyTraffic(usage, "claude", { name: "team" }, { "api-key": "sk-a" });
+test("keyTraffic uses auth_index with masked keys, under the family or compatibility name", () => {
+  const claude = keyTraffic(
+    usage,
+    "claude",
+    { name: "team" },
+    { "api-key": "$secret", auth_index: "auth-a" },
+  );
   assert.deepEqual(claude, { total: [3, 0], failed: [1, 0], times: ["", ""] });
   const compat = { name: "OpenRouter", "base-url": "https://r.example/v1" };
-  assert.deepEqual(keyTraffic(usage, "openai-compatibility", compat, { "api-key": "sk-b" }), {
-    total: [9],
-    failed: [0],
-    times: [""],
-  });
-  assert.equal(keyTraffic(usage, "claude", { name: "team" }, { "api-key": "sk-x" }), null);
-  assert.equal(keyTraffic(undefined, "claude", {}, { "api-key": "sk-a" }), null);
+  assert.deepEqual(
+    keyTraffic(usage, "openai-compatibility", compat, {
+      "api-key": "$secret",
+      auth_index: "auth-b",
+    }),
+    {
+      total: [9],
+      failed: [0],
+      times: [""],
+    },
+  );
+  assert.equal(keyTraffic(usage, "claude", {}, { auth_index: "auth-x" }), null);
+  assert.equal(keyTraffic(undefined, "claude", {}, { auth_index: "auth-a" }), null);
+  assert.equal(keyTraffic(usage, "claude", {}, { "api-key": "$secret" }), null);
+  assert.equal(keyTraffic(usage, "claude", {}, { "api-key": "auth-a" }), null);
 });
 
 test("entriesOf lists configured families in order and adds up each group's keys", () => {
   const config = {
     "api-keys": {
       codex: [],
-      claude: [{ name: "team", keys: [{ "api-key": "sk-a" }, { "api-key": "sk-x" }] }],
+      claude: [
+        {
+          "@id": "provider-team",
+          name: "team",
+          keys: [
+            { "@id": "key-a", "api-key": "$secret", auth_index: "auth-a" },
+            { "@id": "key-x", "api-key": "$secret", auth_index: "auth-x" },
+          ],
+        },
+      ],
     },
   };
   const entries = entriesOf(config, usage, (n) => `Group ${n}`);
@@ -80,6 +115,20 @@ test("entriesOf lists configured families in order and adds up each group's keys
     [["claude", ["team"]]],
   );
   assert.deepEqual(entries[0][1][0].traffic, { total: [3, 0], failed: [1, 0], times: ["", ""] });
+  assert.equal(entries[0][1][0].group, config["api-keys"].claude[0]);
+  assert.equal(entries[0][1][0].group["@id"], "provider-team");
+  assert.equal(entries[0][1][0].keys[0].key, config["api-keys"].claude[0].keys[0]);
+  assert.equal(entries[0][1][0].keys[0].key["@id"], "key-a");
+  const group = config["api-keys"].claude[0];
+  const reordered = { ...group, keys: [...group.keys].reverse(), disabled: true };
+  const updated = entriesOf({ "api-keys": { claude: [reordered] } }, usage, String)[0][1][0];
+  assert.equal(updated.group["@id"], "provider-team");
+  assert.deepEqual(
+    updated.keys.map(({ key }) => key["@id"]),
+    ["key-x", "key-a"],
+  );
+  assert.equal(updated.keys[1].key.auth_index, "auth-a");
+  assert.equal(updated.keys[1].key["api-key"], "$secret");
 });
 
 test("a key is failing when at least half of its requests failed", () => {
@@ -110,6 +159,7 @@ test("formErrors asks for a base URL only from OpenAI-compatible groups, and che
   assert.deepEqual(formErrors(fields, false), {});
   assert.deepEqual(formErrors(fields, true), { baseUrl: "required" });
   assert.deepEqual(formErrors({ ...fields, baseUrl: "nope" }, false), { baseUrl: "invalid" });
+  assert.deepEqual(formErrors({ ...fields, key: "$secret" }, false), { key: true });
   assert.deepEqual(formErrors({ name: "", baseUrl: "https://x/v1", key: "" }, true), {
     name: true,
     key: true,

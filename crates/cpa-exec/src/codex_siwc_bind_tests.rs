@@ -193,7 +193,7 @@ async fn bind_saves_the_issued_client_tokens() {
                 }),
             };
             let oauth = CodexOAuth::new(wreq::Client::new()).with_siwc_token_url(&url);
-            let task = tokio::spawn(async move { bind_with(&cfg, " c.json ", port, oauth, interaction).await });
+            let task = tokio::spawn(async move { bind_with(&cfg, " c.json ", port, oauth, interaction, None).await });
             let auth_url = url::Url::parse(&rx.await.unwrap()).unwrap();
             let query = |k: &str| {
                 auth_url

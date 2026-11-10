@@ -983,7 +983,12 @@ impl Drop for AbortOnDrop {
 /// `--devin-login` (`DoDevinLogin`): browser or headless login through
 /// `requests.proxy-url`, then the credential in `auth-dir`. Failures are logged and the
 /// command still exits normally, as in Go.
-pub async fn login(cfg: &cpa_core::config::Config, no_browser: bool, callback_port: u16) -> Option<PathBuf> {
+pub async fn login(
+    cfg: &cpa_core::config::Config,
+    no_browser: bool,
+    callback_port: u16,
+    save: Option<crate::login_store::LoginSave>,
+) -> Option<PathBuf> {
     let proxy = cfg
         .document
         .get("requests")
@@ -1002,10 +1007,13 @@ pub async fn login(cfg: &cpa_core::config::Config, no_browser: bool, callback_po
     let auth_dir = cfg.auth_dir.clone();
     let saved = {
         let record = record.clone();
-        tokio::task::spawn_blocking(move || save_record(&auth_dir, &record))
-            .await
-            .map_err(|_| "credential publication failed".to_owned())
-            .and_then(|r| r)
+        tokio::task::spawn_blocking(move || {
+            let path = auth_dir.join(&record.file_name);
+            crate::login_store::save_login(save.as_ref(), &[path], || save_record(&auth_dir, &record))
+        })
+        .await
+        .map_err(|_| "credential publication failed".to_owned())
+        .and_then(|r| r)
     };
     let path = match saved {
         Ok(path) => path,
@@ -1014,11 +1022,6 @@ pub async fn login(cfg: &cpa_core::config::Config, no_browser: bool, callback_po
             return None;
         }
     };
-    println!("Authentication saved to {}", path.display());
-    if !record.label.is_empty() {
-        println!("Authenticated as {}", record.label);
-    }
-    println!("Devin authentication successful!");
     Some(path)
 }
 

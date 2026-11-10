@@ -935,7 +935,11 @@ pub async fn refresh(auth: &XaiAuth, credential: &Credential) -> Result<Metadata
 }
 
 /// `--xai-login`: device flow through `requests.proxy-url`, then the credential file.
-pub async fn login(cfg: &Config, no_browser: bool) -> Result<PathBuf, ExecError> {
+pub async fn login(
+    cfg: &Config,
+    no_browser: bool,
+    save: Option<crate::login_store::LoginSave>,
+) -> Result<PathBuf, ExecError> {
     let proxy = cfg
         .document
         .get("requests")
@@ -943,10 +947,15 @@ pub async fn login(cfg: &Config, no_browser: bool) -> Result<PathBuf, ExecError>
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     let client = GoClients::new(Default::default()).get(&Proxy::parse(proxy));
-    login_with(XaiAuth::new(client), &cfg.auth_dir, no_browser).await
+    login_with(XaiAuth::new(client), &cfg.auth_dir, no_browser, save).await
 }
 
-pub(crate) async fn login_with(auth: XaiAuth, auth_dir: &Path, no_browser: bool) -> Result<PathBuf, ExecError> {
+pub(crate) async fn login_with(
+    auth: XaiAuth,
+    auth_dir: &Path,
+    no_browser: bool,
+    save: Option<crate::login_store::LoginSave>,
+) -> Result<PathBuf, ExecError> {
     println!("Starting xAI authentication...");
     let code = auth.start_device_flow().await.map_err(|e| {
         auth_error(
@@ -977,7 +986,6 @@ pub(crate) async fn login_with(auth: XaiAuth, auth_dir: &Path, no_browser: bool)
     if tokens.access_token.trim().is_empty() {
         return Err(auth_error(502, "xai token storage missing access token"));
     }
-    println!("xAI authentication successful");
     let record = login_record(
         &tokens,
         &rfc3339_utc(Utc::now()),
@@ -988,16 +996,16 @@ pub(crate) async fn login_with(auth: XaiAuth, auth_dir: &Path, no_browser: bool)
     let target = path.clone();
     let metadata = record.metadata;
     tokio::task::spawn_blocking(move || {
-        let existing = std::fs::read(&target).ok().filter(|raw| !raw.is_empty());
-        let document = GoValue::Object(saved_document(metadata, existing.as_deref()).map_err(|e| auth_error(500, e))?);
-        crate::kimi_auth::write_private(&target, &document.encode_indented())
-            .map_err(|_| auth_error(500, "xai: cannot write credential file"))
+        crate::login_store::save_login(save.as_ref(), std::slice::from_ref(&target), || {
+            let existing = std::fs::read(&target).ok().filter(|raw| !raw.is_empty());
+            let document = GoValue::Object(saved_document(metadata, existing.as_deref())?);
+            crate::kimi_auth::write_private(&target, &document.encode_indented())
+                .map_err(|_| "xai: cannot write credential file".to_owned())
+        })
     })
     .await
-    .map_err(|_| auth_error(500, "xai: credential publication failed"))??;
-    println!("Authentication saved to {}", path.display());
-    println!("Authenticated as {}", record.label);
-    println!("xAI authentication successful!");
+    .map_err(|_| auth_error(500, "xai: credential publication failed"))?
+    .map_err(|error| auth_error(500, error))?;
     Ok(path)
 }
 

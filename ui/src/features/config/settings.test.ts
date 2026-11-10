@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { dynamicKeys, hinted } from "../../i18n/config.ts";
+import { absent } from "../../lib/configPath.ts";
 import {
   changes,
   editDraft,
@@ -14,7 +15,7 @@ import {
 
 const setting = (path: string) => settings.find((s) => s.path === path)!;
 
-test("shown takes the draft, then the file, then the server default", () => {
+test("shown takes the draft, then the stored value, then the server default", () => {
   const port = setting("server/port");
   assert.equal(shown({}, port, {}), 8317);
   assert.equal(shown({ server: { port: 9000 } }, port, {}), 9000);
@@ -79,4 +80,18 @@ test("each field keeps the value from its own first edit", () => {
   const pending = changes(latest, second.values, second.baseline);
   assert.equal(pending.find((c) => c.setting.path === "server/port")?.before, 9000);
   assert.equal(pending.find((c) => c.setting.path === "server/host")?.before, "b");
+});
+
+test("pending changes retain absent and stored baselines together after a refetch", () => {
+  const original = { server: { port: 9000 } };
+  const first = editDraft(original, {}, "server/host", "localhost");
+  const second = editDraft(original, first.values, "server/port", 9001, first.baseline);
+  const pending = changes(
+    { server: { host: "other", port: 9002 } },
+    second.values,
+    second.baseline,
+  );
+  assert.equal(pending.length, 2);
+  assert.equal(pending.find((change) => change.setting.path === "server/host")?.before, absent);
+  assert.equal(pending.find((change) => change.setting.path === "server/port")?.before, 9000);
 });

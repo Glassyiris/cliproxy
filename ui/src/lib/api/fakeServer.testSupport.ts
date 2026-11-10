@@ -1,13 +1,13 @@
 // A fetch stand-in for API tests: records each request and answers from `answer`.
 export type Sent = { method: string; url: URL; headers: Record<string, string>; body: unknown };
 
-export function fakeServer() {
+export function fakeServer(href = "http://cpa.test/management.html") {
   const sent: Sent[] = [];
   const server = {
     sent,
     answer: (_: Sent): Response | Promise<Response> => Response.json({}),
   };
-  Object.assign(globalThis, { location: { href: "http://cpa.test/management.html" } });
+  Object.assign(globalThis, { location: { href } });
   globalThis.fetch = async (input, init = {}) => {
     const body = typeof init.body === "string" ? tryJson(init.body) : init.body;
     const s: Sent = {

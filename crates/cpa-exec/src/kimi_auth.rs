@@ -17,6 +17,7 @@ use futures_util::future::{BoxFuture, Shared};
 use serde_json::{Map, Value, json};
 
 use crate::kimi_http::{BUILD_VERSION, auth_error, go_arch, go_os, hostname, rfc3339_utc};
+use crate::login_store::{LoginSave, save_login};
 use crate::proxy::GoHeaders;
 use cpa_common::json::GoValue;
 
@@ -617,7 +618,12 @@ pub fn write_login(auth_dir: &Path, record: &LoginRecord) -> Result<PathBuf, Exe
 
 /// `--kimi-login` (`provider` "kimi") or `--kimi-ai-login` ("kimi-ai"): device flow
 /// through the configured `requests.proxy-url`, then the credential file in `auth-dir`.
-pub async fn login(provider: &str, cfg: &cpa_core::config::Config, no_browser: bool) -> Result<PathBuf, ExecError> {
+pub async fn login(
+    provider: &str,
+    cfg: &cpa_core::config::Config,
+    no_browser: bool,
+    save: Option<LoginSave>,
+) -> Result<PathBuf, ExecError> {
     let domain = if provider == "kimi" { DOMAIN_COM } else { DOMAIN_AI };
     let proxy = cfg
         .document
@@ -627,7 +633,7 @@ pub async fn login(provider: &str, cfg: &cpa_core::config::Config, no_browser: b
         .unwrap_or_default();
     let client = crate::proxy::GoClients::new(crate::proxy::Hooks::default()).get(&crate::proxy::Proxy::parse(proxy));
     let flow = DeviceFlow::new(client, domain, "");
-    login_with(flow, provider, &cfg.auth_dir, no_browser).await
+    login_with(flow, provider, &cfg.auth_dir, no_browser, save).await
 }
 
 pub(crate) async fn login_with(
@@ -635,6 +641,7 @@ pub(crate) async fn login_with(
     provider: &str,
     auth_dir: &Path,
     no_browser: bool,
+    save: Option<LoginSave>,
 ) -> Result<PathBuf, ExecError> {
     let display = if provider == "kimi" { "Kimi" } else { "Kimi.ai" };
     println!("Starting {display} authentication...");
@@ -656,19 +663,19 @@ pub(crate) async fn login_with(
         println!("(This will timeout in {} seconds if not authorized)", code.expires_in);
     }
     let tokens = flow.poll(&code).await?;
-    print!("\n{display} authentication successful!\n");
     let record = login_record(provider, &tokens, flow.device_id(), Utc::now().timestamp_millis());
     let path = auth_dir.join(&record.file_name);
     println!("Saving credentials to {}", path.display());
     let contents = encode_credential(&record.metadata);
     let target = path.clone();
-    tokio::task::spawn_blocking(move || write_private(&target, contents.as_bytes()))
-        .await
-        .map_err(|_| auth_error(500, "kimi: credential publication failed"))?
-        .map_err(|_| auth_error(500, "kimi: cannot write credential file"))?;
-    println!("Authentication saved to {}", path.display());
-    println!("Authenticated as {}", record.label);
-    println!("{display} authentication successful!");
+    tokio::task::spawn_blocking(move || {
+        save_login(save.as_ref(), std::slice::from_ref(&target), || {
+            write_private(&target, contents.as_bytes()).map_err(|_| "kimi: cannot write credential file".to_owned())
+        })
+    })
+    .await
+    .map_err(|_| auth_error(500, "kimi: credential publication failed"))?
+    .map_err(|error| auth_error(500, error))?;
     Ok(path)
 }
 

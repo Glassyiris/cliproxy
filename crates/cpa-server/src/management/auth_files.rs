@@ -17,7 +17,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use cpa_common::gostr::GoStr;
 use cpa_common::json::GoValue;
-use cpa_core::config::{Config, credentials};
+use cpa_core::config::credentials;
 use cpa_core::credential::{Credential, MetadataPatch, Source};
 use serde_json::{Map, Value, json};
 
@@ -599,6 +599,12 @@ fn entry(state: &Management, c: &Credential, v8: bool, quota: &QuotaPlugins) -> 
         e.insert("account_type", account_type.into());
     }
     if !account.is_empty() {
+        // An API-key credential's account is the key itself; reveal goes through export.
+        let account = if account_type == "api_key" {
+            crate::config_store::resources::SECRET.into()
+        } else {
+            account
+        };
         e.insert("account", account.into());
     }
     let meta = path.map(std::fs::metadata);
@@ -828,8 +834,18 @@ pub(crate) async fn download(State(state): State<Arc<Management>>, RawQuery(raw)
     if !ends_json(&name) {
         return fail(StatusCode::BAD_REQUEST, "name must end with .json");
     }
-    let full = state.rt.config().auth_dir.join(&name);
-    match tokio::fs::read(&full).await {
+    let full = state
+        .rt
+        .store()
+        .snapshot()
+        .iter()
+        .find(|c| c.id == name || file_name(c).as_deref() == Some(name.as_str()))
+        .and_then(|c| path_of(c).map(Path::to_owned))
+        .unwrap_or_else(|| state.rt.config().auth_dir.join(&name));
+    let bytes = tokio::task::spawn_blocking(move || read_file(&state, &full))
+        .await
+        .unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
+    match bytes {
         Ok(bytes) => (
             [
                 (header::CONTENT_TYPE, HeaderValue::from_static("application/json")),
@@ -875,6 +891,28 @@ pub(super) fn write_file(dst: &Path, data: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Reads the source document from its durable owner, even without a working file.
+pub(super) fn read_file(state: &Management, path: &Path) -> std::io::Result<Vec<u8>> {
+    state
+        .rt
+        .store()
+        .credential_backend()
+        .read(path)
+        .map_err(std::io::Error::other)?
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+}
+
+fn write_source(state: &Management, path: &Path, bytes: &[u8]) -> Result<(), String> {
+    state
+        .rt
+        .store()
+        .credential_backend()
+        .save(path, bytes)
+        .map_err(|e| e.to_string())?;
+    state.credential_changes.notify_one();
+    Ok(())
+}
+
 /// Re-synthesizes the store from disk and the current config (callers hold `disk`).
 fn resync(state: &Management) {
     state.publish((*state.rt.config()).clone(), None);
@@ -911,9 +949,8 @@ fn prepare_upload(state: &Management, name: &str, data: &[u8]) -> Result<Upload,
     }
     let synthesized = credentials::from_file(&cfg, &cfg.auth_dir, &dst, data)
         .map_err(|e| (true, format!("invalid auth file: invalid weight in {base}: {e}")))?;
-    // Go writes the upload as sent, then its file store rewrites it unless it is
-    // already JSON-equal to the canonical form: canonical metadata keys plus the
-    // auth's disabled flag, in `json.Marshal` key order with no trailing newline.
+    // Preserve uploaded bytes when their metadata is already canonical; otherwise
+    // persist canonical keys and the synthesized disabled flag.
     let uploaded: BTreeMap<String, Value> = meta.into_iter().collect();
     let mut persisted = uploaded.clone();
     for (alias, canon) in ALIASES {
@@ -963,49 +1000,32 @@ fn store_file(
         if v8 {
             state.oauth.invalidate_siwc(&dst);
         }
-        if let Err(e) = write_file(&dst, &bytes) {
+        if let Err(e) = write_source(state, &dst, &bytes) {
             return Ok(Err((false, format!("failed to write file: {e}"))));
         }
         publish_stored(state, dst, &bytes, synthesized);
         return Ok(Ok(()));
-    }
-    // Go writes the upload as sent, then saves its record under the file's credential
-    // lock (`PersistCodexAuthFile`), which re-reads the file: a refresh holding the lock
-    // meanwhile patches its new tokens onto the upload, and the save keeps them. A rerun
-    // holds the lock its first attempt waited for, after that write.
-    if !lock.holds(&dst) {
-        let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        if v8 {
-            state.oauth.invalidate_siwc(&dst);
-        }
-        if let Err(e) = write_file(&dst, data) {
-            return Ok(Err((false, format!("failed to write file: {e}"))));
-        }
     }
     match lock.hold(&dst) {
         Ok(()) => {}
         Err(PatchError::LockBusy(path)) => return Err(path),
         Err(e) => return Ok(Err((false, format!("failed to write file: {e:?}")))),
     }
+    if let Err(e) = state.rt.store().credential_backend().restore(&dst) {
+        return Ok(Err((false, format!("failed to read credential: {e}"))));
+    }
     let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
     if v8 {
         state.oauth.invalidate_siwc(&dst);
     }
-    // Go's metadata branch: the upload as decoded, the disk's credentials merged in, the
-    // record's flag, then `json.Marshal`, written unless the file holds those bytes.
+    // Persist the uploaded login without merging tokens from the previous document.
     let disabled = synthesized.as_ref().is_some_and(|c| c.disabled);
     let object = |b: &[u8]| GoValue::parse_f64(b).and_then(|v| v.into_object().ok());
     let mut doc = object(data).unwrap_or_default();
-    let existing = std::fs::read(&dst).ok();
-    if let Some(disk) = existing.as_deref().and_then(object).filter(|d| !d.is_empty()) {
-        merge_codex_from_disk(&disk, &mut doc);
-    }
     doc.insert("disabled".into(), GoValue::Bool(disabled));
     normalize_go(&mut doc);
     let bytes = GoValue::Object(doc).marshal();
-    // Go's store does not recreate a disabled record's file that is gone.
-    let write = existing.as_ref().map_or(!disabled, |old| *old != bytes);
-    if write && let Err(e) = write_file(&dst, &bytes) {
+    if let Err(e) = write_source(state, &dst, &bytes) {
         return Ok(Err((false, format!("failed to write file: {e}"))));
     }
     let cfg = state.rt.config();
@@ -1175,6 +1195,20 @@ fn delete_names(q: &Query, body: &[u8]) -> Result<Vec<String>, &'static str> {
     Ok(unique(out))
 }
 
+/// Deletion cannot wait for a plugin refresh while holding `disk`: the plugin may
+/// call back into a save that needs it. A busy document leaves the durable set intact.
+fn delete_lock(path: &Path) -> Result<std::fs::File, (StatusCode, String)> {
+    let io = |e| (StatusCode::INTERNAL_SERVER_ERROR, e);
+    let file = cpa_exec::codex_siwc_bind::open_lock_file(path).map_err(io)?;
+    if !cpa_exec::codex_siwc_bind::try_lock(&file).map_err(io)? {
+        return Err((
+            StatusCode::CONFLICT,
+            "credential refresh in progress; retry deletion".into(),
+        ));
+    }
+    Ok(file)
+}
+
 /// Go `deleteAuthFileByName`. Callers hold `disk` and resync afterwards.
 fn delete_one(state: &Management, name: &str, v8: bool) -> Result<String, (StatusCode, String)> {
     let name = name.trim();
@@ -1202,22 +1236,18 @@ fn delete_one(state: &Management, name: &str, v8: bool) -> Result<String, (Statu
     let target: PathBuf = found
         .and_then(|c| path_of(c).map(Path::to_path_buf))
         .unwrap_or_else(|| cfg.auth_dir.join(&base));
+    let db = state.rt.store().credential_backend();
+    let internal = |e: anyhow::Error| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    db.restore(&target).map_err(internal)?;
+    let _lock = delete_lock(&target)?;
+    if db.read(&target).map_err(internal)?.is_none() {
+        return Err((StatusCode::NOT_FOUND, "auth file not found".into()));
+    }
+    db.delete(&target).map_err(internal)?;
     if v8 {
         state.oauth.invalidate_siwc(&target);
     }
-    match std::fs::remove_file(&target) {
-        Ok(()) => {
-            // Go `deleteTokenRecord`: remote stores record the removal explicitly.
-            state
-                .store_delete(&target)
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-            Ok(base)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Err((StatusCode::NOT_FOUND, "auth file not found".into()))
-        }
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("failed to remove file: {e}"))),
-    }
+    Ok(base)
 }
 
 pub(crate) async fn delete(
@@ -1250,32 +1280,42 @@ pub(crate) async fn delete(
 
 pub(super) fn delete_sync(state: &Management, q: &Query, body: &[u8], v8: bool) -> Response {
     if matches!(q.first("all"), "true" | "1" | "*") {
-        let dir = state.rt.config().auth_dir.clone();
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(e) => {
-                return fail(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("failed to read auth dir: {e}"),
-                );
+        let db = state.rt.store().credential_backend();
+        let removed = (|| -> Result<usize, (StatusCode, String)> {
+            let internal = |e: anyhow::Error| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+            let paths: Vec<_> = db
+                .documents()
+                .map_err(internal)?
+                .into_iter()
+                .map(|(path, _)| path)
+                .collect();
+            let mut locks = Vec::with_capacity(paths.len());
+            for path in &paths {
+                db.restore(path).map_err(internal)?;
+                locks.push(delete_lock(path)?);
             }
+            db.write_files(&paths, || {
+                for path in &paths {
+                    match std::fs::remove_file(path) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                Ok(())
+            })
+            .map_err(internal)?;
+            if v8 {
+                for path in &paths {
+                    state.oauth.invalidate_siwc(path);
+                }
+            }
+            Ok(paths.len())
+        })();
+        return match removed {
+            Ok(deleted) => reply(StatusCode::OK, [("status", "ok".into()), ("deleted", deleted.into())]),
+            Err((status, error)) => fail(status, format!("failed to delete credentials: {error}")),
         };
-        let mut deleted = 0;
-        for entry in entries.flatten() {
-            let is_json = entry.file_name().to_string_lossy().go_lower().ends_with(".json");
-            if entry.file_type().is_ok_and(|t| !t.is_dir()) && is_json && {
-                if v8 {
-                    state.oauth.invalidate_siwc(&entry.path());
-                }
-                std::fs::remove_file(entry.path()).is_ok()
-            } {
-                if let Err(error) = state.store_delete(&entry.path()) {
-                    return fail(StatusCode::INTERNAL_SERVER_ERROR, error);
-                }
-                deleted += 1;
-            }
-        }
-        return reply(StatusCode::OK, [("status", "ok".into()), ("deleted", deleted.into())]);
     }
     let names = match delete_names(q, body) {
         Ok(n) => n,
@@ -1439,8 +1479,9 @@ fn toggle_config_key(
     let edited = state.edit_document(disk, "credentials-api", &message, |doc| -> Result<(), Option<String>> {
         // Locate the key in the document being edited, which may be newer than the
         // published config (another process committed since the last poll).
-        let text = doc.yaml().map_err(|e| Some(e.to_string()))?;
-        let current = Config::parse(&text).map_err(|e| Some(e.to_string()))?;
+        let json = serde_json::to_value(cpa_core::config::AsJson(doc.value())).map_err(|e| Some(e.to_string()))?;
+        let resources = crate::config_store::resources::split(&json, &[]).map_err(|e| Some(e.to_string()))?;
+        let (current, _) = crate::config_store::resources::config(&resources).map_err(|e| Some(e.to_string()))?;
         let Some(credentials::KeyLocation {
             family,
             group: g,
@@ -1573,10 +1614,11 @@ pub(crate) async fn status(State(state): State<Arc<Management>>, body: Result<Fi
                     ],
                 ),
                 Ok(false) => fail(StatusCode::NOT_FOUND, "config api key entry not found"),
-                Err(e) => fail(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("failed to update config api key: {e}"),
-                ),
+                Err(e) => {
+                    // Like /admin/v1: the response carries fixed text only.
+                    tracing::error!("failed to update config api key: {e}");
+                    fail(StatusCode::INTERNAL_SERVER_ERROR, "failed to update config api key")
+                }
             });
         }
         // Go v8.0.35 `Manager.Modify`: the flag lands on the record as it is now, so a
@@ -1618,7 +1660,7 @@ fn virtual_source_status(state: &Management, target: &Credential, disabled: bool
     if source.is_empty() {
         return fail(StatusCode::INTERNAL_SERVER_ERROR, PLUGIN_VIRTUAL);
     }
-    let data = match std::fs::read(&source) {
+    let data = match read_file(state, Path::new(&source)) {
         Ok(data) => data,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return fail(StatusCode::NOT_FOUND, "auth file not found");
@@ -1661,7 +1703,7 @@ fn virtual_source_status(state: &Management, target: &Credential, disabled: bool
             "failed to update source auth file: marshal auth file",
         );
     };
-    if let Err(e) = write_file(Path::new(&source), &raw) {
+    if let Err(e) = write_source(state, Path::new(&source), &raw) {
         return fail(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to update source auth file: {e}"),
@@ -2120,7 +2162,16 @@ fn save_file_backed(
     if codex_record(&target.provider, metadata) {
         lock.hold(path)?;
     }
-    let existing = std::fs::read(path).ok();
+    let existing = match read_file(state, path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            return Err(if e.kind() == std::io::ErrorKind::NotFound {
+                PatchError::NotFound
+            } else {
+                PatchError::Io(e.to_string())
+            });
+        }
+    };
     let held: Option<[u8; 32]> = existing
         .as_deref()
         .map(|b| <sha2::Sha256 as sha2::Digest>::digest(b).into());
@@ -2408,6 +2459,7 @@ fn commit_bytes(state: &Management, target: &Credential, commit: Commit) -> Resu
     if fallback && kept {
         fallbacks.insert(scanned);
     }
+    state.credential_changes.notify_one();
     Ok(())
 }
 
@@ -2828,9 +2880,11 @@ mod tests {
         for (file, body) in files {
             std::fs::write(dir.join(file), body).unwrap();
         }
-        let path = dir.join("config.yaml");
-        std::fs::write(&path, format!("oauth: {{auth-dir: {}}}\n", dir.display())).unwrap();
-        let cfg = cpa_core::config::Config::load(&path).unwrap();
+        let store = Arc::new(crate::config_store::ConfigStore::memory_with(&format!(
+            "oauth: {{auth-dir: {}}}\n",
+            dir.display()
+        )));
+        let cfg = store.load().unwrap().config;
         let mut scan = credentials::scan_auth_dir(&cfg);
         edit(&mut scan.credentials);
         let rt = Arc::new(crate::testing::runtime(
@@ -2844,9 +2898,261 @@ mod tests {
                 google: Default::default(),
             },
         ));
-        // As the binary records what it loaded.
-        rt.store().note_loaded(&scan.read);
-        (Management::new(rt, path), dir)
+        let materialized = rt.config().auth_dir.clone();
+        let read = scan
+            .read
+            .into_iter()
+            .map(|(path, hash)| (materialized.join(path.strip_prefix(&dir).unwrap()), hash))
+            .collect();
+        rt.store().note_loaded(&read);
+        std::fs::remove_dir_all(dir).unwrap();
+        (Management::new(rt, store), materialized)
+    }
+
+    fn sqlite_management() -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>, PathBuf) {
+        let root = std::env::temp_dir().join(format!("cpa-management-sqlite-{}", uuid::Uuid::new_v4()));
+        let legacy = root.join("legacy");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(
+            legacy.join("a.json"),
+            br#"{"type":"claude","access_token":"old","plugin_extra":{"keep":true}}"#,
+        )
+        .unwrap();
+        let config = Arc::new(crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap());
+        config
+            .import_yaml(&format!("oauth: {{auth-dir: {}}}\n", legacy.display()), "test", "")
+            .unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(config.clone(), &legacy).unwrap();
+        let mut cfg = config.load().unwrap().config;
+        cfg.auth_dir = db.auth_dir();
+        let scan = credentials::scan_auth_dir(&cfg);
+        let rt = Arc::new(crate::testing::runtime_with_db(
+            cfg,
+            scan.credentials,
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            db.clone(),
+        ));
+        (Management::new(rt, config), db, root)
+    }
+
+    #[test]
+    fn sqlite_codex_reupload_replaces_the_old_login() {
+        let (state, db, root) = sqlite_management();
+        let path = db.auth_dir().join("codex.json");
+        let old = br#"{"type":"codex","access_token":"access-A","refresh_token":"refresh-A","account_id":"account-A","siwc":{"token":"A"}}"#;
+        db.write_files(std::slice::from_ref(&path), || {
+            std::fs::write(&path, old).map_err(Into::into)
+        })
+        .unwrap();
+        let uploaded = br#"{"type":"codex","access_token":"access-B","refresh_token":"refresh-B","account_id":"account-B","siwc":{"token":"B"},"disabled":true}"#;
+        store_file(&state, "codex.json", uploaded, true, &mut CodexLock::default())
+            .unwrap()
+            .unwrap();
+        let stored: Value = serde_json::from_slice(&db.read(&path).unwrap().unwrap()).unwrap();
+        let published = state.rt.store().get("codex.json").unwrap();
+        for (key, value) in [
+            ("access_token", "access-B"),
+            ("refresh_token", "refresh-B"),
+            ("account_id", "account-B"),
+        ] {
+            assert_eq!(stored[key], value);
+            assert_eq!(published.metadata[key], value);
+        }
+        assert_eq!(stored["siwc"]["token"], "B");
+        assert_eq!(published.metadata["siwc"]["token"], "B");
+        assert_eq!(stored["disabled"], true);
+        assert!(published.disabled);
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sqlite_fields_download_and_delete_survive_discarded_working_files() {
+        let (state, db, root) = sqlite_management();
+        let response = fields(
+            State(state.clone()),
+            Ok(FirstJson(Bytes::from(r#"{"name":"a.json","note":"saved"}"#))),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = status(
+            State(state.clone()),
+            Ok(FirstJson(Bytes::from(r#"{"name":"a.json","disabled":true}"#))),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let auth = db.auth_dir().join("a.json");
+        let bytes = db.read(&auth).unwrap().unwrap();
+        let doc: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(doc["note"], "saved");
+        assert_eq!(doc["disabled"], true);
+        assert_eq!(doc["plugin_extra"]["keep"], true);
+        std::fs::remove_file(&auth).unwrap();
+        let response = download(State(state.clone()), RawQuery(Some("name=a.json".into()))).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .as_ref(),
+            bytes
+        );
+        drop(state);
+        let cache = db.auth_dir();
+        drop(db);
+        std::fs::remove_dir_all(&cache).unwrap();
+        let store = Arc::new(crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap());
+        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &root.join("legacy")).unwrap();
+        assert_eq!(std::fs::read(&auth).unwrap(), bytes);
+        std::fs::remove_file(&auth).unwrap();
+        db.delete(&auth).unwrap();
+        drop(db);
+        drop(store);
+        std::fs::remove_dir_all(&cache).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(
+            Arc::new(crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap()),
+            &root.join("legacy"),
+        )
+        .unwrap();
+        assert!(db.read(&auth).unwrap().is_none());
+        assert!(!auth.exists());
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_sqlite_upload_never_publishes_or_reports_success() {
+        let (state, db, root) = sqlite_management();
+        let before = state.rt.store().get("a.json").unwrap();
+        state.config_store().conn().execute_batch("CREATE TRIGGER reject_credential BEFORE INSERT ON credential_document BEGIN SELECT RAISE(ABORT, 'injected durable failure'); END;").unwrap();
+        let result = store_file(
+            &state,
+            "a.json",
+            br#"{"type":"claude","access_token":"new"}"#,
+            false,
+            &mut CodexLock::default(),
+        )
+        .unwrap();
+        assert!(result.is_err());
+        let after = state.rt.store().get("a.json").unwrap();
+        assert_eq!(after.revision, before.revision);
+        assert_eq!(after.metadata["access_token"], "old");
+        let bytes = db.read(&db.auth_dir().join("a.json")).unwrap().unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap()["access_token"], "old");
+        assert_eq!(std::fs::read(db.auth_dir().join("a.json")).unwrap(), bytes);
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sqlite_deletion_conflicts_with_inflight_refresh_without_losing_documents() {
+        let (state, db, root) = sqlite_management();
+        let path = db.auth_dir().join("a.json");
+        let held = cpa_exec::codex_siwc_bind::lock_file(&path).unwrap();
+        let before = db.read(&path).unwrap().unwrap();
+        assert_eq!(delete_one(&state, "a.json", true).unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(db.read(&path).unwrap().unwrap(), before);
+        let response = delete_sync(&state, &Query::parse(Some("all=true".into())), b"", true);
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert!(body["error"].as_str().unwrap().contains("retry deletion"), "{body}");
+        assert_eq!(db.read(&path).unwrap().unwrap(), before);
+        drop(held);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(delete_one(&state, "a.json", true).unwrap(), "a.json");
+        assert!(db.read(&path).unwrap().is_none());
+        assert!(!path.exists());
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sqlite_external_downloads_use_source_bytes_and_stale_edits_cannot_resurrect_deleted_auths() {
+        let (state, db, root) = sqlite_management();
+        let external = root.join("explicit.json");
+        let bytes = br#"{"type":"claude","access_token":"external","opaque":[1,2]}"#;
+        db.save(&external, bytes).unwrap();
+        {
+            let _disk = state.disk.lock().unwrap();
+            state.publish((*state.rt.config()).clone(), None);
+        }
+        std::fs::remove_file(&external).unwrap();
+        let response = download(State(state.clone()), RawQuery(Some("name=explicit.json".into()))).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .as_ref(),
+            bytes
+        );
+        let deleted = db.auth_dir().join("a.json");
+        db.delete(&deleted).unwrap();
+        assert!(
+            state.rt.store().get("a.json").is_some(),
+            "another process's delete has not reconciled yet"
+        );
+        let response = fields(
+            State(state.clone()),
+            Ok(FirstJson(Bytes::from(r#"{"name":"a.json","note":"stale"}"#))),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = status(
+            State(state.clone()),
+            Ok(FirstJson(Bytes::from(r#"{"name":"a.json","disabled":true}"#))),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(db.read(&deleted).unwrap().is_none());
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn config_key_toggles_are_stored_and_published() {
+        let (state, dir) = management("config-toggle", &[]);
+        state.config_store().import_yaml(
+            &format!("oauth: {{auth-dir: {}}}\napi-keys:\n  claude:\n    - excluded-models: [hidden]\n      keys:\n        - api-key: test-key\n", dir.display()),
+            "test", "",
+        ).unwrap();
+        crate::watching::reload(&state).unwrap();
+        let id = state
+            .rt
+            .store()
+            .snapshot()
+            .iter()
+            .find(|c| matches!(c.source, Source::Config { .. }))
+            .unwrap()
+            .id
+            .clone();
+        for disabled in [true, false] {
+            let disk = state.disk.lock().unwrap();
+            assert!(toggle_config_key(&state, &disk, &id, disabled).unwrap());
+            let loaded = state.config_store().load().unwrap();
+            let provider = loaded.resources.iter().find(|r| r.kind.name() == "provider").unwrap();
+            let excluded = provider.spec["keys"][0]["excluded-models"].as_array().unwrap();
+            assert_eq!(excluded.iter().any(|v| v == "*"), disabled);
+            assert!(excluded.iter().any(|v| v == "hidden"));
+            assert_eq!(
+                state.rt.store().get(&id).unwrap().attributes["excluded_models"]
+                    .split(',')
+                    .any(|v| v == "*"),
+                disabled
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// A refresh that started before management edits only the credential's `use_siwc`
@@ -2996,11 +3302,15 @@ mod tests {
         assert!(state.disk.try_lock().is_ok(), "the waiting save does not hold disk");
         assert!(!save.is_finished(), "the save waits for the lock");
         // The other process's refresh, under its lock.
-        std::fs::write(
-            &path,
-            r#"{"type":"codex","access_token":"C","refresh_token":"rC","disabled":false}"#,
-        )
-        .unwrap();
+        state
+            .rt
+            .store()
+            .credential_backend()
+            .save(
+                &path,
+                br#"{"type":"codex","access_token":"C","refresh_token":"rC","disabled":false}"#,
+            )
+            .unwrap();
         drop(lock);
         let saved = tokio::time::timeout(std::time::Duration::from_secs(5), save)
             .await
@@ -3043,11 +3353,8 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Go writes a Codex upload as sent, then saves its record through its store under
-    /// the file's credential lock (leaving `<name>.lock`), waiting for another holder;
-    /// other uploads take none. A refresh holding the lock meanwhile rotates the tokens
-    /// in the uploaded file, and the save keeps them: the spent refresh token does not
-    /// come back.
+    /// A Codex upload waits for the credential lock and then replaces the previous
+    /// login. Other uploads do not take that lock.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_codex_upload_waits_for_the_credential_lock() {
         let (state, dir) = management("codex-upload-lock", &[]);
@@ -3061,13 +3368,16 @@ mod tests {
         });
         crate::runtime::tests::lock_waited(&path).await;
         assert!(state.disk.try_lock().is_ok(), "the waiting upload does not hold disk");
-        assert_eq!(std::fs::read(&path).unwrap(), sent, "written as sent before the lock");
-        // The refresh holding the lock patches its grant onto the uploaded file.
-        std::fs::write(
-            &path,
-            r#"{"type":"codex","access_token":"a2","refresh_token":"r2","priority":7}"#,
-        )
-        .unwrap();
+        assert!(!path.exists(), "the upload waits before writing its document");
+        state
+            .rt
+            .store()
+            .credential_backend()
+            .save(
+                &path,
+                br#"{"type":"codex","access_token":"a2","refresh_token":"r2","priority":7}"#,
+            )
+            .unwrap();
         drop(held);
         tokio::time::timeout(std::time::Duration::from_secs(5), upload)
             .await
@@ -3076,10 +3386,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            r#"{"access_token":"a2","disabled":false,"priority":7,"refresh_token":"r2","type":"codex"}"#
+            r#"{"access_token":"a1","disabled":false,"priority":7,"refresh_token":"r1","type":"codex"}"#
         );
         let stored = state.rt.store().get("up-codex.json").unwrap();
-        assert_eq!(stored.str("refresh_token"), Some("r2"));
+        assert_eq!(stored.str("refresh_token"), Some("r1"));
         let data = br#"{"type":"claude","access_token":"B"}"#.to_vec();
         store(&state, move |s, l| store_file(s, "up-claude.json", &data, true, l))
             .await
@@ -3117,6 +3427,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(stamp(), before);
+        assert_eq!(
+            state.rt.store().credential_backend().read(&file).unwrap().unwrap(),
+            before.3
+        );
         // Go's manager publishes the record all the same.
         assert!(state.rt.store().get("a.json").unwrap().revision > current.revision);
         std::fs::remove_dir_all(dir).unwrap();
@@ -3145,8 +3459,13 @@ mod tests {
                 std::fs::read(dir.join(file)).unwrap(),
             )
         };
-        // Edited to disabled behind the watcher's back: a disable is equal on disk.
-        std::fs::write(dir.join("a.json"), r#"{"type":"claude","disabled":true}"#).unwrap();
+        // A durable change made before publication already matches the requested state.
+        state
+            .rt
+            .store()
+            .credential_backend()
+            .save(&dir.join("a.json"), br#"{"type":"claude","disabled":true}"#)
+            .unwrap();
         let before = stamp("a.json");
         let a = state.rt.store().get("a.json").unwrap();
         assert!(!a.disabled);
@@ -3155,6 +3474,16 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         save_file_backed(&state, &a, &meta, &[], &mut CodexLock::default()).unwrap();
         assert_eq!(stamp("a.json"), before);
+        assert_eq!(
+            state
+                .rt
+                .store()
+                .credential_backend()
+                .read(&dir.join("a.json"))
+                .unwrap()
+                .unwrap(),
+            before.3
+        );
         assert!(state.rt.store().get("a.json").unwrap().disabled);
 
         // 9007199254740993 reads as 9007199254740992 in float64: equal, not written,
@@ -3170,6 +3499,16 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         save_file_backed(&state, &b, &meta, &literals, &mut CodexLock::default()).unwrap();
         assert_eq!(stamp("b.json"), before);
+        assert_eq!(
+            state
+                .rt
+                .store()
+                .credential_backend()
+                .read(&dir.join("b.json"))
+                .unwrap()
+                .unwrap(),
+            before.3
+        );
         let b = state.rt.store().get("b.json").unwrap();
         assert_eq!(b.metadata["request_retry"], 9_007_199_254_740_993_u64);
         let mut meta = b.metadata.clone();
@@ -3247,9 +3586,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Go's numbers come from what the record was loaded or saved from, never from the
-    /// file as it is now: a save after an edit nobody reloaded writes what Go holds, or
-    /// refuses when only the edited text could say (docs/DIFFERENCES-FROM-GO.md).
+    /// Stored numbers survive stale edits to disposable working files.
     #[tokio::test]
     async fn numbers_follow_the_record_not_the_file() {
         let (state, dir) = management(
@@ -3290,19 +3627,21 @@ mod tests {
             std::fs::read_to_string(dir.join("big.json")).unwrap(),
             r#"{"disabled":true,"type":"claude","x":18446744073709556000}"#
         );
-        // Replaced before a reload: the loaded text is gone, so the save is refused and
-        // neither the file nor the record changes.
-        let edited = r#"{"type":"claude","x":18446744073709551617}"#;
-        std::fs::write(dir.join("edited.json"), edited).unwrap();
-        let before = state.rt.store().get("edited.json").unwrap();
-        let refused = disable("edited.json");
-        assert!(
-            matches!(&refused, Err(PatchError::Io(e)) if e.contains("changed since it was loaded")),
-            "{refused:?}"
+        // A stale working file cannot replace the durable loaded document.
+        std::fs::write(dir.join("edited.json"), r#"{"type":"claude","x":18446744073709551617}"#).unwrap();
+        disable("edited.json").unwrap();
+        let saved = state
+            .rt
+            .store()
+            .credential_backend()
+            .read(&dir.join("edited.json"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(saved).unwrap(),
+            r#"{"disabled":true,"type":"claude","x":18446744073709556000}"#
         );
-        assert_eq!(std::fs::read_to_string(dir.join("edited.json")).unwrap(), edited);
-        let after = state.rt.store().get("edited.json").unwrap();
-        assert_eq!((after.revision, after.disabled), (before.revision, false));
+        assert!(state.rt.store().get("edited.json").unwrap().disabled);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

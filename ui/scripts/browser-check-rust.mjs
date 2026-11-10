@@ -115,21 +115,6 @@ try {
   browser("wait", "--fn", "document.querySelectorAll('main .rule').length===0");
   console.log("PASS payload add/remove: persisted real Rust writes");
 
-  browser("click", 'nav a[href="#config"]');
-  settled();
-  browser("find", "role", "button", "click", "--name", "Edit YAML");
-  browser("wait", "textarea");
-  const original = evaluate("document.querySelector('textarea').value");
-  assert.ok(original.includes("strategy: round-robin"));
-  browser("fill", "textarea", original.replace("strategy: round-robin", "strategy: fill-first"));
-  browser("find", "role", "button", "click", "--name", "Review changes");
-  browser("wait", ".diff .added");
-  assert.ok(evaluate("document.querySelectorAll('.diff .added').length") > 0);
-  browser("screenshot", `${output}/rust-dashboard-diff.png`, "--full");
-  browser("find", "role", "button", "click", "--name", "Keep editing");
-  browser("fill", "textarea", original);
-  browser("find", "role", "button", "click", "--name", "Close");
-  console.log("PASS YAML editor: persisted tree, real diff, discarded without writing");
 
   browser("click", 'nav a[href="#accounts"]');
   settled();

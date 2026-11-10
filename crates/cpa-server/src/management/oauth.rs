@@ -11,6 +11,7 @@ use cpa_core::gostr::GoStr;
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -18,6 +19,7 @@ use axum::extract::{RawQuery, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use cpa_core::exec::ExecError;
+use cpa_exec::login_store::{LoginSave, save_login};
 use cpa_exec::proxy::Proxy;
 use futures_util::FutureExt;
 use serde_json::{Value, json};
@@ -547,19 +549,22 @@ async fn import_vertex(
     }
     let auth_dir = state.rt.config().auth_dir.clone();
     let saved = tokio::task::spawn_blocking(move || {
-        // Under `disk` from the read of an existing file to the write, so a concurrent
-        // management edit (for example `disabled`) is neither lost nor overwritten.
         let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        let upload = import_upload(&auth_dir, &file.data, &location)?;
-        // Go `saveTokenRecord`: success only once the token store has the file.
-        let mut written = Ok(());
-        let stored = state.store_write(Box::new(|| {
-            written = upload.write();
-            written.as_ref().map_err(|_| anyhow::anyhow!("write failed"))?;
-            Ok(Some(upload.path.clone()))
-        }));
-        written?;
-        stored.map_err(UploadError::Save)?;
+        let mut upload = import_upload(&auth_dir, &file.data, &location)?;
+        if state.rt.store().is_home() {
+            return Err(UploadError::Save("Home owns its credentials remotely".into()));
+        }
+        state
+            .rt
+            .store()
+            .credential_backend()
+            .write_files(std::slice::from_ref(&upload.path.clone()), || {
+                upload
+                    .write()
+                    .map_err(|_| anyhow::anyhow!("failed to write Vertex credential"))
+            })
+            .map_err(|e| UploadError::Save(format!("{e:#}")))?;
+        state.credential_changes.notify_one();
         state.publish((*state.rt.config()).clone(), None);
         Ok(upload)
     })
@@ -607,29 +612,59 @@ async fn save_if_pending<T: Send + 'static>(
     sid: &str,
     provider: &str,
     value: T,
-    write: impl FnOnce(PathBuf, T) -> Result<PathBuf, String> + Send + 'static,
+    write: impl FnOnce(PathBuf, T, LoginSave) -> Result<PathBuf, String> + Send + 'static,
     save_error: &str,
 ) -> Outcome {
     let auth_dir = state.rt.config().auth_dir.clone();
     let (worker, sid, owner) = (state.clone(), sid.to_owned(), provider.to_owned());
     let saved = tokio::task::spawn_blocking(move || {
-        let _guard = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        // Go `saveTokenRecord`: saved only once the token store has the file. The
-        // session is checked right before the write, after any store sync.
-        worker.store_write(Box::new(|| {
-            if !worker.oauth.is_pending(&sid, &owner) {
-                return Ok(None);
-            }
-            assert!(!worker.login_panic, "injected login panic");
-            write(auth_dir, value).map(Some).map_err(anyhow::Error::msg)
-        }))
+        if worker.rt.store().is_home() {
+            return Err("Home owns its credentials remotely".to_owned());
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let skipped = cancelled.clone();
+        let owner_state = worker.clone();
+        let save: LoginSave = Arc::new(move |paths, write| {
+            let committed = (|| -> anyhow::Result<()> {
+                let mut paths = paths
+                    .iter()
+                    .map(|path| crate::credential_store::credential_path_key(path))
+                    .collect::<std::io::Result<Vec<_>>>()?;
+                paths.sort();
+                paths.dedup();
+                let _locks = paths
+                    .iter()
+                    .map(|path| cpa_exec::codex_siwc_bind::lock_file(path).map_err(anyhow::Error::msg))
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                let _disk = owner_state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+                owner_state.rt.store().credential_backend().write_files(&paths, || {
+                    // Check after hydration, immediately before the provider merges/writes.
+                    if !owner_state.oauth.is_pending(&sid, &owner) {
+                        skipped.store(true, Ordering::Relaxed);
+                        return Err(anyhow::anyhow!("OAuth session cancelled"));
+                    }
+                    assert!(!owner_state.login_panic, "injected login panic");
+                    write().map_err(anyhow::Error::msg)
+                })
+            })();
+            committed.map_err(|e| format!("{e:#}"))
+        });
+        let result = write(auth_dir, value, save);
+        if cancelled.load(Ordering::Relaxed) {
+            Ok(None)
+        } else {
+            result.map(|path| {
+                worker.credential_changes.notify_one();
+                Some(path)
+            })
+        }
     })
     .await;
     match saved {
         Ok(Ok(Some(_))) => Outcome::Saved,
         Ok(Ok(None)) => Outcome::Cancelled,
-        Ok(Err(e)) => {
-            tracing::error!("failed to save {provider} token: {e}");
+        Ok(Err(_)) => {
+            tracing::error!("failed to save {provider} token");
             Outcome::Failed(save_error.to_owned())
         }
         Err(e) => {
@@ -760,8 +795,8 @@ async fn start_claude(state: Arc<Management>, webui: bool) -> Response {
                 Ok(patch) => {
                     let legacy = Arc::new(Mutex::new(None));
                     let slot = legacy.clone();
-                    let write = move |dir: PathBuf, patch| {
-                        let (path, old) = ManagedLogin::save(&dir, patch).map_err(|e| exec_text(&e))?;
+                    let write = move |dir: PathBuf, patch, save: LoginSave| {
+                        let (path, old) = ManagedLogin::save(&dir, patch, Some(&save)).map_err(|e| exec_text(&e))?;
                         *slot.lock().unwrap_or_else(PoisonError::into_inner) = old;
                         Ok(path)
                     };
@@ -788,20 +823,12 @@ async fn start_claude(state: Arc<Management>, webui: bool) -> Response {
     started(url, sid)
 }
 
-/// Go `saveTokenRecord` after the canonical Claude credential is stored: the matching
-/// legacy file is deleted through the token store (`store.Delete`), so a git store
-/// commits the removal its watcher guard would refuse.
+/// Removes the legacy document after the canonical Claude credential is durable.
 async fn remove_legacy_claude(state: &Arc<Management>, legacy: PathBuf) -> Outcome {
     let worker = state.clone();
     let removed = tokio::task::spawn_blocking(move || {
         let _guard = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        if worker.store.is_some() {
-            return worker.store_delete(&legacy);
-        }
-        match std::fs::remove_file(&legacy) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
-            _ => Ok(()),
-        }
+        worker.store_delete(&legacy)
     })
     .await;
     match removed {
@@ -856,7 +883,9 @@ async fn start_codex(state: Arc<Management>, webui: bool) -> Response {
                 .await
             {
                 Ok(tokens) => {
-                    let write = |dir: PathBuf, tokens| write_login(&dir, &tokens).map_err(|e| exec_text(&e));
+                    let write = |dir: PathBuf, tokens, save: LoginSave| {
+                        write_login(&dir, &tokens, Some(&save)).map_err(|e| exec_text(&e))
+                    };
                     save_if_pending(
                         &worker,
                         &flow,
@@ -937,9 +966,11 @@ async fn start_antigravity(state: Arc<Management>, webui: bool) -> Response {
                     String::new()
                 });
                 let record = build_auth(&tokens, &email, &project, chrono::Utc::now());
-                let write = |dir: PathBuf, (name, metadata): (String, serde_json::Map<String, Value>)| {
-                    write_login(&dir, &name, &metadata)
-                };
+                let write =
+                    |dir: PathBuf, (name, metadata): (String, serde_json::Map<String, Value>), save: LoginSave| {
+                        let path = dir.join(&name);
+                        save_login(Some(&save), &[path], || write_login(&dir, &name, &metadata))
+                    };
                 save_if_pending(
                     &worker,
                     &flow,
@@ -1061,7 +1092,10 @@ async fn start_devin(state: Arc<Management>) -> Response {
         let Some(record) = created else {
             return fail("Failed to create Devin authentication record");
         };
-        let write = |dir: PathBuf, record| save_record(&dir, &record);
+        let write = |dir: PathBuf, record: cpa_exec::devin_auth::AuthRecord, save: LoginSave| {
+            let path = dir.join(&record.file_name);
+            save_login(Some(&save), &[path], || save_record(&dir, &record))
+        };
         let outcome = save_if_pending(
             &worker,
             &flow,
@@ -1151,7 +1185,12 @@ async fn start_kimi(state: Arc<Management>, domain: String) -> Response {
                 );
                 // Go records the requested domain as given.
                 record.metadata.insert("domain".into(), domain.clone().into());
-                let write = |dir: PathBuf, record| write_login(&dir, &record).map_err(|e| exec_text(&e));
+                let write = |dir: PathBuf, record: cpa_exec::kimi_auth::LoginRecord, save: LoginSave| {
+                    let path = dir.join(&record.file_name);
+                    save_login(Some(&save), &[path], || {
+                        write_login(&dir, &record).map_err(|e| exec_text(&e))
+                    })
+                };
                 save_if_pending(
                     &worker,
                     &sid,
@@ -1214,7 +1253,9 @@ async fn start_meta(state: Arc<Management>) -> Response {
                 Outcome::Failed("Failed to exchange token".into())
             }
             Ok(bundle) => {
-                let write = move |dir: PathBuf, bundle| save_login(&dir, &bundle, now).map(|o| o.path);
+                let write = move |dir: PathBuf, bundle, save: LoginSave| {
+                    save_login(&dir, &bundle, now, Some(&save)).map(|o| o.path)
+                };
                 save_if_pending(&worker, &sid, "meta", bundle, write, "Failed to save token to file").await
             }
         };
@@ -1277,7 +1318,10 @@ async fn start_xai(state: Arc<Management>) -> Response {
                 // Go `WaitForAuthorization`: RFC 3339 seconds in UTC.
                 let last_refresh = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
                 let record = login_record(&tokens, &last_refresh, &code.token_endpoint, now.timestamp_millis());
-                let write = |dir: PathBuf, record| save_login(&dir, record);
+                let write = |dir: PathBuf, record: LoginRecord, save: LoginSave| {
+                    let path = dir.join(&record.file_name);
+                    cpa_exec::login_store::save_login(Some(&save), &[path], || save_login(&dir, record))
+                };
                 save_if_pending(&worker, &sid, "xai", record, write, "Failed to save token to file").await
             }
         };
@@ -1635,6 +1679,145 @@ fn redirect_query(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sqlite_state(label: &str) -> (PathBuf, Arc<Management>, Arc<crate::credential_store::CredentialDb>) {
+        let root = std::env::temp_dir().join(format!("oauth-{label}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let config = Arc::new(crate::config_store::ConfigStore::open(&root.join("config.db")).unwrap());
+        let db = crate::credential_store::CredentialDb::initialize(config.clone(), &root.join("legacy")).unwrap();
+        let mut cfg = config.load().unwrap().config;
+        cfg.auth_dir = db.auth_dir();
+        let rt = Arc::new(crate::testing::runtime_with_db(
+            cfg,
+            Vec::new(),
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            db.clone(),
+        ));
+        (root, Management::new(rt, config), db)
+    }
+
+    #[tokio::test]
+    async fn pending_provider_writer_restores_bytes_on_error_and_respects_cancellation() {
+        let (root, state, db) = sqlite_state("provider-rollback");
+        let fixture: Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../cpa-exec/tests/fixtures/vertex_go.json"
+        )))
+        .unwrap();
+        let key = fixture["import"][0]["input"].as_str().unwrap();
+        let path = db.auth_dir().join("vertex-proj-1.json");
+        let original = br#"{ "type":"vertex", "prefix":"team", "disabled":true }"#;
+        db.save(&path, original).unwrap();
+        std::fs::write(&path, br#"{"type":"vertex","prefix":"cache-edit","disabled":false}"#).unwrap();
+        let upload = cpa_exec::vertex_auth::import_upload(&db.auth_dir(), key.as_bytes(), "").unwrap();
+        state.oauth.register("active", "vertex");
+        let outcome = save_if_pending(
+            &state,
+            "active",
+            "vertex",
+            upload,
+            |_, mut upload, save| {
+                let path = upload.path.clone();
+                save_login(Some(&save), std::slice::from_ref(&path), || {
+                    upload.write().map_err(|_| "Vertex writer failed".to_owned())?;
+                    let written: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                    assert_eq!(written["prefix"], "team");
+                    assert_eq!(written["disabled"], true);
+                    assert!(written.get("service_account").is_some(), "real provider writer ran");
+                    Err("injected failure after provider write".to_owned())
+                })
+            },
+            "safe save failure",
+        )
+        .await;
+        assert!(matches!(outcome, Outcome::Failed(message) if message == "safe save failure"));
+        assert_eq!(db.read(&path).unwrap().unwrap(), original);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+
+        state.oauth.register("cancelled", "vertex");
+        assert!(state.oauth.cancel("cancelled"));
+        let upload = cpa_exec::vertex_auth::import_upload(&db.auth_dir(), key.as_bytes(), "").unwrap();
+        let outcome = save_if_pending(
+            &state,
+            "cancelled",
+            "vertex",
+            upload,
+            |_, upload, save| {
+                let path = upload.path;
+                save_login(Some(&save), std::slice::from_ref(&path), || {
+                    panic!("cancelled writer ran")
+                })
+            },
+            "safe save failure",
+        )
+        .await;
+        assert!(matches!(outcome, Outcome::Cancelled));
+        assert_eq!(db.read(&path).unwrap().unwrap(), original);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pending_provider_save_waits_for_document_before_taking_disk() {
+        let (root, state, db) = sqlite_state("provider-lock-order");
+        let path = db.auth_dir().join("vertex.json");
+        db.save(&path, br#"{"type":"vertex","prefix":"before"}"#).unwrap();
+        let document = cpa_exec::codex_siwc_bind::lock_file(&path).unwrap();
+        state.oauth.register("lock-order", "vertex");
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let saving = tokio::spawn({
+            let state = state.clone();
+            async move {
+                save_if_pending(
+                    &state,
+                    "lock-order",
+                    "vertex",
+                    (),
+                    move |dir, (), save| {
+                        let path = dir.join("vertex.json");
+                        started_tx.send(()).unwrap();
+                        save_login(Some(&save), std::slice::from_ref(&path), || {
+                            std::fs::write(&path, br#"{"type":"vertex","prefix":"saved"}"#)
+                                .map_err(|error| error.to_string())?;
+                            Ok(path.clone())
+                        })
+                    },
+                    "save failed",
+                )
+                .await
+            }
+        });
+        started_rx.await.unwrap();
+        let (released_tx, released_rx) = tokio::sync::oneshot::channel();
+        let disk = tokio::task::spawn_blocking({
+            let state = state.clone();
+            move || {
+                drop(state.disk.lock().unwrap_or_else(PoisonError::into_inner));
+                released_tx.send(()).unwrap();
+            }
+        });
+        // The channel proves disk was acquired and released while the document is
+        // still locked. The timeout only bounds a lock-order regression's failure.
+        let released = tokio::time::timeout(Duration::from_secs(5), released_rx).await;
+        drop(document);
+        released.expect("document lock wait held management disk").unwrap();
+        disk.await.unwrap();
+        assert!(matches!(saving.await.unwrap(), Outcome::Saved));
+        let saved = br#"{"type":"vertex","prefix":"saved"}"#;
+        assert_eq!(db.read(&path).unwrap().unwrap(), saved);
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn session_causes_drop_upstream_bodies_and_descriptions() {

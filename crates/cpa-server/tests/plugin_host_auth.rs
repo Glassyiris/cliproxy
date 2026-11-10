@@ -8,7 +8,6 @@
 
 use std::sync::Arc;
 
-use cpa_core::config::Config;
 use cpa_exec::Executors;
 use cpa_exec::claude::ClaudeExecutor;
 use cpa_plugin::callbacks::RequestScope;
@@ -40,19 +39,12 @@ async fn plugin_auth_callbacks_read_and_save_the_credential_store() {
         r#"{"type":"codex","email":"c@example.invalid","disabled":true}"#,
     )
     .unwrap();
-    let config_path = work.join("config.yaml");
-    std::fs::write(
-        &config_path,
-        format!(
-            "config-version: 8\nauth-dir: {}\nrouting:\n  session-affinity: true\n",
-            auths.display()
-        ),
-    )
-    .unwrap();
-    let config = Config::load(&config_path).unwrap();
+    let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&format!(
+        "config-version: 8\noauth:\n  auth-dir: {}\nrouting:\n  session-affinity: true\n",
+        auths.display()
+    )));
+    let config = store.load().unwrap().config;
     let credentials = cpa_core::config::credentials::load(&config);
-    let claude = credentials.iter().find(|c| c.id == "claude.json").unwrap().clone();
-    let index = cpa_core::config::credentials::auth_index(&claude);
     let rt = Arc::new(cpa_server::testing::runtime(
         config,
         credentials,
@@ -64,7 +56,9 @@ async fn plugin_auth_callbacks_read_and_save_the_credential_store() {
             google: Default::default(),
         },
     ));
-    let _state = Management::with_options(rt.clone(), config_path, Options::default());
+    let claude = rt.store().get("claude.json").unwrap();
+    let index = cpa_core::config::credentials::auth_index(&claude);
+    let _state = Management::with_options(rt.clone(), store, Options::default());
     // The host learns the config (and so the auth directory) as the server starts.
     cpa_server::plugins::start(&rt).await;
     let host = rt.plugins().clone();
@@ -77,7 +71,12 @@ async fn plugin_auth_callbacks_read_and_save_the_credential_store() {
     let lease = rt.store().select(selection).expect("the claude credential is picked");
     drop(lease);
 
-    let (h, i, auths_dir, idx) = (host.clone(), instance.clone(), auths.clone(), index.clone());
+    let (h, i, auths_dir, idx) = (
+        host.clone(),
+        instance.clone(),
+        rt.config().auth_dir.clone(),
+        index.clone(),
+    );
     tokio::task::spawn_blocking(move || {
         let call = |method: &str, request: &str| call_from_plugin(&h, "p", &i, method, request.as_bytes());
 

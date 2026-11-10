@@ -623,15 +623,15 @@ M4-0363	partial	partial	manual	latest-version route (crates/cpa-server/src/manag
 M4-0365	partial	partial	automatic	implementation cites header_helpers.go (crates/cpa-common/src/headers.rs, crates/cpa-common/src/lib.rs); no case matched by name	
 M4-0367	partial	partial	automatic	implementation cites responses_tools.go (crates/cpa-translate/src/responses_tools.rs); no case matched by name	
 M4-0368	partial	partial	manual	crates/cpa-server/src/sanitize.rs sanitize_matches_go	Not ported by name.
-M4-0369	partial	partial	manual	crates/cpa-server/src/config_diff.rs real_go_reload_summaries_and_redaction (Go-generated fixtures, tests/fixtures/config_diff_go.json); watching.rs reload logging	Not ported by name.
-M4-0370	partial	partial	manual	crates/cpa-server/src/config_diff.rs real_go_reload_summaries_and_redaction (Go-generated fixtures, tests/fixtures/config_diff_go.json); watching.rs reload logging	Not ported by name.
-M4-0371	missing	missing	manual	no model hash helpers or models_hash/excluded_models_hash auth attributes	Reload summaries are ported (crates/cpa-server/src/config_diff.rs).
-M4-0372	missing	missing	manual	no model hash helpers or models_hash/excluded_models_hash auth attributes	Reload summaries are ported (crates/cpa-server/src/config_diff.rs).
-M4-0373	partial	partial	manual	crates/cpa-server/src/config_diff.rs real_go_reload_summaries_and_redaction (Go-generated fixtures, tests/fixtures/config_diff_go.json); watching.rs reload logging	Not ported by name.
-M4-0374	partial	partial	manual	crates/cpa-server/src/config_diff.rs real_go_reload_summaries_and_redaction (Go-generated fixtures, tests/fixtures/config_diff_go.json); watching.rs reload logging	Not ported by name.
-M4-0375	partial	partial	manual	crates/cpa-server/src/config_diff.rs real_go_reload_summaries_and_redaction (Go-generated fixtures, tests/fixtures/config_diff_go.json); watching.rs reload logging	Not ported by name.
-M4-0376	partial	partial	manual	crates/cpa-server/src/config_diff.rs real_go_reload_summaries_and_redaction (Go-generated fixtures, tests/fixtures/config_diff_go.json); watching.rs reload logging	Not ported by name.
-M2-0134	partial	partial	manual	crates/cpa-server/src/config_diff.rs real_go_reload_summaries_and_redaction (Go-generated fixtures, tests/fixtures/config_diff_go.json); watching.rs reload logging	Not ported by name.
+M4-0369	partial	partial	manual	crates/cpa-server/src/config_diff.rs resource_reload_summary_never_includes_values (resource summary; Go summary parity deliberately dropped); watching.rs reload logging	Not ported by name.
+M4-0370	partial	partial	manual	crates/cpa-server/src/config_diff.rs resource_reload_summary_never_includes_values (resource summary; Go summary parity deliberately dropped); watching.rs reload logging	Not ported by name.
+M4-0371	missing	missing	manual	no model hash helpers or models_hash/excluded_models_hash auth attributes	Resource reload summaries use crates/cpa-server/src/config_diff.rs; Go summary parity deliberately dropped.
+M4-0372	missing	missing	manual	no model hash helpers or models_hash/excluded_models_hash auth attributes	Resource reload summaries use crates/cpa-server/src/config_diff.rs; Go summary parity deliberately dropped.
+M4-0373	partial	partial	manual	crates/cpa-server/src/config_diff.rs resource_reload_summary_never_includes_values (resource summary; Go summary parity deliberately dropped); watching.rs reload logging	Not ported by name.
+M4-0374	partial	partial	manual	crates/cpa-server/src/config_diff.rs resource_reload_summary_never_includes_values (resource summary; Go summary parity deliberately dropped); watching.rs reload logging	Not ported by name.
+M4-0375	partial	partial	manual	crates/cpa-server/src/config_diff.rs resource_reload_summary_never_includes_values (resource summary; Go summary parity deliberately dropped); watching.rs reload logging	Not ported by name.
+M4-0376	partial	partial	manual	crates/cpa-server/src/config_diff.rs resource_reload_summary_never_includes_values (resource summary; Go summary parity deliberately dropped); watching.rs reload logging	Not ported by name.
+M2-0134	partial	partial	manual	crates/cpa-server/src/config_diff.rs resource_reload_summary_never_includes_values (resource summary; Go summary parity deliberately dropped); watching.rs reload logging	Not ported by name.
 M4-0377	partial	partial	manual	crates/cpa-server/src/watching.rs; tests/management.rs watcher tests; manage_go.json synth	Not ported by name.
 M4-0378	partial	partial	manual	crates/cpa-server/src/watching.rs; tests/management.rs watcher tests; manage_go.json synth	Not ported by name.
 M4-0379	partial	partial	manual	crates/cpa-server/src/watching.rs; tests/management.rs watcher tests; manage_go.json synth	Not ported by name.

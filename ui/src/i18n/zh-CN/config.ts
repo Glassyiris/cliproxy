@@ -18,7 +18,6 @@ export default {
     "config.access.count": "{count} 个密钥",
     "config.access.providers": "提供商密钥",
     "config.access.manage": "管理{what}",
-    "config.yaml.label": "配置文件",
     "config.sections.client": "按客户端调整请求",
     "config.sections.multimedia": "图像和视频生成",
     "config.sections.upstream": "各供应商的请求行为",

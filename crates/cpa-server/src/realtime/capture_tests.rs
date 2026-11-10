@@ -84,7 +84,7 @@ async fn start(dir: &Path, upstream_url: &str) -> String {
     ));
     let management = crate::management::Management::with_options(
         rt.clone(),
-        dir.join("config.yaml"),
+        Arc::new(crate::config_store::ConfigStore::memory()),
         crate::management::Options {
             log_dir: Some(dir.to_owned()),
             management_password: Some(String::new()),

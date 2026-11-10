@@ -1,4 +1,5 @@
 import { ApiError, base, ConnectionError } from "./client.ts";
+import { ConfigChangedError, isUsableSecret } from "./config.ts";
 
 /**
  * The model ids this proxy offers a client key, asked the way a tool asks. No upstream call.
@@ -6,6 +7,7 @@ import { ApiError, base, ConnectionError } from "./client.ts";
  * reading the body included, and ends as ConnectionError "timeout".
  */
 export async function listClientModels(clientKey: string, signal?: AbortSignal): Promise<string[]> {
+  if (!isUsableSecret(clientKey)) throw new ConfigChangedError("client-key");
   const route = { method: "GET", path: "/v1/models" } as const;
   const timeout = AbortSignal.timeout(30_000);
   try {

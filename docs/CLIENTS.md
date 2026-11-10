@@ -1,6 +1,6 @@
 # Use cook-router with your tools
 
-The examples use `http://127.0.0.1:8317` and `your-client-key`. Replace both with the address and client key from `config.yaml`. The dashboard at `/management.html` has a Use with tools dialog, on the Client keys page, that shows these values with copy buttons. Pick a model ID from the dashboard's Models page or from `GET /v1/models`. Available IDs depend on the accounts connected to your proxy.
+The examples use `http://127.0.0.1:8317` and `your-client-key`. Replace both with your installation's address and client key. The dashboard at `/management.html` has a Use with tools dialog, on the Client keys page, that shows these values with copy buttons. SQLite is the proxy's durable config authority; do not retrieve current settings from an old import YAML. Pick a model ID from the dashboard's Models page or `GET /v1/models`.
 
 ## Claude Code
 
@@ -39,7 +39,7 @@ Anthropic refuses Claude Code releases that are too old for a model. The error r
 Claude Code 2.1.236 does not support this model; version 2.1.251 or newer is required. Run 'claude update', or update the Claude desktop app, then try again.
 ```
 
-Its `error.details.error_code` is `claude_code_version_too_old`. From Claude Code itself, run `claude update`. From another client, or from a Claude Code release that is not forwarded, the identity cook-router sends is older than the model needs. Until a cook-router release raises it, set a newer one in `config.yaml`. Use the version that `claude --version` prints, and the `X-Stainless-Package-Version` and `X-Stainless-Runtime-Version` headers that release sends:
+Its `error.details.error_code` is `claude_code_version_too_old`. From Claude Code itself, run `claude update`. From another client, or a Claude Code release that is not forwarded, the identity cook-router sends is older than the model needs. Until a cook-router release raises it, update the corresponding settings through the dashboard or `/admin/v1`. The YAML below is the initial import/runtime projection shape, not a watched config file. Use the version that `claude --version` prints and the `X-Stainless-Package-Version` and `X-Stainless-Runtime-Version` headers that release sends:
 
 ```yaml
 oauth:
@@ -51,7 +51,7 @@ oauth:
         runtime-version: "<X-Stainless-Runtime-Version>"
 ```
 
-The older layout spells the same block `claude-header-defaults:` at the top level. The version in `user-agent` also becomes the lowest Claude Code version that is forwarded as itself.
+For older imports the same block is spelled `claude-header-defaults:` at the top level. The version in `user-agent` also becomes the lowest Claude Code version forwarded as itself. Editing an imported file afterward has no effect.
 
 ### GPT in Claude Code
 

@@ -1,13 +1,13 @@
 //! The TUI against the real management router (in process, loopback only): the
-//! password gate, lazy tab loading, and writes through the v0 routes.
+//! password gate, lazy tab loading, and writes through the admin API.
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cpa_core::config::Config;
 use cpa_exec::Executors;
 use cpa_exec::claude::ClaudeExecutor;
+use cpa_server::config_store::ConfigStore;
 use cpa_server::management::{self, Management, Options};
 
 use super::app::{self, App};
@@ -19,7 +19,7 @@ const LOCAL_PASSWORD: &str = "fake-local-password";
 const SECRET_HASH: &str = "$2a$04$ZwmGqAwK/vcnBgQOZtSBE.RoTJoA.tmp0hCnv0bzqXssaSXsf63E6";
 
 /// Starts the management router on 127.0.0.1 with the TUI's local password.
-async fn serve(dir: &std::path::Path) -> String {
+async fn serve(dir: &std::path::Path) -> (String, Arc<Management>) {
     let auth_dir = dir.join("auth");
     std::fs::create_dir_all(&auth_dir).unwrap();
     std::fs::write(
@@ -27,16 +27,11 @@ async fn serve(dir: &std::path::Path) -> String {
         r#"{"type":"claude","email":"user@example.invalid","access_token":"fake-token"}"#,
     )
     .unwrap();
-    let path = dir.join("config.yaml");
-    std::fs::write(
-        &path,
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{SECRET_HASH}'\noauth:\n  auth-dir: {}\naccess:\n  api-keys: [fake-key-a]\nobservability:\n  logs:\n    logging-to-file: false\n",
-            auth_dir.display()
-        ),
-    )
-    .unwrap();
-    let config = Config::load(&path).unwrap();
+    let store = Arc::new(ConfigStore::memory_with(&format!(
+        "config-version: 8\nmanagement:\n  secret-key: '{SECRET_HASH}'\noauth:\n  auth-dir: {}\naccess:\n  api-keys: [fake-key-a]\nobservability:\n  logs:\n    logging-to-file: false\n",
+        auth_dir.display()
+    )));
+    let config = store.load().unwrap().config;
     let credentials = cpa_core::config::credentials::load(&config);
     let rt = Arc::new(cpa_server::testing::runtime(
         config,
@@ -51,7 +46,7 @@ async fn serve(dir: &std::path::Path) -> String {
     ));
     let state = Management::with_options(
         rt,
-        path,
+        store,
         Options {
             local_password: LOCAL_PASSWORD.into(),
             management_password: Some(String::new()),
@@ -61,9 +56,9 @@ async fn serve(dir: &std::path::Path) -> String {
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let app = management::router(state).into_make_service_with_connect_info::<SocketAddr>();
+    let app = management::router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    base
+    (base, state)
 }
 
 /// Runs commands and feeds their messages back, as the TUI loop does. A command that
@@ -116,7 +111,7 @@ fn tui_drives_the_management_api() {
 async fn drive() {
     let dir = std::env::temp_dir().join(format!("cpa-tui-e2e-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let base = serve(&dir).await;
+    let (base, management) = serve(&dir).await;
     let mut app = App::new(&base, "", None);
     app.resize(100, 40);
     assert!(app.init().is_empty(), "the gate fetches nothing");
@@ -146,10 +141,15 @@ async fn drive() {
         "{dashboard}"
     );
 
-    // Config: loaded on first visit; Enter on Debug writes PUT /debug.
+    // Config loads on first visit; Enter on Debug applies the setting.
     keys(&mut app, &["tab"]).await;
     assert_eq!(app.active, app::CONFIG);
-    let debug = app.config.fields.iter().position(|f| f.path == "debug").unwrap();
+    let debug = app
+        .config
+        .fields
+        .iter()
+        .position(|f| f.path == "observability/logs/debug")
+        .unwrap();
     assert_eq!(app.config.fields[debug].value, "false");
     for _ in 0..debug {
         keys(&mut app, &["down"]).await;
@@ -162,7 +162,7 @@ async fn drive() {
         .config
         .fields
         .iter()
-        .position(|f| f.path == "logging-to-file")
+        .position(|f| f.path == "observability/logs/logging-to-file")
         .unwrap();
     for _ in debug..logging {
         keys(&mut app, &["down"]).await;
@@ -170,29 +170,44 @@ async fn drive() {
     keys(&mut app, &["enter"]).await;
     assert!(app.logs_enabled);
     assert_eq!(app.tabs.len(), 6);
-    let saved = std::fs::read_to_string(dir.join("config.yaml")).unwrap();
-    assert!(
-        saved.contains("debug: true") && saved.contains("logging-to-file: true"),
-        "{saved}"
+    let saved = management.config_store().load().unwrap().config;
+    assert_eq!(saved.document["observability"]["logs"]["debug"].as_bool(), Some(true));
+    assert_eq!(
+        saved.document["observability"]["logs"]["logging-to-file"].as_bool(),
+        Some(true)
     );
 
-    // API keys: add (PATCH old: null), then delete the first.
+    // API keys: add, then delete the first.
     keys(&mut app, &["tab", "tab"]).await;
     assert_eq!(app.active, app::API_KEYS);
-    assert_eq!(app.keys.keys, ["fake-key-a"]);
+    assert_eq!(app.keys.keys.len(), 1);
+    let original = app.keys.keys[0].clone();
+    assert!(!joined(&app.keys.vp.text()).contains("fake-key"));
     // `q`, `L` and Tab are text while the field has focus.
     keys(&mut app, &["a"]).await;
     type_text(&mut app, "fake-key-qL").await;
     keys(&mut app, &["tab", "enter"]).await;
-    assert_eq!(app.keys.keys, ["fake-key-a", "fake-key-qL"]);
+    assert_eq!(app.keys.keys.len(), 2);
+    let added = app.keys.keys[1].clone();
     assert_eq!(app.active, app::API_KEYS);
-    // Adding a key already present changes nothing.
-    keys(&mut app, &["a"]).await;
-    type_text(&mut app, "fake-key-a").await;
+    // Editing starts empty, targets the resource identity, and advances its revision.
+    keys(&mut app, &["e"]).await;
+    assert_eq!(app.keys.input.value(), "");
+    type_text(&mut app, "fake-key-edited").await;
     keys(&mut app, &["enter"]).await;
-    assert_eq!(app.keys.keys, ["fake-key-a", "fake-key-qL"]);
+    assert_eq!(app.keys.keys[0].id, original.id);
+    assert!(app.keys.keys[0].rev > original.rev);
+    assert_eq!(
+        management.config_store().load().unwrap().config.api_keys,
+        ["fake-key-edited", "fake-key-qL"]
+    );
     keys(&mut app, &["d", "y"]).await;
-    assert_eq!(app.keys.keys, ["fake-key-qL"]);
+    assert_eq!(app.keys.keys, [added]);
+    assert_eq!(
+        management.config_store().load().unwrap().config.api_keys,
+        ["fake-key-qL"]
+    );
+    assert!(!joined(&app.keys.vp.text()).contains("fake-key"));
 
     // Auth files: disable the file through PATCH /auth-files/status.
     keys(&mut app, &["shift+tab"]).await;

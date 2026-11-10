@@ -5,11 +5,11 @@
 [![Homebrew](https://img.shields.io/badge/brew-vayungodara%2Ftap%2Fcliproxy--rs-orange)](https://github.com/vayungodara/homebrew-tap)
 [![Stars](https://img.shields.io/github/stars/prep-cook/cook-router)](https://github.com/prep-cook/cook-router/stargazers)
 
-Use DeepSeek, GLM, Kimi, OpenRouter and more in Codex CLI and Claude Code: one local endpoint, API translation, failover. Single Rust binary, CLIProxyAPI-compatible.
+Use DeepSeek, GLM, Kimi, OpenRouter and more in Codex CLI and Claude Code: one local endpoint, API translation, failover. Single Rust binary with SQLite-backed configuration.
 
 - **API translation.** Codex CLI sends Responses requests, and the proxy sends Chat Completions to providers that only offer those, tool calls included. Claude Code's Messages requests are translated to the selected provider's format the same way.
 - **Several keys and providers behind one model name.** By default, a 429 cools that key for the model and the request moves to another ready key or provider with the same alias.
-- **One binary with the dashboard built in.** It reads CLIProxyAPI's `config.yaml` and credential files. Parity with CLIProxyAPI v8.0.35 is partial; [PARITY.md](docs/PARITY.md) has the counts.
+- **One binary with the dashboard built in.** Configuration and OAuth credentials live in SQLite. Import existing CLIProxyAPI YAML and credential files once; they are not watched or shared runtime storage. [Configuration](docs/CONFIGURATION.md) explains the cutover.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/prep-cook/cook-router/master/install.sh | sh
@@ -21,7 +21,7 @@ On Windows, or with Homebrew or Scoop, see [Quick start](#quick-start).
   <a href="https://github.com/vayungodara/cliproxy-rs/releases/latest"><img src="docs/img/hero.gif" alt="cook-router on 127.0.0.1:8317 translates a Codex CLI Responses request to Chat Completions for DeepSeek and moves it to a second key when the first answers 429. Claude Code's Messages requests reach GLM the same way. Kimi and OpenRouter are the other providers shown." width="880"></a>
 </p>
 
-0.4.0 changes how some configs load. Read [Before you upgrade](https://github.com/vayungodara/cliproxy-rs/releases/tag/v0.4.0#:~:text=Before%20you%20upgrade) in the [release notes](https://github.com/vayungodara/cliproxy-rs/releases/tag/v0.4.0) first.
+**SQLite migration:** back up your old configuration and credentials before upgrading. YAML is now an import format, not the runtime authority; the old config Management API endpoints are removed. See [migration](docs/MIGRATING-FROM-GO.md) and [installation](docs/INSTALL.md).
 
 > **Set it up with your coding agent.** Paste this into Claude Code, Codex or Amp on the machine where the proxy should run:
 >
@@ -37,19 +37,19 @@ On Windows, or with Homebrew or Scoop, see [Quick start](#quick-start).
    irm https://raw.githubusercontent.com/prep-cook/cook-router/master/install.ps1 | iex
    ```
 
-   The installer checks the release checksum, writes `~/.cook-router/config.yaml`, starts the proxy and opens the dashboard. On Windows, the config is `%USERPROFILE%\.cook-router\config.yaml`. It saves new keys in `keys.env` without printing them.
+   The installer checks the release checksum and creates private bootstrap settings and `keys.env` without printing the keys. First bootstrap imports those settings into SQLite; later settings and OAuth changes are saved only in the database. See [INSTALL.md](docs/INSTALL.md) before upgrading an older YAML-based install.
 
    Other ways to install: [Homebrew](docs/INSTALL.md#homebrew) on macOS or Linux, [Scoop](docs/INSTALL.md#scoop) on Windows, and the rest in [INSTALL.md](docs/INSTALL.md).
 
-2. Sign in to the dashboard with `COOK_ROUTER_MANAGEMENT_KEY` from the `keys.env` next to your config. Add a provider API key, or connect your own account. Read [Accounts and provider terms](#accounts-and-provider-terms) before connecting a subscription.
+2. Sign in to the dashboard with `COOK_ROUTER_MANAGEMENT_KEY` from your installation's `keys.env`. Add a provider API key, or connect your own account. Read [Accounts and provider terms](#accounts-and-provider-terms) before connecting a subscription.
 
 3. On the dashboard's **Client keys** page, open **Use with tools** and copy the Codex CLI or Claude Code settings. Your tools use `COOK_ROUTER_CLIENT_KEY`, not the management key.
 
-Run the install command again to upgrade, or `brew upgrade cliproxy-rs` with Homebrew. Both keep your config and keys. [INSTALL.md](docs/INSTALL.md) covers start at login, release binaries, Docker and building from source. [GETTING-STARTED.md](docs/GETTING-STARTED.md) has the longer walkthrough.
+Run the install command again to upgrade, or `brew upgrade cliproxy-rs` with Homebrew. Keep the persistent database and keys. [INSTALL.md](docs/INSTALL.md) covers start at login, release binaries, Docker and building from source. [GETTING-STARTED.md](docs/GETTING-STARTED.md) has the longer walkthrough.
 
 ## What is this?
 
-cook-router is a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). It reads the same `config.yaml` and credential formats and implements the client routes and v8 Management API. The dashboard shows provider keys and their traffic, request history and tool settings.
+cook-router grew from a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) and now develops independently. It imports legacy settings and credentials, serves the client APIs and exposes resource-based configuration at `/admin/v1`. The dashboard shows provider keys and their traffic, request history and tool settings.
 
 <p align="center">
   <picture>
@@ -58,7 +58,7 @@ cook-router is a Rust rewrite of [CLIProxyAPI](https://github.com/router-for-me/
   </picture>
 </p>
 
-The compatibility target is CLIProxyAPI v8.0.35. Parity is incomplete: the audit has 1,951 items, with 1,053 covered, 872 partial and 26 missing. [PARITY.md](docs/PARITY.md) defines those counts.
+The frozen CLIProxyAPI v8.0.35 audit is historical evidence, not a current compatibility target. [PARITY.md](docs/PARITY.md) retains its original counts and fixtures; current persistence and administration intentionally differ.
 
 ## How it compares
 
@@ -70,7 +70,7 @@ Checked against each project's own README on 28 October 2026. All five translate
 | Linux x86_64 release² | 19.0 MB download, 44.6 MB binary with the dashboard | 23.6 MB download, 71.1 MB binary; it downloads its panel at start | Not measured | Not measured | Not measured |
 | Memory² | 25.8 MB idle at start; in the field-mix hour, 161.5 MB peak and 97.8 MB after 5 min idle | 49.7 MB idle at start; in the field-mix hour, 198.3 MB peak and 75.8 MB after 5 min idle | Not measured | Not measured | Not measured |
 | Built-in dashboard | Yes, in the binary | Separate project (Management Center) | Yes | Yes | Yes |
-| Reads CLIProxyAPI's config and credential files | Yes, with [partial parity](docs/PARITY.md) | It is the reference | No | No | No |
+| Imports CLIProxyAPI's config and credential files | One-time migration to SQLite; see [migration](docs/MIGRATING-FROM-GO.md) | It is the source format | No | No | No |
 
 ¹ Not stated in CLIProxyAPI's README; checked in its v8.0.35 source and release assets. cook-router's translation and failover are ports of that code.
 
@@ -78,7 +78,7 @@ Checked against each project's own README on 28 October 2026. All five translate
 
 Where the others are stronger:
 
-- CLIProxyAPI is the complete implementation that cook-router follows. It was faster in the synthetic runs under [Performance](#performance), and its README lists many apps built on it.
+- CLIProxyAPI is the original Go implementation. It was faster in the synthetic runs under [Performance](#performance), and its README lists many apps built on it.
 - LiteLLM covers 100+ providers and adds virtual keys, spend tracking, guardrails and a Python SDK.
 - claude-code-router has routing conditions on headers and bodies, ordered fallback models, its own client keys with request and token limits, and a desktop app.
 - opencodex supports 40+ providers out of the box, also serves Claude Desktop and Grok Build, and has a desktop app.
@@ -97,7 +97,7 @@ If you only use one provider and it serves the Responses API, Codex can talk to 
 
 The proxy is for the rest: an endpoint that only offers Chat Completions, such as OpenCode Go's models, or several providers and keys behind one endpoint, with failover when one returns 429. It accepts Responses requests from Codex and sends Chat Completions upstream, tool calls included.
 
-You do not need a subscription login. Merge this provider block into `~/.cook-router/config.yaml`, or `%USERPROFILE%\.cook-router\config.yaml` on Windows. Keep `access.api-keys`, `management.secret-key` and the rest of your config. The proxy reloads the configuration on save. The upstream keys below are separate from your proxy's client key. Replace the key and upstream model placeholders with values from each provider.
+You do not need a subscription login. Add these providers on the dashboard's Provider keys page. The YAML below describes the legacy import/runtime projection shape, not SQLite's persisted schema: use it when preparing an initial import, keeping `access.api-keys`, `management.secret-key` and your other settings. Editing an old YAML file after import does nothing. The upstream keys below are separate from your proxy's client key. Replace the key and upstream model placeholders with values from each provider.
 
 ```yaml
 api-keys:
@@ -167,13 +167,13 @@ Personal use is still subject to each provider's terms, and providers can restri
 
 ### Several accounts
 
-Each sign-in creates a file in `auth-dir`. Routing chooses among ready credentials with `soonest-reset` (the default: the account whose weekly limit resets soonest goes first), `round-robin`, `fill-first` or `weighted-round-robin`. The installer enables session affinity to keep a conversation on one account. When the setting is omitted, the server default is off. A 429 can move the request to another ready credential for that model. [MULTI-ACCOUNT.md](docs/MULTI-ACCOUNT.md) covers routing and access from your other machines.
+Each sign-in creates a credential in SQLite. Routing chooses among ready credentials with `soonest-reset` (the default: the account whose weekly limit resets soonest goes first), `round-robin`, `fill-first` or `weighted-round-robin`. Session affinity keeps a conversation on one account; when omitted, the server default is off. A 429 can move the request to another ready credential for that model. [MULTI-ACCOUNT.md](docs/MULTI-ACCOUNT.md) covers routing and access from your other machines.
 
-## CLIProxyAPI compatibility
+## Migrating from CLIProxyAPI
 
-Config and protocol tests check compatibility with Go CLIProxyAPI at `6fecc6e`. The bundled dashboard has tests against both servers. No third-party CLIProxyAPI app has been tested with cook-router yet.
+Go CLIProxyAPI no longer defines cook-router's config or administration contract. The old `/v0/management` and `/v8/management` configuration endpoints are deleted; non-config management routes remain separate from `/admin/v1`.
 
-Before switching, read [MIGRATING-FROM-GO.md](docs/MIGRATING-FROM-GO.md), especially the refresh-token warning. The default Docker image expects `/data/config.yaml` and runs as UID/GID 10001. Update mounts and permissions, or override `--config` and set an accessible `oauth.auth-dir` to keep existing paths.
+Before switching, read [MIGRATING-FROM-GO.md](docs/MIGRATING-FROM-GO.md), especially the refresh-token warning. Mount a persistent directory for SQLite in containers, writable by UID/GID 10001 for the default Docker image. Never run both servers against the same account's refresh tokens.
 
 ## Terminal UI
 
@@ -185,7 +185,7 @@ Not in cook-router yet:
 
 - An AUR package.
 - Three plugin pieces: model discovery for each credential, response hooks on a buffered Claude answer, and sending your GitHub token on plugin store requests.
-- The remaining parity gaps and Go test cases, listed in [PARITY.md](docs/PARITY.md).
+- Historical parity gaps are recorded in [PARITY.md](docs/PARITY.md); they are not a commitment to track future Go changes.
 
 ## Performance
 
@@ -240,6 +240,6 @@ The binary also contains third-party Rust crates, a bundled copy of BoringSSL an
 ## Thanks
 
 - [vayungodara/cliproxy-rs](https://github.com/vayungodara/cliproxy-rs), the Rust rewrite this project grew from.
-- [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), the Go project this one follows.
+- [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), the original Go project.
 - The [Astryx](https://astryx.atmeta.com/) design system and [Lucide](https://lucide.dev) icons, used by the dashboard.
 - [Rosé Pine](https://rosepinetheme.com) palette (MIT) and [@lobehub/icons](https://github.com/lobehub/lobe-icons) provider marks (MIT).

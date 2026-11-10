@@ -79,7 +79,6 @@ export default {
     "config.access.count": "{count, plural, one {# key} other {# keys}}",
     "config.access.providers": "Provider keys",
     "config.access.manage": "Manage {what}",
-    "config.yaml.label": "Configuration file",
     "config.sections.client": "Per-client request tweaks",
     "config.sections.multimedia": "Image and video generation",
     "config.sections.upstream": "Request behaviour per provider",

@@ -212,43 +212,10 @@ impl Runner {
             if let Ok(res) = runner.http(&json!({"method": "GET", "path": "/healthz"}))
                 && res["status"] == 200
             {
-                // Steps compare request-time calls, so the plugin syncs of startup are
-                // waited for and dropped (the generator settles for the same reason).
-                // Like Go, the server syncs plugins twice: before it serves here (Go:
-                // once its listener is up), and when the config watcher's first look
-                // reloads the config (Go's watcher reloads clients when it starts).
-                // Each sync asks every executor plugin, none of which registers models,
-                // for its identifier twice. The watcher's reload comes about 200 ms
-                // after serving starts and can otherwise land in any later step.
-                // The barrier counts this fixture's calls: it does not prove quiescence. A
-                // build that asks fewer times fails here after 10 s; update the count then.
-                let labels = executor_labels(scenario);
+                // Startup plugin synchronization finishes before the listener serves
+                // health checks; credential-only reloads do not synchronize again.
                 let identifiers = json!({"methods": ["executor.identifier"]});
-                let synced = Instant::now() + Duration::from_secs(10);
-                let mut asked = loop {
-                    // Non-destructive snapshots, so no call is lost while the recorders
-                    // still append; drained once the count is reached.
-                    let asked: Vec<String> = runner
-                        .read_records(&identifiers, false)
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .map(|r| r["label"].as_str().unwrap().to_owned())
-                        .collect();
-                    if labels.iter().all(|l| asked.iter().filter(|a| a == l).count() >= 4) {
-                        break asked;
-                    }
-                    assert!(
-                        Instant::now() < synced,
-                        "{}: startup plugin syncs asked {asked:?} for the executor identifiers of {labels:?}",
-                        scenario["name"]
-                    );
-                    std::thread::sleep(Duration::from_millis(25));
-                };
                 runner.records(&identifiers);
-                asked.sort_unstable();
-                asked.dedup();
-                assert_eq!(asked, labels, "{}: startup executor.identifier", scenario["name"]);
                 return runner;
             }
             if Instant::now() > deadline || runner.child.try_wait().unwrap().is_some() {
@@ -623,25 +590,6 @@ fn callback_ids(s: &str) -> String {
         }
     }
     out.push_str(rest);
-    out
-}
-
-/// Labels of the scenario's plugins that declare an executor, in label order.
-fn executor_labels(scenario: &Value) -> Vec<&str> {
-    let mut label = None;
-    let mut out = Vec::new();
-    for line in scenario["config"].as_str().unwrap_or_default().lines() {
-        let line = line.trim();
-        if let Some(l) = line.strip_prefix("label: ") {
-            label = Some(l.trim());
-        } else if let Some(caps) = line.strip_prefix("caps: ")
-            && caps.split(',').any(|c| c.trim() == "executor")
-            && let Some(l) = label.take()
-        {
-            out.push(l);
-        }
-    }
-    out.sort_unstable();
     out
 }
 

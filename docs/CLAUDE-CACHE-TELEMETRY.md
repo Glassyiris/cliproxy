@@ -2,7 +2,9 @@
 
 Claude Messages attempts add `claude_cache` to the existing usage queue and RESP
 `usage` channel only when usage statistics and the separate, default-off
-`observability.usage.claude-cache-telemetry` setting are enabled. For example:
+`observability.usage.claude-cache-telemetry` setting are enabled. Set them through
+the dashboard or `/admin/v1`; this YAML shows the initial import/runtime projection,
+not a watched file or SQLite's persisted schema:
 
 ```yaml
 observability:

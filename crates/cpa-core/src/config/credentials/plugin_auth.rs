@@ -341,6 +341,17 @@ pub fn preparse_auth_dir(cfg: &crate::config::Config) {
     }
 }
 
+/// Caches plugin answers for exactly these source documents, without reading working
+/// files. Like [`preparse_auth_dir`], call before taking locks a plugin may need.
+pub fn preparse_documents(cfg: &crate::config::Config, documents: impl IntoIterator<Item = (PathBuf, Vec<u8>)>) {
+    let Some(parser) = current() else { return };
+    let scan = super::scan_documents_with(cfg, documents, Some(Ask::Fill(&*parser)));
+    // This source is authoritative, including nested and external documents.
+    if let Some(answers) = answers().as_mut() {
+        answers.retain(|path, _| scan.read.contains_key(path));
+    }
+}
+
 /// Go `ValidateAuthWeight` on a parsed auth.
 fn weight_valid(auth: &ParsedAuth) -> bool {
     auth.attributes
@@ -864,6 +875,83 @@ mod tests {
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn document_scans_keep_nested_external_bytes_and_plugin_semantics() {
+        let _state = plugin_auth_state();
+        let cfg = crate::config::Config {
+            auth_dir: PathBuf::from("/auth"),
+            ..Default::default()
+        };
+        let documents: Vec<(PathBuf, Vec<u8>)> = [
+            (
+                "/external/z.json",
+                r#"{"type":"acme","unknown":{"from":"external"},"priority":7}"#,
+            ),
+            (
+                "/auth/nested/native.json",
+                r#"{"type":"codex","unknown":{"nested":[1,2]}}"#,
+            ),
+            ("/auth/nested/a.json", r#"{"type":"acme","unknown":{"from":"nested"}}"#),
+            (
+                "/external/native.json",
+                r#"{"type":"codex","unknown":{"external":true}}"#,
+            ),
+            ("/auth/nested/suppressed.json", r#"{"type":"suppressed"}"#),
+            ("/external/incomplete.json", "{"),
+        ]
+        .into_iter()
+        .map(|(path, raw)| (PathBuf::from(path), raw.as_bytes().to_vec()))
+        .collect();
+        let parser = fake(|req| match req.provider {
+            "acme" => Parsed::Handled(vec![auth(
+                "shared",
+                "acme",
+                serde_json::from_slice(req.raw_json).unwrap(),
+                &[],
+            )]),
+            "suppressed" => Parsed::Handled(Vec::new()),
+            _ => Parsed::NotHandled,
+        });
+        let expected_read: BTreeMap<_, [u8; 32]> = documents
+            .iter()
+            .map(|(path, data)| (path.clone(), Sha256::digest(data).into()))
+            .collect();
+        let deferred = super::super::scan_documents_with(&cfg, documents.clone(), Some(Ask::Cached));
+        assert!(deferred.credentials.is_empty());
+        assert_eq!(deferred.deferred.len(), documents.len() - 1);
+        assert_eq!(deferred.read.len(), 1);
+
+        let filled = super::super::scan_documents_with(&cfg, documents.clone(), Some(Ask::Fill(&parser)));
+        let scan = super::super::scan_documents_with(&cfg, documents.clone(), Some(Ask::Cached));
+        assert_eq!(parser.asked.lock().unwrap().len(), documents.len() - 1);
+        assert_eq!(scan.read, expected_read);
+        assert_eq!(filled.read, scan.read);
+        assert_eq!(scan.incomplete, [PathBuf::from("/external/incomplete.json")].into());
+        assert!(scan.deferred.is_empty() && scan.unapplied.is_empty());
+        assert_eq!(scan.credentials.len(), 3);
+        for (cached, filled) in scan.credentials.iter().zip(&filled.credentials) {
+            assert_eq!(cached.id, filled.id);
+            assert_eq!(cached.source, filled.source);
+            assert_eq!(cached.metadata, filled.metadata);
+            assert_eq!(cached.attributes, filled.attributes);
+        }
+        for path in ["/auth/nested/native.json", "/external/native.json"] {
+            let (path, data) = documents.iter().find(|(p, _)| p == Path::new(path)).unwrap();
+            let expected = super::super::from_file(&cfg, &cfg.auth_dir, path, data)
+                .unwrap()
+                .unwrap();
+            let actual = scan.credentials.iter().find(|c| c.id == expected.id).unwrap();
+            assert_eq!(actual.source, expected.source);
+            assert_eq!(actual.metadata, expected.metadata);
+            assert_eq!(actual.attributes, expected.attributes);
+            assert!(actual.metadata.contains_key("unknown"));
+        }
+        let plugin = scan.credentials.iter().find(|c| c.id == "shared").unwrap();
+        assert_eq!(plugin.source, Source::File(PathBuf::from("/external/z.json")));
+        assert_eq!(plugin.metadata["unknown"], json!({"from": "external"}));
+        assert_eq!(plugin.attributes["priority"], "7");
     }
 
     /// The scan callers run under the disk lock asks no plugin: it takes what a fill

@@ -29,7 +29,7 @@ pub use plugin_auth::with_thread_plugin_auth_parser;
 pub use plugin_auth::{
     ParseRequest, Parsed, ParsedAuth, PluginAuthParser, clean as absolute_clean_path, note_plugin_auth_write,
     on_plugin_auth_change, plugin_auth_epoch, plugin_auth_parser_active, plugin_save_credentials, preparse_auth_dir,
-    set_plugin_auth_parser, set_plugin_auth_providers,
+    preparse_documents, set_plugin_auth_parser, set_plugin_auth_providers,
 };
 
 const WEIGHT_MAX: i64 = 1_000_000;
@@ -1482,7 +1482,7 @@ pub fn from_auth_dir(cfg: &Config) -> Vec<Credential> {
     scan_auth_dir(cfg).credentials
 }
 
-/// What one read of the auth folder found.
+/// What one read of credential documents found.
 #[derive(Default)]
 pub struct AuthScan {
     pub credentials: Vec<Credential>,
@@ -1512,15 +1512,31 @@ pub fn scan_auth_dir(cfg: &Config) -> AuthScan {
     scan_with(cfg, plugin_auth::current().map(|_| Ask::Cached))
 }
 
+/// Scans exactly these credential documents, including nested and external paths.
+/// Paths determine provenance; no working files are read. Plugin answers must first
+/// be cached by [`preparse_documents`], as for [`scan_auth_dir`].
+pub fn scan_documents(cfg: &Config, documents: impl IntoIterator<Item = (PathBuf, Vec<u8>)>) -> AuthScan {
+    scan_documents_with(cfg, documents, plugin_auth::current().map(|_| Ask::Cached))
+}
+
+fn scan_documents_with(
+    cfg: &Config,
+    documents: impl IntoIterator<Item = (PathBuf, Vec<u8>)>,
+    parser: Option<Ask<'_>>,
+) -> AuthScan {
+    let mut documents: Vec<_> = documents.into_iter().collect();
+    documents.sort_by(|(a, _), (b, _)| a.cmp(b));
+    scan_in_order(cfg, documents, parser)
+}
+
 fn scan_with(cfg: &Config, parser: Option<Ask<'_>>) -> AuthScan {
-    let mut scan = AuthScan::default();
     let entries = match std::fs::read_dir(&cfg.auth_dir) {
         Ok(entries) => entries,
         Err(e) => {
             if e.kind() != std::io::ErrorKind::NotFound {
                 tracing::warn!(dir = %cfg.auth_dir.display(), error = %e, "cannot read auth dir");
             }
-            return scan;
+            return AuthScan::default();
         }
     };
     // With a plugin parser, Go's traversal: file-name order (`os.ReadDir`), and the last
@@ -1535,12 +1551,23 @@ fn scan_with(cfg: &Config, parser: Option<Ask<'_>>) -> AuthScan {
         plain = entries.flatten();
         &mut plain
     };
-    for entry in entries {
-        let path: PathBuf = entry.path();
+    let documents = entries.filter_map(|entry| {
         if !entry.file_name().to_string_lossy().go_lower().ends_with(".json") {
-            continue;
+            return None;
         }
-        let Some(data) = read_regular(&path) else { continue };
+        let path = entry.path();
+        read_regular(&path).map(|data| (path, data))
+    });
+    scan_in_order(cfg, documents, parser)
+}
+
+fn scan_in_order(
+    cfg: &Config,
+    documents: impl IntoIterator<Item = (PathBuf, Vec<u8>)>,
+    parser: Option<Ask<'_>>,
+) -> AuthScan {
+    let mut scan = AuthScan::default();
+    for (path, data) in documents {
         scan.read.insert(path.clone(), Sha256::digest(&data).into());
         if serde_json::from_slice::<serde::de::IgnoredAny>(&data).is_err() {
             scan.incomplete.insert(path);

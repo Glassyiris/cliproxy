@@ -98,8 +98,8 @@ fn gateway(error: &str, message: String) -> Response {
     respond(StatusCode::BAD_GATEWAY, &json!({"error": error, "message": message}))
 }
 
-/// Go `GetAPIKeyUsage`: API-key credentials grouped by provider (the OpenAI-compatible
-/// name when set) and keyed by `base_url|api_key`, with summed counters.
+/// API-key credentials grouped by provider and keyed by the live `auth_index` used
+/// by credential and model listings. Telemetry must not expose provider keys.
 pub(crate) async fn api_key_usage(State(state): State<Arc<Management>>) -> Response {
     let store = state.rt.store();
     let mut out: BTreeMap<String, BTreeMap<String, (u64, u64, Value)>> = BTreeMap::new();
@@ -107,15 +107,7 @@ pub(crate) async fn api_key_usage(State(state): State<Arc<Management>>) -> Respo
         if auth_kind(c) != Some("apikey") {
             continue;
         }
-        let Some(key) = c.attributes.get("api_key").map(|k| k.trim()).filter(|k| !k.is_empty()) else {
-            continue;
-        };
-        let base = ["base_url", "base-url"]
-            .iter()
-            .filter_map(|k| c.attributes.get(*k))
-            .map(|v| v.trim())
-            .find(|v| !v.is_empty())
-            .unwrap_or_default();
+        let key = cpa_core::config::credentials::auth_index(c);
         let provider = c
             .attributes
             .get("compat_name")
@@ -130,7 +122,7 @@ pub(crate) async fn api_key_usage(State(state): State<Arc<Management>>) -> Respo
         };
         let activity = store.activity(&c.id);
         let recent = recent_requests(&activity);
-        let entry = out.entry(provider).or_default().entry(format!("{base}|{key}"));
+        let entry = out.entry(provider).or_default().entry(key);
         match entry {
             std::collections::btree_map::Entry::Vacant(v) => {
                 v.insert((activity.success, activity.failed, recent));
@@ -223,7 +215,7 @@ mod tests {
         ));
         let state = Management::with_options(
             rt,
-            dir.join("config.yaml"),
+            Arc::new(crate::config_store::ConfigStore::memory()),
             super::super::Options {
                 latest_release_url: Some("http://127.0.0.1:0/latest".into()),
                 update_check_disabled: Some(false),

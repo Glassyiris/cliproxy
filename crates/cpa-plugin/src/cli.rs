@@ -311,16 +311,16 @@ impl Host {
     }
 
     /// Go `ExecuteCommandLine`. `builtin` lists the host's own flags as
-    /// `(name, current value)`; `persist` saves an auth a command produced and
-    /// returns its path. Returns the exit code, whether any plugin ran, and the output to
-    /// write in order.
+    /// `(name, current value)`; `persist` atomically saves all auths a command produced
+    /// and returns their paths in order. All auths are validated before it is called.
+    /// Returns the exit code, whether any plugin ran, and the output to write in order.
     pub async fn execute_command_line(
         &self,
         program: &str,
         args: &[String],
         config_path: &str,
         builtin: &[(String, String)],
-        persist: &dyn Fn(PluginAuth) -> Result<String, String>,
+        persist: &dyn Fn(Vec<PluginAuth>) -> Result<Vec<String>, String>,
     ) -> (i32, bool, Vec<Output>) {
         let mut all: BTreeMap<String, CommandLineFlagValue> = builtin
             .iter()
@@ -394,32 +394,18 @@ impl Host {
                     }
                 };
             if resp.exit_code == 0 && !resp.auths.is_empty() {
-                let mut saved = Vec::new();
-                let mut failure = None;
-                for (index, data) in std::mem::take(&mut resp.auths).into_iter().enumerate() {
-                    let Some(auth) = PluginAuth::from_auth_data(data, "", "", &auth_dir) else {
-                        failure = Some(format!("pluginhost: command-line auth {} is invalid", index + 1));
-                        break;
-                    };
-                    let id = auth.id.clone();
-                    match persist(auth) {
-                        Ok(path) if !path.trim().is_empty() => saved.push(path),
-                        Ok(_) => {}
-                        Err(e) => {
-                            failure = Some(format!("pluginhost: save command-line auth {id}: {e}"));
-                            break;
+                let saved = match persist_command_auths(std::mem::take(&mut resp.auths), &auth_dir, persist) {
+                    Ok(saved) => saved,
+                    Err(message) => {
+                        push_output(&mut output, Output::Stdout(resp.stdout));
+                        push_output(&mut output, Output::Stderr(resp.stderr));
+                        push_output(&mut output, Output::Stderr(Bytes::from(format!("{message}\n"))));
+                        if exit == 0 {
+                            exit = 1;
                         }
+                        continue;
                     }
-                }
-                if let Some(message) = failure {
-                    push_output(&mut output, Output::Stdout(resp.stdout));
-                    push_output(&mut output, Output::Stderr(resp.stderr));
-                    push_output(&mut output, Output::Stderr(Bytes::from(format!("{message}\n"))));
-                    if exit == 0 {
-                        exit = 1;
-                    }
-                    continue;
-                }
+                };
                 if !saved.is_empty() {
                     let mut stdout = resp.stdout.to_vec();
                     if stdout.last().is_some_and(|b| *b != b'\n') {
@@ -441,6 +427,24 @@ impl Host {
     }
 }
 
+fn persist_command_auths(
+    data: Vec<crate::api::AuthData>,
+    auth_dir: &str,
+    persist: &dyn Fn(Vec<PluginAuth>) -> Result<Vec<String>, String>,
+) -> Result<Vec<String>, String> {
+    let auths = data
+        .into_iter()
+        .enumerate()
+        .map(|(index, data)| {
+            PluginAuth::from_auth_data(data, "", "", auth_dir)
+                .ok_or_else(|| format!("pluginhost: command-line auth {} is invalid", index + 1))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    persist(auths)
+        .map(|paths| paths.into_iter().filter(|path| !path.trim().is_empty()).collect())
+        .map_err(|_| "pluginhost: save command-line auths failed".to_owned())
+}
+
 fn push_output(out: &mut Vec<Output>, item: Output) {
     let empty = match &item {
         Output::Stdout(b) | Output::Stderr(b) => b.is_empty(),
@@ -453,6 +457,67 @@ fn push_output(out: &mut Vec<Output>, item: Output) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_second_command_auth_never_calls_persist() {
+        let called = std::cell::Cell::new(false);
+        let result = persist_command_auths(
+            vec![
+                crate::api::AuthData {
+                    provider: "rec".into(),
+                    id: "first".into(),
+                    ..Default::default()
+                },
+                crate::api::AuthData::default(),
+            ],
+            "",
+            &|_| {
+                called.set(true);
+                Ok(vec!["first.json".into()])
+            },
+        );
+        assert_eq!(result.unwrap_err(), "pluginhost: command-line auth 2 is invalid");
+        assert!(!called.get());
+    }
+
+    #[test]
+    fn command_auths_persist_in_one_ordered_batch() {
+        let calls = std::cell::Cell::new(0);
+        let result = persist_command_auths(
+            ["first", "second"]
+                .into_iter()
+                .map(|id| crate::api::AuthData {
+                    provider: "rec".into(),
+                    id: id.into(),
+                    ..Default::default()
+                })
+                .collect(),
+            "",
+            &|auths| {
+                calls.set(calls.get() + 1);
+                assert_eq!(
+                    auths.iter().map(|auth| auth.id.as_str()).collect::<Vec<_>>(),
+                    ["first", "second"]
+                );
+                Ok(vec!["first.json".into(), " ".into(), "second.json".into()])
+            },
+        );
+        assert_eq!(calls.get(), 1);
+        assert_eq!(result.unwrap(), ["first.json", "second.json"]);
+    }
+
+    #[test]
+    fn command_auth_save_failure_hides_callback_details() {
+        let result = persist_command_auths(
+            vec![crate::api::AuthData {
+                provider: "rec".into(),
+                ..Default::default()
+            }],
+            "",
+            &|_| Err("secret source bytes".into()),
+        );
+        assert_eq!(result.unwrap_err(), "pluginhost: save command-line auths failed");
+    }
 
     /// Expected values printed by Go 1.26 (`strconv.ParseFloat` + `FormatFloat(f, 'g',
     /// -1, 64)`, `time.ParseDuration` + `Duration.String`) for the same inputs.

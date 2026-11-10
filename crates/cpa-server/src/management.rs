@@ -52,6 +52,10 @@ pub struct Management {
     pub(crate) config: Arc<ConfigStore>,
     /// The revision and digest of the stored config the runtime last published.
     published: Mutex<(u64, String)>,
+    /// Another database connection committed; the watcher must rescan canonical credentials.
+    pub(crate) credential_changes: Arc<tokio::sync::Notify>,
+    /// Settings actually used to construct the listener and runtime.
+    startup: Arc<Config>,
     // ponytail: one lock for config and auth disk operations; split only if management
     // throughput matters. The watcher shares it, preventing stale disk publication.
     pub(crate) disk: Mutex<()>,
@@ -82,10 +86,6 @@ pub struct Management {
     pub(crate) login_panic: bool,
     /// Go `Handler.logDir`: resolved once at startup.
     pub(crate) log_dir: PathBuf,
-    /// The remote store mirroring config and auth files, when one is configured.
-    pub(crate) store: Option<Arc<dyn crate::persist::StorePersister>>,
-    /// Pins auth-dir across reloads (tests only; see [`Options::auth_dir`]).
-    auth_dir: Option<PathBuf>,
     /// The zone log line timestamps are parsed in (Go `time.Local` when `None`).
     pub(crate) log_zone: logs::Zone,
     /// Plugin store test seams and release cache (Go `Handler.pluginStore*`).
@@ -116,15 +116,8 @@ pub struct Options {
     pub login_panic: bool,
     /// Overrides the log directory Go resolves at startup (tests only).
     pub log_dir: Option<PathBuf>,
-    /// A Postgres, git or object store mirroring config and auth files (Go's
-    /// registered token store when it persists remotely).
-    pub store: Option<Arc<dyn crate::persist::StorePersister>>,
     /// Parses log line timestamps in this zone instead of the local one (tests only).
     pub log_zone: Option<chrono::FixedOffset>,
-    /// Scans this directory for credentials on every reload instead of the config's
-    /// auth-dir, so a config without one never reads the default `~/.cli-proxy-api`
-    /// (tests only). A configured store still wins.
-    pub auth_dir: Option<PathBuf>,
     /// The only plugin store registry (Go `pluginStoreRegistryURL`; tests only).
     pub plugin_store_registry_url: Option<String>,
     /// The plugin store's HTTP client (Go `pluginStoreHTTPClient`; tests only).
@@ -176,8 +169,6 @@ impl Management {
             .clone()
             .unwrap_or_else(|| crate::logging::resolve_log_dir(&cfg));
         let mut options = options;
-        let store = options.store.take();
-        let auth_dir = options.auth_dir.take();
         let login_settled = options.login_settled.take();
         let login_panic = options.login_panic;
         let log_zone = options.log_zone;
@@ -188,12 +179,19 @@ impl Management {
         );
         let access = access::Access::new(&cfg, options);
         rt.usage_queue().configure(access.available(), &cfg);
-        let published = config.load().map(|l| (l.rev, l.digest)).unwrap_or_default();
+        let published = config
+            .load()
+            .ok()
+            .filter(|l| l.config.document == cfg.document)
+            .map(|l| (l.rev, l.digest))
+            .unwrap_or_default();
         let state = Arc::new(Self {
             access,
             rt,
             config,
             published: Mutex::new(published),
+            credential_changes: Arc::default(),
+            startup: cfg,
             disk: Mutex::new(()),
             fallbacks: Mutex::default(),
             disabled_via_api: Mutex::default(),
@@ -208,8 +206,6 @@ impl Management {
             login_settled,
             login_panic,
             log_dir,
-            store,
-            auth_dir,
             log_zone,
             plugin_store,
         });
@@ -219,35 +215,25 @@ impl Management {
         state
     }
 
-    /// Go `Watcher.mirroredAuthDir`: with a remote store, the auth directory is the
-    /// store's mirror whatever `auth-dir` says.
+    /// Credentials always load from SQLite's materialized working folder.
     pub(crate) fn lock_auth_dir(&self, cfg: &mut Config) {
-        if let Some(store) = &self.store {
-            cfg.auth_dir = store.auth_dir();
-        } else if let Some(dir) = &self.auth_dir {
-            cfg.auth_dir = dir.clone();
+        if !self.rt.store().is_home() {
+            cfg.auth_dir = self.rt.store().credential_backend().auth_dir();
         }
     }
 
-    /// Go `deleteTokenRecord`: tells the store about an explicit removal. Blocking;
-    /// call from a blocking thread.
+    /// Deletes a canonical document before acknowledging its removal.
     pub(crate) fn store_delete(&self, path: &std::path::Path) -> Result<(), String> {
-        let Some(store) = self.store.clone() else {
-            return Ok(());
-        };
-        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-        store.delete_auth(path).map_err(|e| format!("{e:#}"))
-    }
-
-    /// Go `Store.Save`: `write` through the configured store, which has the file when
-    /// this returns (git syncs first and holds its lock across the write); without a
-    /// store, just `write`. Blocking: call from a blocking thread holding `disk`.
-    pub(crate) fn store_write(&self, write: crate::persist::SaveFn<'_>) -> Result<Option<PathBuf>, String> {
-        match &self.store {
-            Some(store) => store.save_auth(write),
-            None => write(),
+        if self.rt.store().is_home() {
+            return Err("Home owns its credentials remotely".into());
         }
-        .map_err(|e| format!("{e:#}"))
+        self.rt
+            .store()
+            .credential_backend()
+            .delete(path)
+            .map_err(|e| format!("{e:#}"))?;
+        self.credential_changes.notify_one();
+        Ok(())
     }
 
     /// Runs one store write under `disk`, then publishes what it committed, so a
@@ -267,9 +253,8 @@ impl Management {
         _disk: &std::sync::MutexGuard<'_, ()>,
         write: impl FnOnce(&ConfigStore) -> Result<Committed, CommitError>,
     ) -> Result<(Committed, bool), CommitError> {
-        let before = self.rt.config();
         let done = write(&self.config)?;
-        let restart = startup_changed(&before, &done.config);
+        let restart = startup_changed(&self.startup, &done.config);
         if done.written {
             *self.published.lock().unwrap_or_else(PoisonError::into_inner) = (done.rev, done.digest.clone());
             self.publish(done.config.clone(), None);
@@ -309,8 +294,8 @@ impl Management {
         }
     }
 
-    /// Publishes the stored config when another process (the CLI) committed since the
-    /// last look. A config that no longer compiles is logged and the running one kept.
+    /// Publishes the stored config and wakes the credential watcher when another
+    /// connection committed. An invalid config keeps the running one.
     pub fn reload_config(&self) {
         let _guard = self.disk.lock().unwrap_or_else(PoisonError::into_inner);
         match self.config.changed_elsewhere() {
@@ -321,6 +306,7 @@ impl Management {
                 return;
             }
         }
+        self.credential_changes.notify_one();
         let loaded = match self.config.load() {
             Ok(loaded) => loaded,
             Err(fault) => {
@@ -329,7 +315,7 @@ impl Management {
             }
         };
         let mut published = self.published.lock().unwrap_or_else(PoisonError::into_inner);
-        if (loaded.rev, &loaded.digest) == (published.0, &published.1) {
+        if loaded.rev < published.0 || (loaded.rev, &loaded.digest) == (published.0, &published.1) {
             return;
         }
         crate::config_diff::log(&self.rt.config(), &loaded.config);
@@ -353,7 +339,15 @@ impl Management {
     /// and publishes it.
     pub(crate) fn stored_config(&self) -> Result<Config, crate::config_store::Fault> {
         let loaded = self.config.load()?;
-        *self.published.lock().unwrap_or_else(PoisonError::into_inner) = (loaded.rev, loaded.digest);
+        let mut published = self.published.lock().unwrap_or_else(PoisonError::into_inner);
+        if loaded.rev < published.0 {
+            return Err(crate::config_store::Fault::new(
+                None,
+                "stored revision is older than the running revision",
+            ));
+        }
+        *published = (loaded.rev, loaded.digest);
+        drop(published);
         Ok(loaded.config)
     }
 
@@ -365,6 +359,29 @@ impl Management {
     /// valid config (a rotated or removed secret) always take effect.
     pub(crate) fn publish(&self, cfg: Config, files: Option<credentials::AuthScan>) {
         self.publish_upload(cfg, files, None);
+    }
+
+    /// Reads canonical documents; a failed scan keeps loaded file credentials while
+    /// allowing the config itself to take effect.
+    pub(crate) fn scan_credentials(&self, cfg: &Config) -> credentials::AuthScan {
+        if self.rt.store().is_home() {
+            return credentials::AuthScan::default();
+        }
+        self.rt.store().credential_backend().scan(cfg).unwrap_or_else(|error| {
+            tracing::error!("credential database: reading credentials failed, keeping the loaded ones: {error:#}");
+            let credentials = self
+                .rt
+                .store()
+                .snapshot()
+                .iter()
+                .filter(|c| matches!(c.source, Source::File(_)))
+                .map(|c| Credential::clone(c))
+                .collect();
+            credentials::AuthScan {
+                credentials,
+                ..Default::default()
+            }
+        })
     }
 
     /// [`Self::publish`] after an upload wrote `upload`'s file. While plugin auth
@@ -386,7 +403,7 @@ impl Management {
         let mut cfg = cfg;
         self.lock_auth_dir(&mut cfg);
         use sha2::{Digest, Sha256};
-        let scan = files.unwrap_or_else(|| credentials::scan_auth_dir(&cfg));
+        let scan = files.unwrap_or_else(|| self.scan_credentials(&cfg));
         let mut all = scan.credentials;
         let mut read = scan.read;
         // Uploads record absolute paths; a relative auth-dir scans relative ones.
@@ -396,7 +413,9 @@ impl Management {
         let mut claimed = Vec::new();
         let mut fallbacks = self.fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
         fallbacks.retain(|path| {
-            let Ok(data) = std::fs::read(path) else { return false };
+            let Ok(data) = auth_files::read_file(self, path) else {
+                return false;
+            };
             if all
                 .iter()
                 .any(|c| matches!(&c.source, Source::File(p) if absolute(p) == absolute(path)))
@@ -431,11 +450,13 @@ impl Management {
             }
         }
         all.extend(credentials::from_config(&cfg));
-        self.access.config_published(&cfg);
-        crate::logging::configure(&cfg);
-        self.rt.usage_queue().configure(self.access.available(), &cfg);
-        let policy = policy(&cfg);
-        self.rt.publish_config_and_policy(cfg, policy);
+        if cfg != *self.rt.config() {
+            self.access.config_published(&cfg);
+            crate::logging::configure(&cfg);
+            self.rt.usage_queue().configure(self.access.available(), &cfg);
+            let policy = policy(&cfg);
+            self.rt.publish_config_and_policy(cfg, policy);
+        }
         let upload = upload.filter(|(c, _)| {
             matches!(&c.source, Source::File(path) if scan.deferred.iter().any(|p| absolute(p) == absolute(path)))
         });
@@ -844,18 +865,10 @@ pub fn router(state: Arc<Management>) -> Router {
         )
         .route(&format!("{v0}/quota/fetch"), methods().post(guarded!(s, quota::fetch)))
         .route(&format!("{v0}/quota/reset"), methods().post(guarded!(s, quota::reset)));
-    router = router
-        .route(
-            &format!("{v0}/plugins/{{id}}/enabled"),
-            methods().patch(guarded!(s, plugins::patch_enabled)),
-        )
-        .route(
-            &format!("{v0}/plugins/{{id}}/config"),
-            methods()
-                .get(guarded!(s, plugins::get_config))
-                .put(guarded!(s, plugins::put_config))
-                .patch(guarded!(s, plugins::patch_config)),
-        );
+    router = router.route(
+        &format!("{v0}/plugins/{{id}}/enabled"),
+        methods().patch(guarded!(s, plugins::patch_enabled)),
+    );
     for (path, _) in legacy::AUTH_URL_ROUTES {
         router = router.route(&format!("{v0}/{path}"), methods().get(guarded!(s, legacy::auth_url)));
     }
@@ -938,13 +951,16 @@ pub(super) fn live_auth_indexes(state: &Management) -> std::collections::HashMap
 }
 
 /// Whether a setting the server reads only at startup differs: the listener address,
-/// TLS and the trusted proxies.
+/// TLS, trusted proxies, or the configured Tokio worker count when the environment
+/// does not override it.
 fn startup_changed(before: &Config, after: &Config) -> bool {
     let tls = |c: &Config| c.document.get("server").and_then(|s| s.get("tls")).cloned();
     before.host != after.host
         || before.port != after.port
         || before.trusted_proxies != after.trusted_proxies
         || tls(before) != tls(after)
+        || (std::env::var_os("TOKIO_WORKER_THREADS").is_none()
+            && before.document.get("worker-threads") != after.document.get("worker-threads"))
 }
 
 include!(concat!(env!("OUT_DIR"), "/dashboard.rs"));

@@ -87,10 +87,18 @@ pub struct SavedRefresh {
 
 /// The server's credential manager as the plugin host uses it.
 pub trait AuthManager: Send + Sync {
+    /// False for a persistence-only CLI adapter without a runtime credential set.
+    fn manages_auths(&self) -> bool {
+        true
+    }
     /// Go `Manager.List`.
     fn list(&self) -> Vec<HostAuth>;
     /// Go `Manager.GetByID`.
     fn get_by_id(&self, id: &str) -> Option<HostAuth>;
+    /// Reads the source document; managers with durable storage override the file view.
+    fn read_file(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+        std::fs::read(path)
+    }
     /// Go `saveAuthFile` from the write on: `write` puts the file (its error is the
     /// callback's), then the manager registers or updates `auths` and removes the
     /// file's other credentials (`upsertAuthRecordsForPath`), persisting them as its
@@ -166,7 +174,7 @@ impl Host {
         if !trim_space(raw).is_empty() {
             gojson::from_slice::<Metadata>(raw).map_err(|e| err(format!("decode host auth list request: {e}")))?;
         }
-        let files = match self.auth_manager() {
+        let files = match self.auth_manager().filter(|manager| manager.manages_auths()) {
             Some(manager) => {
                 let mut entries: Vec<HostAuthFileEntry> = manager.list().iter().filter_map(build_entry).collect();
                 entries.sort_by_key(|e| e.name.go_lower());
@@ -253,6 +261,7 @@ impl Host {
         }
         let manager = self
             .auth_manager()
+            .filter(|manager| manager.manages_auths())
             .ok_or_else(|| err("core auth manager unavailable"))?;
         manager
             .list()
@@ -274,7 +283,10 @@ impl Host {
         if path.is_empty() {
             return Err(err(format!("auth file path not found for auth_index {index}")));
         }
-        let data = std::fs::read(&path).map_err(|e| {
+        let manager = self
+            .auth_manager()
+            .ok_or_else(|| err("core auth manager unavailable"))?;
+        let data = manager.read_file(Path::new(&path)).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 err(format!("auth file not found for auth_index {index}"))
             } else {
@@ -511,7 +523,7 @@ impl Host {
     /// that is the file's default ID, else a non-virtual credential of the file at
     /// `path` (preferring one not under the default ID), else the one with `id`.
     fn existing_auth_for_save(&self, id: &str, path: &str, default_id: &str) -> Option<HostAuth> {
-        let manager = self.auth_manager()?;
+        let manager = self.auth_manager().filter(|manager| manager.manages_auths())?;
         let id = id.trim();
         if !id.is_empty()
             && id != default_id
@@ -616,7 +628,7 @@ impl Host {
             return Err(err("session_id is required"));
         }
         let observed_at = GoTime::now_utc();
-        let Some(manager) = self.auth_manager() else {
+        let Some(manager) = self.auth_manager().filter(|manager| manager.manages_auths()) else {
             return Ok(abi::ok_envelope(&HostAffinityLookupResponse {
                 status: AFFINITY_UNSUPPORTED.into(),
                 observed_at,
@@ -965,6 +977,39 @@ fn errno_text(e: &std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persistence_only_manager_keeps_standalone_lookup_behavior() {
+        struct PersistenceOnly;
+        impl AuthManager for PersistenceOnly {
+            fn manages_auths(&self) -> bool {
+                false
+            }
+            fn list(&self) -> Vec<HostAuth> {
+                panic!("standalone listing must use the disk fallback")
+            }
+            fn get_by_id(&self, _: &str) -> Option<HostAuth> {
+                panic!("standalone lookups have no runtime manager")
+            }
+            fn save(&self, _: SavedAuths, write: &mut dyn FnMut() -> Result<(), String>) -> Result<(), String> {
+                write()
+            }
+            fn lookup_session_affinity(&self, _: &str, _: &str, _: &str) -> (String, Option<HostAuth>) {
+                panic!("standalone affinity must stay unsupported")
+            }
+        }
+        let host = Host::new();
+        let before = host.host_auth_list(b"{}").unwrap_err();
+        host.set_auth_manager(Some(Arc::new(PersistenceOnly)));
+        assert_eq!(host.host_auth_list(b"{}").unwrap_err(), before);
+        assert_eq!(
+            host.auth_by_index("missing").unwrap_err().message,
+            "core auth manager unavailable"
+        );
+        assert!(host.existing_auth_for_save("id", "/auth/a.json", "a.json").is_none());
+        host.host_affinity_lookup(br#"{"provider":"rec","model":"m","session_id":"s"}"#)
+            .unwrap();
+    }
 
     #[test]
     fn go_number_and_bool_parsing() {

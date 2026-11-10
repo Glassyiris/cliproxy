@@ -1,32 +1,40 @@
 // Local release fixtures: no provider clients, auth files or network access.
 fn main() {
     let arg = std::env::args().nth(1).unwrap_or_default();
+    #[cfg(not(legacy))]
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    #[cfg(not(legacy))]
+    if args.iter().any(|arg| arg == "config") {
+        let status = std::process::Command::new(std::env::var_os("INSTALLER_REAL_BINARY").unwrap())
+            .args(&args)
+            .status()
+            .unwrap();
+        std::process::exit(status.code().unwrap_or(1));
+    }
     if arg == "--version" {
         println!("cook-router 999.2.0");
     } else if arg == "--help" {
         #[cfg(legacy)]
         println!("--config PATH");
         #[cfg(not(legacy))]
-        println!("--config PATH --log-file PATH --working-dir DIR");
+        println!("--db PATH --config PATH --log-file PATH --working-dir DIR");
     } else {
         #[cfg(legacy)]
         std::process::exit(2);
         #[cfg(plain_health)]
         {
             use std::io::{Read, Write};
-            let args: Vec<_> = std::env::args().collect();
-            let config =
-                std::fs::read_to_string(&args[args.iter().position(|arg| arg == "--config").unwrap() + 1]).unwrap();
-            let value = |key| {
-                config
-                    .lines()
-                    .find_map(|line| line.trim().strip_prefix(key))
-                    .unwrap()
-                    .trim()
-                    .trim_matches('"')
-            };
-            let listener =
-                std::net::TcpListener::bind((value("host:"), value("port:").parse::<u16>().unwrap())).unwrap();
+            let db = &args[args.iter().position(|arg| arg == "--db").unwrap() + 1];
+            let output = std::process::Command::new(std::env::var_os("INSTALLER_REAL_BINARY").unwrap())
+                .args(["--db", db, "config", "listener"])
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            let settings = String::from_utf8(output.stdout).unwrap();
+            let mut settings = settings.lines();
+            let host = settings.next().unwrap();
+            let port = settings.next().unwrap().parse::<u16>().unwrap();
+            let listener = std::net::TcpListener::bind((host, port)).unwrap();
             // Deliberately speaks HTTP despite a TLS config: a TCP-only probe
             // accepts this broken upgrade; a real HTTPS probe must roll it back.
             for stream in listener.incoming() {

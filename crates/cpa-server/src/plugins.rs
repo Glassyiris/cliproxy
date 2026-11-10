@@ -128,17 +128,11 @@ pub async fn sync(rt: &Runtime, cfg: Arc<Config>) {
     sync_models(rt).await;
 }
 
-/// Go loads plugins while it builds the service, so its first auth-folder load already
-/// asks plugin auth providers (sdk/cliproxy/builder.go `ApplyConfig`, then
-/// `coreManager.Load` in `Service.Run`). Credentials load before plugins start here, so
-/// the binary calls this once they have: while a plugin offers an auth provider, the
-/// auth folder and config credentials load again, before serving. Not in Home mode,
-/// whose credentials come from Home. Published as the watcher publishes a scan: a file
-/// changed after the scan read it (a token refresh committed meanwhile) keeps its
-/// current credential, and so does a file the scan read half-written. Plugins parse on
-/// a blocking thread, holding no lock: a parse can make host callbacks that need the
-/// async runtime, even with one worker thread. This load registers the credentials as
-/// Go's first one does, so it replaces the startup load's refresh schedules
+/// Reloads canonical credential documents after startup plugins register their auth
+/// providers. Home credentials belong to Home and are never loaded locally. Plugin
+/// parsing runs on a blocking thread without management/runtime locks; publication
+/// preserves incomplete documents and credentials saved after the scan read them.
+/// This startup load replaces provisional refresh schedules
 /// ([`crate::runtime::CredentialStore::end_bootstrap`]).
 pub async fn reload_plugin_auth_files(rt: &Arc<Runtime>) {
     use cpa_core::config::credentials;
@@ -152,15 +146,16 @@ pub async fn reload_plugin_auth_files(rt: &Arc<Runtime>) {
         }
     }
     let end = EndBootstrap(rt.clone());
-    if !credentials::plugin_auth_parser_active() {
+    if rt.store().is_home() || !credentials::plugin_auth_parser_active() {
         return;
     }
     let rt = rt.clone();
     let reload = tokio::task::spawn_blocking(move || {
         let _end = end;
         let cfg = rt.config();
-        credentials::preparse_auth_dir(&cfg);
-        let scan = credentials::scan_auth_dir(&cfg);
+        let db = rt.store().credential_backend();
+        db.preparse(&cfg)?;
+        let scan = db.scan(&cfg)?;
         let mut all = scan.credentials;
         for existing in rt.store().snapshot() {
             if let cpa_core::credential::Source::File(path) = &existing.source
@@ -174,9 +169,12 @@ pub async fn reload_plugin_auth_files(rt: &Arc<Runtime>) {
         rt.store().reconcile_scanned_with(all, &scan.read, |current, all| {
             keep_deferred(current, all, &scan.deferred)
         });
+        Ok::<(), anyhow::Error>(())
     });
-    if let Err(e) = reload.await {
-        tracing::error!(error = %e, "reloading auth files for plugin auth providers failed");
+    match reload.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::error!(error = %e, "reloading credential documents for plugin auth providers failed"),
+        Err(e) => tracing::error!(error = %e, "reloading auth files for plugin auth providers failed"),
     }
 }
 

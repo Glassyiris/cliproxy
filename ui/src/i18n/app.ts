@@ -6,7 +6,7 @@ export default {
 
     "app.signIn.managementKey": "Management key",
     "app.signIn.help":
-      "The plain text you set as {setting}, or MANAGEMENT_PASSWORD. On first start the server replaces it in config.yaml with a hash.",
+      "The plain text you set as {setting}, or MANAGEMENT_PASSWORD. Management keys are stored hashed in the settings database.",
     "app.signIn.heading": "Connect to this server",
     "app.signIn.checking": "Checking {host}…",
     "app.signIn.restoring": "Connecting to {host}…",
@@ -21,11 +21,11 @@ export default {
     "app.signIn.connecting": "Connecting…",
     "app.signIn.remember": "Remember on this device",
     "app.signIn.apiOff":
-      "The management API is off. Set management.secret-key in config.yaml and restart, or start the server with MANAGEMENT_PASSWORD.",
+      "The management API is off. Set management.secret-key in the settings database, or start the server with MANAGEMENT_PASSWORD.",
     "app.signIn.remoteDisabled":
-      "This server accepts the dashboard only from its own machine. Open it there, or set management.allow-remote: true in config.yaml with a strong key.",
+      "This server accepts the dashboard only from its own machine. Open it there, or enable management.allow-remote in the settings database with a strong key.",
     "app.signIn.banned": "{message}. Too many wrong keys came from this address.",
-    "app.signIn.wrongKey": "Wrong key. Use the plain text, not the hash now in config.yaml.",
+    "app.signIn.wrongKey": "Wrong key. Use the plain text, not the hash stored in the database.",
     "app.connection.unreachable":
       "The server did not answer. Check that it is running and that this address reaches it.",
     "app.connection.timeout": "The server did not answer within 30 seconds. Try again.",
@@ -162,6 +162,8 @@ export default {
     "app.editor.review": "Review changes",
     "app.editor.save": "Save",
     "app.editor.saved": "Saved.",
+    "app.editor.reenterSecrets":
+      "Re-enter the secret at each of these fields in {resource} to change where it is sent: {pointers}. Your JSON edits are kept.",
     "app.editor.noChanges": "Nothing changed yet.",
     "app.editor.invalidJson": "The JSON is not valid. Fix it before reviewing.",
     "app.editor.discardDescription": "Closing the editor drops the changes you made.",

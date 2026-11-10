@@ -32,9 +32,61 @@ pub const DENY_PROXY: &str = "http://127.0.0.1:9";
 /// Attribute set by [`local`].
 const LOCAL: &str = "cpa_test_local";
 
-/// [`Runtime::new`] whose executor calls cannot leave the machine.
-pub fn runtime(config: Config, credentials: Vec<Credential>, executors: Executors) -> Runtime {
-    let rt = Runtime::new(config, credentials, executors);
+/// A local runtime with a private SQLite database whose executors cannot leave the
+/// machine. Credentials seeded in the private auth directory are imported once.
+pub fn runtime(mut config: Config, mut credentials: Vec<Credential>, executors: Executors) -> Runtime {
+    let dir = std::env::temp_dir().join(format!("cpa-runtime-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&dir).expect("private runtime directory");
+    let store = Arc::new(crate::config_store::ConfigStore::open(&dir.join("test.db")).expect("test database"));
+    let original = config.auth_dir.clone();
+    let legacy = if original == Config::default().auth_dir {
+        dir.join("legacy")
+    } else {
+        original.clone()
+    };
+    let db = crate::credential_store::CredentialDb::initialize(store, &legacy).expect("test credentials");
+    for credential in &mut credentials {
+        if let cpa_core::credential::Source::File(path) = &mut credential.source {
+            let source = path.clone();
+            if let Ok(relative) = source.strip_prefix(&original) {
+                *path = db.auth_dir().join(relative);
+                for key in ["path", "source"] {
+                    if credential
+                        .attributes
+                        .get(key)
+                        .is_some_and(|value| value == source.to_string_lossy().as_ref())
+                    {
+                        credential.attributes.insert(key.into(), path.display().to_string());
+                    }
+                }
+            }
+            if db.read(path).expect("test credential read").is_none()
+                && let Ok(bytes) = std::fs::read(&source)
+            {
+                db.save(path, &bytes).expect("test credential seed");
+            }
+        }
+    }
+    config.auth_dir = db.auth_dir();
+    runtime_with_db(config, credentials, executors, db)
+}
+
+/// A guarded local runtime using a test's existing private credential database.
+pub fn runtime_with_db(
+    config: Config,
+    credentials: Vec<Credential>,
+    executors: Executors,
+    db: Arc<crate::credential_store::CredentialDb>,
+) -> Runtime {
+    use sha2::Digest;
+    let read = db
+        .documents()
+        .expect("test source documents")
+        .into_iter()
+        .map(|(path, bytes)| (path, sha2::Sha256::digest(bytes).into()))
+        .collect();
+    let rt = Runtime::new(config, credentials, executors, db);
+    rt.store().note_loaded(&read);
     rt.deny_external.store(true, Ordering::Relaxed);
     rt
 }
@@ -223,7 +275,7 @@ mod tests {
             google: Default::default(),
         };
         let c = credential(&[], serde_json::json!({}));
-        let plain = Runtime::new(Config::default(), Vec::new(), executors());
+        let plain = Runtime::home(Config::default(), Vec::new(), executors());
         assert!(Arc::ptr_eq(&plain.for_executor(&c), &c));
         let test = runtime(Config::default(), Vec::new(), executors());
         assert_eq!(test.for_executor(&c).attributes["proxy_url"], DENY_PROXY);

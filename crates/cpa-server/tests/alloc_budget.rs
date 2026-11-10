@@ -338,11 +338,10 @@ async fn large_requests_stay_within_their_heap_budget() {
     // error log (Go's deferred API request), until the response has streamed.
     let management = cpa_server::management::Management::with_options(
         rt.clone(),
-        dir.join("config.yaml"),
+        Arc::new(cpa_server::config_store::ConfigStore::memory()),
         cpa_server::management::Options {
             log_dir: Some(dir.join("logs")),
             management_password: Some(String::new()),
-            auth_dir: Some(dir.clone()),
             ..Default::default()
         },
     );

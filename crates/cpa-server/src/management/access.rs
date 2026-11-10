@@ -45,6 +45,9 @@ const EXPOSED_HEADERS: &str = "X-CPA-TRACE-ID, X-CPA-VERSION, X-CPA-COMMIT, X-CP
 X-CPA-SUPPORT-PLUGIN, X-CPA-HOME-VERSION, X-CPA-HOME-BUILD-DATE, X-SERVER-VERSION, \
 X-SERVER-BUILD-DATE, Location, Retry-After, ETag, X-Request-Id, OpenAI-Request-Id";
 
+#[derive(Clone, Copy)]
+pub(super) struct AdminResponse;
+
 struct Attempt {
     count: u32,
     blocked_until: Option<Instant>,
@@ -312,8 +315,19 @@ pub(crate) async fn guard(State(state): State<Arc<Management>>, req: Request, ne
     let local = ip == "127.0.0.1" || ip == "::1";
     let provided = provided_key(req.headers()).to_vec();
     let cfg = state.rt.config();
+    let admin = req.uri().path().starts_with("/admin/v1/");
     let mut response = match state.access.authenticate(&cfg, &ip, local, &provided).await {
         Ok(()) => next.run(req).await,
+        Err((status, message)) if admin => super::admin::error(
+            &state,
+            status.as_u16(),
+            if status == StatusCode::UNAUTHORIZED {
+                "unauthorized"
+            } else {
+                "forbidden"
+            },
+            &message,
+        ),
         Err((status, message)) => json_error(status, &message),
     };
     version_headers(response.headers_mut());
@@ -342,6 +356,7 @@ pub async fn cors(mut req: Request, next: Next) -> Response {
 
 /// The inner request-log snapshot must see CORS headers before axum framing.
 pub(crate) fn cors_headers(response: &mut Response) {
+    let admin = response.extensions().get::<AdminResponse>().is_some();
     let headers = response.headers_mut();
     for (name, value) in [
         ("Access-Control-Allow-Origin", "*"),
@@ -350,6 +365,12 @@ pub(crate) fn cors_headers(response: &mut Response) {
         ("Access-Control-Expose-Headers", EXPOSED_HEADERS),
     ] {
         headers.insert(name, HeaderValue::from_static(value));
+    }
+    if admin {
+        headers.append(
+            header::ACCESS_CONTROL_EXPOSE_HEADERS,
+            HeaderValue::from_static("X-Cook-Revision, X-Cook-Published-Revision"),
+        );
     }
 }
 

@@ -201,8 +201,9 @@ fn file_id(_: &Path) -> Option<(u64, u64)> {
 
 /// Go `resolveSIWCBindFile`: the credential's real path inside `auth-dir` and its
 /// current content. The file itself must not be a symlink; the folder may be.
-fn resolve(auth_dir: &Path, path: &Path) -> Option<(PathBuf, Map<String, Value>)> {
-    let dir = std::fs::canonicalize(auth_dir).ok()?;
+fn resolve(state: &Management, path: &Path) -> Option<(PathBuf, Map<String, Value>)> {
+    state.rt.store().credential_backend().restore(path).ok()?;
+    let dir = std::fs::canonicalize(&state.rt.config().auth_dir).ok()?;
     if !std::fs::symlink_metadata(path).ok()?.file_type().is_file() {
         return None;
     }
@@ -266,8 +267,7 @@ fn start(state: &Management, name: &str) -> Response {
             "SIWC binding requires a file-backed Codex OAuth credential",
         );
     }
-    let cfg = state.rt.config();
-    let resolved = path_of(target).and_then(|p| resolve(&cfg.auth_dir, p));
+    let resolved = path_of(target).and_then(|p| resolve(state, p));
     let Some((path, meta)) = resolved else {
         return fail(StatusCode::BAD_REQUEST, "SIWC binding target is unavailable or invalid");
     };
@@ -288,7 +288,7 @@ fn start(state: &Management, name: &str) -> Response {
             "failed to initialize SIWC authorization",
         );
     };
-    let identifier = codex_siwc::identifier(&cfg);
+    let identifier = codex_siwc::identifier(&state.rt.config());
     let Ok(url) = codex_siwc::authorize_url(&sid, &nonce, &device_id, REDIRECT_URI, &challenge, &identifier) else {
         return fail(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -524,8 +524,7 @@ fn commit(
         );
         return Ok(());
     };
-    let cfg = state.rt.config();
-    if resolve(&cfg.auth_dir, &flow.path).is_none_or(|(path, _)| path != flow.path) {
+    if resolve(state, &flow.path).is_none_or(|(path, _)| path != flow.path) {
         fail_session(state, sid, flow, "SIWC binding target is no longer available");
         return Ok(());
     }
@@ -596,12 +595,18 @@ fn write_binding(state: &Management, flow: &Flow, tokens: &Tokens, lock: &mut Co
         // Read, merged and written under the file's credential lock, so a refresh in
         // another process lands before the read or after the write.
         lock.hold(path).map_err(|e| format!("{e:?}"))?;
+        state
+            .rt
+            .store()
+            .credential_backend()
+            .restore(path)
+            .map_err(|e| format!("restore backing file: {e}"))?;
         if !std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
             || std::fs::canonicalize(path).ok().as_deref() != Some(flow.path.as_path())
         {
             return Err("backing file changed".into());
         }
-        let disk = std::fs::read(path).map_err(|e| format!("read backing file: {e}"))?;
+        let disk = super::auth_files::read_file(state, path).map_err(|e| format!("read backing file: {e}"))?;
         let meta: Map<String, Value> = serde_json::from_slice(&disk).map_err(|_| "invalid Codex OAuth file")?;
         let codex = meta
             .get("type")
@@ -683,7 +688,12 @@ mod tests {
                 let _held = state.disk.lock().unwrap();
                 locked_tx.send(()).unwrap();
                 go_rx.recv().unwrap();
-                std::fs::write(&file, new).unwrap();
+                state
+                    .rt
+                    .store()
+                    .credential_backend()
+                    .save(&file, new.as_bytes())
+                    .unwrap();
                 state.publish((*state.rt.config()).clone(), None);
             }
         });
@@ -813,7 +823,15 @@ mod tests {
             ("delete-batch", "", r#"["codex.json","other.json"]"#),
         ] {
             let (dir, file, state) = fixture(Some(base.clone()));
-            std::fs::write(dir.join("other.json"), codex_file("other")).unwrap();
+            state
+                .rt
+                .store()
+                .credential_backend()
+                .save(
+                    &state.rt.config().auth_dir.join("other.json"),
+                    codex_file("other").as_bytes(),
+                )
+                .unwrap();
             let sid = started_state(
                 bind(
                     State(state.clone()),
@@ -833,7 +851,12 @@ mod tests {
                     go_rx.recv().unwrap();
                     if operation == "upload" {
                         state.oauth.invalidate_siwc(&file);
-                        std::fs::write(&file, reupload).unwrap();
+                        state
+                            .rt
+                            .store()
+                            .credential_backend()
+                            .save(&file, reupload.as_bytes())
+                            .unwrap();
                     } else {
                         let q = Query::parse(Some(query.to_owned()));
                         let response = super::super::auth_files::delete_sync(&state, &q, body.as_bytes(), true);
@@ -975,7 +998,12 @@ mod tests {
         crate::runtime::tests::lock_waited(&file).await;
         // The other process's refresh spends "r" and writes "r2" under the lock.
         let rotated = codex_file("old").replace(r#""refresh_token":"r""#, r#""refresh_token":"r2""#);
-        std::fs::write(&file, rotated).unwrap();
+        state
+            .rt
+            .store()
+            .credential_backend()
+            .save(&file, rotated.as_bytes())
+            .unwrap();
         drop(held);
         let bound = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -1013,9 +1041,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("codex.json");
         std::fs::write(&file, codex_file("old")).unwrap();
-        let path = dir.join("config.yaml");
-        std::fs::write(&path, format!("oauth: {{auth-dir: {}}}\n", dir.display())).unwrap();
-        let cfg = cpa_core::config::Config::load(&path).unwrap();
+        let store = Arc::new(crate::config_store::ConfigStore::memory_with(&format!(
+            "oauth: {{auth-dir: {}}}\n",
+            dir.display()
+        )));
+        let cfg = store.load().unwrap().config;
         let rt = Arc::new(crate::testing::runtime(
             cfg.clone(),
             cpa_core::config::credentials::from_auth_dir(&cfg),
@@ -1027,10 +1057,13 @@ mod tests {
                 google: Default::default(),
             },
         ));
+        std::fs::remove_dir_all(dir).unwrap();
+        let dir = rt.config().auth_dir.clone();
+        let file = dir.join("codex.json");
         let options = crate::management::Options {
             login_base,
             ..Default::default()
         };
-        (dir, file, Management::with_options(rt, path, options))
+        (dir, file, Management::with_options(rt, store, options))
     }
 }

@@ -692,7 +692,12 @@ fn label(project: &str, email: &str) -> String {
 
 /// `-vertex-import`: reads a service-account key, normalizes its private key and writes
 /// `vertex-[<prefix>-]<project>.json` in `auth_dir`. Errors are Go's log messages.
-pub fn import(auth_dir: &Path, key_path: &str, prefix: &str) -> Result<PathBuf, String> {
+pub fn import(
+    auth_dir: &Path,
+    key_path: &str,
+    prefix: &str,
+    save: Option<&crate::login_store::LoginSave>,
+) -> Result<PathBuf, String> {
     let path = key_path.trim();
     if path.is_empty() {
         return Err("vertex-import: missing service account key path".into());
@@ -746,11 +751,13 @@ pub fn import(auth_dir: &Path, key_path: &str, prefix: &str) -> Result<PathBuf, 
     // misc.LogSavingCredentials.
     println!("Saving credentials to {}", out.display());
     // Private (0600) and atomic, like every other credential writer; Go uses os.Create.
-    crate::kimi_auth::write_private(&out, &GoValue::Object(doc).encode_indented()).map_err(|e| {
-        save_failed(format!(
-            "vertex credential: create file failed: {}",
-            path_error("open", &out, &e)
-        ))
+    crate::login_store::save_login(save, std::slice::from_ref(&out), || {
+        crate::kimi_auth::write_private(&out, &GoValue::Object(doc).encode_indented()).map_err(|e| {
+            save_failed(format!(
+                "vertex credential: create file failed: {}",
+                path_error("open", &out, &e)
+            ))
+        })
     })?;
     Ok(out)
 }
@@ -798,23 +805,35 @@ fn normalize_decoded(sa: Option<BTreeMap<String, GoValue>>) -> Result<BTreeMap<S
     Ok(sa)
 }
 
-/// A service account imported through the Management API, checked and merged with an
-/// existing file but not yet written ([`Upload::write`]).
+/// A checked service account ready for the Management API's durable writer.
 #[derive(Debug)]
 pub struct Upload {
     pub path: PathBuf,
     pub project: String,
     pub email: String,
     pub location: String,
-    contents: Vec<u8>,
+    metadata: BTreeMap<String, GoValue>,
 }
 
 impl Upload {
     /// Go `VertexCredentialStorage.SaveTokenToFile`, called by the token store's `Save`.
-    pub fn write(&self) -> Result<(), UploadError> {
+    pub fn write(&mut self) -> Result<(), UploadError> {
+        let disabled = std::fs::read(&self.path)
+            .ok()
+            .and_then(|raw| crate::meta_auth::go_map_from_json(&raw))
+            .and_then(|(existing, _)| crate::meta_auth::merge_existing(&mut self.metadata, &existing, "vertex"))
+            .unwrap_or(false);
+        crate::meta_auth::normalize_metadata(&mut self.metadata);
+        if let Some(weight) = self.metadata.get("weight") {
+            let json: Value = serde_json::from_slice(&weight.marshal()).unwrap_or(Value::Null);
+            cpa_core::config::credentials::parse_weight(&json)
+                .map_err(|e| UploadError::Save(format!("auth filestore: invalid metadata weight: {e}")))?;
+        }
+        self.metadata.insert("disabled".to_owned(), GoValue::Bool(disabled));
+        let contents = GoValue::Object(std::mem::take(&mut self.metadata)).encode_indented();
         let dir = self.path.parent().unwrap_or(Path::new("."));
         go_mkdir_all(dir).map_err(|e| UploadError::Save(format!("auth filestore: create dir failed: {e}")))?;
-        crate::kimi_auth::write_private(&self.path, &self.contents).map_err(|e| {
+        crate::kimi_auth::write_private(&self.path, &contents).map_err(|e| {
             UploadError::Save(format!(
                 "vertex credential: create file failed: {}",
                 path_error("open", &self.path, &e)
@@ -834,9 +853,8 @@ pub enum UploadError {
 
 /// Management `ImportVertexCredential`: like `-vertex-import`, but without a prefix,
 /// with the given location (`us-central1` when empty), and saved as the management
-/// token store saves: settings and `disabled` of an existing file are kept
-/// (`mergeExistingAuthFileMetadata`). Nothing is written yet: the caller saves the
-/// result through its token store.
+/// token store saves: [`Upload::write`] merges settings and `disabled` from the
+/// canonical working file. The caller must hydrate that path before invoking it.
 pub fn import_upload(auth_dir: &Path, data: &[u8], location: &str) -> Result<Upload, UploadError> {
     let sa = decode_service_account(data).map_err(UploadError::InvalidJson)?;
     let sa = normalize_decoded(sa).map_err(UploadError::InvalidServiceAccount)?;
@@ -862,24 +880,12 @@ pub fn import_upload(auth_dir: &Path, data: &[u8], location: &str) -> Result<Upl
     doc.insert("service_account".to_owned(), GoValue::Object(sa));
     doc.insert("type".to_owned(), GoValue::String("vertex".into()));
     let path = go_clean(&auth_dir.join(format!("vertex-{}.json", file_part(&project))));
-    let disabled = std::fs::read(&path)
-        .ok()
-        .and_then(|raw| crate::meta_auth::go_map_from_json(&raw))
-        .and_then(|(existing, _)| crate::meta_auth::merge_existing(&mut doc, &existing, "vertex"))
-        .unwrap_or(false);
-    crate::meta_auth::normalize_metadata(&mut doc);
-    if let Some(weight) = doc.get("weight") {
-        let json: Value = serde_json::from_slice(&weight.marshal()).unwrap_or(Value::Null);
-        cpa_core::config::credentials::parse_weight(&json)
-            .map_err(|e| UploadError::Save(format!("auth filestore: invalid metadata weight: {e}")))?;
-    }
-    doc.insert("disabled".to_owned(), GoValue::Bool(disabled));
     Ok(Upload {
         path,
         project,
         email,
         location,
-        contents: GoValue::Object(doc).encode_indented(),
+        metadata: doc,
     })
 }
 

@@ -18,6 +18,7 @@ use cpa_core::config::Config;
 use cpa_core::credential::Credential;
 use cpa_exec::Executors;
 use cpa_exec::claude::ClaudeExecutor;
+use cpa_server::cooldown_store::Backend;
 use serde_json::json;
 
 const FILE: &str = "claude-q.json";
@@ -111,7 +112,7 @@ async fn proxy_with(
          save-cooldown-status: {save}\n    max-trusted-cooldown: \"{bound}\"\n",
         dir = auth_dir.display(),
     );
-    // The file exists in `auth-dir`, so the runtime's own reconcile keeps it.
+    // The private legacy credential is imported once into the runtime's SQLite database.
     let meta = json!({"type": "claude", "api_key": "sk-fake-claude", "base_url": upstream_url});
     std::fs::write(auth_dir.join(FILE), meta.to_string()).unwrap();
     let mut credential =
@@ -183,13 +184,14 @@ async fn early_reset_is_noticed_after_the_bound(save: bool) {
         "a cooling credential is not sent upstream"
     );
 
-    let cds = dir.join("claude-q.cds");
     let url = if save {
-        assert!(cds.exists(), "save-cooldown-status writes the cooldown");
-        let saved = cpa_server::cooldown_store::load(&dir).unwrap();
+        rt.shutdown_codex_refreshes().await;
+        let backend = rt.store().credential_backend();
+        let saved = Backend::load(backend.as_ref()).unwrap();
+        assert!(!saved.is_empty(), "save-cooldown-status writes SQLite");
         let next = saved[0].next_retry_after.unwrap();
         let left = next.duration_since(SystemTime::now()).unwrap_or_default();
-        assert!(left <= BOUND, "the file holds the bound, not the six days: {left:?}");
+        assert!(left <= BOUND, "SQLite holds the bound, not the six days: {left:?}");
         let recover = saved[0].quota.next_recover_at.unwrap();
         assert!(
             recover > SystemTime::now() + SIX_DAYS - Duration::from_secs(60),
@@ -197,18 +199,32 @@ async fn early_reset_is_noticed_after_the_bound(save: bool) {
         );
         assert_eq!(saved[0].quota.trust_windows, Some(1));
         // A restart restores the bounded cooldown, neither escalated nor six days.
+        let config = (*rt.config()).clone();
+        let credentials = rt.store().snapshot().iter().map(|c| (**c).clone()).collect();
         drop(rt);
-        let (url, restarted) = proxy(&dir, &upstream_url, save).await;
+        let restarted = Arc::new(cpa_server::testing::runtime_with_db(
+            config,
+            credentials,
+            Executors {
+                claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            backend,
+        ));
+        let url = serve(cpa_server::app(restarted.clone(), axum::Router::new())).await;
         let restored = restarted.store().cooldowns(FILE);
         let left = restored.iter().map(|c| c.remaining).max().expect("restored");
-        assert!(
-            left > Duration::ZERO && left <= BOUND,
-            "restored from {}: {left:?}",
-            cds.display()
-        );
+        assert!(left > Duration::ZERO && left <= BOUND, "restored from SQLite: {left:?}");
         url
     } else {
-        assert!(!cds.exists());
+        assert!(
+            Backend::load(rt.store().credential_backend().as_ref())
+                .unwrap()
+                .is_empty()
+        );
         url
     };
 
@@ -248,8 +264,8 @@ async fn early_reset_is_noticed_after_the_bound_with_save_cooldown_status() {
     early_reset_is_noticed_after_the_bound(true).await;
 }
 
-/// A bounded `.cds` record cook-router wrote in its third window (count 2, 4 h)
-/// restores as it is: 4 h left, the six-day stated reset kept.
+/// A legacy bounded cooldown imports into SQLite in its third window (count 2, 4 h)
+/// and restores as it is: 4 h left, the six-day stated reset kept.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_saved_trust_count_restores_its_window() {
     use cpa_server::cooldown_store::{Quota, Record};
@@ -287,8 +303,9 @@ async fn a_saved_trust_count_restores_its_window() {
         .max()
         .expect("stated reset kept");
     assert!(stated > SIX_DAYS - Duration::from_secs(60), "{stated:?}");
-    // The restore rewrote the file from the restored state: the count is still there.
-    let rewritten = cpa_server::cooldown_store::load(&dir).unwrap();
+    // The restored state is rewritten into SQLite with its trust count intact.
+    rt.shutdown_codex_refreshes().await;
+    let rewritten = Backend::load(rt.store().credential_backend().as_ref()).unwrap();
     assert_eq!(rewritten.len(), 1);
     assert_eq!(rewritten[0].quota.trust_windows, Some(3));
     let _ = std::fs::remove_dir_all(&dir);

@@ -60,7 +60,9 @@ fn quit() -> Step {
 
 /// Go `isLogsEnabledFromConfig`: on unless `logging-to-file` is a false bool.
 fn logs_enabled_from(cfg: &Object) -> bool {
-    cfg.get("logging-to-file").and_then(Value::as_bool).unwrap_or(true)
+    super::client::value_at(cfg, "observability/logs/logging-to-file")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
 }
 
 pub struct App {
@@ -323,7 +325,7 @@ impl App {
             Msg::ConfigUpdate { path, value, err } => {
                 let mut cmds = Vec::new();
                 // Go: switching logging-to-file shows or hides the logs tab.
-                if let (false, None, "logging-to-file", Some(enabled)) =
+                if let (false, None, "observability/logs/logging-to-file", Some(enabled)) =
                     (self.standalone, &err, path.as_str(), value.as_bool())
                 {
                     let before = self.logs_enabled;

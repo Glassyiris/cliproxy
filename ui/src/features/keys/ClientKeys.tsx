@@ -4,8 +4,8 @@
 //   the one frame (DESIGN.md "Pages").
 // - No search, scope toggle, column filters, sorting, totals or record facts: a server holds a
 //   handful of keys and the API gives a key no field to sort or filter by.
-// - No name, created, last-used or request columns, and no Rename: the server stores client keys as
-//   a plain list of strings (config `access/api-keys`) and counts usage per upstream key only.
+// - No name, created, last-used or request columns, and no Rename: client key resources carry only
+//   a secret and stable identity; usage is counted per upstream key only.
 // - Row dividers stay on (Table's default `rows`), not the template's `none`: lists are flat with
 //   hairline dividers (DESIGN.md "Pages").
 // - The empty state has the add action and no warning banner: Overview's attention card already
@@ -16,18 +16,16 @@ import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { icons } from "../../components/icons.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
-import { useConfig, useConfigWrite } from "../../app/serverQueries.ts";
+import { useClientKeys, useClientKeyWrite } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
-import { readPath } from "../../lib/configPath.ts";
+import { createClientKey, deleteClientKey, type ClientKey } from "../../lib/api/clientKeys.ts";
 import { t } from "../../lib/i18n.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { AddKeyDialog } from "./AddKeyDialog.tsx";
 import { KeyTable } from "./KeyTable.tsx";
 import { RevokeKeyDialog } from "./RevokeKeyDialog.tsx";
-
-const KEYS_PATH = "access/api-keys";
 
 /**
  * Add key unless the list is known to be empty (the empty state has it); Use with a tool always: it
@@ -55,11 +53,10 @@ function HeaderActions({
   );
 }
 
-/** Opens "Use with a tool" over the page, with a key row's own key when given its position. */
+/** Opens the tool dialog with the selected resource's stable ID. */
 function useOpenUse() {
   const [, setParams] = useHashParams();
-  return (index?: number) =>
-    setParams({ open: "use", key: index === undefined ? undefined : String(index) }, "push");
+  return (id?: string) => setParams({ open: "use", key: id }, "push");
 }
 
 /** The add-key dialog is `?open=new`, so Overview's first run can open it from another page. */
@@ -72,13 +69,12 @@ function useAdding() {
 }
 
 export default function ClientKeys() {
-  const config = useConfig();
+  const query = useClientKeys();
   const action = useAction();
-  const write = useConfigWrite(action);
+  const write = useClientKeyWrite(action);
   const [adding, setAdding] = useAdding();
-  const [revoking, setRevoking] = useState<string | null>(null);
-  // A key the file lacks and an explicit null both show as no keys.
-  const keys = config.data ? (readPath(config.data, KEYS_PATH, []) as string[]) : undefined;
+  const [revoking, setRevoking] = useState<ClientKey | null>(null);
+  const keys = query.data?.items;
   const hasKeys = !!keys?.length;
   const openUse = useOpenUse();
   const addButton = (
@@ -91,13 +87,8 @@ export default function ClientKeys() {
   );
 
   const revoke = async () => {
-    if (keys && revoking !== null)
-      await write(
-        KEYS_PATH,
-        keys.filter((k) => k !== revoking),
-        t("keys.revoke.revoked"),
-      );
-    setRevoking(null);
+    if (revoking && (await write(() => deleteClientKey(revoking), t("keys.revoke.revoked"))))
+      setRevoking(null);
   };
 
   return (
@@ -106,17 +97,17 @@ export default function ClientKeys() {
       width="full"
       actions={
         <HeaderActions
-          showAdd={config.isPending || hasKeys}
+          showAdd={query.isPending || hasKeys}
           onUse={() => openUse()}
           add={addButton}
         />
       }
     >
-      {config.isError && (
+      {query.isError && (
         <ReadError
-          error={config.error}
+          error={query.error}
           what={t("keys.page.what")}
-          retry={() => void config.refetch()}
+          retry={() => void query.refetch()}
         />
       )}
       {keys?.length === 0 && (
@@ -127,19 +118,18 @@ export default function ClientKeys() {
           actions={addButton}
         />
       )}
-      {(config.isPending || hasKeys) && (
+      {(query.isPending || hasKeys) && (
         <KeyTable keys={keys} onUse={openUse} onRevoke={setRevoking} />
       )}
       {adding && keys && (
         <AddKeyDialog
-          keys={keys}
           busy={action.busy}
-          add={(key) => write(KEYS_PATH, [...keys, key], t("keys.add.added"))}
+          add={(key) => write(() => createClientKey(key), t("keys.add.added"))}
           onClose={() => setAdding(false)}
         />
       )}
       <RevokeKeyDialog
-        target={revoking}
+        target={revoking?.id ?? null}
         busy={action.busy}
         onConfirm={() => void revoke()}
         onClose={() => setRevoking(null)}

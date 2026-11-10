@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { fakeServer } from "./api/fakeServer.testSupport.ts";
 
 const server = fakeServer();
+// Dynamic imports let fakeServer install location before the client initializes its base URL.
 const { request, ConnectionError } = await import("./api/client.ts");
 const { routes } = await import("./api/routes.ts");
 const { cancelSignIns, openSession, SignInError } = await import("./session.ts");
@@ -114,13 +115,13 @@ test("a sign-out cancels a pending sign-in before probes, and a later sign-in su
   );
   assert.deepEqual(
     server.sent.map((s) => `${s.method} ${s.url.pathname}`),
-    ["GET /v8/management/config"],
+    ["GET /admin/v1/effective/config"],
     "the cancelled sign-in sends no probes and leaves no key for another request",
   );
 
   server.answer = () => Response.json({ "config-version": 8 });
   await openSession("secret", hooks);
-  assert.ok(server.sent.some((s) => s.url.pathname !== "/v8/management/config"));
+  assert.ok(server.sent.some((s) => s.url.pathname !== "/admin/v1/effective/config"));
   await request(routes.readConfig);
 });
 
@@ -130,9 +131,11 @@ test("a good key opens the session and sends each capability probe once", async 
   await openSession("secret", hooks);
   await openSession("secret", hooks);
   const paths = server.sent.map((s) => `${s.method} ${s.url.pathname}`);
-  assert.equal(paths.filter((p) => p === "GET /v8/management/config").length, 2);
-  const probes = paths.filter((p) => p !== "GET /v8/management/config");
+  assert.equal(paths.filter((p) => p === "GET /admin/v1/effective/config").length, 2);
+  const probes = paths.filter((p) => p !== "GET /admin/v1/effective/config");
   assert.ok(probes.length > 0);
+  assert.ok(probes.every((path) => path.includes(" /v8/management/")));
+  assert.ok(server.sent.slice(1).every((s) => s.url.pathname !== "/admin/v1/apply"));
   assert.equal(
     new Set(probes).size,
     probes.length / 2,

@@ -13,12 +13,12 @@ import { Text } from "@astryxdesign/core/Text";
 import type { Action } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ConfigEditor } from "../../components/ConfigEditor.tsx";
+import { PluginConfigEditor } from "../../components/PluginConfigEditor.tsx";
 import type { Config } from "../../lib/api/config.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
 import { roles } from "../../themes/site/roles.ts";
 import { Row } from "./SettingRow.tsx";
-import { YAML_KEY } from "./settings.ts";
 
 /** Top-level sections that a control edits somewhere in the dashboard, so not listed here. */
 const covered = new Set([
@@ -32,11 +32,11 @@ const covered = new Set([
   "oauth",
   "api-keys",
   "plugins",
-  // Read once at start, and a v8 write comments it out (docs/CONFIGURATION.md "worker-threads").
+  // Read once at startup; changes require a restart.
   "worker-threads",
 ]);
 
-/** Sections no control edits, listed even when the file lacks them, with what each is for. */
+/** Sections no control edits, listed even when absent, with what each is for. */
 const purposes: Record<string, () => string> = {
   client: () => t("config.sections.client"),
   multimedia: () => t("config.sections.multimedia"),
@@ -45,7 +45,7 @@ const purposes: Record<string, () => string> = {
   "model-routers": () => t("config.sections.modelRouters"),
 };
 
-/** The known sections first, then any other the file holds, in the file's order. */
+/** The known sections first, then other stored sections, in their returned order. */
 const sectionsOf = (config: Config | undefined) => [
   ...new Set([
     ...Object.keys(purposes),
@@ -53,7 +53,7 @@ const sectionsOf = (config: Config | undefined) => [
   ]),
 ];
 
-/** What the file holds there: how many entries, or that the server uses its defaults. */
+/** The stored amount: how many entries, or that the server uses its defaults. */
 function amount(value: unknown) {
   if (value === undefined || value === null) return t("config.sections.default");
   if (typeof value !== "object") return typeof value === "string" ? value : JSON.stringify(value);
@@ -69,8 +69,8 @@ function Entry({
 }: {
   name: string;
   purpose?: string;
-  /** The amount; undefined while the file loads, null for the whole file. */
-  value: string | null | undefined;
+  /** The amount; undefined while the config loads. */
+  value: string | undefined;
   onEdit: () => void;
 }) {
   return (
@@ -94,19 +94,14 @@ function Entry({
   );
 }
 
-/** The whole file, then every section without a control; Edit opens it in the editor. */
+/** Every section without a control; Edit opens it as JSON in the editor. */
 export function Advanced({ action, config }: { action: Action; config: Config | undefined }) {
   const [params, setParams] = useHashParams();
   const open = (key: string | undefined) => setParams({ key }, "push");
   const key = params.key;
+  const pluginId = key ? /^plugins\/configs\/([^/]+)$/.exec(key)?.[1] : undefined;
   return (
     <VStack gap={0}>
-      <Entry
-        name={YAML_KEY}
-        purpose={t("config.yaml.label")}
-        value={null}
-        onEdit={() => open(YAML_KEY)}
-      />
       {sectionsOf(config).map((name) => (
         <Entry
           key={name}
@@ -117,8 +112,15 @@ export function Advanced({ action, config }: { action: Action; config: Config | 
         />
       ))}
       <ConfigEditor
-        source={!key ? null : key === YAML_KEY ? { yaml: true } : { path: key }}
-        title={key === YAML_KEY ? t("config.yaml.label") : (key ?? "")}
+        source={key && !pluginId ? { path: key } : null}
+        title={key ?? ""}
+        hashKey="key"
+        action={action}
+        onClose={() => open(undefined)}
+      />
+      <PluginConfigEditor
+        id={pluginId ?? null}
+        title={key ?? ""}
         hashKey="key"
         action={action}
         onClose={() => open(undefined)}

@@ -120,7 +120,7 @@ function UsageNotice({ usage }: { usage: ReturnType<typeof useSections>["usage"]
 
 /**
  * The filters, the open group and the family being added, kept in the hash
- * (`#accounts?view=providers&provider=codex&list=all&show=failing&q=&group=<family>:<index>`,
+ * (`#accounts?view=providers&provider=codex&list=all&show=failing&q=&group=<family>:<id>`,
  * `add=<family>` so Connect can open the add form). `list` is the inbox view, as on Accounts.
  */
 function useHashState(entries: Entry[] | undefined) {
@@ -243,7 +243,7 @@ export default function ProviderKeys() {
         key={entryId(open)}
         entry={open}
         busy={page.action.busy}
-        toggling={writes.toggling === entryId(open)}
+        toggling={writes.toggling === open.group["@id"]}
         onAction={writes.press}
         onClose={() => go(null)}
       />

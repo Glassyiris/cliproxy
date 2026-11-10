@@ -513,7 +513,7 @@ async fn login_matches_go_requests_and_file() {
         let go_raw = fx["extra"]["file_raw"].as_str().unwrap();
         let stamp = gj::get(go_raw.as_bytes(), "last_refresh").str().into_owned();
         let now = chrono::DateTime::parse_from_rfc3339(&stamp).unwrap().to_utc();
-        let outcome = login_with(login_auth(&mock.url).with_fixed_now(now), dir.path(), true)
+        let outcome = login_with(login_auth(&mock.url).with_fixed_now(now), dir.path(), true, None)
             .await
             .unwrap();
         let go: Vec<Captured> = fx["upstream"]
@@ -548,7 +548,7 @@ async fn failed_login_mint_logs_no_response_body() {
     let dir = TempDir::new();
     let capture = crate::kimi_fixture::LogCapture::default();
     let guard = capture.install();
-    let outcome = login_with(login_auth(&mock.url), dir.path(), true).await;
+    let outcome = login_with(login_auth(&mock.url), dir.path(), true, None).await;
     drop(guard);
     assert!(outcome.is_ok(), "a failed mint does not fail the login");
     let logs = capture.0.lock().unwrap().clone();
@@ -871,7 +871,7 @@ fn login_merge_skips_an_existing_file_go_cannot_decode() {
     let now = chrono::DateTime::parse_from_rfc3339("2026-10-02T00:00:00Z")
         .unwrap()
         .to_utc();
-    let outcome = meta_auth::save_login(dir.path(), &bundle, now).unwrap();
+    let outcome = meta_auth::save_login(dir.path(), &bundle, now, None).unwrap();
     let written = std::fs::read_to_string(&outcome.path).unwrap();
     assert!(serde_json::from_str::<Value>(&written).is_ok(), "valid JSON: {written}");
     assert!(!written.contains("prefix") && !written.contains("custom"), "{written}");
@@ -898,7 +898,7 @@ async fn login_skips_existing_file_with_an_overwritten_overflow() {
     let now = chrono::DateTime::parse_from_rfc3339(&gj::get(go_raw.as_bytes(), "last_refresh").str())
         .unwrap()
         .to_utc();
-    let outcome = login_with(login_auth(&mock.url).with_fixed_now(now), dir.path(), true)
+    let outcome = login_with(login_auth(&mock.url).with_fixed_now(now), dir.path(), true, None)
         .await
         .unwrap();
     let written = std::fs::read_to_string(&outcome.path).unwrap();

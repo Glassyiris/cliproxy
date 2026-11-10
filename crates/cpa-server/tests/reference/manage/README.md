@@ -9,6 +9,8 @@ complete `api.NewServer` driven through `httptest`. It opens no sockets and call
 provider, GitHub or OAuth endpoint. Secrets are `fake-*` strings; bcrypt hashes are
 regenerated on every run, so tests hash the same plaintext themselves.
 
+The checked-in management fixture is adapted to cook-router's SQLite resource API, not an unchanged Go recording. Regeneration below overwrites that adaptation: remove the entire `config_writes` group again and retarget config-read route steps to `/admin/v1/effective/config` before updating the fixture. Keep only the supported non-config management scenarios; do not restore removed v0/v8 config routes. Review the adapted fixture alongside its Rust replay when regenerating.
+
 Record with Go 1.26.4, the toolchain of the v8.0.35 release build (`GO_VERSION` in the reference's `.github/workflows/release.yaml`); from 1.26.4 `textproto` quotes MIME header diagnostics with `%q`. Regenerate with a temporary module inside the reference module's internal-package
 boundary (the reference checkout is not modified). Copying the reference's `go.sum`
 pins its dependency versions; `-mod=mod` lets the temporary module record them.
