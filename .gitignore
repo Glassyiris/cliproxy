@@ -1,3 +1,7 @@
 /target
 ui/node_modules/
 ui/.amp/
+
+# Python bytecode
+__pycache__/
+*.pyc

@@ -51,6 +51,8 @@ RULES = (
     (r"\.github/scripts/test-counts\.py", frozenset({"tests"})),
     # The other workflows run on their own path filters; here only actionlint reads them.
     (r"\.github/workflows/[^/]+", frozenset({"workflows"})),
+    # The pull request title check; changes.yml runs it and its tests.
+    (r"\.github/scripts/(pr-title|test_pr_title)\.py", NONE),
     # Installers workflow (install.yml) only.
     (r"\.github/scripts/(test-installers\.py|installer-fixture\.rs)", NONE),
     # Repository metadata that no job reads.
