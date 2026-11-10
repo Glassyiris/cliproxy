@@ -57,7 +57,7 @@ A pull request that touches shipped code needs a new fragment: `crates/`, `ui/sr
 - CI must pass: the `ci-ok` check, which requires every lane the change selects (format, clippy, tests, the harness check, clippy on Windows with all targets and warnings as errors, the Linux size and idle gates, the dashboard checks and actionlint), the changelog fragment check (`fragments`) and the title check (`title`). To run every lane, add the `ci:full` label and re-run the CI workflow.
 - A ruleset protects `master`, and nobody can bypass it, administrators included:
   - every change goes through a pull request and is squash-merged;
-  - `ci-ok`, `fragments` and `title` must pass on a branch that is up to date with `master`; when `master` has moved, use **Update branch** on the pull request and wait for the checks again;
+  - `ci-ok`, `fragments` and `title` must pass. A branch behind `master` can still merge; GitHub refuses only when the two conflict;
   - force pushes, deletion and merge commits are blocked.
   When CI itself is broken and a fix cannot merge, an administrator can set the ruleset to Disabled under Settings → Rules → Rulesets → `master`, merge the fix, and set it back to Active. The change shows in the ruleset's history.
 
