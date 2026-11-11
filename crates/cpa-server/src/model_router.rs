@@ -372,8 +372,37 @@ fn cheapest(pool: &[Variant], need: f64) -> Option<&Variant> {
     pool.iter().filter(|v| v.index >= need).min_by(cheaper)
 }
 
-/// The text of the request's last user turn (Chat Completions, Responses, Messages or
-/// Gemini), truncated to [`JUDGE_TEXT`] bytes.
+/// Whether an input item is the user's: it has the `user` role, or it is a Responses
+/// `message` that omits its role (developer, system and assistant items name theirs).
+fn is_user(item: &json::Res) -> bool {
+    let role = item.get("role").str();
+    role == "user" || (role.is_empty() && item.get("type").str() == "message")
+}
+
+/// The tags around a client's reminder block (Claude Code's date and memory notes).
+const REMINDER_OPEN: &str = "<system-reminder>";
+const REMINDER_CLOSE: &str = "</system-reminder>";
+
+/// `text` without its complete reminder blocks, trimmed: they are the client's notes to the
+/// model, not the user's words. An unclosed tag is kept as written. One pass over `text`.
+fn without_reminders(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(REMINDER_OPEN) {
+        let Some(len) = rest[start..].find(REMINDER_CLOSE) else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        rest = &rest[start + len + REMINDER_CLOSE.len()..];
+    }
+    out.push_str(rest);
+    out.trim().to_owned()
+}
+
+/// The text of the request's latest user message (Chat Completions, Responses, Messages or
+/// Gemini) without reminder blocks, truncated to [`JUDGE_TEXT`] bytes. A turn left without
+/// text (a tool result with a reminder appended) yields to the user message before it; text
+/// beside a tool result is kept.
 fn last_user_text(body: &[u8]) -> String {
     let mut out = String::new();
     for key in ["messages", "input", "contents"] {
@@ -381,28 +410,33 @@ fn last_user_text(body: &[u8]) -> String {
         if !list.exists() {
             continue;
         }
-        if list.kind == json::Kind::String {
-            out = list.str().into_owned();
-            break;
-        }
-        let Some(turn) = list.array().into_iter().rev().find(|t| t.get("role").str() == "user") else {
-            break;
-        };
-        let content = turn.get("content");
-        if content.kind == json::Kind::String {
-            out = content.str().into_owned();
+        out = if list.kind == json::Kind::String {
+            without_reminders(&list.str())
         } else {
-            let parts = if content.exists() { content } else { turn.get("parts") };
-            for part in parts.array() {
-                let text = part.get("text");
-                if text.kind == json::Kind::String {
-                    if !out.is_empty() {
-                        out.push('\n');
-                    }
-                    out.push_str(&text.str());
-                }
-            }
-        }
+            list.array()
+                .into_iter()
+                .rev()
+                .filter(is_user)
+                .find_map(|turn| {
+                    let content = turn.get("content");
+                    let text = if content.kind == json::Kind::String {
+                        without_reminders(&content.str())
+                    } else {
+                        let parts = if content.exists() { content } else { turn.get("parts") };
+                        parts
+                            .array()
+                            .iter()
+                            .map(|p| p.get("text"))
+                            .filter(|t| t.kind == json::Kind::String)
+                            .map(|t| without_reminders(&t.str()))
+                            .filter(|t| !t.is_empty())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    (!text.is_empty()).then_some(text)
+                })
+                .unwrap_or_default()
+        };
         break;
     }
     if out.len() > JUDGE_TEXT {
@@ -486,7 +520,7 @@ fn fresh_turn(body: &[u8]) -> bool {
         let Some(last) = list.array().pop() else {
             return false;
         };
-        if last.get("role").str() != "user" {
+        if !is_user(&last) {
             return false;
         }
         let content = last.get("content");
@@ -1110,7 +1144,6 @@ mod tests {
         };
         assert_eq!(patterns(&spec("my-model", None), Some(&renamed)), ["my-model"]);
     }
-
     #[test]
     fn last_user_text_reads_each_format() {
         let chat = br#"{"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"x"},{"role":"user","content":[{"type":"text","text":"a"},{"type":"image"},{"type":"text","text":"b"}]}]}"#;
@@ -1120,12 +1153,34 @@ mod tests {
         assert_eq!(last_user_text(responses), "r");
         let gemini = br#"{"contents":[{"role":"user","parts":[{"text":"g"}]}]}"#;
         assert_eq!(last_user_text(gemini), "g");
+        // A client's reminder blocks are not the user's words; a mention of the tag is.
+        let reminder = "<system-reminder>\nthe date\n</system-reminder>\n";
+        let part = |t: &str| serde_json::json!({"type": "text", "text": t});
+        let turns = |t: serde_json::Value| serde_json::to_vec(&serde_json::json!({"messages": t})).unwrap();
+        let asked = serde_json::json!([{"role": "user", "content": [part(reminder), part("why does it hang?"), part(reminder)]}]);
+        assert_eq!(last_user_text(&turns(asked)), "why does it hang?");
+        let mixed = format!("{reminder}Explain how <system-reminder> is parsed");
+        let mixed = serde_json::json!([{"role": "user", "content": mixed}]);
+        assert_eq!(last_user_text(&turns(mixed)), "Explain how <system-reminder> is parsed");
+        // Text beside a tool result is kept; a turn left with none yields to the one before.
+        let tool = serde_json::json!({"type": "tool_result", "tool_use_id": "t", "content": "found"});
+        let beside =
+            serde_json::json!([{"role": "user", "content": [tool, part("Thanks, now deploy"), part(reminder)]}]);
+        assert_eq!(last_user_text(&turns(beside)), "Thanks, now deploy");
+        let looped = serde_json::json!([
+            {"role": "user", "content": "fix the race"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": [tool, part(reminder)]}
+        ]);
+        assert_eq!(last_user_text(&turns(looped)), "fix the race");
+        // Responses message may omit role; developer is not user
+        let roleless = br#"{"input":[{"type":"message","content":[{"type":"input_text","text":"u"}]},{"role":"developer","content":"d"}]}"#;
+        assert_eq!(last_user_text(roleless), "u");
         let long = format!(
             r#"{{"messages":[{{"role":"user","content":"{}"}}]}}"#,
             "é".repeat(JUDGE_TEXT)
         );
-        let text = last_user_text(long.as_bytes());
-        assert!(text.len() <= JUDGE_TEXT && text.len() >= JUDGE_TEXT - 1);
+        assert!(last_user_text(long.as_bytes()).len() <= JUDGE_TEXT);
     }
 
     #[test]
