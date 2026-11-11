@@ -425,8 +425,26 @@ impl ClaudeExecutor {
             req.usage.claude_cache(telemetry);
         }
         let response = self
-            .send(&ctx, &mut prepared, "/v1/messages", Some(&req.usage), req.capture())
+            .send(
+                &ctx,
+                &mut prepared,
+                "/v1/messages",
+                Some(&req.usage),
+                req.capture(),
+                replay,
+            )
             .await;
+        if prepared.recovered {
+            // The final attempt, not the rejected first body, owns final-wire usage.
+            if req.usage.enabled() {
+                req.usage.request(Format::Claude, prepared.body.as_bytes());
+            }
+            if req.usage.wants_claude_cache()
+                && let Some(telemetry) = telemetry::collect(&ctx, &req, &prepared)
+            {
+                req.usage.claude_cache(telemetry);
+            }
+        }
         let response = response.inspect_err(|error| {
             // shouldClearKimiThinkingReplayAfterError: an upstream rejection of applied replay.
             if let Some(scope) = replay.filter(|s| s.applied)
@@ -581,7 +599,7 @@ impl ClaudeExecutor {
         let mut prepared = ctx.prepare_count(&req, &translated, &original).await?;
         let capture = req.capture();
         let response = self
-            .send(&ctx, &mut prepared, "/v1/messages/count_tokens", None, capture)
+            .send(&ctx, &mut prepared, "/v1/messages/count_tokens", None, capture, None)
             .await?;
         let body = match response.body {
             ResponseBody::Stream(raw) => collect(raw).await.inspect_err(|e| capture_error(capture, e))?,
@@ -608,17 +626,15 @@ impl ClaudeExecutor {
         path: &str,
         usage: Option<&cpa_core::exec::UsageSink>,
         capture: &CaptureSink,
+        replay: Option<&replay::Scope>,
     ) -> Result<RawResponse, ExecError> {
         let usage = usage.filter(|u| u.enabled());
         let url = format!("{}{path}?beta=true", ctx.base_url);
         let fast = ctx.first_party && prepared.fast;
-        // The body moves into the request; nothing reads it after the send.
-        let body = Bytes::from(std::mem::take(&mut prepared.body));
-        let prepared = &*prepared;
-        let mut headers = GoHeaders::new();
-        for (name, value) in &prepared.headers {
-            headers.add_raw(name, value.as_str());
-        }
+        // Bytes keeps the original available for a single request-scoped history
+        // recovery without copying the body on successful requests.
+        let mut body = Bytes::from(std::mem::take(&mut prepared.body));
+        let prepared = &mut *prepared;
         // Go's fallbackRoundTripper, per hop: the native Claude Code transport and
         // ordered writer for Anthropic, http.DefaultTransport (or the proxy transport)
         // for every other origin, behind one redirect-following http.Client.
@@ -635,71 +651,126 @@ impl ClaudeExecutor {
                 }
             })
         };
-        // helps.RecordAPIRequest: the header map the executor built (Go spelling, the
-        // transport's own headers excluded), unmasked; every physical send. The log may
-        // keep the body for the whole exchange, so it gets the body being sent rather
-        // than a copy.
-        if capture.enabled() {
-            let (auth_type, auth_value) = cpa_core::registry::dynamic::account_info(ctx.credential);
-            capture.record_request(
-                UpstreamRequest {
-                    url: &url,
-                    method: "POST",
-                    headers: &prepared.headers,
-                    body: &body,
-                    provider: ctx.log_provider,
-                    auth_id: &ctx.credential.id,
-                    auth_label: &ctx.credential.label,
-                    auth_type,
-                    auth_value: &auth_value,
-                },
-                &body,
-            );
-        }
-        if let Some(usage) = usage {
-            usage.round_trip_started();
-        }
-        tracing::trace!(target: "cpa_latency", stage = "prepared");
-        let mut upstream = crate::proxy::send_routed(&route, &url, headers, body, None, usage)
-            .await
-            .map_err(|e| {
-                capture_error(capture, &e);
-                fast_request_error(fast, e)
-            })?;
-        if capture.enabled() {
-            capture.record(CaptureEvent::ResponseMetadata(
-                upstream.status,
-                &go_headers(&upstream.headers),
-            ));
-        }
-        if let Some(usage) = usage.cloned() {
-            let mut marked = false;
-            upstream.body = upstream
-                .body
-                .inspect(move |chunk| {
-                    if !marked && chunk.as_ref().is_ok_and(|c| !c.is_empty()) {
-                        marked = true;
-                        usage.first_byte();
+        for attempt in 0..=1 {
+            let recovery_headers = (attempt == 1).then(|| {
+                prepared
+                    .headers
+                    .iter()
+                    .filter_map(|(name, value)| {
+                        if name.eq_ignore_ascii_case("anthropic-beta") {
+                            let value = betas::without_thinking_binding(value);
+                            (!value.is_empty()).then(|| (name.clone(), value))
+                        } else {
+                            Some((name.clone(), value.clone()))
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            });
+            let request_headers = recovery_headers.as_ref().unwrap_or(&prepared.headers);
+            let mut headers = GoHeaders::new();
+            for (name, value) in request_headers {
+                headers.add_raw(name, value.as_str());
+            }
+            // helps.RecordAPIRequest: the header map the executor built (Go spelling, the
+            // transport's own headers excluded), unmasked; every physical send. The log may
+            // keep the body for the whole exchange, so it gets the body being sent rather
+            // than a copy.
+            if capture.enabled() {
+                let (auth_type, auth_value) = cpa_core::registry::dynamic::account_info(ctx.credential);
+                capture.record_request(
+                    UpstreamRequest {
+                        url: &url,
+                        method: "POST",
+                        headers: request_headers,
+                        body: &body,
+                        provider: ctx.log_provider,
+                        auth_id: &ctx.credential.id,
+                        auth_label: &ctx.credential.label,
+                        auth_type,
+                        auth_value: &auth_value,
+                    },
+                    &body,
+                );
+            }
+            if let Some(usage) = usage {
+                usage.round_trip_started();
+            }
+            tracing::trace!(target: "cpa_latency", stage = "prepared");
+            let mut upstream = match crate::proxy::send_routed(&route, &url, headers, body.clone(), None, usage).await {
+                Ok(upstream) => upstream,
+                Err(error) => {
+                    capture_error(capture, &error);
+                    if attempt == 1 {
+                        prepared.body = text(body.to_vec());
+                        prepared.headers = recovery_headers.expect("recovery headers exist");
+                        prepared.recovered = true;
                     }
-                })
-                .boxed();
+                    return Err(fast_request_error(fast, error));
+                }
+            };
+            if capture.enabled() {
+                capture.record(CaptureEvent::ResponseMetadata(
+                    upstream.status,
+                    &go_headers(&upstream.headers),
+                ));
+            }
+            if let Some(usage) = usage.cloned() {
+                let mut marked = false;
+                upstream.body = upstream
+                    .body
+                    .inspect(move |chunk| {
+                        if !marked && chunk.as_ref().is_ok_and(|c| !c.is_empty()) {
+                            marked = true;
+                            usage.first_byte();
+                        }
+                    })
+                    .boxed();
+            }
+            // MarkResult observes the headers of every upstream answer to a Messages request
+            // from a Claude credential, whatever its status or body (Go records them before
+            // reading the body); count_tokens results skip observation in Go's conductor.
+            // ponytail: Go keys the model state by the conductor's state model; the executor
+            // sees the upstream base model, as Codex's observation does.
+            if path == "/v1/messages" && ctx.credential.provider.trim().eq_ignore_ascii_case("claude") {
+                self.quota
+                    .observe_model(&ctx.credential.id, &ctx.base_model, &upstream.headers);
+            }
+            let result = finish(
+                decode_upstream(upstream).await,
+                fast,
+                ctx.settings.model_level_cooling,
+                capture,
+            )
+            .await;
+            match result {
+                Err(error)
+                    if attempt == 0
+                        && path == "/v1/messages"
+                        && prepared.thinking_recovery
+                        && history_rejection(&error) =>
+                {
+                    if let Some(recovered) = drop_completed_thinking(&body, prepared.cch) {
+                        // The first rejection invalidated restored history even if this
+                        // recovery later fails or loses its transport.
+                        if let Some(scope) = replay.filter(|scope| scope.applied) {
+                            scope.recover();
+                        }
+                        body = Bytes::from(recovered);
+                        continue;
+                    }
+                    return Err(error);
+                }
+                result => {
+                    if attempt == 1 {
+                        prepared.body = text(body.to_vec());
+                        prepared.headers = recovery_headers.expect("recovery headers exist");
+                        prepared.recovered = true;
+                    }
+                    return result;
+                }
+            }
         }
-        // MarkResult observes the headers of every upstream answer to a Messages request
-        // from a Claude credential, whatever its status or body (Go records them before
-        // reading the body); count_tokens results skip observation in Go's conductor.
-        // ponytail: Go keys the model state by the conductor's state model; the executor
-        // sees the upstream base model, as Codex's observation does.
-        if path == "/v1/messages" && ctx.credential.provider.trim().eq_ignore_ascii_case("claude") {
-            self.quota
-                .observe_model(&ctx.credential.id, &ctx.base_model, &upstream.headers);
-        }
-        finish(
-            decode_upstream(upstream).await,
-            fast,
-            ctx.settings.model_level_cooling,
-            capture,
-        )
-        .await
+        unreachable!("one recovery attempt always returns")
     }
 }
 
@@ -928,6 +999,12 @@ struct Prepared {
     body: String,
     headers: Vec<(String, String)>,
     order: Vec<String>,
+    /// Proxy-owned drop_block permits one client-side recovery, never a caller-owned one.
+    thinking_recovery: bool,
+    /// The second attempt finished; body and headers hold its final wire data.
+    recovered: bool,
+    /// The first attempt signed CCH, so recovery must re-sign it.
+    cch: bool,
     /// The tool aliases of the request, shared with the response relay and, for a
     /// thread turn, with the thread alias store.
     reverse: Arc<alias::Reverse>,
@@ -1058,6 +1135,121 @@ fn sanitize_for_upstream(mut body: String, base_model: &str, preserve_empty_thin
         body = rawjson::delete(&body, &path);
     }
     body
+}
+
+/// Opts preserved-thinking Messages into upstream prefix recovery. The bool records
+/// proxy ownership, so a later client-side retry never rewrites an explicit caller policy.
+fn enable_prefix_drop(mut body: String, base_model: &str) -> (String, bool) {
+    if betas::progress_display(base_model)
+        && rawjson::string(&body, "thinking.type")
+            .trim()
+            .eq_ignore_ascii_case("adaptive")
+        && !rawjson::get(&body, "thinking.block_binding").exists()
+        && rawjson::get(&body, "messages").items().iter().any(|message| {
+            message
+                .get("content")
+                .items()
+                .iter()
+                .any(|part| matches!(part.get("type").str(), "thinking" | "redacted_thinking"))
+        })
+    {
+        body = rawjson::set_str(&body, "thinking.block_binding.prefix_mismatch_behavior", "drop_block");
+        return (body, true);
+    }
+    (body, false)
+}
+
+/// Matches the generic gateway error observed for rejected history, or Anthropic's
+/// explicit signature validation error, without retrying ordinary invalid requests.
+fn history_rejection(error: &ExecError) -> bool {
+    if error.status != 400 {
+        return false;
+    }
+    let body = String::from_utf8_lossy(&error.body);
+    body.contains("upstream_error") || body.go_lower().contains("signature")
+}
+
+/// Removes thinking only from completed assistant turns after the upstream rejected
+/// preserved history. The trailing assistant tool_use -> user tool_result cycle stays
+/// intact. Returns `None` unless the request opted into drop_block and a block was removed.
+fn drop_completed_thinking(body: &[u8], cch: bool) -> Option<Vec<u8>> {
+    use cpa_common::json;
+    use std::borrow::Cow;
+
+    if &*json::get(body, "thinking.block_binding.prefix_mismatch_behavior").bytes() != b"drop_block" {
+        return None;
+    }
+    let messages = json::get(body, "messages");
+    if !messages.is_array() {
+        return None;
+    }
+    let messages = messages.array();
+    let active = messages
+        .iter()
+        .rposition(|message| {
+            &*message.get("role").bytes() == b"assistant"
+                && message
+                    .get("content")
+                    .array()
+                    .iter()
+                    .any(|part| &*part.get("type").bytes() == b"tool_use")
+        })
+        .filter(|index| {
+            messages[*index + 1..].iter().all(|message| {
+                let content = message.get("content");
+                let role = message.get("role").bytes();
+                &*role == b"system"
+                    || (&*role == b"user"
+                        && content.is_array()
+                        && !content.array().is_empty()
+                        && content
+                            .array()
+                            .iter()
+                            .any(|part| &*part.get("type").bytes() == b"tool_result"))
+            })
+        });
+    let mut kept_messages: Vec<Cow<'_, [u8]>> = Vec::with_capacity(messages.len());
+    let mut modified = false;
+    for (index, message) in messages.iter().enumerate() {
+        if Some(index) == active || &*message.get("role").bytes() != b"assistant" {
+            kept_messages.push(message.raw.clone());
+            continue;
+        }
+        let content = message.get("content");
+        if !content.is_array() {
+            kept_messages.push(message.raw.clone());
+            continue;
+        }
+        let mut kept_parts = Vec::with_capacity(content.array().len());
+        let mut message_modified = false;
+        for part in content.array().iter() {
+            let kind = part.get("type").bytes();
+            if &*kind == b"thinking" || &*kind == b"redacted_thinking" {
+                message_modified = true;
+                modified = true;
+            } else {
+                kept_parts.push(part.raw.clone());
+            }
+        }
+        if !message_modified {
+            kept_messages.push(message.raw.clone());
+        } else if !kept_parts.is_empty() {
+            let updated = json::try_set_raw(message.raw(), "content", json::join(&kept_parts)).ok()?;
+            kept_messages.push(Cow::Owned(updated));
+        }
+    }
+    if !modified {
+        return None;
+    }
+    let joined = json::join(&kept_messages);
+    drop(kept_messages);
+    let out = json::try_set_raw(body, "messages", joined).ok()?;
+    let out = String::from_utf8(out).ok()?;
+    let out = rawjson::delete(&out, "thinking.block_binding");
+    if cch {
+        return Some(signing::sign(out).ok()?.into_bytes());
+    }
+    Some(out.into_bytes())
 }
 
 /// `extractAndRemoveBetas`.
@@ -1470,6 +1662,8 @@ impl<'a> Ctx<'a> {
             }
         }
         body = sanitize_for_upstream(body, &self.base_model, self.is_compat);
+        let thinking_recovery;
+        (body, thinking_recovery) = enable_prefix_drop(body, &self.base_model);
         if self.cli_profile {
             body = self.apply_identity(&body, &session_id)?;
         }
@@ -1545,6 +1739,9 @@ impl<'a> Ctx<'a> {
             body,
             headers,
             order,
+            thinking_recovery,
+            recovered: false,
+            cch,
             reverse,
             continuity: diagnostics,
             thread,
@@ -1658,6 +1855,9 @@ impl<'a> Ctx<'a> {
             body,
             headers,
             order,
+            thinking_recovery: false,
+            recovered: false,
+            cch: false,
             reverse: Default::default(),
             continuity: Default::default(),
             thread: None,

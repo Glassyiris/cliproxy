@@ -109,6 +109,277 @@ fn request(case: &Value) -> ExecRequest {
     }
 }
 
+#[test]
+fn preserved_thinking_recovers_from_upstream_prefix_mismatches() {
+    let body = r#"{"model":"claude-opus-5-5","thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"first"},{"role":"assistant","content":[{"type":"redacted_thinking","data":"foreign"},{"type":"text","text":"answer"}]},{"role":"user","content":"next"}]}"#;
+    let (out, injected) = enable_prefix_drop(
+        sanitize_for_upstream(body.into(), "claude-opus-5-5", false),
+        "claude-opus-5-5",
+    );
+    assert!(injected);
+    assert_eq!(
+        rawjson::get(&out, "thinking.block_binding.prefix_mismatch_behavior").str(),
+        "drop_block"
+    );
+
+    let (explicit, injected) = enable_prefix_drop(
+        sanitize_for_upstream(
+            body.replace(
+                r#""type":"adaptive""#,
+                r#""type":"adaptive","block_binding":{"prefix_mismatch_behavior":"error"}"#,
+            ),
+            "claude-opus-5-5",
+            false,
+        ),
+        "claude-opus-5-5",
+    );
+    assert!(!injected);
+    assert_eq!(
+        rawjson::get(&explicit, "thinking.block_binding.prefix_mismatch_behavior").str(),
+        "error"
+    );
+
+    let first_turn =
+        r#"{"model":"claude-opus-5-5","thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"hi"}]}"#;
+    let (out, injected) = enable_prefix_drop(
+        sanitize_for_upstream(first_turn.into(), "claude-opus-5-5", false),
+        "claude-opus-5-5",
+    );
+    assert!(!injected);
+    assert!(!rawjson::get(&out, "thinking.block_binding").exists());
+}
+
+#[tokio::test]
+async fn rejected_history_retries_once_without_completed_thinking() {
+    use axum::response::IntoResponse;
+
+    #[derive(Default)]
+    struct CacheUsage(std::sync::Mutex<Vec<cpa_core::exec::ClaudeCacheTelemetry>>);
+    impl cpa_core::exec::UsageObserver for CacheUsage {
+        fn response_body(&self, _: Format, _: &[u8]) {}
+        fn response_line(&self, _: Format, _: &[u8]) {}
+        fn request(&self, _: Format, _: &[u8]) {}
+
+        fn wants_claude_cache(&self) -> bool {
+            true
+        }
+
+        fn claude_cache(&self, telemetry: cpa_core::exec::ClaudeCacheTelemetry) {
+            self.0.lock().unwrap().push(telemetry);
+        }
+    }
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+    let captured = seen.clone();
+    let router = axum::Router::new().fallback(move |headers: http::HeaderMap, body: String| {
+        let captured = captured.clone();
+        async move {
+            let beta = headers
+                .get("anthropic-beta")
+                .map(|v| v.to_str().unwrap().to_owned())
+                .unwrap_or_default();
+            let mut seen = captured.lock().unwrap();
+            let reject_always = body.contains("reject_always");
+            let recover_429 = body.contains("recover_429");
+            let reject_invalid = body.contains("reject_invalid");
+            let recovered = !body.contains(r#""data":"old""#);
+            seen.push((body, beta));
+            if reject_invalid {
+                return (
+                    http::StatusCode::BAD_REQUEST,
+                    [(http::header::CONTENT_TYPE, "application/json")],
+                    r#"{"type":"error","error":{"type":"invalid_request_error","message":"bad schema"}}"#.to_owned(),
+                )
+                    .into_response();
+            }
+            if recover_429 && recovered {
+                return (
+                    http::StatusCode::TOO_MANY_REQUESTS,
+                    [(http::header::CONTENT_TYPE, "application/json")],
+                    r#"{"type":"error","error":{"type":"rate_limit_error","message":"second quota"}}"#.to_owned(),
+                )
+                    .into_response();
+            }
+            if seen.len() == 1 || reject_always || recover_429 {
+                return (
+                    http::StatusCode::BAD_REQUEST,
+                    [(http::header::CONTENT_TYPE, "application/json")],
+                    r#"{"type":"error","error":{"type":"upstream_error","message":"rejected"}}"#.to_owned(),
+                )
+                    .into_response();
+            }
+            let message = serde_json::json!({"id":"msg_recovered","type":"message","role":"assistant",
+                "model":"claude-opus-5-5","content":[],"usage":{"input_tokens":3,"output_tokens":0}});
+            ([(http::header::CONTENT_TYPE, "application/json")], message.to_string()).into_response()
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+    let executor = ClaudeExecutor::with_client(wreq::Client::new(), DEFAULT_BASE_URL);
+    let mut credential = harness_credential();
+    credential.attributes.insert("base_url".into(), base);
+    credential
+        .attributes
+        .insert("header:anthropic-beta".into(), "claude-code-20250219".into());
+    let body = r#"{"model":"claude-opus-5-5","max_tokens":64,"thinking":{"type":"adaptive"},"messages":[
+        {"role":"user","content":"first"},
+        {"role":"assistant","content":[{"type":"redacted_thinking","data":"old"},{"type":"text","text":"done"}]},
+        {"role":"user","content":"next"},
+        {"role":"assistant","content":[{"type":"redacted_thinking","data":"active"},{"type":"tool_use","id":"tu_1","name":"read","input":{}}]},
+        {"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"ok"},{"type":"text","text":"<system-reminder>continue</system-reminder>"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}}]},
+        {"role":"system","content":[{"type":"text","text":"continue"}]}
+    ]}"#;
+    let telemetry = Arc::new(CacheUsage::default());
+    let with_usage = |body: String| {
+        let mut request = client_request(body, Default::default());
+        request.usage = cpa_core::exec::UsageSink::new(telemetry.clone());
+        request
+    };
+    drain(
+        &executor,
+        &credential,
+        &Config::parse("").unwrap(),
+        with_usage(body.into()),
+    )
+    .await;
+
+    {
+        let seen_snapshot = seen.lock().unwrap();
+        assert_eq!(seen_snapshot.len(), 2, "{seen_snapshot:?}");
+        let first: Value = serde_json::from_str(&seen_snapshot[0].0).unwrap();
+        let second: Value = serde_json::from_str(&seen_snapshot[1].0).unwrap();
+        assert_eq!(
+            first["thinking"]["block_binding"]["prefix_mismatch_behavior"],
+            "drop_block"
+        );
+        assert_eq!(
+            seen_snapshot[0].1,
+            "claude-code-20250219,thinking-binding-controls-2026-08-01"
+        );
+        assert_eq!(seen_snapshot[1].1, "claude-code-20250219");
+        assert!(second["thinking"].get("block_binding").is_none());
+        assert_eq!(
+            second["messages"][1]["content"],
+            serde_json::json!([{"type":"text","text":"done"}])
+        );
+        assert_eq!(
+            second["messages"][3]["content"][0],
+            serde_json::json!({"type":"redacted_thinking","data":"active"})
+        );
+        let first_cch = rawjson::string(&seen_snapshot[0].0, "system.0.text");
+        let second_cch = rawjson::string(&seen_snapshot[1].0, "system.0.text");
+        assert_ne!(first_cch, second_cch, "recovery must re-sign CCH");
+        assert_eq!(signing::sign(seen_snapshot[1].0.clone()).unwrap(), seen_snapshot[1].0);
+
+        let observations = telemetry.0.lock().unwrap();
+        assert_eq!(observations.len(), 2, "telemetry must describe both upstream attempts");
+        assert!(
+            observations[0]
+                .betas
+                .contains(&"thinking-binding-controls-2026-08-01".into())
+        );
+        assert!(
+            !observations[1]
+                .betas
+                .contains(&"thinking-binding-controls-2026-08-01".into())
+        );
+        assert_ne!(observations[0].thinking_hash, observations[1].thinking_hash);
+        assert_ne!(observations[0].history_prefix.hash, observations[1].history_prefix.hash);
+    }
+
+    let explicit = body
+        .replace(
+            r#""type":"adaptive""#,
+            r#""type":"adaptive","block_binding":{"prefix_mismatch_behavior":"error"}"#,
+        )
+        .replace("first", "reject_always");
+    let error = executor
+        .execute(&credential, with_usage(explicit), &Config::parse("").unwrap())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.status, 400);
+    assert_eq!(seen.lock().unwrap().len(), 3, "explicit error must not retry");
+
+    let error = executor
+        .execute(
+            &credential,
+            with_usage(body.replace("first", "reject_always")),
+            &Config::parse("").unwrap(),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.status, 400);
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        5,
+        "a rejected recovery must not retry again"
+    );
+
+    let error = executor
+        .execute(
+            &credential,
+            with_usage(body.replace("first", "recover_429")),
+            &Config::parse("").unwrap(),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.status, 429, "the final error must keep its status");
+    assert!(String::from_utf8_lossy(&error.body).contains("second quota"));
+    assert_eq!(seen.lock().unwrap().len(), 7, "a 429 recovery must stop");
+    {
+        let observations = telemetry.0.lock().unwrap();
+        assert_eq!(
+            observations.len(),
+            7,
+            "final failures must refresh final-wire telemetry"
+        );
+        assert!(
+            !observations[6]
+                .betas
+                .contains(&"thinking-binding-controls-2026-08-01".into())
+        );
+    }
+
+    let explicit_drop = body
+        .replace(
+            r#""type":"adaptive""#,
+            r#""type":"adaptive","block_binding":{"prefix_mismatch_behavior":"drop_block"}"#,
+        )
+        .replace("first", "reject_always");
+    let error = executor
+        .execute(&credential, with_usage(explicit_drop), &Config::parse("").unwrap())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.status, 400);
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        8,
+        "caller-owned drop_block must not be rewritten"
+    );
+
+    let error = executor
+        .execute(
+            &credential,
+            with_usage(body.replace("first", "reject_invalid")),
+            &Config::parse("").unwrap(),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.status, 400);
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        9,
+        "unrelated invalid requests must not retry"
+    );
+}
+
 #[tokio::test]
 async fn pipeline_reproduces_go_upstream_captures() {
     let captures: Value = serde_json::from_str(include_str!("testdata/go_captures.json")).unwrap();

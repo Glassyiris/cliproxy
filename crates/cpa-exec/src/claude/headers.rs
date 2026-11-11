@@ -363,6 +363,9 @@ pub(crate) fn build(p: &Plan<'_>) -> GoHeader {
         } else if p.stream {
             restore(&mut h);
         }
+        if rawjson::get(p.body, "thinking.block_binding").exists() {
+            h.set("Anthropic-Beta", betas::with_thinking_binding(h.get("Anthropic-Beta")));
+        }
         return h;
     }
 
@@ -462,6 +465,9 @@ pub(crate) fn build(p: &Plan<'_>) -> GoHeader {
         transport(&mut h);
     } else if p.stream {
         transport(&mut h);
+    }
+    if rawjson::get(p.body, "thinking.block_binding").exists() {
+        h.set("Anthropic-Beta", betas::with_thinking_binding(h.get("Anthropic-Beta")));
     }
     h
 }
@@ -621,6 +627,66 @@ mod tests {
         assert!(needs_cached_session(true, false, ""));
         assert!(needs_cached_session(false, true, " "));
         assert!(!needs_cached_session(true, true, "explicit-session"));
+    }
+
+    #[test]
+    fn custom_beta_keeps_required_thinking_binding() {
+        let settings = Settings::default();
+        let incoming = HeaderMap::new();
+        let attributes = [("header:anthropic-beta".into(), "claude-code-20250219".into())].into();
+        let h = build(&Plan {
+            api_key: "sk-ant-api03-FAKE",
+            bearer: true,
+            first_party: false,
+            count_tokens: false,
+            stream: true,
+            extra_betas: &[],
+            body: r#"{"model":"claude-opus-5-5","thinking":{"type":"adaptive","block_binding":{"prefix_mismatch_behavior":"drop_block"}}}"#,
+            incoming: &incoming,
+            confirmed: false,
+            helper: false,
+            cli_fingerprint: true,
+            use_oauth_betas: false,
+            session_id: "",
+            settings: &settings,
+            attributes: &attributes,
+            cpa_session: "",
+            device_profile: None,
+            cached_session_id: "",
+        });
+        assert_eq!(
+            h.get("Anthropic-Beta"),
+            "claude-code-20250219,thinking-binding-controls-2026-08-01"
+        );
+
+        let incoming: HeaderMap = [("anthropic-beta", "claude-code-20250219")]
+            .into_iter()
+            .map(|(k, v)| (k.parse().unwrap(), v.parse().unwrap()))
+            .collect();
+        let h = build(&Plan {
+            api_key: "sk-ant-oat01-FAKE",
+            bearer: true,
+            first_party: true,
+            count_tokens: false,
+            stream: false,
+            extra_betas: &[],
+            body: r#"{"model":"claude-opus-5-5","thinking":{"type":"adaptive","block_binding":{"prefix_mismatch_behavior":"drop_block"}}}"#,
+            incoming: &incoming,
+            confirmed: true,
+            helper: false,
+            cli_fingerprint: true,
+            use_oauth_betas: false,
+            session_id: "",
+            settings: &settings,
+            attributes: &Default::default(),
+            cpa_session: "",
+            device_profile: None,
+            cached_session_id: "",
+        });
+        assert_eq!(
+            h.get("Anthropic-Beta"),
+            "claude-code-20250219,thinking-binding-controls-2026-08-01"
+        );
     }
 
     #[test]
