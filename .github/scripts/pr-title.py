@@ -1,41 +1,40 @@
 #!/usr/bin/env python3
 """Check a pull request title, which becomes the squash commit's subject (CONTRIBUTING.md).
 
-    PR_TITLE='ui: keep Overview tiles whole' pr-title.py
-    pr-title.py 'ui: keep Overview tiles whole'
+    PR_TITLE='fix(ui): keep Overview tiles whole' pr-title.py
+    pr-title.py 'fix(ui): keep Overview tiles whole'
 
-The title is `<area>: <subject>`, or `<area>, <area>: <subject>` for a change that spans
-areas. Each area comes from AREAS. The subject is an imperative phrase that starts in lower
-case (a first word such as `OAuth` or `TLS`, with a capital after its first letter, may keep
-its case) and does not end with a full stop. The whole title fits in MAX_LENGTH characters,
-leaving room for the ` (#123)` GitHub appends.
+The title is `type(scope): subject`, where type is a change category, scope is one of the
+SCOPES below, and subject is an imperative phrase starting in lower case (a first word such as
+`OAuth` or `TLS`, with a capital after its first letter, may keep its case) without a full stop.
+The whole title fits in MAX_LENGTH characters, leaving room for the ` (#123)` GitHub appends.
 """
 import os
 import re
 import sys
 
-AREAS = {
+TYPES = {"feat", "fix", "refactor", "test", "style", "chore", "docs", "deps", "ci", "release"}
+SCOPES = {
     "cli": "the cook-router binary: command line, TUI, discovery, Home node (crates/cook-router)",
     "server": "HTTP routes, client auth, credential selection, management API (crates/cpa-server)",
     "exec": "upstream provider executors (crates/cpa-exec)",
     "translate": "request and response translation (crates/cpa-translate)",
     "core": "config, credentials, formats, shared helpers (crates/cpa-core, crates/cpa-common)",
     "plugin": "the native plugin host and plugin store (crates/cpa-plugin)",
-    "store": "remote and local config and auth stores (crates/cpa-store)",
     "home": "the Home control-plane client (crates/cpa-home)",
     "ui": "the dashboard (ui/)",
     "installer": "install.sh and install.ps1",
     "docker": "the Dockerfile and image",
     "packaging": "Homebrew, winget and AUR manifests (packaging/)",
     "ci": "workflows and CI scripts (.github/)",
-    "docs": "README, docs/ and other documentation",
     "deps": "dependency updates",
+    "docs": "README, docs/ and other documentation",
     "bench": "benchmarks, gates and the harness (bench/, harness/)",
     "tools": "repository tools (tools/)",
     "release": "release preparation: version, changelog",
 }
 MAX_LENGTH = 72
-TITLE = re.compile(r"(?P<areas>[a-z]+(?:, [a-z]+)*): (?P<subject>\S.*)")
+TITLE = re.compile(r"(?P<type>[a-z]+)\((?P<scope>[a-z]+)\): (?P<subject>\S.*)")
 
 
 def problems(title):
@@ -48,11 +47,12 @@ def problems(title):
         found.append(f"Shorten the title to {MAX_LENGTH} characters; it has {len(title)}.")
     match = TITLE.fullmatch(title)
     if not match:
-        found.append("Start the title with an area and a colon, such as `ui: keep Overview tiles whole`.")
+        found.append("Start the title with a type and scope, such as `fix(ui): keep Overview tiles whole`.")
         return found
-    unknown = [a for a in match["areas"].split(", ") if a not in AREAS]
-    if unknown:
-        found.append(f"Unknown area {', '.join(unknown)}; use one of: {', '.join(AREAS)}.")
+    if match["type"] not in TYPES:
+        found.append(f"Unknown type {match['type']}; use one of: {', '.join(sorted(TYPES))}.")
+    if match["scope"] not in SCOPES:
+        found.append(f"Unknown scope {match['scope']}; use one of: {', '.join(sorted(SCOPES))}.")
     subject = match["subject"]
     word = subject.split()[0]
     if word[0].isupper() and not any(c.isupper() for c in word[1:]):
