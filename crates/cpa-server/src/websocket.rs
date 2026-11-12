@@ -693,10 +693,15 @@ impl Connection {
             let payload = String::from_utf8_lossy(&frame).into_owned();
             // Dispatch owns pre-output failures so it can select another credential.
             // Forwarding still watches for loss while a client write is blocked.
-            let flow = tokio::select! {
-                biased;
-                flow = self.turn(&mut sink, payload) => Some(flow),
-                () = client.gone() => None,
+            let flow = {
+                // Keep the large turn future out of select!'s temporary tuple.
+                let turn = self.turn(&mut sink, payload);
+                tokio::pin!(turn);
+                tokio::select! {
+                    biased;
+                    flow = &mut turn => Some(flow),
+                    () = client.gone() => None,
+                }
             };
             // A finished turn wakes idle work such as the heap trim (one atomic load).
             cpa_common::idle::activity();
