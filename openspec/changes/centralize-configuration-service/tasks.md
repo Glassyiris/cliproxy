@@ -1,6 +1,6 @@
 ## 1. Canonical state and the application boundary
 
-- [ ] 1.1 Add private-fixture acceptance examples for memory-only queries, sole online ownership and commit/publication order; verify they fail for the current bypass/SQLite-read behavior before implementation, and record the existing `usage_record::tests::redirects_start_the_upload_measurements_over` and `watching::tests::incomplete_documents_keep_the_credential_until_valid_json` outcomes as an explicit baseline rather than hiding them.
+- [x] 1.1 Add private-fixture acceptance examples for memory-only queries, sole online ownership and commit/publication order; verify they fail for the current bypass/SQLite-read behavior before implementation, and record the existing `usage_record::tests::redirects_start_the_upload_measurements_over` and `watching::tests::incomplete_documents_keep_the_credential_until_valid_json` outcomes as an explicit baseline rather than hiding them.
 - [x] 1.2 Introduce complete service-owned canonical state and derived immutable runtime/domain views using the existing resource/credential/history representations; verify fixture loading preserves IDs/order, opaque plugin fields, raw credential bytes, revision/change history and cooldown checkpoints without a second mutable authority.
 - [x] 1.3 Implement memory-only resource, configuration, history and authorized credential queries; verify reads still work with storage disabled after bootstrap and readers retain the old coherent snapshot during a slow mutation.
 - [x] 1.4 Add serialized typed command admission with existing resource/credential preconditions and candidate validation; verify invalid input, stale preconditions and dry runs produce no persistence, memory publication or callbacks.
@@ -41,7 +41,7 @@
 - [x] 6.1 Implement owned function-callback registration with an atomic initial view and version-ordered delivery outside state/list locks; verify registration/publication races, read reentrancy, self-unsubscription, subscriber failure isolation and later-command scheduling without deadlock.
 - [x] 6.2 Migrate existing access/logging/usage/plugin/catalog/policy/credential consumers to the supplied authorized views; verify they observe the committed version, receive only relevant domain changes and do not reload ambient globals or obtain secret-bearing canonical exports unnecessarily.
 - [x] 6.3 Apply the existing cancellation/task tracking and join primitives to the component's async, blocking and child-process work; verify stop-and-wait ownership, bounded admission and no workspace use after cleanup without imposing a deadlocking global blocking-pool limit.
-- [ ] 6.4 Make isolated job inputs/results explicit with relevant version/registration fences; verify ambient configuration/CWD/environment changes do not alter the supplied computation and stale results cannot overwrite current state while unrelated changes do not spuriously reject valid output.
+- [x] 6.4 Make isolated job inputs/results explicit with relevant version/registration fences; verify ambient configuration/CWD/environment changes do not alter the supplied computation and stale results cannot overwrite current state while unrelated changes do not spuriously reject valid output.
 
 ## 7. Retire bypasses and update operational guidance
 
