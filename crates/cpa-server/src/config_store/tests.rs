@@ -3,6 +3,9 @@ use super::*;
 use serde_json::json;
 
 mod database;
+mod encoding;
+mod operation_resources;
+mod ordered;
 
 impl ConfigStore {
     fn commit(&self, ops: &[Op], actor: &str, message: &str, dry_run: bool) -> Result<Committed, CommitError> {
@@ -261,27 +264,27 @@ fn moves_reorder_list_entries() {
 }
 
 #[test]
-fn another_connection_s_commit_is_noticed() {
-    let dir = std::env::temp_dir().join(format!("cook-config-poll-{}", uuid::Uuid::new_v4()));
-    let path = dir.join("cook.db");
-    let server = crate::testing::config_store(&path).unwrap();
-    assert!(!server.changed_elsewhere().unwrap());
+fn owner_mutations_publish_current_memory_without_reloading() {
+    let dir = std::env::temp_dir().join(format!("cook-config-owner-{}", uuid::Uuid::new_v4()));
+    let server = std::sync::Arc::new(crate::testing::config_store(&dir.join("cook.db")).unwrap());
     server
         .commit(&[put("setting", "routing", json!({}))], "t", "", false)
         .unwrap();
-    assert!(!server.changed_elsewhere().unwrap(), "its own commit");
-    let cli = crate::testing::config_store(&path).unwrap();
-    cli.commit(
-        &[put("setting", "routing", json!({"strategy": "fill-first"}))],
-        "cli",
-        "",
-        false,
-    )
-    .unwrap();
-    assert!(server.changed_elsewhere().unwrap());
-    assert!(!server.changed_elsewhere().unwrap());
+    let retained = server.load().unwrap();
+    let adapter = server.clone();
+    adapter
+        .commit(
+            &[put("setting", "routing", json!({"strategy": "fill-first"}))],
+            "adapter",
+            "",
+            false,
+        )
+        .unwrap();
     assert_eq!(server.load().unwrap().rev, 2);
-    drop((server, cli));
+    assert_eq!(retained.rev, 1);
+    assert_eq!(retained.resources[0].spec, json!({}));
+    assert_eq!(server.load().unwrap().resources[0].spec["strategy"], "fill-first");
+    drop((adapter, server));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -357,29 +360,41 @@ fn collection_and_resource_preconditions_are_checked_inside_the_write() {
 }
 
 #[test]
-fn unsupported_database_kinds_fail_closed_on_reads_and_writes() {
-    let store = ConfigStore::memory();
+fn unsupported_database_kinds_are_rejected_before_bootstrap() {
+    let dir = std::env::temp_dir().join(format!("cook-config-unsupported-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("original.db");
+    let store = crate::testing::config_store(&original).unwrap();
     store.import_yaml("", "t", "").unwrap();
-    store
-        .conn()
-        .execute(
+    let bytes = std::fs::read(&original).unwrap();
+    for (name, sql) in [
+        (
+            "resource",
             "INSERT INTO resource(kind,id,spec,rev,created_rev) VALUES ('future','x','{}',1,1)",
-            [],
-        )
-        .unwrap();
-    assert!(store.resources().is_err());
-    assert!(store.load().is_err());
-    assert_eq!(store.commit(&[], "t", "", false).unwrap_err().code, "store_failed");
-    store.conn().execute("DELETE FROM resource", []).unwrap();
-    store
-        .conn()
-        .execute(
+        ),
+        (
+            "history",
             "INSERT INTO change(rev,kind,id,after) VALUES (1,'future','x','{\"ord\":0,\"spec\":{}}')",
-            [],
-        )
-        .unwrap();
-    assert!(store.state_at(1).is_err());
-    assert!(store.revision(1).is_err());
+        ),
+    ] {
+        let path = dir.join(format!("{name}.db"));
+        std::fs::write(&path, &bytes).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(sql, []).unwrap();
+        drop(conn);
+        let unsupported = std::fs::read(&path).unwrap();
+        assert!(
+            crate::testing::config_store(&path).is_err(),
+            "unsupported {name} was admitted"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            unsupported,
+            "failed bootstrap changed the input artifact"
+        );
+    }
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -409,16 +424,18 @@ fn public_digests_do_not_fingerprint_secrets() {
 }
 
 #[test]
-fn snapshot_revision_and_rows_never_cross_external_commits() {
+fn snapshot_revision_and_rows_never_cross_owner_commits() {
     let dir = std::env::temp_dir().join(format!("cook-config-snapshot-{}", uuid::Uuid::new_v4()));
     let path = dir.join("cook.db");
-    let store = crate::testing::config_store(&path).unwrap();
+    let store = Arc::new(crate::testing::config_store(&path).unwrap());
     store
         .commit(&[put("setting", "server", json!({"port":9000}))], "t", "", false)
         .unwrap();
     let writer_path = path.clone();
+    let owner = store.clone();
     let writer = std::thread::spawn(move || {
-        let writer = crate::testing::config_store(&writer_path).unwrap();
+        assert!(crate::testing::config_store(&writer_path).is_err());
+        let writer = owner;
         for port in 9001..9020 {
             writer
                 .commit(&[put("setting", "server", json!({"port":port}))], "t", "", false)

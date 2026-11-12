@@ -1,4 +1,4 @@
-//! Offline config commands use the same SQLite authority as the server.
+//! Explicit online imports use the management API; offline commands require sole ownership.
 
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -19,6 +19,12 @@ pub struct Cli {
     working_dir: Option<PathBuf>,
     #[arg(long, global = true)]
     log_file: Option<PathBuf>,
+    /// Explicit management API destination; no local fallback on request failure.
+    #[arg(long, global = true, default_value = "")]
+    management_base_url: String,
+    /// Management password for the selected service.
+    #[arg(long, global = true, hide = true, default_value = "")]
+    password: String,
     #[command(subcommand)]
     command: Top,
 }
@@ -105,7 +111,12 @@ fn existing(db: &Path) -> anyhow::Result<ConfigStore> {
         "config database {} does not exist; run config import first",
         db.display()
     );
-    ConfigStore::open_without_migration(db)
+    match ConfigStore::open_without_migration(db) {
+        // A running owner keeps publishing complete single-file snapshots: reading one
+        // is not a competing mutation.
+        Err(error) if error.is::<cpa_server::config_store::AlreadyOwned>() => ConfigStore::open_published(db),
+        result => result,
+    }
 }
 
 fn export(store: &ConfigStore, secrets: bool) -> anyhow::Result<String> {
@@ -128,11 +139,27 @@ pub fn execute(args: Vec<String>) -> anyhow::Result<()> {
 fn run(cli: Cli) -> anyhow::Result<()> {
     let db = crate::db_path(&cli.db, &cli.config);
     let Top::Config { command } = cli.command;
+    let online = !cli.management_base_url.trim().is_empty();
+    anyhow::ensure!(
+        !online || matches!(&command, Command::Import { .. }),
+        "online config commands currently support import only"
+    );
     match command {
         Command::Import { file } => {
             let text = read_config(&file)?;
             // Parse and validate before creating a database; replace commits atomically.
             let resources = import_config(&text)?;
+            if online {
+                let client = crate::tui::Client::new(&cli.management_base_url, &cli.password);
+                let document = serde_json::to_string(&resources::export_json(0, &resources, true))?;
+                let revision = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?
+                    .block_on(client.import_config(document))
+                    .map_err(anyhow::Error::msg)?;
+                println!("Imported revision {revision} through the management API");
+                return Ok(());
+            }
             let store = ConfigStore::open(&db)?;
             let done = store.replace(resources, "cli", &format!("import {}", file.display()), false)?;
             println!("Imported revision {} into {}", done.rev, db.display());

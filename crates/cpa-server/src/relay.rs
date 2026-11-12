@@ -91,14 +91,20 @@ async fn conditional_auth(State(rt): State<Arc<Runtime>>, req: Request, next: Ne
     crate::access::require_client_key(State(rt), req, next).await
 }
 
-async fn upgrade(State(rt): State<Arc<Runtime>>, ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>) -> Response {
+async fn upgrade(
+    State(rt): State<Arc<Runtime>>,
+    owner: Option<axum::Extension<crate::listener::ConnectionWork>>,
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+) -> Response {
     let Ok(ws) = ws else {
         return crate::websocket::upgrade_rejected();
     };
     let relay = rt.executors.google.aistudio.relay.clone();
-    ws.max_message_size(MAX_MESSAGE)
-        .max_frame_size(MAX_MESSAGE)
-        .on_upgrade(move |socket| serve(relay, socket))
+    crate::listener::websocket(
+        ws.max_message_size(MAX_MESSAGE).max_frame_size(MAX_MESSAGE),
+        owner,
+        move |socket| serve(relay, socket),
+    )
 }
 
 /// gorilla's `CloseError` text for a close frame.

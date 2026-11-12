@@ -8,22 +8,29 @@
 //! - `GET /revisions`, `GET /revisions/{rev}`, `POST /revisions/{rev}/restore`.
 //! - `GET /export`, `POST /import`: a versioned resource export or a YAML config.
 //!
-//! All writes accept `?dry_run=true` and `?message=`. Import and restore require
+//! - `POST /credentials/batch`: managed raw documents committed atomically.
+//!
+//! Configuration writes accept `?dry_run=true` and `?message=`. Import and restore require
 //! a concrete `If-Match` revision from a collection read, effective config or export;
 //! a wildcard is insufficient. The condition is checked inside the write transaction,
 //! including dry runs.
 //! Bodies are bounded and read only after management authentication. Responses never
-//! expose parser or database error text, and ordinary reads mask every secret.
+//! expose parser or database error text. Resource reads mask secrets; the explicitly
+//! authorized credential source view carries original bytes for client merge/CAS.
 
-use std::sync::Arc;
+use std::collections::BTreeSet;
+use std::sync::{Arc, PoisonError};
 
 use axum::body::{Bytes, HttpBody as _};
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header, request::Parts};
 use axum::response::{IntoResponse, Response};
+use base64::Engine as _;
+use cpa_core::gostr::GoStr as _;
 use futures_util::StreamExt as _;
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value as Json, json};
+use sha2::{Digest as _, Sha256};
 
 use super::Management;
 use crate::config_store::{CommitError, Committed, Kind, Op, Precondition, Resource, resources};
@@ -430,6 +437,234 @@ impl LimitedBody {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CredentialBatchQuery {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CredentialBatch {
+    #[serde(default)]
+    documents: Vec<CredentialDocument>,
+    #[serde(default)]
+    deletions: Vec<CredentialDeletion>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CredentialDeletion {
+    name: String,
+    if_match: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CredentialDocument {
+    name: String,
+    data: String,
+    /// SHA-256 of the current raw document, not a configuration revision.
+    if_match: Option<String>,
+    #[serde(default)]
+    if_none_match: bool,
+}
+
+/// One authorized immutable source view, including documents not yet parsed.
+pub(crate) async fn credential_sources(State(state): State<Arc<Management>>) -> Result<Response, AdminError> {
+    blocking(state, |state| {
+        if state.rt.store().is_home() {
+            return Err(AdminError::new(
+                state,
+                404,
+                "not_available",
+                "credentials belong to the remote authority",
+            ));
+        }
+        let db = state.rt.store().credential_backend();
+        let root = db.auth_dir();
+        let documents = db
+            .documents()
+            .map_err(|_| AdminError::store(state))?
+            .into_iter()
+            .filter_map(|(path, bytes)| {
+                let name = path.file_name()?.to_str()?;
+                if path.parent() != Some(root.as_path()) || !super::auth_files::managed_name(name) {
+                    return None;
+                }
+                Some(
+                    json!({"name": name, "data": base64::engine::general_purpose::STANDARD.encode(&bytes),
+                    "sha256": format!("{:x}", Sha256::digest(&bytes))}),
+                )
+            })
+            .collect::<Vec<_>>();
+        let auth_dir = root.to_str().ok_or_else(|| AdminError::store(state))?;
+        Ok(send(
+            state,
+            StatusCode::OK,
+            &json!({"auth_dir": auth_dir, "documents": documents}),
+            None,
+        ))
+    })
+    .await
+}
+
+pub(crate) async fn credential_batch(
+    State(state): State<Arc<Management>>,
+    AdminQuery(_): AdminQuery<CredentialBatchQuery>,
+    body: LimitedBody,
+) -> Result<Response, AdminError> {
+    let batch: CredentialBatch = body.json(&state, None)?;
+    let invalid = || AdminError::new(&state, 400, "invalid_credential_batch", "invalid credential batch");
+    if (batch.documents.is_empty() && batch.deletions.is_empty()) || state.rt.store().is_home() {
+        return Err(invalid());
+    }
+    let db = state.rt.store().credential_backend();
+    let mut names = BTreeSet::new();
+    let mut documents = Vec::with_capacity(batch.documents.len());
+    for document in batch.documents {
+        let name = &document.name;
+        if !super::auth_files::managed_name(name)
+            || !names.insert(if cfg!(windows) { name.go_lower() } else { name.clone() })
+            || document.if_match.as_ref().is_some_and(|hash| {
+                document.if_none_match || hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit())
+            })
+        {
+            return Err(invalid());
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&document.data)
+            .map_err(|_| invalid())?;
+        let path = db.auth_dir().join(name);
+        documents.push((document, path, bytes));
+    }
+    let mut deletions = Vec::with_capacity(batch.deletions.len());
+    for deletion in batch.deletions {
+        let name = &deletion.name;
+        if !super::auth_files::managed_name(name)
+            || !names.insert(if cfg!(windows) { name.go_lower() } else { name.clone() })
+            || deletion.if_match.len() != 64
+            || !deletion.if_match.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(invalid());
+        }
+        let path = db.auth_dir().join(name);
+        deletions.push((deletion, path));
+    }
+    // Stable order prevents multi-document writers from inverting protocol locks.
+    // Wait off the async worker and without holding either management or owner gate.
+    let mut paths: Vec<_> = documents
+        .iter()
+        .map(|(_, path, _)| path.clone())
+        .chain(deletions.iter().map(|(_, path)| path.clone()))
+        .collect();
+    paths.sort();
+    let mut locks = Vec::with_capacity(paths.len());
+    for path in paths {
+        locks.push(
+            state
+                .rt
+                .lock_codex_file(&path)
+                .await
+                .map_err(|_| AdminError::store(&state))?,
+        );
+    }
+    blocking(state, move |state| {
+        let _locks = locks;
+        let _disk = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut command = db.command().map_err(|_| AdminError::store(state))?;
+        let mut prepared = Vec::with_capacity(documents.len());
+        for (document, path, bytes) in &documents {
+            let (target, _, synthesized, _) =
+                super::auth_files::prepare_upload(state, &document.name, bytes).map_err(|(invalid, _)| {
+                    if invalid {
+                        AdminError::new(state, 400, "invalid_credential", "invalid credential document")
+                    } else {
+                        AdminError::store(state)
+                    }
+                })?;
+            if target != *path {
+                return Err(AdminError::new(
+                    state,
+                    400,
+                    "invalid_credential_target",
+                    "invalid managed target",
+                ));
+            }
+            if document.if_none_match || document.if_match.is_some() {
+                let current = command.read(path).map_err(|_| AdminError::store(state))?;
+                let conflict = document.if_none_match && current.is_some()
+                    || document.if_match.as_ref().is_some_and(|expected| {
+                        current
+                            .as_ref()
+                            .is_none_or(|bytes| !format!("{:x}", Sha256::digest(bytes)).eq_ignore_ascii_case(expected))
+                    });
+                if conflict {
+                    return Err(AdminError::new(
+                        state,
+                        412,
+                        "precondition_failed",
+                        "a credential precondition failed",
+                    ));
+                }
+            }
+            prepared.push((path.clone(), synthesized));
+        }
+        for (deletion, path) in &deletions {
+            let current = command.read(path).map_err(|_| AdminError::store(state))?;
+            if current
+                .as_ref()
+                .is_none_or(|bytes| !format!("{:x}", Sha256::digest(bytes)).eq_ignore_ascii_case(&deletion.if_match))
+            {
+                return Err(AdminError::new(
+                    state,
+                    412,
+                    "precondition_failed",
+                    "a credential precondition failed",
+                ));
+            }
+        }
+        let documents: Vec<_> = documents.into_iter().map(|(_, path, bytes)| (path, bytes)).collect();
+        let mut changes: Vec<_> = documents
+            .iter()
+            .map(|(path, bytes)| (path.clone(), Some(bytes.as_slice())))
+            .collect();
+        changes.extend(deletions.iter().map(|(_, path)| (path.clone(), None)));
+        // Validation is shared with upload, but this port preserves original bytes.
+        command
+            .apply_documents(&changes)
+            .map_err(|_| AdminError::store(state))?;
+        drop(command);
+        for path in prepared
+            .iter()
+            .map(|(path, _)| path)
+            .chain(deletions.iter().map(|(_, path)| path))
+        {
+            state.oauth.invalidate_siwc(path);
+        }
+        let mut uploads = Vec::new();
+        {
+            let mut fallbacks = state.fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
+            for (_, path) in &deletions {
+                fallbacks.remove(path);
+            }
+            for ((path, synthesized), (_, bytes)) in prepared.into_iter().zip(&documents) {
+                if let Some(credential) = synthesized {
+                    fallbacks.remove(&path);
+                    uploads.push((credential, Sha256::digest(bytes).into()));
+                } else {
+                    fallbacks.insert(path);
+                }
+            }
+        }
+        state.publish_uploads((*state.rt.config()).clone(), None, uploads);
+        state.credential_changes.notify_one();
+        let mut receipt = json!({"status": "ok", "saved": documents.len()});
+        if !deletions.is_empty() {
+            receipt["deleted"] = deletions.len().into();
+        }
+        Ok(send(state, StatusCode::OK, &receipt, None))
+    })
+    .await
+}
+
 fn checked(kind: Kind, id: &str, condition: Option<Precondition>, op: Op) -> Vec<Op> {
     let revisions = match condition {
         Some(Precondition::Revision(rev)) => Some(Some(vec![rev])),
@@ -475,7 +710,10 @@ async fn blocking(
     f: impl FnOnce(&Management) -> Result<Response, AdminError> + Send + 'static,
 ) -> Result<Response, AdminError> {
     let fallback = state.clone();
-    tokio::task::spawn_blocking(move || f(&state))
+    state
+        .work
+        .clone()
+        .spawn_blocking(move || f(&state))
         .await
         .map_err(|_| AdminError::store(&fallback))?
 }

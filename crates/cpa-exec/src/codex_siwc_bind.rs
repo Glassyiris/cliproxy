@@ -377,7 +377,7 @@ fn show_url(url: &str, port: u16, no_browser: bool) {
 }
 
 /// [`bind`] through `oauth` and `interaction` (tests use local endpoints).
-pub(crate) async fn bind_with(
+pub async fn bind_with(
     cfg: &Config,
     target: &str,
     port: u16,
@@ -385,7 +385,14 @@ pub(crate) async fn bind_with(
     interaction: Interaction,
     save: Option<crate::login_store::LoginSave>,
 ) -> Result<PathBuf, BindError> {
-    let path = resolve(&cfg.auth_dir, target).map_err(BindError::Log)?;
+    let path = {
+        let auth_dir = cfg.auth_dir.clone();
+        let target = target.to_owned();
+        tokio::task::spawn_blocking(move || resolve(&auth_dir, &target))
+            .await
+            .map_err(|error| BindError::Log(format!("siwc-bind: {error}")))?
+            .map_err(BindError::Log)?
+    };
     let device = {
         let path = path.clone();
         tokio::task::spawn_blocking(move || device_id(&path))

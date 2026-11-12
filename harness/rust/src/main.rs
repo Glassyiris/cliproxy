@@ -46,11 +46,14 @@ async fn main() -> anyhow::Result<()> {
     rt.start_auto_refresh();
     let management =
         cpa_server::management::Management::with_options(rt.clone(), store, cpa_server::management::Options::default());
-    let _watcher = cpa_server::watching::start(&management);
+    let watcher = cpa_server::watching::start(&management);
     let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()))
         .layer(axum::middleware::from_fn(cpa_server::management::cors));
     let app = cpa_server::observability::router(&rt, app);
     // The production listener (crates/cook-router uses the same call), plain HTTP.
-    cpa_server::listener::serve_with_resp(listener, app, None, Some(management)).await?;
+    let served = cpa_server::listener::serve_with_resp(listener, app, None, Some(management)).await;
+    watcher.shutdown().await?;
+    rt.shutdown_codex_refreshes().await;
+    served?;
     Ok(())
 }

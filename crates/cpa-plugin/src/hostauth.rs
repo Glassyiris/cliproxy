@@ -86,7 +86,80 @@ pub struct SavedRefresh {
 }
 
 /// The server's credential manager as the plugin host uses it.
+/// Internal job provenance, not a plugin wire field or a client save flag.
+#[derive(Clone)]
+pub enum AuthSaveJob {
+    LoginStart {
+        provider: String,
+    },
+    LoginPoll {
+        provider: String,
+        session: String,
+    },
+    Refresh {
+        provider: String,
+        id: String,
+        registration: u64,
+        version: u64,
+    },
+}
+
+/// A job's canonical source and the runtime admission its own save may install.
+#[derive(Clone, Copy, Debug)]
+pub struct AuthSaveSourceFence {
+    pub sha256: [u8; 32],
+    pub registration: u64,
+    pub version: u64,
+}
+
+pub trait GrantedAuthSave: Send + Sync {
+    fn source_fence(&self, _path: &Path, _live: &std::sync::atomic::AtomicBool) -> Option<AuthSaveSourceFence> {
+        None
+    }
+    fn save(
+        &self,
+        auths: SavedAuths,
+        data: &[u8],
+        write: &mut dyn FnMut() -> Result<(), String>,
+        live: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), String>;
+}
+
+pub struct AuthSaveGrant {
+    authority: Arc<dyn GrantedAuthSave>,
+    live: std::sync::atomic::AtomicBool,
+}
+
+/// A single owned job closes its authority on completion/cancellation, even if a
+/// callback retained a RequestScope clone while waiting for owner admission.
+pub struct AuthSaveJobScope(Arc<AuthSaveGrant>);
+impl AuthSaveJobScope {
+    pub fn new(authority: Arc<dyn GrantedAuthSave>) -> Self {
+        Self(Arc::new(AuthSaveGrant {
+            authority,
+            live: std::sync::atomic::AtomicBool::new(true),
+        }))
+    }
+    pub fn source_fence(&self, path: &Path) -> Option<AuthSaveSourceFence> {
+        self.0.authority.source_fence(path, &self.0.live)
+    }
+    pub fn request_scope(&self) -> crate::callbacks::RequestScope {
+        crate::callbacks::RequestScope {
+            auth_save_grant: Some(self.0.clone()),
+            ..Default::default()
+        }
+    }
+}
+impl Drop for AuthSaveJobScope {
+    fn drop(&mut self) {
+        self.0.live.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 pub trait AuthManager: Send + Sync {
+    fn grant_job(&self, _job: AuthSaveJob) -> Option<AuthSaveJobScope> {
+        None
+    }
     /// False for a persistence-only CLI adapter without a runtime credential set.
     fn manages_auths(&self) -> bool {
         true
@@ -135,6 +208,10 @@ fn err(message: impl Into<String>) -> CallbackError {
 }
 
 impl Host {
+    pub fn auth_save_job(&self, job: AuthSaveJob) -> Option<AuthSaveJobScope> {
+        self.auth_manager()?.grant_job(job)
+    }
+
     /// Go `SetAuthManager`.
     pub fn set_auth_manager(&self, manager: Option<Arc<dyn AuthManager>>) {
         let previous = std::mem::replace(
@@ -331,6 +408,18 @@ impl Host {
     pub(crate) fn host_auth_save(&self, caller: &crate::callbacks::Caller, raw: &[u8]) -> Result<Bytes, CallbackError> {
         let req: HostAuthSaveRequest =
             gojson::from_slice(raw).map_err(|e| err(format!("decode host auth save request: {e}")))?;
+        // Existing callback correlation, authenticated against the plugin instance.
+        // ponytail: a plugin omitting this existing ID has ordinary save authority
+        // only; it must return its result or propagate a refused save, not guess a job.
+        let context: serde_json::Value = serde_json::from_slice(raw).map_err(|_| err("invalid auth save context"))?;
+        let callback_id = context
+            .get("host_callback_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let scope = self.http_scope(caller, callback_id)?;
+        if scope.cancel.is_cancelled() {
+            return Err(err("auth save job cancelled"));
+        }
         // validateHostAuthSaveRequest.
         let name = req.name.trim();
         if name.is_empty() || name.contains(['/', '\\']) || (cfg!(windows) && has_volume_name(name)) {
@@ -366,9 +455,16 @@ impl Host {
             }
         };
         let mut write = || write_auth_file(&dst, &data).map_err(|e| format!("failed to write auth file: {e}"));
-        match self.auth_manager() {
-            Some(manager) => manager.save(auths, &mut write).map_err(err)?,
-            None => write().map_err(err)?,
+        if let Some(grant) = scope.auth_save_grant {
+            grant
+                .authority
+                .save(auths, &data, &mut write, &grant.live)
+                .map_err(err)?;
+        } else {
+            match self.auth_manager() {
+                Some(manager) => manager.save(auths, &mut write).map_err(err)?,
+                None => write().map_err(err)?,
+            }
         }
         Ok(abi::ok_envelope(&HostAuthSaveResponse {
             name: name.to_owned(),

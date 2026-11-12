@@ -1,27 +1,82 @@
-//! Immutable snapshots at `--db`, with the mutable SQLite database kept in OS tmp.
+//! Immutable snapshots at `--db`, with a private recoverable checkpoint in OS tmp.
 use super::*;
 use anyhow::{Context as _, bail};
-use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-static HANDLES: OnceLock<Mutex<HashMap<PathBuf, usize>>> = OnceLock::new();
-
-// This field is dropped after ConfigStore's connection, so cleanup never unlinks
-// a database while that handle still has it open.
+// A store owns the working directory even while no SQLite connection is open.
 pub(super) struct Disk {
     root: PathBuf,
     directory: PathBuf,
+    unresolved: AtomicBool,
+    // Released only after Drop has finished checkpoint/workspace cleanup.
+    _ownership: File,
+}
+
+impl Disk {
+    pub(super) fn recovery(&self, unresolved: bool) {
+        self.unresolved.store(unresolved, Ordering::Release);
+    }
+    pub(super) fn connection(&self, _store: &ConfigStore, _writing: bool) -> anyhow::Result<StoreConnection<'static>> {
+        // Reads also own this lock: a reload must never replace an inode that
+        // another operation still has open, even in another process.
+        let coordination = lock(&self.root)?;
+        let path = self.directory.join("live.db");
+        let metadata = std::fs::symlink_metadata(&path)?;
+        anyhow::ensure!(metadata.is_file() && owned(&metadata), "unsafe temporary database file");
+        // Recovery/seeding belongs to startup or the validated copy above, never
+        // silently create a blank database after a failed ordinary reopen.
+        let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        super::db::configure(&conn, true)?;
+        Ok(StoreConnection::Disk {
+            conn,
+            _coordination: Box::new(coordination),
+        })
+    }
 }
 
 impl ConfigStore {
-    pub(crate) fn write_guard(&self) -> anyhow::Result<Option<Connection>> {
-        self.disk.as_ref().map(|disk| lock(&disk.root)).transpose()
+    pub(crate) fn working_directory(&self) -> Option<&Path> {
+        self.disk.as_ref().map(|disk| disk.directory.as_path())
     }
 
-    pub(crate) fn publish(&self, conn: &Connection) -> anyhow::Result<()> {
+    pub(super) fn persist(
+        &self,
+        retained: &state::Pending,
+        pending: &mut Option<state::Pending>,
+    ) -> anyhow::Result<()> {
+        let state = &retained.state;
+        let Some(disk) = &self.disk else { return Ok(()) };
+        // Coordinate replacement without ever opening the old checkpoint in SQLite.
+        let _coordination = lock(&disk.root)?;
+        let mut image = install(
+            &disk.directory.join("live.db"),
+            |temporary| state.encode(temporary),
+            || {
+                *pending = Some(retained.clone());
+                disk.recovery(true);
+            },
+        )?;
         if let Some(path) = &self.path {
-            publish(conn, path)?;
+            // This handle contains only the newly encoded immutable bytes, not a
+            // reopened live SQL database. Readers of older inodes remain valid.
+            install(
+                path,
+                |temporary| {
+                    std::io::copy(&mut image, &mut OpenOptions::new().write(true).open(temporary)?)?;
+                    Ok(())
+                },
+                || {},
+            )?;
+            #[cfg(test)]
+            crate::testing::publication_effects::installed(path);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn publish(&self, state: &State) -> anyhow::Result<()> {
+        if let Some(path) = &self.path {
+            install(path, |temporary| state.encode(temporary), || {})?;
         }
         Ok(())
     }
@@ -32,35 +87,30 @@ pub(super) fn open(path: &Path, migrate: bool) -> anyhow::Result<ConfigStore> {
 }
 
 pub(super) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Result<ConfigStore> {
+    let path = canonical_path(path, migrate)?;
+    let ownership = ownership(&path)?;
     private_dir(&root)?;
     let _coordination = lock(&root)?;
-    let path = canonical_path(path, migrate)?;
     let directory = root.join(path_hash(&path));
-    sweep(&root, &directory)?;
+    // Other namespaces may contain valid unacknowledged grants. Only their own
+    // resumed owner can decide that recovery is settled and clean them up.
     private_dir(&directory)?;
-    let active = active_references(&directory)?;
-    private_dir(&directory.join("refs"))?;
+    // The native guard already proves exclusive ownership; PID markers can be stale.
     let live = directory.join("live.db");
     let existing = match std::fs::metadata(&live) {
         Ok(metadata) if metadata.len() > 0 => match open_live(&live) {
             Ok(conn) => {
-                let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+                // Unknown newer tables are not permission to discard their data.
+                let version = super::db::schema_version(&conn)?;
                 let tables: i64 = conn.query_row(
                     "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('resource', 'revision', 'change')",
                     [], |row| row.get(0),
                 )?;
-                if version > 0 && tables == 3 {
-                    Some(conn)
-                } else if active {
-                    bail!("temporary config database is uninitialized while another process is using it");
-                } else {
-                    None
-                }
+                if version > 0 && tables == 3 { Some(conn) } else { None }
             }
-            Err(error) if !active && corrupt(&error) => None,
+            Err(error) if corrupt(&error) => None,
             Err(error) => return Err(error).context("resume temporary config database"),
         },
-        Ok(_) if active => bail!("temporary config database is empty while another process is using it"),
         Ok(_) => None,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
@@ -72,7 +122,6 @@ pub(super) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Resu
                 // A broken working copy is disposable only when no process owns it.
                 std::fs::remove_dir_all(&directory)?;
                 private_dir(&directory)?;
-                private_dir(&directory.join("refs"))?;
             }
             if path.exists() && std::fs::metadata(&path)?.len() > 0 {
                 super::db::private_files(&path)?;
@@ -93,9 +142,17 @@ pub(super) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Resu
     let mut store = ConfigStore::init(conn, Some(path.clone()), migrate)?;
     // Includes recovery of a committed live transaction whose earlier publication
     // failed. Readiness is never acknowledged before the snapshot catches up.
-    publish(&store.conn(), &path)?;
-    register(&directory)?;
-    store.disk = Some(Disk { root, directory });
+    // Bootstrap-only conversion preserves explicit old-schema/offline-read behavior.
+    // Ordinary publications below encode the canonical State, not this connection.
+    publish_bootstrap(&*store.conn()?, &path)?;
+    store.disk = Some(Disk {
+        root,
+        directory,
+        unresolved: AtomicBool::new(false),
+        _ownership: ownership,
+    });
+    // The runtime retains only paths/lifetime ownership, not a SQLite connection.
+    drop(store.conn.take());
     Ok(store)
 }
 
@@ -113,6 +170,56 @@ fn canonical_path(path: &Path, create: bool) -> anyhow::Result<PathBuf> {
     let parent = std::fs::canonicalize(parent)?;
     Ok(parent.join(path.file_name().context("config database needs a file name")?))
 }
+
+fn ownership(path: &Path) -> anyhow::Result<File> {
+    #[cfg(not(any(unix, windows)))]
+    bail!(
+        "exclusive configuration ownership is unsupported for {}",
+        path.display()
+    );
+    #[cfg(any(unix, windows))]
+    {
+        // Independent of TMPDIR/working roots and atomic replacements of the DB.
+        // This generated lock is never a backup input and must never be unlinked
+        // during workspace cleanup: contenders must keep the same lock inode.
+        let directory = path
+            .parent()
+            .context("config database needs a parent")?
+            .join(".cook-router-owners");
+        private_dir(&directory)?;
+        // Use the native name so filesystem case aliases share the same lock.
+        let file = cpa_exec::codex_siwc_bind::open_lock_file(
+            &directory.join(path.file_name().context("config database needs a file name")?),
+        )
+        .map_err(anyhow::Error::msg)
+        .context("open configuration ownership guard")?;
+        let metadata = file.metadata()?;
+        anyhow::ensure!(
+            metadata.is_file() && owned(&metadata),
+            "unsafe configuration ownership guard"
+        );
+        if !cpa_exec::codex_siwc_bind::try_lock(&file).map_err(anyhow::Error::msg)? {
+            return Err(AlreadyOwned(path.to_owned()).into());
+        }
+        Ok(file)
+    }
+}
+
+/// Another service or offline command owns the selected database.
+#[derive(Debug)]
+pub struct AlreadyOwned(PathBuf);
+
+impl std::fmt::Display for AlreadyOwned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "config database {} is already owned; use the authenticated management API for online changes",
+            self.0.display()
+        )
+    }
+}
+
+impl std::error::Error for AlreadyOwned {}
 
 fn path_hash(path: &Path) -> String {
     Sha256::digest(path.as_os_str().as_encoded_bytes())
@@ -153,19 +260,52 @@ fn lock(root: &Path) -> anyhow::Result<Connection> {
     Ok(conn) // Dropping the connection releases the reserved SQLite write lock.
 }
 
-fn publish(conn: &Connection, destination: &Path) -> anyhow::Result<()> {
+/// Bootstrap/migration is the only publication sourced from an imported database.
+fn publish_bootstrap(conn: &Connection, destination: &Path) -> anyhow::Result<()> {
+    install(
+        destination,
+        |temporary| {
+            conn.execute(
+                "VACUUM INTO ?1",
+                [temporary.to_str().context("snapshot directory must be UTF-8")?],
+            )?;
+            Ok(())
+        },
+        || {},
+    )?;
+    Ok(())
+}
+
+fn install(
+    destination: &Path,
+    build: impl FnOnce(&Path) -> anyhow::Result<()>,
+    replaced: impl FnOnce(),
+) -> anyhow::Result<File> {
     let temporary = destination.with_file_name(format!(".cook-snapshot-{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| {
         let file = private_file(&temporary)?;
-        conn.execute(
-            "VACUUM INTO ?1",
-            [temporary.to_str().context("snapshot directory must be UTF-8")?],
-        )?;
+        build(&temporary)?;
         file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temporary, destination).context("publish config database snapshot")?;
+        #[cfg(test)]
+        crate::testing::installation_effects::run(
+            destination,
+            crate::testing::installation_effects::Stage::BeforeReplace,
+        )?;
+        let replacement = replace(&temporary, destination);
+        // A write-through rename can report a metadata-flush error after moving
+        // the file. The vanished construction name still requires recovery.
+        if replacement.is_ok() || !temporary.try_exists()? {
+            replaced();
+        }
+        replacement.context("publish config database snapshot")?;
+        #[cfg(test)]
+        crate::testing::installation_effects::run(
+            destination,
+            crate::testing::installation_effects::Stage::AfterReplace,
+        )?;
+        #[cfg(unix)]
         sync_directory(destination.parent().expect("canonical database parent"))?;
-        Ok(())
+        Ok(file)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
@@ -173,16 +313,51 @@ fn publish(conn: &Connection, destination: &Path) -> anyhow::Result<()> {
     result
 }
 
-fn sync_directory(path: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    File::open(path)?.sync_all()?;
-    #[cfg(not(unix))]
-    let _ = path;
+#[cfg(unix)]
+fn replace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW};
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    // Same-directory rename only: never request COPY_ALLOWED, which can expose
+    // partial copied contents. WRITE_THROUGH completes native metadata durability.
+    // https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-movefileexw
+    // SAFETY: both buffers are NUL-terminated and remain valid throughout the call.
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
     Ok(())
 }
 
+#[cfg(not(any(unix, windows)))]
+fn replace(_source: &Path, _destination: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "durable snapshot replacement is unsupported on this platform",
+    ))
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> std::io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
 fn private_dir(path: &Path) -> std::io::Result<()> {
-    let mut options = std::fs::DirBuilder::new();
+    let options = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    let mut options = options;
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt as _;
@@ -259,117 +434,14 @@ fn owned(metadata: &std::fs::Metadata) -> bool {
     }
 }
 
-fn process_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        let Ok(pid) = i32::try_from(pid) else { return false };
-        if pid <= 0 {
-            return false;
-        }
-        // SAFETY: signal zero probes existence without sending a signal.
-        (unsafe { libc::kill(pid, 0) }) == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
-    }
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError};
-        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-        // SAFETY: this only opens and closes an OS process handle.
-        unsafe {
-            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-            if handle.is_null() {
-                return GetLastError() != ERROR_INVALID_PARAMETER;
-            }
-            CloseHandle(handle);
-            true
-        }
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = pid;
-        true
-    }
-}
-
-fn active_references(directory: &Path) -> anyhow::Result<bool> {
-    let entries = match std::fs::read_dir(directory.join("refs")) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error.into()),
-    };
-    let mut active = false;
-    for entry in entries {
-        let entry = entry?;
-        if entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<u32>().ok())
-            .is_some_and(process_alive)
-        {
-            active = true;
-        } else {
-            std::fs::remove_file(entry.path())?;
-        }
-    }
-    Ok(active)
-}
-
-fn sweep(root: &Path, current: &Path) -> anyhow::Result<()> {
-    for entry in std::fs::read_dir(root)? {
-        let entry = entry?;
-        if entry.path() == current || !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let name = entry.file_name();
-        if !name
-            .to_str()
-            .is_some_and(|name| name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit()))
-        {
-            continue;
-        }
-        if !active_references(&entry.path())? {
-            std::fs::remove_dir_all(entry.path())?;
-        }
-    }
-    Ok(())
-}
-
-fn register(directory: &Path) -> anyhow::Result<()> {
-    let mut handles = HANDLES
-        .get_or_init(Mutex::default)
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    let count = handles.entry(directory.to_owned()).or_default();
-    if *count == 0 {
-        let _file = private_file(&directory.join("refs").join(std::process::id().to_string()))?;
-    }
-    *count += 1;
-    Ok(())
-}
-
 impl Drop for Disk {
     fn drop(&mut self) {
         let release = || -> anyhow::Result<()> {
             let _coordination = lock(&self.root)?;
-            let mut handles = HANDLES
-                .get_or_init(Mutex::default)
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            let Some(count) = handles.get_mut(&self.directory) else {
-                return Ok(());
-            };
-            *count -= 1;
-            if *count != 0 {
-                return Ok(());
+            if self.unresolved.load(Ordering::Acquire) {
+                bail!("publication recovery is unresolved; temporary checkpoint retained");
             }
-            handles.remove(&self.directory);
-            let marker = self.directory.join("refs").join(std::process::id().to_string());
-            match std::fs::remove_file(marker) {
-                Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
-                _ => {}
-            }
-            if !active_references(&self.directory)? {
-                std::fs::remove_dir_all(&self.directory)?;
-            }
+            std::fs::remove_dir_all(&self.directory)?;
             Ok(())
         };
         if let Err(error) = release() {

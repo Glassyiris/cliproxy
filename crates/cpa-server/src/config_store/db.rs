@@ -59,6 +59,18 @@ impl ConfigStore {
         Self::open_mode(path, false)
     }
 
+    /// A read-only in-memory view of the published single-file snapshot, for reads
+    /// while another process owns it. The owner only replaces that path atomically, so
+    /// the open file is one complete image; no ownership, workspace or companion file is
+    /// used, and nothing is written back.
+    pub fn open_published(path: &Path) -> anyhow::Result<Self> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        Self::init(conn, None, false)
+    }
+
     fn open_mode(path: &Path, migrate: bool) -> anyhow::Result<Self> {
         super::published::open(path, migrate)
     }
@@ -80,34 +92,26 @@ impl ConfigStore {
     }
 
     pub(super) fn init(mut conn: Connection, path: Option<PathBuf>, migrate: bool) -> anyhow::Result<Self> {
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.pragma_update(None, "synchronous", "FULL")?;
-        if path.is_some() {
-            delete_journal(&conn)?;
-        }
-        conn.pragma_update(None, "secure_delete", "ON")?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
-        if migrate {
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let version = schema_version(&tx)?;
-            for (i, step) in MIGRATIONS.iter().enumerate().skip(version) {
-                tx.execute_batch(step)?;
-                tx.pragma_update(None, "user_version", (i + 1) as i64)?;
-            }
-            tx.commit()?;
-        } else {
-            schema_version(&conn)?;
-        }
-        let seen = conn.pragma_query_value(None, "data_version", |r| r.get(0))?;
+        initialize(&mut conn, path.is_some(), migrate)?;
+        let state = State::decode(&conn)?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            state: RwLock::new(Arc::new(state)),
+            writer: Mutex::new(None),
+            grant_sources: RwLock::default(),
+            virtual_grants: Mutex::default(),
+            held_logins: Mutex::default(),
+            held_login_sources: RwLock::default(),
+            rejected_login_sources: RwLock::default(),
+            admission_pins: Mutex::default(),
+            subscriptions: Arc::default(),
+            conn: Some(Mutex::new(conn)),
             path,
-            seen: Mutex::new(seen),
             disk: None,
         })
     }
 
-    /// A consistent online SQLite backup; never replaces an existing path.
+    /// Encodes one accepted complete snapshot into a new standalone SQLite file;
+    /// never reads the working database or replaces an existing destination.
     pub fn backup(&self, destination: &Path) -> anyhow::Result<()> {
         #[cfg(unix)]
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -116,9 +120,10 @@ impl ConfigStore {
         #[cfg(unix)]
         options.mode(0o600);
         let file = options.open(destination)?;
-        let result = self
-            .conn()
-            .execute("VACUUM INTO ?1", [destination.to_string_lossy().as_ref()]);
+        let result = self.current().encode(destination).and_then(|()| {
+            file.sync_all()?;
+            Ok(())
+        });
         drop(file);
         if result.is_err() {
             let _ = std::fs::remove_file(destination);
@@ -126,6 +131,33 @@ impl ConfigStore {
         result?;
         Ok(())
     }
+}
+
+pub(super) fn initialize(conn: &mut Connection, disk: bool, migrate: bool) -> anyhow::Result<()> {
+    configure(conn, disk)?;
+    if migrate {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let version = schema_version(&tx)?;
+        for (i, step) in MIGRATIONS.iter().enumerate().skip(version) {
+            tx.execute_batch(step)?;
+            tx.pragma_update(None, "user_version", (i + 1) as i64)?;
+        }
+        tx.commit()?;
+    } else {
+        schema_version(conn)?;
+    }
+    Ok(())
+}
+
+pub(super) fn configure(conn: &Connection, disk: bool) -> anyhow::Result<()> {
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    conn.pragma_update(None, "synchronous", "FULL")?;
+    if disk {
+        delete_journal(conn)?;
+    }
+    conn.pragma_update(None, "secure_delete", "ON")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    Ok(())
 }
 
 pub(super) fn schema_version(conn: &Connection) -> anyhow::Result<usize> {
@@ -189,6 +221,7 @@ pub(super) fn stored_kind(name: &str) -> rusqlite::Result<Kind> {
     })
 }
 
+#[cfg(test)]
 pub(super) fn head(conn: &Connection) -> rusqlite::Result<u64> {
     conn.query_row("SELECT coalesce(max(rev), 0) FROM revision", [], |r| r.get::<_, i64>(0))
         .map(|n| n as u64)

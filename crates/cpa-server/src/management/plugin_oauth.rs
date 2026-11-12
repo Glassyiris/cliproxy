@@ -93,6 +93,9 @@ pub(super) async fn serve_auth_url(state: &Arc<Management>, path: &str, raw_quer
     if !host.has_auth_provider(&provider) {
         return None;
     }
+    if !super::oauth::admit_grant_work(state).await {
+        return Some(error(StatusCode::SERVICE_UNAVAILABLE, "credential recovery required"));
+    }
     let callback_path = if v8 {
         query.retain(|(k, _)| k != "provider");
         "/v8/management/oauth/callback"
@@ -106,8 +109,12 @@ pub(super) async fn serve_auth_url(state: &Arc<Management>, path: &str, raw_quer
             "failed to generate authorization url",
         ));
     };
+    let job = host.auth_save_job(cpa_plugin::hostauth::AuthSaveJob::LoginStart {
+        provider: provider.clone(),
+    });
+    let scope = job.as_ref().map(|job| job.request_scope()).unwrap_or_default();
     let resp = match host
-        .start_login(&provider, &base_url, query_metadata(query), &Default::default())
+        .start_login(&provider, &base_url, query_metadata(query), &scope)
         .await
     {
         Ok(Some(resp)) => resp,
@@ -138,13 +145,28 @@ pub(super) async fn serve_auth_url(state: &Arc<Management>, path: &str, raw_quer
 /// The plugin branch of Go `GetAuthStatus`: polls the plugin, saving the auths a
 /// successful login returns. `None` when the plugin does not handle the poll.
 pub(super) async fn poll(state: &Arc<Management>, sid: &str, provider: &str, metadata: Metadata) -> Option<Response> {
+    if !super::oauth::admit_grant_work(state).await {
+        return Some(error(StatusCode::SERVICE_UNAVAILABLE, "credential recovery required"));
+    }
     let host = state.rt.plugins();
     let status = |s: &str| map_json(StatusCode::OK, &json!({"status": s}));
     let failed = |message: &str| {
         state.oauth.set_error(sid, message);
         map_json(StatusCode::OK, &json!({"status": "error", "error": message}))
     };
-    let resp = match host.poll_login(provider, sid, metadata, &Default::default()).await {
+    let authority = super::plugin_auth::ScopedSave::issue(
+        state,
+        cpa_plugin::hostauth::AuthSaveJob::LoginPoll {
+            provider: provider.to_owned(),
+            session: sid.to_owned(),
+        },
+    )
+    .map(Arc::new);
+    let job = authority
+        .as_ref()
+        .map(|authority| cpa_plugin::hostauth::AuthSaveJobScope::new(authority.clone()));
+    let scope = job.as_ref().map(|job| job.request_scope()).unwrap_or_default();
+    let resp = match host.poll_login(provider, sid, metadata, &scope).await {
         Ok(Some(resp)) => resp,
         Ok(None) => return None,
         Err(e) => {
@@ -177,21 +199,32 @@ pub(super) async fn poll(state: &Arc<Management>, sid: &str, provider: &str, met
             };
             let saved = {
                 let state = state.clone();
-                tokio::task::spawn_blocking(move || save_records(&state, records)).await
+                let (sid, provider) = (sid.to_owned(), provider.to_owned());
+                state
+                    .work
+                    .clone()
+                    .spawn_blocking(move || {
+                        let _job = job;
+                        save_records(&state, records, Some((&sid, &provider)), authority.as_deref())
+                    })
+                    .await
             };
             match saved {
                 Ok(Ok(external)) => {
                     crate::plugins::reload_plugin_auth_files(&state.rt).await;
                     if !external.is_empty() {
                         let state = state.clone();
-                        if tokio::task::spawn_blocking(move || {
-                            let _guard = state.disk.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                            for (path, credentials) in external {
-                                state.rt.store().upsert_file(Some(&path), credentials, &[]);
-                            }
-                        })
-                        .await
-                        .is_err()
+                        if state
+                            .work
+                            .clone()
+                            .spawn_blocking(move || {
+                                let _guard = state.disk.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                                for (path, credentials) in external {
+                                    state.rt.store().upsert_file(Some(&path), credentials, &[]);
+                                }
+                            })
+                            .await
+                            .is_err()
                         {
                             return Some(failed("Failed to publish authentication tokens"));
                         }
@@ -217,6 +250,8 @@ pub(super) async fn poll(state: &Arc<Management>, sid: &str, provider: &str, met
 fn save_records(
     state: &Management,
     records: Vec<PluginAuth>,
+    consumed_login: Option<(&str, &str)>,
+    authority: Option<&super::plugin_auth::ScopedSave>,
 ) -> Result<Vec<(std::path::PathBuf, Vec<cpa_core::credential::Credential>)>, String> {
     if state.rt.store().is_home() {
         return Err("credential saves unavailable in Home mode".into());
@@ -231,33 +266,60 @@ fn save_records(
         .iter()
         .map(|record| record.file_path(&base).map(std::path::PathBuf::from))
         .collect::<Result<_, _>>()?;
-    let write_batch = || {
+    // Only a returned successful login response carries this session provenance.
+    // Render against the latest pending candidate, before any cache-file I/O.
+    let result = (|| -> anyhow::Result<_> {
+        let mut command = match consumed_login {
+            Some(_) => backend.granted_command()?,
+            None => backend.command()?,
+        };
+        if let Some((sid, provider)) = consumed_login
+            && !state.oauth.is_pending(sid, provider)
+        {
+            anyhow::bail!("OAuth session cancelled");
+        }
         let mut external = Vec::new();
-        for (mut record, path) in records.into_iter().zip(&paths) {
-            if let Ok(raw) = std::fs::read(path)
+        let mut documents = std::collections::BTreeMap::<std::path::PathBuf, Vec<u8>>::new();
+        for (mut record, path) in records.into_iter().zip(paths) {
+            if consumed_login.is_some() {
+                let authority = authority.ok_or_else(|| anyhow::anyhow!("missing login job authority"))?;
+                authority
+                    .validate(
+                        state,
+                        &path,
+                        &command,
+                        &std::sync::atomic::AtomicBool::new(true),
+                        &record.save_payload().map_err(anyhow::Error::msg)?,
+                    )
+                    .map_err(anyhow::Error::msg)?;
+            }
+            let existing = match documents.get(&path) {
+                Some(bytes) => Some(bytes.clone()),
+                None => command.read(&path)?,
+            };
+            if let Some(raw) = existing
                 && let Ok(Value::Object(existing)) = serde_json::from_slice::<Value>(&raw)
             {
                 record.merge_existing(&existing);
             }
-            let parsed = (cpa_plugin::platform::clean(path).parent() != Some(root.as_path()))
+            let parsed = (cpa_plugin::platform::clean(&path).parent() != Some(root.as_path()))
                 .then(|| record.clone().into_parsed());
-            record.save_file(&base, true)?;
-            // Directory reloads cannot discover an explicit path outside the root
-            // (or a nested path). Return its validated credentials to the poll.
+            let bytes = record.save_payload().map_err(anyhow::Error::msg)?.to_vec();
+            // Directory reloads cannot discover explicit paths outside the root.
             if let Some(parsed) = parsed {
-                let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-                let metadata = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+                let metadata = serde_json::from_slice(&bytes)?;
                 let credentials =
-                    cpa_core::config::credentials::plugin_save_credentials(path, &metadata, vec![parsed])?;
-                external.retain(|(existing, _)| existing != path);
+                    cpa_core::config::credentials::plugin_save_credentials(&path, &metadata, vec![parsed])
+                        .map_err(anyhow::Error::msg)?;
+                external.retain(|(existing, _)| existing != &path);
                 external.push((path.clone(), credentials));
             }
+            documents.insert(path, bytes);
         }
-        Ok::<_, String>(external)
-    };
-    let result = backend
-        .write_files(&paths, || write_batch().map_err(anyhow::Error::msg))
-        .map_err(|e| format!("persist plugin auth batch: {e}"));
+        command.save_documents(&documents.into_iter().collect::<Vec<_>>())?;
+        Ok(external)
+    })()
+    .map_err(|error| format!("persist plugin auth batch: {error}"));
     if result.is_ok() {
         // Credentials only: the watcher rescans SQLite, as Go's watcher registers saved
         // tokens. Republishing the config here would restart plugins.
@@ -318,22 +380,31 @@ mod tests {
     use super::*;
 
     fn sqlite_state(work: &Path) -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>) {
+        sqlite_state_with_host(work, cpa_plugin::Host::new())
+    }
+    fn sqlite_state_with_host(
+        work: &Path,
+        host: cpa_plugin::Host,
+    ) -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>) {
         let store = Arc::new(crate::testing::config_store(&work.join("config.db")).unwrap());
         let db = crate::credential_store::CredentialDb::initialize(store.clone(), &work.join("legacy")).unwrap();
         let mut cfg = store.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
-        let rt = Arc::new(crate::testing::runtime_with_db(
-            cfg,
-            Vec::new(),
-            cpa_exec::Executors {
-                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
-                codex: Default::default(),
-                devices: Default::default(),
-                openai: Default::default(),
-                google: Default::default(),
-            },
-            db.clone(),
-        ));
+        let rt = Arc::new(
+            crate::testing::runtime_with_db(
+                cfg,
+                Vec::new(),
+                cpa_exec::Executors {
+                    claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                    codex: Default::default(),
+                    devices: Default::default(),
+                    openai: Default::default(),
+                    google: Default::default(),
+                },
+                db.clone(),
+            )
+            .with_plugin_host(host),
+        );
         (Management::new(rt, store), db)
     }
 
@@ -361,15 +432,7 @@ mod tests {
             let existing = auths.join("existing.json");
             let prior = br#"{"type":"rec","access_token":"old","plugin_extra":{"keep":true}}"#;
             db.save(&existing, prior).unwrap();
-            if sql_failure {
-                crate::testing::database_connection(state.config_store())
-                    .execute_batch(
-                        "CREATE TRIGGER reject_plugin BEFORE INSERT ON credential_document
-                         WHEN instr(CAST(NEW.bytes AS TEXT), 'reject') > 0
-                         BEGIN SELECT RAISE(ABORT, 'reject plugin batch'); END;",
-                    )
-                    .unwrap();
-            }
+            let blocked = sql_failure.then(|| crate::testing::block_checkpoint_install(state.config_store()));
             let outside = work.join("explicit.json");
             let mut explicit = record(&auths, "unused.json", br#"{"type":"rec","access_token":"created"}"#);
             explicit
@@ -386,6 +449,8 @@ mod tests {
                     explicit,
                     bad,
                 ],
+                None,
+                None,
             );
             assert!(result.is_err());
             assert_eq!(db.read(&existing).unwrap().unwrap(), prior);
@@ -395,7 +460,84 @@ mod tests {
             assert!(db.read(&outside).unwrap().is_none());
             assert!(!auths.join("bad.json").exists());
             assert!(state.rt.store().snapshot().is_empty());
+            drop(blocked);
             let _ = std::fs::remove_dir_all(work);
+        }
+    }
+
+    #[tokio::test]
+    async fn consumed_login_batches_keep_session_permission_and_atomicity_while_pending() {
+        for case in ["valid", "cancelled", "invalid-batch", "manual"] {
+            let work = std::env::temp_dir().join(format!("plugin-batch-pending-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&work).unwrap();
+            let (host, _) = cpa_plugin::testing::scripted::host_with(
+                &work.join("plugins"),
+                std::collections::BTreeMap::from([(
+                    "rec",
+                    cpa_plugin::testing::scripted::Script {
+                        caps: r#""auth_provider":true"#,
+                        results: std::collections::BTreeMap::from([("auth.identifier", r#"{"identifier":"rec"}"#)]),
+                        ..Default::default()
+                    },
+                )]),
+            )
+            .await;
+            let (state, db) = sqlite_state_with_host(&work, host);
+            let auths = db.auth_dir();
+            assert!(state.oauth.register_plugin("session", "rec", Default::default()));
+            if case == "cancelled" {
+                let _ = super::super::oauth::cancel(
+                    axum::extract::State(state.clone()),
+                    axum::extract::RawQuery(Some("state=session".into())),
+                )
+                .await;
+            }
+            assert!(
+                state.rt.plugins().auth_provider_record("rec").is_some(),
+                "script provider registered"
+            );
+            let authority = super::super::plugin_auth::ScopedSave::issue(
+                &state,
+                cpa_plugin::hostauth::AuthSaveJob::LoginPoll {
+                    provider: "rec".into(),
+                    session: "session".into(),
+                },
+            );
+            let blocked = crate::testing::block_publication(state.config_store().path().unwrap());
+            assert!(
+                state
+                    .config_store()
+                    .import_yaml("server: {port: 8318}\n", "test", "pending")
+                    .is_err()
+            );
+            let mut second = record(
+                &auths,
+                "second.json",
+                br#"{"type":"rec","access_token":"second-grant"}"#,
+            );
+            if case == "invalid-batch" {
+                second.attributes.insert("weight".into(), "1.5".into());
+            }
+            let result = save_records(
+                &state,
+                vec![
+                    record(&auths, "first.json", br#"{"type":"rec","access_token":"first-grant"}"#),
+                    second,
+                ],
+                (case != "manual").then_some(("session", "rec")),
+                authority.as_ref(),
+            );
+            assert!(result.is_err(), "pending preservation cannot report success");
+            assert!(db.documents().unwrap().is_empty());
+            drop(blocked);
+            db.admit_work().unwrap();
+            assert_eq!(
+                db.documents().unwrap().len(),
+                if case == "valid" { 2 } else { 0 },
+                "{case}: no unauthorized or partial batch"
+            );
+            drop((state, db));
+            std::fs::remove_dir_all(work).unwrap();
         }
     }
 
@@ -414,7 +556,7 @@ mod tests {
         let mut auth = record(&db.auth_dir(), "unused.json", br#"{"type":"rec","access_token":"new"}"#);
         auth.attributes
             .insert("path".into(), outside.to_string_lossy().into_owned());
-        let external = save_records(&state, vec![auth]).unwrap();
+        let external = save_records(&state, vec![auth], None, None).unwrap();
         assert_eq!(external.len(), 1);
         assert_eq!(external[0].0, outside);
         assert_eq!(external[0].1[0].metadata["plugin_extra"], json!({"keep": true}));

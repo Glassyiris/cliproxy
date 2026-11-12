@@ -26,6 +26,9 @@ use cpa_exec::Executors;
 
 use crate::Runtime;
 
+#[cfg(test)]
+pub(crate) mod installation_effects;
+
 /// The deny-all proxy: the discard port on loopback, where nothing listens.
 pub const DENY_PROXY: &str = "http://127.0.0.1:9";
 
@@ -37,6 +40,11 @@ const LOCAL: &str = "cpa_test_local";
 /// does not apply to this library. Never changes process-global TMPDIR.
 pub fn config_store(path: &std::path::Path) -> anyhow::Result<crate::config_store::ConfigStore> {
     config_store_mode(path, true)
+}
+
+/// Observes the owner workspace without depending on its directory layout.
+pub fn working_directory(store: &crate::config_store::ConfigStore) -> Option<std::path::PathBuf> {
+    store.working_directory().map(std::path::Path::to_owned)
 }
 
 /// The same fixture namespace, preserving the offline no-schema-migration contract.
@@ -56,12 +64,148 @@ fn config_store_mode(path: &std::path::Path, migrate: bool) -> anyhow::Result<cr
     crate::config_store::ConfigStore::open_in(path, migrate, root)
 }
 
+/// Executes fixture SQL on a fresh copy of canonical state, then installs the
+/// resulting fixture state. Do not retain raw SQLite handles across runtime calls.
+pub fn database_execute(store: &crate::config_store::ConfigStore, sql: &str) -> anyhow::Result<()> {
+    store.fixture_execute(sql)
+}
+
 /// Opens a test-only SQL connection to the mutable database for failure injection.
 /// Keep `store` alive until this connection is closed; `store.path()` names the
 /// immutable published backup, not the database the runtime writes.
 pub fn database_connection(store: &crate::config_store::ConfigStore) -> rusqlite::Connection {
-    let path = store.conn().path().expect("on-disk test database").to_owned();
+    let path = store.conn().unwrap().path().expect("on-disk test database").to_owned();
     rusqlite::Connection::open(path).expect("test database connection")
+}
+
+#[cfg(test)]
+pub(crate) struct BlockedPublication {
+    path: std::path::PathBuf,
+    permissions: std::fs::Permissions,
+}
+
+#[cfg(test)]
+impl Drop for BlockedPublication {
+    fn drop(&mut self) {
+        std::fs::set_permissions(&self.path, self.permissions.clone()).expect("restore publication permissions");
+    }
+}
+
+/// Keep the snapshot readable but make its atomic replacement fail, after a writer
+/// has installed its recovery checkpoint.
+#[cfg(test)]
+pub(crate) fn block_publication(path: &std::path::Path) -> BlockedPublication {
+    #[cfg(unix)]
+    let path = path.parent().expect("snapshot parent");
+    let permissions = std::fs::metadata(path).unwrap().permissions();
+    let mut blocked = permissions.clone();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        blocked.set_mode(0o500);
+    }
+    #[cfg(not(unix))]
+    blocked.set_readonly(true);
+    std::fs::set_permissions(path, blocked).unwrap();
+    BlockedPublication {
+        path: path.to_owned(),
+        permissions,
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod publication_effects {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn counters() -> &'static Mutex<HashMap<PathBuf, Arc<AtomicUsize>>> {
+        static COUNTERS: OnceLock<Mutex<HashMap<PathBuf, Arc<AtomicUsize>>>> = OnceLock::new();
+        COUNTERS.get_or_init(Mutex::default)
+    }
+
+    /// Counts completed published-file installs for one private fixture. No
+    /// callbacks run at the storage edge, and setup effects are excluded by scope.
+    pub(crate) struct Counter {
+        path: PathBuf,
+        count: Arc<AtomicUsize>,
+    }
+
+    impl Counter {
+        pub(crate) fn new(store: &crate::config_store::ConfigStore) -> Self {
+            let path = store.path().expect("published fixture").to_owned();
+            let count = Arc::new(AtomicUsize::new(0));
+            assert!(counters().lock().unwrap().insert(path.clone(), count.clone()).is_none());
+            Self { path, count }
+        }
+
+        pub(crate) fn get(&self) -> usize {
+            self.count.load(Ordering::SeqCst)
+        }
+    }
+
+    impl Drop for Counter {
+        fn drop(&mut self) {
+            counters().lock().unwrap().remove(&self.path);
+        }
+    }
+
+    pub(crate) fn installed(path: &Path) {
+        if let Some(count) = counters().lock().unwrap().get(path) {
+            count.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn counter_is_target_scoped_and_counts_equal_byte_publications() {
+        let root = std::env::temp_dir().join(format!("cpa-publication-counter-{}", uuid::Uuid::new_v4()));
+        let stores = ["one.db", "two.db"].map(|name| Arc::new(super::config_store(&root.join(name)).unwrap()));
+        let backends = stores.each_ref().map(|store| {
+            crate::credential_store::CredentialDb::initialize(store.clone(), &root.join("legacy")).unwrap()
+        });
+        let path = backends[0].auth_dir().join("a.json");
+        let bytes = br#"{"type":"claude","access_token":"private-test"}"#;
+        backends[0].save(&path, bytes).unwrap();
+        let counter = Counter::new(&stores[0]);
+        backends[1].save(&backends[1].auth_dir().join("b.json"), bytes).unwrap();
+        assert_eq!(counter.get(), 0, "other private targets cannot affect this fixture");
+        for _ in 0..2 {
+            backends[0].save(&path, bytes).unwrap();
+        }
+        assert_eq!(counter.get(), 2, "identical bytes still incur two durable installs");
+        drop(counter);
+        let counter = Counter::new(&stores[0]);
+        assert_eq!(counter.get(), 0, "new scope must not inherit an old count");
+        backends[0].save(&path, bytes).unwrap();
+        assert_eq!(counter.get(), 1);
+        drop(counter);
+        drop(backends);
+        drop(stores);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+pub struct BlockedCheckpoint {
+    path: std::path::PathBuf,
+    parked: std::path::PathBuf,
+}
+
+impl Drop for BlockedCheckpoint {
+    fn drop(&mut self) {
+        std::fs::remove_dir(&self.path).expect("remove checkpoint obstruction");
+        std::fs::rename(&self.parked, &self.path).expect("restore old checkpoint");
+    }
+}
+
+/// An explicit storage-effect fault: construction can complete, but installing
+/// the checkpoint fails. The previous recovery artifact is retained unchanged.
+pub fn block_checkpoint_install(store: &crate::config_store::ConfigStore) -> BlockedCheckpoint {
+    let path = std::path::PathBuf::from(database_connection(store).path().unwrap());
+    let parked = path.with_extension("blocked-checkpoint");
+    std::fs::rename(&path, &parked).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    BlockedCheckpoint { path, parked }
 }
 
 /// A local runtime with a private SQLite database whose executors cannot leave the
@@ -121,6 +265,28 @@ pub fn runtime_with_db(
     rt.store().note_loaded(&read);
     rt.deny_external.store(true, Ordering::Relaxed);
     rt
+}
+
+/// Synchronous fixture parsing must not inherit another test host's native parser.
+/// Keep preparation and consumption inside this scope, never across await/spawn.
+#[cfg(test)]
+pub(crate) fn with_builtin_auth_parser<T>(f: impl FnOnce() -> T) -> T {
+    use cpa_core::config::credentials::{ParseRequest, Parsed, PluginAuthParser};
+    struct BuiltIn;
+    impl PluginAuthParser for BuiltIn {
+        fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
+            Parsed::NotHandled
+        }
+    }
+    cpa_core::config::credentials::with_thread_plugin_auth_parser(Arc::new(BuiltIn), f)
+}
+
+#[cfg(test)]
+pub(crate) fn builtin_auth_files(cfg: &Config) -> Vec<Credential> {
+    with_builtin_auth_parser(|| {
+        cpa_core::config::credentials::preparse_auth_dir(cfg);
+        cpa_core::config::credentials::from_auth_dir(cfg)
+    })
 }
 
 /// Marks a credential whose executor the test pointed at a local mock (for example
@@ -311,5 +477,49 @@ mod tests {
         assert!(Arc::ptr_eq(&plain.for_executor(&c), &c));
         let test = runtime(Config::default(), Vec::new(), executors());
         assert_eq!(test.for_executor(&c).attributes["proxy_url"], DENY_PROXY);
+    }
+}
+
+#[cfg(test)]
+mod builtin_auth_tests {
+    use super::*;
+    #[test]
+    fn builtin_preparation_is_explicit_and_preserves_the_enclosing_parser_context() {
+        use cpa_core::config::credentials::{self, ParseRequest, Parsed, PluginAuthParser};
+        struct Suppress;
+        impl PluginAuthParser for Suppress {
+            fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
+                Parsed::Handled(vec![])
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("cpa-builtin-prepare-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join("fixture.json"),
+            br#"{"type":"claude","access_token":"private-fixture"}"#,
+        )
+        .unwrap();
+        let mut cfg = Config::parse("").unwrap();
+        cfg.auth_dir = dir.clone();
+        credentials::with_thread_plugin_auth_parser(Arc::new(Suppress), || {
+            assert!(
+                credentials::from_auth_dir(&cfg).is_empty(),
+                "fresh cached-only scope must defer"
+            );
+            credentials::preparse_auth_dir(&cfg);
+            assert!(
+                credentials::from_auth_dir(&cfg).is_empty(),
+                "outer parser suppresses this document"
+            );
+            let loaded = builtin_auth_files(&cfg);
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(loaded[0].id, "fixture.json");
+            assert_eq!(loaded[0].str("access_token"), Some("private-fixture"));
+            assert!(
+                credentials::from_auth_dir(&cfg).is_empty(),
+                "nested fixture preparation must restore outer answers"
+            );
+        });
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

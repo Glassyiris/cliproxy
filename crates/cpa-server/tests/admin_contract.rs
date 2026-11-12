@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use axum::extract::Request;
 use axum::middleware::Next;
-use cpa_server::config_store::{Kind, Op};
+use cpa_server::config_store::Kind;
 use cpa_server::management::{Management, Options};
 use cpa_server::{Runtime, management, request_logging};
 use serde_json::{Value, json};
@@ -28,6 +28,10 @@ struct Fixture {
 
 impl Fixture {
     async fn new(name: &str, trusted_proxy: bool) -> Self {
+        Self::with_management_password(name, trusted_proxy, String::new()).await
+    }
+
+    async fn with_management_password(name: &str, trusted_proxy: bool, management_password: String) -> Self {
         let dir = std::env::temp_dir().join(format!(
             "admin-contract-{name}-{}-{}",
             std::process::id(),
@@ -45,9 +49,11 @@ impl Fixture {
             "config-version: 8\nserver: {{host: '127.0.0.1', port: 0, {trusted}}}\nmanagement: {{secret-key: '{hash}', allow-remote: false}}\noauth: {{auth-dir: {}}}\nrouting: {{retry: {{request-retry: 3}}}}\naccess: {{api-keys: [client-http-test-secret]}}\nobservability: {{logs: {{request-log: true}}}}\n",
             dir.join("auth").display()
         ), "test", "fixture").unwrap();
-        let cfg = store.load().unwrap().config;
+        let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &dir.join("auth")).unwrap();
+        let mut cfg = store.load().unwrap().config;
+        cfg.auth_dir = db.auth_dir();
         let credentials = cpa_core::config::credentials::from_config(&cfg);
-        let rt = Arc::new(cpa_server::testing::runtime(
+        let rt = Arc::new(cpa_server::testing::runtime_with_db(
             cfg,
             credentials,
             cpa_exec::Executors {
@@ -57,12 +63,13 @@ impl Fixture {
                 openai: Default::default(),
                 google: Default::default(),
             },
+            db,
         ));
         let state = Management::with_options(
             rt.clone(),
             store,
             Options {
-                management_password: Some(String::new()),
+                management_password: Some(management_password),
                 log_dir: Some(dir.join("logs")),
                 ..Default::default()
             },
@@ -146,6 +153,313 @@ impl Drop for Fixture {
     }
 }
 
+#[tokio::test]
+async fn legacy_multipart_credential_upload_keeps_partial_success() {
+    let f = Fixture::new("legacy-partial-upload", false).await;
+    let data = r#"{"type":"claude","disabled":false,"access_token":"legacy-fixture"}"#;
+    let body = format!(
+        "--batch\r\nContent-Disposition: form-data; name=\"files\"; filename=\"legacy-good.json\"\r\nContent-Type: application/json\r\n\r\n{data}\r\n--batch\r\nContent-Disposition: form-data; name=\"files\"; filename=\"legacy-bad.json\"\r\nContent-Type: application/json\r\n\r\n{{\r\n--batch--\r\n"
+    );
+    let response = f
+        .request(wreq::Method::POST, "/v8/management/credentials")
+        .header("content-type", "multipart/form-data; boundary=batch")
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 207);
+    let reply: Value = response.json().await.unwrap();
+    assert_eq!(reply["status"], "partial");
+    assert_eq!(reply["uploaded"], 1);
+    assert_eq!(reply["failed"][0]["name"], "legacy-bad.json");
+    assert_eq!(download_credential(&f, "legacy-good.json").await, data.as_bytes());
+}
+
+fn batch_document(name: &str, data: &[u8]) -> Value {
+    use base64::Engine as _;
+    json!({"name": name, "data": base64::engine::general_purpose::STANDARD.encode(data)})
+}
+
+async fn download_credential(f: &Fixture, name: &str) -> Vec<u8> {
+    let response = f
+        .request(
+            wreq::Method::GET,
+            &format!("/v8/management/credentials/download?name={name}"),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    response.bytes().await.unwrap().to_vec()
+}
+
+#[tokio::test]
+async fn credential_batch_preserves_bytes_and_is_in_the_portable_snapshot() {
+    let f = Fixture::new("credential-batch", false).await;
+    let first = b" \n{ \"type\":\"claude\", \"access_token\":\"fixture-only\", \"opaque\": [1,true,null] }\n";
+    let second = b"{\"type\":\"custom-plugin\",\"private_extension\":{\"z\":2,\"a\":1}}\n";
+    let head = f.head();
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&json!({"documents": [batch_document("a.json", first), batch_document("b.json", second)]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(download_credential(&f, "a.json").await, first);
+    assert_eq!(download_credential(&f, "b.json").await, second);
+    assert_eq!(f.head(), head, "credentials do not create configuration revisions");
+
+    let copy = f.dir.join("portable.db");
+    std::fs::copy(f.state.config_store().path().unwrap(), &copy).unwrap();
+    let store = Arc::new(cpa_server::testing::config_store(&copy).unwrap());
+    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &f.dir.join("absent")).unwrap();
+    assert_eq!(db.read(&db.auth_dir().join("a.json")).unwrap().unwrap(), first);
+    assert_eq!(db.read(&db.auth_dir().join("b.json")).unwrap().unwrap(), second);
+    drop((db, store));
+
+    use sha2::Digest as _;
+    let mut update = batch_document("a.json", second);
+    update["if_match"] = format!("{:x}", sha2::Sha256::digest(first)).into();
+    let mut create = batch_document("c.json", first);
+    create["if_none_match"] = true.into();
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&json!({"documents": [update, create]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(download_credential(&f, "a.json").await, second);
+    assert_eq!(download_credential(&f, "c.json").await, first);
+    assert_eq!(f.head(), head);
+}
+
+#[tokio::test]
+async fn credential_batch_saves_and_deletes_atomically_with_raw_source_conditions() {
+    use sha2::Digest as _;
+    let f = Fixture::new("credential-batch-delete", false).await;
+    let seed = br#"{"type":"claude","access_token":"original-fixture","opaque":{"keep":true}}"#;
+    let replacement = br#" {"type":"claude","access_token":"replacement-fixture","opaque":[2,true]}
+"#;
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&json!({"documents":[batch_document("a.json",seed),batch_document("b.json",seed)]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let before = std::fs::read(f.state.config_store().path().unwrap()).unwrap();
+    let head = f.head();
+    let removed_path = f.rt.config().auth_dir.join("b.json");
+    assert!(f.rt.store().snapshot().iter().any(
+        |credential| matches!(&credential.source, cpa_core::credential::Source::File(path) if path == &removed_path)
+    ));
+    let hash = format!("{:x}", sha2::Sha256::digest(seed));
+    let mut update = batch_document("a.json", replacement);
+    update["if_match"] = hash.clone().into();
+    let deletion = json!({"name":"b.json","if_match":hash});
+    for (bad, status) in [
+        (json!({"name":"b.json","if_match":"00".repeat(32)}), 412),
+        (json!({"name":"../outside.json","if_match":hash}), 400),
+        (json!({"name":"a.json","if_match":hash}), 400),
+        (json!({"name":"b.json"}), 400),
+    ] {
+        let response = f
+            .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+            .json(&json!({"documents":[update],"deletions":[bad]}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(download_credential(&f, "a.json").await, seed);
+        assert_eq!(download_credential(&f, "b.json").await, seed);
+        assert_eq!(std::fs::read(f.state.config_store().path().unwrap()).unwrap(), before);
+    }
+    let blocked = cpa_server::testing::block_checkpoint_install(f.state.config_store());
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&json!({"documents":[update],"deletions":[deletion]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 500);
+    assert_eq!(download_credential(&f, "a.json").await, seed);
+    assert_eq!(download_credential(&f, "b.json").await, seed);
+    assert_eq!(std::fs::read(f.rt.config().auth_dir.join("b.json")).unwrap(), seed);
+    drop(blocked);
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&json!({"documents":[update],"deletions":[deletion]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let receipt: Value = response.json().await.unwrap();
+    assert_eq!(receipt["saved"], 1);
+    assert_eq!(receipt["deleted"], 1);
+    assert_eq!(download_credential(&f, "a.json").await, replacement);
+    assert_eq!(
+        f.request(wreq::Method::GET, "/v8/management/credentials/download?name=b.json")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    assert!(!f.rt.config().auth_dir.join("b.json").exists());
+    assert!(
+        !f.rt.store().snapshot().iter().any(
+            |credential| matches!(&credential.source, cpa_core::credential::Source::File(path) if path == &removed_path)
+        ),
+        "removed credential must be revoked before acknowledgement"
+    );
+    assert_eq!(
+        f.head(),
+        head,
+        "credential deletion must not restore/change configuration history"
+    );
+    let copy = f.dir.join("mixed-portable.db");
+    std::fs::copy(f.state.config_store().path().unwrap(), &copy).unwrap();
+    let store = Arc::new(cpa_server::testing::config_store(&copy).unwrap());
+    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &f.dir.join("absent")).unwrap();
+    assert_eq!(db.read(&db.auth_dir().join("a.json")).unwrap().unwrap(), replacement);
+    assert!(db.read(&db.auth_dir().join("b.json")).unwrap().is_none());
+    let remove_last =
+        json!({"deletions":[{"name":"a.json","if_match":format!("{:x}",sha2::Sha256::digest(replacement))}]});
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&remove_last)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let receipt: Value = response.json().await.unwrap();
+    assert_eq!(receipt["saved"], 0);
+    assert_eq!(receipt["deleted"], 1);
+    assert_eq!(
+        f.request(wreq::Method::POST, "/admin/v1/credentials/batch")
+            .json(&remove_last)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        412,
+        "a captured deletion cannot succeed after the source is gone"
+    );
+}
+
+#[tokio::test]
+async fn credential_batch_rejects_a_later_invalid_or_conflicting_document_without_partial_writes() {
+    let f = Fixture::new("credential-batch-rejected", false).await;
+    let seed = br#"{"type":"claude","disabled":false,"access_token":"original-fixture"}"#;
+    for name in ["a.json", "b.json"] {
+        let response = f
+            .request(wreq::Method::POST, &format!("/v8/management/credentials?name={name}"))
+            .body(seed.to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+    let before = std::fs::read(f.state.config_store().path().unwrap()).unwrap();
+    let revision = f.state.config_store().load().unwrap().rev;
+    let config_watch = f.rt.subscribe_config();
+    let runtime_tokens = || {
+        let mut tokens: Vec<_> =
+            f.rt.store()
+                .snapshot()
+                .iter()
+                .map(|credential| (credential.id.clone(), credential.str("access_token").map(str::to_owned)))
+                .collect();
+        tokens.sort();
+        tokens
+    };
+    let runtime_before = runtime_tokens();
+    assert_eq!(runtime_before.len(), 2);
+    assert!(
+        runtime_before
+            .iter()
+            .all(|(_, token)| token.as_deref() == Some("original-fixture"))
+    );
+    let replacement = br#"{"type":"claude","access_token":"replacement-fixture"}"#;
+    let mut conflict = batch_document("b.json", replacement);
+    conflict["if_match"] = "00".repeat(32).into();
+    let mut exists = batch_document("b.json", replacement);
+    exists["if_none_match"] = true.into();
+    for (later, status) in [(batch_document("b.json", b"{"), 400), (conflict, 412), (exists, 412)] {
+        let response = f
+            .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+            .json(&json!({"documents": [batch_document("a.json", replacement), later]}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(download_credential(&f, "a.json").await, seed);
+        assert_eq!(download_credential(&f, "b.json").await, seed);
+        assert_eq!(std::fs::read(f.state.config_store().path().unwrap()).unwrap(), before);
+        // Rejection publishes no runtime credential and no configuration revision.
+        assert_eq!(runtime_tokens(), runtime_before);
+        assert_eq!(f.state.config_store().load().unwrap().rev, revision);
+        assert!(!config_watch.has_changed().unwrap());
+    }
+    // The same observation sees an admitted batch, so the checks above are not vacuous.
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&json!({"documents": [batch_document("a.json", replacement)]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_ne!(std::fs::read(f.state.config_store().path().unwrap()).unwrap(), before);
+    assert!(
+        runtime_tokens()
+            .iter()
+            .any(|(_, token)| token.as_deref() == Some("replacement-fixture"))
+    );
+}
+
+#[tokio::test]
+async fn credential_batch_requires_authentication_and_refuses_host_paths() {
+    let f = Fixture::new("credential-batch-paths", false).await;
+    let bytes = br#"{"type":"claude","access_token":"fixture-only"}"#;
+    let response = f
+        .client
+        .post(format!("{}/admin/v1/credentials/batch", f.base))
+        .body("not valid JSON")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 401, "authenticate before parsing the batch");
+    let outside = f.dir.join("outside.json");
+    std::fs::write(&outside, b"untouched").unwrap();
+    let before = std::fs::read(f.state.config_store().path().unwrap()).unwrap();
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch?dry_run=true")
+        .json(&json!({"documents": [batch_document("good.json", bytes)]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400, "unsupported dry run must not write credentials");
+    assert_eq!(std::fs::read(f.state.config_store().path().unwrap()).unwrap(), before);
+    for name in [
+        outside.to_str().unwrap(),
+        "../outside.json",
+        "nested/a.json",
+        "C:\\outside.json",
+    ] {
+        let response = f
+            .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+            .json(&json!({"documents": [batch_document("good.json", bytes), batch_document(name, bytes)]}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400);
+        assert_eq!(std::fs::read(&outside).unwrap(), b"untouched");
+        assert_eq!(std::fs::read(f.state.config_store().path().unwrap()).unwrap(), before);
+    }
+}
+
 async fn rejected(response: wreq::Response, status: u16, code: &str) -> Value {
     assert_eq!(response.status().as_u16(), status);
     assert!(
@@ -159,6 +473,157 @@ async fn rejected(response: wreq::Response, status: u16, code: &str) -> Value {
     assert_eq!(body["error"], code);
     assert!(body["message"].as_str().is_some());
     body
+}
+
+#[tokio::test]
+async fn credential_sources_are_coherent_managed_bytes_not_cache_or_sql_reads() {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    let f = Fixture::new("credential-sources-memory", false).await;
+    let db = f.rt.store().credential_backend();
+    let bytes = b" \n{\"opaque\":{\"future\":[1,true]}}\n";
+    let path = db.auth_dir().join("opaque.json");
+    db.save(&path, bytes).unwrap();
+    db.save(&f.dir.join("external.json"), br#"{"external":"not a managed target"}"#)
+        .unwrap();
+    std::fs::write(&path, b"untrusted cache edit").unwrap();
+    let storage = cpa_server::testing::database_connection(f.state.config_store());
+    storage.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let response = f.request(wreq::Method::GET, "/admin/v1/credentials").send().await;
+    storage.execute_batch("ROLLBACK").unwrap();
+    drop(storage);
+    let response = response.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["auth_dir"], db.auth_dir().to_str().unwrap());
+    let documents = body["documents"].as_array().unwrap();
+    assert_eq!(documents.len(), 1, "never authorize arbitrary external host paths");
+    assert_eq!(documents[0]["name"], "opaque.json");
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(documents[0]["data"].as_str().unwrap())
+            .unwrap(),
+        bytes
+    );
+    assert_eq!(documents[0]["sha256"], format!("{:x}", sha2::Sha256::digest(bytes)));
+}
+
+#[tokio::test]
+async fn committed_config_remains_readable_when_persistence_is_unavailable() {
+    let f = Fixture::new("read-without-persistence", false).await;
+    let (tag, committed) = f.export().await;
+
+    // Fault at the fixture storage boundary: exclude all SQLite readers, not just
+    // access to the published backup. The HTTP query must use accepted memory.
+    let storage = cpa_server::testing::database_connection(f.state.config_store());
+    storage.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let response = f.request(wreq::Method::GET, "/admin/v1/export").send().await;
+    storage.execute_batch("ROLLBACK").unwrap();
+    drop(storage);
+
+    let response = response.unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(status, 200, "committed reads must not depend on storage: {body}");
+    assert_eq!(headers["etag"], tag);
+    assert_eq!(body, committed);
+}
+
+#[tokio::test]
+async fn resource_and_history_queries_keep_committed_identity_without_storage() {
+    let f = Fixture::new("resource-history-memory", false).await;
+    for (id, ord) in [("opaque-later", 20), ("opaque-first", 10)] {
+        let response = f.request(wreq::Method::PUT, &format!("/admin/v1/r/plugin/{id}"))
+            .json(&json!({"ord": ord, "description": "retained description", "spec": {"future": {"opaque": [1, "two", {"three": true}]}}}))
+            .send().await.unwrap();
+        assert_eq!(response.status(), 200);
+    }
+    let revision = f.head();
+    let original = f.state.config_store().state_at(revision).unwrap();
+    let committed = f.state.config_store().snapshot().unwrap().1;
+    let paths = [
+        "/admin/v1/r/plugin".to_owned(),
+        "/admin/v1/r/plugin/opaque-first".to_owned(),
+        "/admin/v1/revisions".to_owned(),
+        format!("/admin/v1/revisions/{revision}"),
+        "/admin/v1/effective/config".to_owned(),
+    ];
+    let mut expected = Vec::new();
+    for path in &paths {
+        let response = f.request(wreq::Method::GET, path).send().await.unwrap();
+        assert_eq!(response.status(), 200, "{path}");
+        expected.push(response.json::<Value>().await.unwrap());
+    }
+    let storage = cpa_server::testing::database_connection(f.state.config_store());
+    storage.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let mut actual = Vec::new();
+    for path in &paths {
+        let response = f.request(wreq::Method::GET, path).send().await.unwrap();
+        actual.push((path, response.status(), response.json::<Value>().await.unwrap()));
+    }
+    let history = f.state.config_store().state_at(revision);
+    storage.execute_batch("ROLLBACK").unwrap();
+    for ((path, status, body), expected) in actual.into_iter().zip(expected) {
+        assert_eq!(status, 200, "{path}: {body}");
+        assert_eq!(body, expected, "{path}");
+    }
+    assert_eq!(history.unwrap(), original);
+    let plugins: Vec<_> = original.iter().filter(|r| r.kind == Kind::Plugin).collect();
+    assert_eq!(
+        plugins.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        ["opaque-first", "opaque-later"]
+    );
+    assert_eq!(plugins[0].description, "retained description");
+    let opaque = committed.iter().find(|r| r.id == "opaque-first").unwrap();
+    assert_eq!(opaque.spec["future"]["opaque"], json!([1, "two", {"three": true}]));
+}
+
+#[tokio::test]
+async fn readers_keep_the_previous_complete_view_during_a_slow_mutation() {
+    let f = Fixture::new("overlapping-save", false).await;
+    let (tag, previous) = f.export().await;
+    let retained = f.state.config_store().load().unwrap();
+    let (entered, started) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let owner = f.state.clone();
+    // The existing public edit callback is an explicit validation/effect port.
+    // Hold the candidate there, not with a sleep or a private-state inspection.
+    let writer = std::thread::spawn(move || {
+        owner.config_store().edit("test", "slow candidate", |document| {
+            document["routing"]["retry"]["request-retry"] = json!(9);
+            let _ = entered.send(());
+            wait.recv_timeout(Duration::from_secs(10))
+                .map_err(|_| cpa_server::config_store::CommitError::invalid("test release timed out"))?;
+            Ok(())
+        })
+    });
+    started.await.unwrap();
+    let response = f.request(wreq::Method::GET, "/admin/v1/export").send().await;
+    release.send(()).unwrap();
+    let committed = writer.join().unwrap().unwrap();
+    let response = response.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["etag"], tag);
+    assert_eq!(response.json::<Value>().await.unwrap(), previous);
+    let (new_tag, current) = f.export().await;
+    assert_eq!(new_tag, format!("\"{}\"", committed.rev));
+    assert_eq!(current["revision"], committed.rev);
+    assert_eq!(
+        f.state
+            .config_store()
+            .load()
+            .unwrap()
+            .config
+            .routing
+            .retry
+            .request_retry,
+        9
+    );
+    assert_eq!(retained.config.routing.retry.request_retry, 3);
+    assert_eq!(retained.rev + 1, committed.rev);
+    assert_ne!(new_tag, tag);
 }
 
 #[tokio::test]
@@ -426,21 +891,14 @@ async fn collection_replacements_require_atomic_global_preconditions() {
         )
         .await;
     }
-    // A peer connection commits after the export, without this HTTP server's lock.
-    let peer = cpa_server::testing::config_store(f.state.config_store().path().unwrap()).unwrap();
-    peer.commit_if(
-        &[Op::Patch {
-            kind: "setting".into(),
-            id: "routing".into(),
-            patch: json!({"retry": {"request-retry": 8}}),
-            if_rev: None,
-        }],
-        "peer",
-        "",
-        false,
-        None,
-    )
-    .unwrap();
+    // A different client changes the owner's state after the export.
+    let response = f
+        .request(wreq::Method::PATCH, "/admin/v1/r/setting/routing")
+        .json(&json!({"retry": {"request-retry": 8}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
     let current = f.head();
     assert!(current > initial);
     for path in [
@@ -529,12 +987,18 @@ async fn collection_replacements_require_atomic_global_preconditions() {
     assert_eq!(f.rt.config().routing.retry.request_retry, 3);
     // Even an uninitialized destination requires its concrete revision 0 rather
     // than a wildcard that says nothing about the snapshot being replaced.
-    let conn = cpa_server::testing::database_connection(f.state.config_store());
-    conn.execute_batch("DELETE FROM change; DELETE FROM resource; DELETE FROM revision;")
-        .unwrap();
-    assert_eq!(f.head(), 0);
+    // Use the existing explicit environment-secret port: clearing canonical
+    // resources now correctly removes the config secret from the running view.
+    let empty = Fixture::with_management_password("uninitialized", false, KEY.into()).await;
+    cpa_server::testing::database_execute(
+        empty.state.config_store(),
+        "DELETE FROM change; DELETE FROM resource; DELETE FROM revision;",
+    )
+    .unwrap();
+    assert_eq!(empty.head(), 0);
     rejected(
-        f.request(wreq::Method::POST, "/admin/v1/import")
+        empty
+            .request(wreq::Method::POST, "/admin/v1/import")
             .header("if-match", "*")
             .json(&backup)
             .send()
@@ -545,7 +1009,8 @@ async fn collection_replacements_require_atomic_global_preconditions() {
     )
     .await;
     rejected(
-        f.request(wreq::Method::POST, "/admin/v1/apply")
+        empty
+            .request(wreq::Method::POST, "/admin/v1/apply")
             .header("if-match", "*")
             .json(&json!({"ops": []}))
             .send()
@@ -555,6 +1020,131 @@ async fn collection_replacements_require_atomic_global_preconditions() {
         "precondition_failed",
     )
     .await;
+}
+
+#[tokio::test]
+async fn successful_config_restore_reports_restart_without_restoring_revoked_credentials() {
+    use sha2::Digest as _;
+    let f = Fixture::new("restore-domain-and-restart", false).await;
+    let name = "revoked-before-config-restore.json";
+    let raw = br#"{"type":"claude","disabled":true,"access_token":"fake-revoked-credential","opaque":{"keep":true}}"#;
+    let saved = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&json!({"documents":[batch_document(name, raw)]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), 200);
+    assert_eq!(download_credential(&f, name).await, raw);
+    let credential_path = f.rt.config().auth_dir.join(name);
+    assert!(f.rt.store().snapshot().iter().any(|credential| matches!(
+        &credential.source, cpa_core::credential::Source::File(path) if path == &credential_path
+    )));
+
+    let response = f
+        .request(wreq::Method::PATCH, "/admin/v1/r/setting/routing")
+        .json(&json!({"retry":{"request-retry":8}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body["restart_required"], false);
+    assert_eq!(body["written"], true);
+    let baseline = f.head();
+    assert_eq!(body["revision"], baseline);
+    let startup_port = f.rt.config().port;
+    let changed_port = if startup_port == 8318 { 8319 } else { 8318 };
+
+    let response = f
+        .request(wreq::Method::PATCH, "/admin/v1/r/setting/server?dry_run=true")
+        .json(&json!({"port":changed_port}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(response.headers().get("etag").is_none());
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body["restart_required"], true);
+    assert_eq!(body["written"], false);
+    assert_eq!(body["revision"], baseline);
+    assert_eq!(f.head(), baseline);
+    assert_eq!(f.rt.config().port, startup_port);
+
+    let response = f
+        .request(wreq::Method::PATCH, "/admin/v1/r/setting/server")
+        .json(&json!({"port":changed_port}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body["restart_required"], true);
+    assert_eq!(body["written"], true);
+    assert_eq!(body["revision"], f.head());
+    assert_eq!(f.rt.config().port, changed_port);
+
+    let deleted = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&json!({"deletions":[{"name":name,"if_match":format!("{:x}",sha2::Sha256::digest(raw))}]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), 200);
+    assert_eq!(
+        f.request(
+            wreq::Method::GET,
+            &format!("/v8/management/credentials/download?name={name}")
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        404
+    );
+    let (current_tag, _) = f.export().await;
+    let response = f
+        .request(wreq::Method::POST, &format!("/admin/v1/revisions/{baseline}/restore"))
+        .header("if-match", current_tag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body["written"], true);
+    assert_eq!(body["dry_run"], false);
+    assert_eq!(body["restart_required"], false);
+    assert_eq!(body["revision"], f.head());
+    assert_eq!(f.rt.config().port, startup_port);
+    assert_eq!(f.rt.config().routing.retry.request_retry, 8);
+    assert_eq!(
+        f.request(
+            wreq::Method::GET,
+            &format!("/v8/management/credentials/download?name={name}")
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
+        404,
+        "configuration history resurrected a revoked document"
+    );
+    assert!(
+        !f.rt.store().snapshot().iter().any(|credential| matches!(
+            &credential.source, cpa_core::credential::Source::File(path) if path == &credential_path
+        )),
+        "configuration restore re-admitted the revoked credential"
+    );
+    let copy = f.dir.join("restored-config-only.db");
+    std::fs::copy(f.state.config_store().path().unwrap(), &copy).unwrap();
+    let restored = Arc::new(cpa_server::testing::config_store(&copy).unwrap());
+    let db = cpa_server::credential_store::CredentialDb::initialize(restored.clone(), &f.dir.join("absent")).unwrap();
+    assert!(db.read(&db.auth_dir().join(name)).unwrap().is_none());
+    assert_eq!(restored.load().unwrap().config.port, startup_port);
+    assert_eq!(restored.load().unwrap().config.routing.retry.request_retry, 8);
+    drop(db);
+    drop(restored);
+    f.rt.finish_shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -733,8 +1323,7 @@ async fn errors_never_echo_parser_or_database_messages_and_keep_safe_locations()
     )
     .await;
     let head = f.head();
-    let conn = cpa_server::testing::database_connection(f.state.config_store());
-    conn.execute_batch("CREATE TRIGGER reject_secret BEFORE INSERT ON resource BEGIN SELECT RAISE(ABORT, 'db-secret-must-not-be-serialized'); END;").unwrap();
+    let _blocked = cpa_server::testing::block_checkpoint_install(f.state.config_store());
     let response = rejected(
         f.request(wreq::Method::PATCH, "/admin/v1/r/setting/routing")
             .json(&json!({"retry": {"request-retry": 9}}))
@@ -745,7 +1334,8 @@ async fn errors_never_echo_parser_or_database_messages_and_keep_safe_locations()
         "store_failed",
     )
     .await;
-    assert!(!response.to_string().contains("db-secret-must-not-be-serialized"));
+    assert_eq!(response["message"], "the config store could not complete the request");
+    assert!(!response.to_string().contains(f.dir.to_str().unwrap()));
     assert_eq!(f.head(), head);
 }
 

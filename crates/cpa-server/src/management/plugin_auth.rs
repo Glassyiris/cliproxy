@@ -71,77 +71,13 @@ impl AuthManager for PluginAuthManager {
     /// republished.
     fn save(&self, auths: SavedAuths, write: &mut dyn FnMut() -> Result<(), String>) -> Result<(), String> {
         let state = self.0.upgrade().ok_or("auth manager unavailable")?;
-        if state.rt.store().is_home() {
-            return Err("credential saves unavailable in Home mode".into());
-        }
-        let _disk = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        let path = match &auths {
-            SavedAuths::BuiltIn(auth) => PathBuf::from(auth.attributes.get("path").cloned().unwrap_or_default()),
-            SavedAuths::Plugin { path, .. } | SavedAuths::Written { path, .. } => path.clone(),
-        };
-        let backend = state.rt.store().credential_backend();
-        let apply = || {
-            write()?;
-            match auths {
-                SavedAuths::Written { data, .. } => Ok((data, None)),
-                SavedAuths::BuiltIn(auth) => {
-                    let bytes = persist(&path, &auth.metadata, auth.disabled)?;
-                    let cfg = state.rt.config();
-                    let (mut credential, fallback) = match credentials::from_file(&cfg, &cfg.auth_dir, &path, &bytes) {
-                        Ok(Some(c)) => (c, false),
-                        // Go registers what its synthesizer would skip; uploads keep such
-                        // files the same way (see `credentials::upload_fallback`).
-                        Ok(None) => match credentials::upload_fallback(&cfg.auth_dir, &path, &bytes) {
-                            Some(c) => (c, true),
-                            None => return Ok((bytes, None)),
-                        },
-                        Err(e) => return Err(format!("register auth: {e}")),
-                    };
-                    // Keep the existing credential's ID and refresh state.
-                    if !auth.id.is_empty() {
-                        credential.id = auth.id.clone();
-                    }
-                    let refresh = vec![SavedRefresh {
-                        id: credential.id.clone(),
-                        donor: Some(credential.id.clone()),
-                    }];
-                    Ok((bytes, Some((vec![credential], refresh, fallback))))
-                }
-                SavedAuths::Plugin {
-                    mut credentials,
-                    persist: rewrite,
-                    refresh,
-                    ..
-                } => {
-                    // A virtual/multiple-auth document retains its raw plugin bytes.
-                    let bytes = match (rewrite, credentials.as_mut_slice()) {
-                        (true, [one]) => {
-                            one.metadata.insert("disabled".into(), one.disabled.into());
-                            persist(&path, &one.metadata, one.disabled)?
-                        }
-                        _ => std::fs::read(&path).map_err(|e| format!("auth filestore: read existing failed: {e}"))?,
-                    };
-                    Ok((bytes, Some((credentials, refresh, false))))
-                }
-            }
-        };
-        let (bytes, publication) = backend
-            .write_files(std::slice::from_ref(&path), || apply().map_err(anyhow::Error::msg))
-            .map_err(|e| format!("persist auth: {e}"))?;
-        // Nested Written saves must be durable before making their parse observable.
-        credentials::note_plugin_auth_write(&path, &bytes);
-        if let Some((credentials, refresh, fallback)) = publication {
-            let mut fallbacks = state.fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
-            if fallback {
-                fallbacks.insert(path.clone());
-            } else {
-                fallbacks.remove(&path);
-            }
-            drop(fallbacks);
-            state.rt.store().upsert_file(Some(&path), credentials, &refresh);
-        }
-        state.credential_changes.notify_one();
-        Ok(())
+        let _operation = state.enter().ok_or("configuration service is shutting down")?;
+        save_auths(&state, auths, write, None)
+    }
+
+    fn grant_job(&self, job: cpa_plugin::hostauth::AuthSaveJob) -> Option<cpa_plugin::hostauth::AuthSaveJobScope> {
+        let state = self.0.upgrade()?;
+        ScopedSave::issue(&state, job).map(|authority| cpa_plugin::hostauth::AuthSaveJobScope::new(Arc::new(authority)))
     }
 
     /// Go `LookupSessionAffinity`: `unsupported` whenever a plugin scheduler is
@@ -152,15 +88,393 @@ impl AuthManager for PluginAuthManager {
     }
 }
 
+/// Specific server-issued login/refresh authority. The native callback context
+/// authenticates the calling instance; these fences are checked again under owner admission.
+pub(super) struct ScopedSave {
+    state: Weak<Management>,
+    _operation: tokio_util::task::task_tracker::TaskTrackerToken,
+    job: cpa_plugin::hostauth::AuthSaveJob,
+    plugin: cpa_plugin::host::Record,
+    root: PathBuf,
+    known: std::collections::BTreeSet<PathBuf>,
+    sources: std::sync::Mutex<BTreeMap<PathBuf, Option<[u8; 32]>>>,
+    refresh: Option<(Arc<Credential>, crate::runtime::RefreshFence)>,
+    refresh_admission: std::sync::Mutex<Option<cpa_plugin::hostauth::AuthSaveSourceFence>>,
+}
+impl ScopedSave {
+    pub(super) fn issue(state: &Arc<Management>, job: cpa_plugin::hostauth::AuthSaveJob) -> Option<Self> {
+        use cpa_plugin::hostauth::AuthSaveJob;
+        let operation = state.enter()?;
+        if state.rt.store().is_home() {
+            return None;
+        }
+        let provider = match &job {
+            AuthSaveJob::LoginStart { provider }
+            | AuthSaveJob::LoginPoll { provider, .. }
+            | AuthSaveJob::Refresh { provider, .. } => provider,
+        };
+        let plugin = state.rt.plugins().auth_provider_record(provider)?;
+        let backend = state.rt.store().credential_backend();
+        let root = crate::credential_store::credential_path_key(&backend.auth_dir()).ok()?;
+        let mut known = std::collections::BTreeSet::new();
+        let mut sources = BTreeMap::new();
+        for (path, bytes) in backend.documents().ok()? {
+            let path = crate::credential_store::credential_path_key(&path).ok()?;
+            if path.parent() != Some(root.as_path()) {
+                continue;
+            }
+            known.insert(path.clone());
+            let Ok(raw): Result<Value, _> = serde_json::from_slice(&bytes) else {
+                continue;
+            };
+            if raw.get("type").and_then(Value::as_str).is_some_and(|kind| {
+                cpa_plugin::host::normalize_provider(kind) == cpa_plugin::host::normalize_provider(provider)
+            }) {
+                sources.insert(path, Some(crate::runtime::sha256(&bytes)));
+            }
+        }
+        let refresh = if let AuthSaveJob::Refresh {
+            id,
+            registration,
+            version,
+            ..
+        } = &job
+        {
+            let (original, registered) = state.rt.store().get_registered(id)?;
+            if original.disabled
+                || registered.registration != *registration
+                || registered.credential_version != *version
+            {
+                return None;
+            }
+            Some((
+                original,
+                crate::runtime::RefreshFence {
+                    registered,
+                    plugin: true,
+                    completed_plugin_grant: true,
+                    plugin_source: state.rt.plugins().auth_provider_fence(provider),
+                    preserved_source: None,
+                },
+            ))
+        } else {
+            None
+        };
+        Some(Self {
+            state: Arc::downgrade(state),
+            _operation: operation,
+            job,
+            plugin,
+            root,
+            known,
+            sources: std::sync::Mutex::new(sources),
+            refresh,
+            refresh_admission: std::sync::Mutex::new(None),
+        })
+    }
+    fn validate_lifetime(&self, state: &Management, live: &std::sync::atomic::AtomicBool) -> Result<(), String> {
+        if !live.load(std::sync::atomic::Ordering::Acquire) || !state.rt.plugins().record_current(&self.plugin) {
+            return Err("auth save job expired or plugin replaced".into());
+        }
+        if let cpa_plugin::hostauth::AuthSaveJob::LoginPoll { provider, session } = &self.job
+            && !state.oauth.is_pending(session, provider)
+        {
+            return Err("OAuth session cancelled".into());
+        }
+        if let Some((original, fence)) = &self.refresh {
+            let Some((current, registered)) = state.rt.store().get_registered(&original.id) else {
+                return Err("refresh target removed".into());
+            };
+            let own_admission = self.refresh_admission.lock().unwrap_or_else(PoisonError::into_inner);
+            // The canonical hash is checked again under owner admission by validate /
+            // authorize_completed_source; upsert_file need not have load provenance.
+            let admitted = own_admission.is_some_and(|source| {
+                registered.registration == source.registration && registered.credential_version == source.version
+            });
+            if current.disabled
+                || current.source != original.source
+                || registered.registration != fence.registered.registration
+                || (registered != fence.registered && !admitted)
+            {
+                return Err("refresh target replaced or revoked".into());
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn validate(
+        &self,
+        state: &Management,
+        path: &Path,
+        command: &crate::credential_store::CredentialCommand<'_>,
+        live: &std::sync::atomic::AtomicBool,
+        data: &[u8],
+    ) -> Result<(), String> {
+        self.validate_lifetime(state, live)?;
+        let path = crate::credential_store::credential_path_key(path).map_err(|_| "invalid auth destination")?;
+        if path.parent() != Some(self.root.as_path()) {
+            return Err("auth save destination is outside this job".into());
+        }
+        let provider = match &self.job {
+            cpa_plugin::hostauth::AuthSaveJob::LoginStart { provider }
+            | cpa_plugin::hostauth::AuthSaveJob::LoginPoll { provider, .. }
+            | cpa_plugin::hostauth::AuthSaveJob::Refresh { provider, .. } => provider,
+        };
+        let raw: Value = serde_json::from_slice(data).map_err(|_| "invalid auth result")?;
+        if raw.get("type").and_then(Value::as_str).is_none_or(|kind| {
+            cpa_plugin::host::normalize_provider(kind) != cpa_plugin::host::normalize_provider(provider)
+        }) {
+            return Err("auth save provider is outside this job".into());
+        }
+        if let Some((original, _)) = &self.refresh
+            && !matches!(&original.source,cpa_core::credential::Source::File(source)if crate::credential_store::credential_path_key(source).ok().as_ref()==Some(&path))
+        {
+            return Err("auth save target is outside this refresh job".into());
+        }
+        let sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.known.contains(&path) && !sources.contains_key(&path) {
+            return Err("auth save cannot replace another source".into());
+        }
+        let expected = sources.get(&path).copied().flatten();
+        let current = command
+            .read(&path)
+            .map_err(|_| "cannot read auth destination")?
+            .map(|bytes| crate::runtime::sha256(&bytes));
+        if current != expected {
+            return Err("auth save source changed or was deleted".into());
+        }
+        Ok(())
+    }
+    fn advance(
+        &self,
+        state: &Management,
+        path: &Path,
+        command: &crate::credential_store::CredentialCommand<'_>,
+        credentials: Option<&[Credential]>,
+    ) {
+        if let (Ok(path), Ok(bytes)) = (crate::credential_store::credential_path_key(path), command.read(path)) {
+            let hash = bytes.map(|bytes| crate::runtime::sha256(&bytes));
+            self.sources
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(path, hash);
+            if let Some((original, _)) = &self.refresh
+                && let Some(next) = credentials.and_then(|credentials| credentials.iter().find(|c| c.id == original.id))
+                && let Some((current, registered)) = state.rt.store().get_registered(&original.id)
+                && let Some(sha256) = hash
+            {
+                // Save may retain R1 without publishing it. Record exactly the admission
+                // that upsert/recovery of these bytes will install, not arbitrary churn.
+                *self.refresh_admission.lock().unwrap_or_else(PoisonError::into_inner) =
+                    Some(cpa_plugin::hostauth::AuthSaveSourceFence {
+                        sha256,
+                        registration: registered.registration,
+                        version: registered.credential_version
+                            + u64::from(crate::runtime::credentials_changed(&current, next)),
+                    });
+            }
+        }
+    }
+}
+impl cpa_plugin::hostauth::GrantedAuthSave for ScopedSave {
+    fn source_fence(
+        &self,
+        path: &Path,
+        live: &std::sync::atomic::AtomicBool,
+    ) -> Option<cpa_plugin::hostauth::AuthSaveSourceFence> {
+        let state = self.state.upgrade()?;
+        self.validate_lifetime(&state, live).ok()?;
+        let (_, fence) = self.refresh.as_ref()?;
+        let path = crate::credential_store::credential_path_key(path).ok()?;
+        let sha256 = self
+            .sources
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&path)
+            .copied()
+            .flatten()?;
+        Some(
+            self.refresh_admission
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .map(|source| cpa_plugin::hostauth::AuthSaveSourceFence { sha256, ..source })
+                .unwrap_or(cpa_plugin::hostauth::AuthSaveSourceFence {
+                    sha256,
+                    registration: fence.registered.registration,
+                    version: fence.registered.credential_version,
+                }),
+        )
+    }
+    fn save(
+        &self,
+        auths: SavedAuths,
+        data: &[u8],
+        write: &mut dyn FnMut() -> Result<(), String>,
+        live: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), String> {
+        let state = self.state.upgrade().ok_or("auth save owner stopped")?;
+        save_auths(&state, auths, write, Some((self, live, data)))
+    }
+}
+
+fn save_auths(
+    state: &Arc<Management>,
+    auths: SavedAuths,
+    write: &mut dyn FnMut() -> Result<(), String>,
+    granted: Option<(&ScopedSave, &std::sync::atomic::AtomicBool, &[u8])>,
+) -> Result<(), String> {
+    if state.rt.store().is_home() {
+        return Err("credential saves unavailable in Home mode".into());
+    }
+    let _disk = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+    let path = match &auths {
+        SavedAuths::BuiltIn(auth) => PathBuf::from(auth.attributes.get("path").cloned().unwrap_or_default()),
+        SavedAuths::Plugin { path, .. } | SavedAuths::Written { path, .. } => path.clone(),
+    };
+    let backend = state.rt.store().credential_backend();
+    let mut command = if granted.is_some() {
+        backend.granted_command()
+    } else {
+        backend.command()
+    }
+    .map_err(|error| format!("persist auth: {error}"))?;
+    if let Some((authority, live, data)) = granted {
+        authority.validate(state, &path, &command, live, data)?;
+        if let Some((original, fence)) = &authority.refresh
+            && original
+                .attributes
+                .get("plugin_virtual")
+                .is_some_and(|value| value == "true")
+        {
+            let next = match &auths {
+                SavedAuths::Plugin { credentials, .. } => credentials
+                    .iter()
+                    .find(|credential| credential.id == original.id)
+                    .cloned(),
+                _ => None,
+            };
+            return state
+                .rt
+                .store()
+                .commit_virtual_callback(&mut Some(command), original, fence.clone(), next, data)
+                .map_err(|_| "virtual grant result retained or refused; not activated before recovery".to_owned());
+        }
+    }
+    let apply = || {
+        if let Some((authority, live, _)) = granted {
+            authority.validate_lifetime(state, live)?;
+        }
+        if granted.is_none() {
+            write()?;
+        }
+        let encode = |metadata: &serde_json::Map<String, Value>, disabled| {
+            granted.map_or_else(
+                || persist(&path, metadata, disabled),
+                |(_, _, data)| Ok(render(data, metadata, disabled)),
+            )
+        };
+        match auths {
+            SavedAuths::Written { data, .. } => Ok((data, None)),
+            SavedAuths::BuiltIn(auth) => {
+                let bytes = encode(&auth.metadata, auth.disabled)?;
+                let cfg = state.rt.config();
+                let (mut credential, fallback) = match credentials::from_file(&cfg, &cfg.auth_dir, &path, &bytes) {
+                    Ok(Some(c)) => (c, false),
+                    // Go registers what its synthesizer would skip; uploads keep such
+                    // files the same way (see `credentials::upload_fallback`).
+                    Ok(None) => match credentials::upload_fallback(&cfg.auth_dir, &path, &bytes) {
+                        Some(c) => (c, true),
+                        None => return Ok((bytes, None)),
+                    },
+                    Err(e) => return Err(format!("register auth: {e}")),
+                };
+                // Keep the existing credential's ID and refresh state.
+                if !auth.id.is_empty() {
+                    credential.id = auth.id.clone();
+                }
+                let refresh = vec![SavedRefresh {
+                    id: credential.id.clone(),
+                    donor: Some(credential.id.clone()),
+                }];
+                Ok((bytes, Some((vec![credential], refresh, fallback))))
+            }
+            SavedAuths::Plugin {
+                mut credentials,
+                persist: rewrite,
+                refresh,
+                ..
+            } => {
+                // A virtual/multiple-auth document retains its raw plugin bytes.
+                let bytes = match (rewrite, credentials.as_mut_slice()) {
+                    (true, [one]) => {
+                        one.metadata.insert("disabled".into(), one.disabled.into());
+                        encode(&one.metadata, one.disabled)?
+                    }
+                    _ => match granted {
+                        Some((_, _, data)) => data.to_vec(),
+                        None => {
+                            std::fs::read(&path).map_err(|e| format!("auth filestore: read existing failed: {e}"))?
+                        }
+                    },
+                };
+                Ok((bytes, Some((credentials, refresh, false))))
+            }
+        }
+    };
+    let result = if granted.is_some() {
+        // Preserve the complete returned bytes before any cache-file I/O.
+        apply()
+            .and_then(|publication| {
+                let result = command.save(&path, &publication.0).map_err(|error| error.to_string());
+                if let Some((authority, _, _)) = granted {
+                    authority.advance(
+                        state,
+                        &path,
+                        &command,
+                        publication.1.as_ref().map(|(credentials, _, _)| credentials.as_slice()),
+                    );
+                }
+                result?;
+                Ok(publication)
+            })
+            .map_err(anyhow::Error::msg)
+    } else {
+        command.write_files(std::slice::from_ref(&path), || apply().map_err(anyhow::Error::msg))
+    };
+    let (bytes, publication) = result.map_err(|error| format!("persist auth: {error}"))?;
+    // Nested Written saves must be durable before making their parse observable.
+    credentials::note_plugin_auth_write(&path, &bytes);
+    if let Some((credentials, refresh, fallback)) = publication {
+        let mut fallbacks = state.fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
+        if fallback {
+            fallbacks.insert(path.clone());
+        } else {
+            fallbacks.remove(&path);
+        }
+        drop(fallbacks);
+        state.rt.store().upsert_file(Some(&path), credentials, &refresh);
+    }
+    state.credential_changes.notify_one();
+    Ok(())
+}
+
 /// Go `FileTokenStore.Save` for a saved auth: the metadata with the auth's `disabled`
 /// flag, marshalled, replacing the file unless it already holds the same JSON.
 /// Returns what the file holds.
-fn persist(path: &Path, metadata: &serde_json::Map<String, Value>, disabled: bool) -> Result<Vec<u8>, String> {
+fn render(existing: &[u8], metadata: &serde_json::Map<String, Value>, disabled: bool) -> Vec<u8> {
     let mut meta: BTreeMap<String, Value> = metadata.clone().into_iter().collect();
     meta.insert("disabled".into(), disabled.into());
     let raw = cpa_plugin::gojson::to_vec(&meta);
+    if json_equal(existing, &raw) {
+        existing.to_vec()
+    } else {
+        raw
+    }
+}
+
+fn persist(path: &Path, metadata: &serde_json::Map<String, Value>, disabled: bool) -> Result<Vec<u8>, String> {
     let existing = std::fs::read(path).map_err(|e| format!("auth filestore: read existing failed: {e}"))?;
-    if json_equal(&existing, &raw) {
+    let raw = render(&existing, metadata, disabled);
+    if existing == raw {
         return Ok(existing);
     }
     let mut file = std::fs::OpenOptions::new()
@@ -340,12 +654,7 @@ mod tests {
         assert_eq!(db.read(&path).unwrap().unwrap(), original);
         std::fs::remove_file(&path).unwrap();
         assert_eq!(manager.read_file(&path).unwrap(), original);
-        crate::testing::database_connection(state.config_store())
-            .execute_batch(
-                "CREATE TRIGGER reject_host_save BEFORE INSERT ON credential_document
-                 BEGIN SELECT RAISE(ABORT, 'reject host save'); END;",
-            )
-            .unwrap();
+        let blocked = crate::testing::block_checkpoint_install(state.config_store());
         let replacement = br#"{"type":"claude","access_token":"new"}"#;
         let auth = HostAuth {
             attributes: [("path".into(), path.to_string_lossy().into_owned())].into(),
@@ -377,12 +686,15 @@ mod tests {
             assert_eq!(std::fs::read(&path).unwrap(), original);
             assert!(state.rt.store().snapshot().is_empty());
         }
+        drop(blocked);
+        drop((manager, state, db));
         let reopened = crate::credential_store::CredentialDb::initialize(
             Arc::new(crate::testing::config_store(&work.join("config.db")).unwrap()),
             &work.join("legacy"),
         )
         .unwrap();
         assert_eq!(reopened.read(&path).unwrap().unwrap(), original);
+        drop(reopened);
         let _ = std::fs::remove_dir_all(work);
     }
 

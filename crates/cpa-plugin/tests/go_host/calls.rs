@@ -368,7 +368,13 @@ async fn command_line(host: &Host, args: &Value) -> Value {
     }
     let persist = |_auths: Vec<PluginAuth>| -> Result<Vec<String>, String> { Err("unexpected save".into()) };
     let (exit, handled, output) = host
-        .execute_command_line("cliproxy", &argv, "/etc/cliproxy/config.yaml", &values, &persist)
+        .execute_command_line(
+            "cliproxy",
+            &argv,
+            "/etc/cliproxy/config.yaml",
+            &values,
+            std::sync::Arc::new(persist),
+        )
         .await;
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
     for item in output {

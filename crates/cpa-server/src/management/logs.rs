@@ -578,7 +578,9 @@ pub(crate) async fn get_logs(State(state): State<Arc<Management>>, RawQuery(raw)
         q.first("limit").trim().to_owned(),
     );
     let (dir, zone) = (state.log_dir.clone(), state.log_zone);
-    tokio::task::spawn_blocking(move || get_logs_sync(&dir, &cursor, &after, &limit, zone))
+    state
+        .work
+        .spawn_blocking(move || get_logs_sync(&dir, &cursor, &after, &limit, zone))
         .await
         .unwrap_or_else(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
 }

@@ -199,6 +199,7 @@ impl Access {
         ip: &str,
         local: bool,
         provided: &[u8],
+        work: &tokio_util::task::TaskTracker,
     ) -> Result<(), (StatusCode, String)> {
         {
             let now = Instant::now();
@@ -236,7 +237,8 @@ impl Access {
         }
         let candidate = provided.to_vec();
         let valid = !secret.is_empty()
-            && tokio::task::spawn_blocking(move || bcrypt::verify(candidate, &secret).unwrap_or(false))
+            && work
+                .spawn_blocking(move || bcrypt::verify(candidate, &secret).unwrap_or(false))
                 .await
                 .unwrap_or(false);
         if !valid {
@@ -297,6 +299,20 @@ pub(crate) fn not_found() -> Response {
     StatusCode::NOT_FOUND.into_response()
 }
 
+pub(crate) async fn owned(State(state): State<Arc<Management>>, req: Request, next: Next) -> Response {
+    let Some(_operation) = state.enter() else {
+        return if req.uri().path().starts_with("/admin/v1/") {
+            super::admin::error(&state, 503, "shutting_down", "configuration service is shutting down")
+        } else {
+            json_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "configuration service is shutting down",
+            )
+        };
+    };
+    next.run(req).await
+}
+
 /// Go `managementAvailabilityMiddleware` alone (the OAuth callback routes).
 pub(crate) async fn available(State(state): State<Arc<Management>>, req: Request, next: Next) -> Response {
     if !state.access.available() {
@@ -316,7 +332,11 @@ pub(crate) async fn guard(State(state): State<Arc<Management>>, req: Request, ne
     let provided = provided_key(req.headers()).to_vec();
     let cfg = state.rt.config();
     let admin = req.uri().path().starts_with("/admin/v1/");
-    let mut response = match state.access.authenticate(&cfg, &ip, local, &provided).await {
+    let mut response = match state
+        .access
+        .authenticate(&cfg, &ip, local, &provided, &state.work)
+        .await
+    {
         Ok(()) => next.run(req).await,
         Err((status, message)) if admin => super::admin::error(
             &state,
@@ -416,6 +436,7 @@ mod tests {
     /// TUI's password is accepted from loopback only, and keeps routes on after reloads.
     #[tokio::test]
     async fn standalone_local_password_works_without_a_secret() {
+        let work = tokio_util::task::TaskTracker::new();
         let cfg = Config::parse("management:\n  allow-remote: true\n").unwrap();
         let options = |standalone| super::super::Options {
             local_password: "fake-local".into(),
@@ -424,7 +445,7 @@ mod tests {
             ..Default::default()
         };
         let plain = Access::new(&cfg, options(false));
-        let refused = plain.authenticate(&cfg, "127.0.0.1", true, b"fake-local").await;
+        let refused = plain.authenticate(&cfg, "127.0.0.1", true, b"fake-local", &work).await;
         assert_eq!(refused.unwrap_err().1, "remote management key not set");
         plain.config_published(&cfg);
         assert!(!plain.available());
@@ -432,13 +453,15 @@ mod tests {
         let access = Access::new(&cfg, options(true));
         assert!(
             access
-                .authenticate(&cfg, "127.0.0.1", true, b"fake-local")
+                .authenticate(&cfg, "127.0.0.1", true, b"fake-local", &work)
                 .await
                 .is_ok()
         );
-        let wrong = access.authenticate(&cfg, "127.0.0.1", true, b"wrong").await;
+        let wrong = access.authenticate(&cfg, "127.0.0.1", true, b"wrong", &work).await;
         assert_eq!(wrong.unwrap_err().1, "invalid management key");
-        let remote = access.authenticate(&cfg, "203.0.113.9", false, b"fake-local").await;
+        let remote = access
+            .authenticate(&cfg, "203.0.113.9", false, b"fake-local", &work)
+            .await;
         assert_eq!(remote.unwrap_err().1, "remote management key not set");
         access.config_published(&cfg);
         assert!(access.available());

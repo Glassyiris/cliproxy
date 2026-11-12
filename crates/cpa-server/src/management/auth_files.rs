@@ -272,12 +272,17 @@ fn lookup(state: &Management, name: &str, auth_index: &str) -> Option<Arc<Creden
         .find(|c| matches_name(c) && credentials::auth_index(c) == auth_index)
 }
 
-fn unsafe_name(name: &str) -> bool {
+pub(super) fn unsafe_name(name: &str) -> bool {
     name.trim().is_empty() || name.contains(['/', '\\'])
 }
 
-fn ends_json(name: &str) -> bool {
+pub(super) fn ends_json(name: &str) -> bool {
     name.go_lower().ends_with(".json")
+}
+
+/// The typed credential port authorizes managed basenames, never host paths.
+pub(super) fn managed_name(name: &str) -> bool {
+    !unsafe_name(name) && ends_json(name) && !name.contains(':') && !name.chars().any(char::is_control)
 }
 
 // ---------------------------------------------------------------------------
@@ -842,7 +847,10 @@ pub(crate) async fn download(State(state): State<Arc<Management>>, RawQuery(raw)
         .find(|c| c.id == name || file_name(c).as_deref() == Some(name.as_str()))
         .and_then(|c| path_of(c).map(Path::to_owned))
         .unwrap_or_else(|| state.rt.config().auth_dir.join(&name));
-    let bytes = tokio::task::spawn_blocking(move || read_file(&state, &full))
+    let bytes = state
+        .work
+        .clone()
+        .spawn_blocking(move || read_file(&state, &full))
         .await
         .unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
     match bytes {
@@ -925,7 +933,7 @@ type Upload = (PathBuf, Vec<u8>, Option<Credential>, bool);
 /// Go `buildAuthFromFileData`'s checks on an upload, and the bytes Go's store writes.
 /// An invalid file is the client's error (`Err((true, _))`, Go `errInvalidAuthFile`,
 /// 400).
-fn prepare_upload(state: &Management, name: &str, data: &[u8]) -> Result<Upload, (bool, String)> {
+pub(super) fn prepare_upload(state: &Management, name: &str, data: &[u8]) -> Result<Upload, (bool, String)> {
     let cfg = state.rt.config();
     let base = Path::new(name)
         .file_name()
@@ -1268,14 +1276,17 @@ pub(crate) async fn delete(
     };
     // Go `DeleteAuthFileV8`.
     let v8 = uri.path().starts_with("/v8/");
-    tokio::task::spawn_blocking(move || {
-        let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        let response = delete_sync(&state, &q, &body, v8);
-        resync(&state);
-        response
-    })
-    .await
-    .unwrap_or_else(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
+    state
+        .work
+        .clone()
+        .spawn_blocking(move || {
+            let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+            let response = delete_sync(&state, &q, &body, v8);
+            resync(&state);
+            response
+        })
+        .await
+        .unwrap_or_else(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
 }
 
 pub(super) fn delete_sync(state: &Management, q: &Query, body: &[u8], v8: bool) -> Response {
@@ -2112,12 +2123,15 @@ pub(super) async fn with_codex_lock<T: Send + 'static>(
     // Bounded like the stale-record retries: a lock that keeps changing hands fails.
     for _ in 0..16 {
         let worker = state.clone();
-        let (returned, out) = tokio::task::spawn_blocking(move || {
-            let out = job(&worker, &mut lock);
-            ((job, lock), out)
-        })
-        .await
-        .map_err(|_| "internal error".to_owned())?;
+        let (returned, out) = state
+            .work
+            .clone()
+            .spawn_blocking(move || {
+                let out = job(&worker, &mut lock);
+                ((job, lock), out)
+            })
+            .await
+            .map_err(|_| "internal error".to_owned())?;
         let path = match out {
             Ok(done) => return Ok(done),
             Err(path) => path,
@@ -2247,7 +2261,7 @@ fn save_file_backed(
         disk: Some(held),
         doc: Some(std::sync::Arc::new(doc)),
     };
-    commit_bytes(state, target, commit)
+    commit_bytes(state, target, commit, None)
 }
 
 /// Go's in-memory metadata for `meta`, the record the auth loader read with serde. A
@@ -2420,18 +2434,31 @@ fn merge_codex_from_disk(disk: &BTreeMap<String, GoValue>, doc: &mut BTreeMap<St
 
 /// Writes `bytes` as `target`'s file and registers their re-synthesis in its place,
 /// while `target` is still the current record (see [`save_file_backed`]).
-pub(super) fn save_bytes(state: &Management, target: &Credential, bytes: Vec<u8>) -> Result<(), PatchError> {
+pub(super) fn save_granted_bytes(
+    state: &Management,
+    target: &Credential,
+    bytes: Vec<u8>,
+    command: &mut Option<crate::credential_store::CredentialCommand<'_>>,
+) -> Result<(), PatchError> {
+    if !command.as_ref().is_some_and(|command| command.is_grant()) {
+        return Err(PatchError::Io("consumed-grant admission required".into()));
+    }
     let commit = Commit {
         bytes,
         write: true,
         disk: None,
         doc: None,
     };
-    commit_bytes(state, target, commit)
+    commit_bytes(state, target, commit, Some(command))
 }
 
 /// Commits `commit` for `target`, publishing the credential its bytes synthesize.
-fn commit_bytes(state: &Management, target: &Credential, commit: Commit) -> Result<(), PatchError> {
+fn commit_bytes(
+    state: &Management,
+    target: &Credential,
+    commit: Commit,
+    admitted: Option<&mut Option<crate::credential_store::CredentialCommand<'_>>>,
+) -> Result<(), PatchError> {
     let Some(path) = path_of(target).map(Path::to_path_buf) else {
         return Err(PatchError::ConfigBacked);
     };
@@ -2449,10 +2476,18 @@ fn commit_bytes(state: &Management, target: &Credential, commit: Commit) -> Resu
         Err(e) => return Err(PatchError::Io(e)),
     };
     let kept = next.is_some();
-    state
-        .rt
-        .store()
-        .commit_file_backed(&target.id, target.revision, commit, next)?;
+    match admitted {
+        Some(command) => {
+            state
+                .rt
+                .store()
+                .commit_file_backed_admitted(command, &target.id, target.revision, commit, next)?
+        }
+        None => state
+            .rt
+            .store()
+            .commit_file_backed(&target.id, target.revision, commit, next)?,
+    }
     let mut fallbacks = state.fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
     fallbacks.remove(&path);
     fallbacks.remove(&scanned);
@@ -3031,7 +3066,7 @@ mod tests {
     async fn failed_sqlite_upload_never_publishes_or_reports_success() {
         let (state, db, root) = sqlite_management();
         let before = state.rt.store().get("a.json").unwrap();
-        state.config_store().conn().execute_batch("CREATE TRIGGER reject_credential BEFORE INSERT ON credential_document BEGIN SELECT RAISE(ABORT, 'injected durable failure'); END;").unwrap();
+        let blocked = crate::testing::block_checkpoint_install(state.config_store());
         let result = store_file(
             &state,
             "a.json",
@@ -3047,6 +3082,7 @@ mod tests {
         let bytes = db.read(&db.auth_dir().join("a.json")).unwrap().unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap()["access_token"], "old");
         assert_eq!(std::fs::read(db.auth_dir().join("a.json")).unwrap(), bytes);
+        drop(blocked);
         drop(state);
         drop(db);
         std::fs::remove_dir_all(root).unwrap();
@@ -3182,6 +3218,9 @@ mod tests {
         let fence = crate::runtime::RefreshFence {
             registered,
             plugin: true,
+            completed_plugin_grant: false,
+            plugin_source: None,
+            preserved_source: None,
         };
         let committed = crate::runtime::commit_refresh(store, "a.json", &current, fence, &patch, |_| {}).unwrap();
         assert_eq!(committed.metadata["refresh_token"], "r2", "the refresh commits");

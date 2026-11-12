@@ -119,17 +119,19 @@ pub async fn execute(host: &Host, builtin: &[(String, String)], backend: &Creden
     let raw: Vec<String> = std::env::args().collect();
     let program = raw.first().cloned().unwrap_or_default();
     let auth_dir = host.host_config_summary().auth_dir;
-    let home_rejected = std::sync::atomic::AtomicBool::new(false);
-    let persist = |auths: Vec<cpa_plugin::auth::PluginAuth>| {
-        let CredentialAuthority::Local(backend) = backend else {
+    let home_rejected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let refused = home_rejected.clone();
+    let backend = (*backend).clone();
+    let persist = Arc::new(move |auths: Vec<cpa_plugin::auth::PluginAuth>| {
+        let CredentialAuthority::Local(backend) = &backend else {
             if auths.is_empty() {
                 return Ok(Vec::new());
             }
-            home_rejected.store(true, std::sync::atomic::Ordering::Relaxed);
+            refused.store(true, std::sync::atomic::Ordering::Relaxed);
             return Err(HOME_CREDENTIAL_ERROR.into());
         };
         save_auths(auths, &auth_dir, backend)
-    };
+    });
     let (code, handled, mut output) = host
         .execute_command_line(
             &program,
@@ -138,12 +140,41 @@ pub async fn execute(host: &Host, builtin: &[(String, String)], backend: &Creden
             // remain authoritative; an empty optional ConfigPath advertises no file.
             "",
             builtin,
-            &persist,
+            persist,
         )
         .await;
     if home_rejected.load(std::sync::atomic::Ordering::Relaxed) {
         output.push(Output::Stderr(format!("{HOME_CREDENTIAL_ERROR}\n").into()));
     }
+    write_output(output);
+    handled.then_some(code)
+}
+
+pub async fn execute_online(
+    host: &Host,
+    builtin: &[(String, String)],
+    raw: &[String],
+    save: cpa_exec::login_store::LoginSave,
+) -> Option<i32> {
+    if !host.has_triggered_command_line_flags() {
+        return None;
+    }
+    let auth_dir = host.host_config_summary().auth_dir;
+    let persist: cpa_plugin::cli::CommandAuthSave = Arc::new(move |auths| save_auths_online(auths, &auth_dir, &save));
+    let (code, handled, output) = host
+        .execute_command_line(
+            raw.first().map(String::as_str).unwrap_or_default(),
+            raw.get(1..).unwrap_or_default(),
+            "",
+            builtin,
+            persist,
+        )
+        .await;
+    write_output(output);
+    handled.then_some(code)
+}
+
+fn write_output(output: Vec<Output>) {
     for item in output {
         let written = match item {
             Output::Stdout(data) => std::io::stdout()
@@ -155,7 +186,6 @@ pub async fn execute(host: &Host, builtin: &[(String, String)], backend: &Creden
             tracing::warn!("pluginhost: failed to write command-line plugin output: {e}");
         }
     }
-    handled.then_some(code)
 }
 
 pub const HOME_CREDENTIAL_ERROR: &str =
@@ -164,10 +194,20 @@ pub const HOME_CREDENTIAL_ERROR: &str =
 /// CLI plugins keep their file-based listing and raw document behavior; saves
 /// acknowledge SQLite. Home commands may run but cannot save local credentials.
 pub fn attach_credentials(host: &Host, authority: CredentialAuthority) {
-    host.set_auth_manager(Some(Arc::new(CliCredentials(authority))));
+    host.set_auth_manager(Some(Arc::new(CliCredentials::Owner(authority))));
 }
 
-struct CliCredentials(CredentialAuthority);
+pub fn attach_online_credentials(host: &Host, root: std::path::PathBuf, save: cpa_exec::login_store::LoginSave) {
+    host.set_auth_manager(Some(Arc::new(CliCredentials::Online { root, save })));
+}
+
+enum CliCredentials {
+    Owner(CredentialAuthority),
+    Online {
+        root: std::path::PathBuf,
+        save: cpa_exec::login_store::LoginSave,
+    },
+}
 
 impl cpa_plugin::hostauth::AuthManager for CliCredentials {
     fn manages_auths(&self) -> bool {
@@ -183,12 +223,19 @@ impl cpa_plugin::hostauth::AuthManager for CliCredentials {
     }
 
     fn read_file(&self, path: &std::path::Path) -> std::io::Result<Vec<u8>> {
-        match &self.0 {
-            CredentialAuthority::Local(db) => db
+        match self {
+            Self::Owner(CredentialAuthority::Local(db)) => db
                 .read(path)
                 .map_err(std::io::Error::other)?
                 .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound)),
-            CredentialAuthority::Home => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+            Self::Owner(CredentialAuthority::Home) => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+            Self::Online { root, .. } => {
+                let path = cpa_server::credential_store::credential_path_key(path)?;
+                if path.parent() != Some(root.as_path()) {
+                    return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+                }
+                std::fs::read(path)
+            }
         }
     }
 
@@ -198,23 +245,62 @@ impl cpa_plugin::hostauth::AuthManager for CliCredentials {
         write: &mut dyn FnMut() -> Result<(), String>,
     ) -> Result<(), String> {
         use cpa_plugin::hostauth::SavedAuths;
-        let CredentialAuthority::Local(backend) = &self.0 else {
+        if matches!(self, Self::Owner(CredentialAuthority::Home)) {
             return Err(HOME_CREDENTIAL_ERROR.into());
-        };
+        }
         let path = match auths {
             SavedAuths::BuiltIn(auth) => {
                 std::path::PathBuf::from(auth.attributes.get("path").ok_or("auth file path unavailable")?)
             }
             SavedAuths::Plugin { path, .. } | SavedAuths::Written { path, .. } => path,
         };
-        backend
-            .write_files(&[path], || write().map_err(anyhow::Error::msg))
-            .map_err(|error| format!("commit plugin CLI credential to SQLite: {error:#}"))
+        match self {
+            Self::Owner(CredentialAuthority::Local(backend)) => backend
+                .write_files(&[path], || write().map_err(anyhow::Error::msg))
+                .map_err(|error| format!("commit plugin CLI credential to SQLite: {error:#}")),
+            Self::Owner(CredentialAuthority::Home) => Err(HOME_CREDENTIAL_ERROR.into()),
+            Self::Online { root, save } => {
+                if path.parent() != Some(root.as_path()) {
+                    return Err("online plugin target escaped its private scratch directory".into());
+                }
+                save(&[path], write)
+            }
+        }
     }
 
     fn lookup_session_affinity(&self, _: &str, _: &str, _: &str) -> (String, Option<cpa_plugin::hostauth::HostAuth>) {
         ("unsupported".into(), None)
     }
+}
+
+fn save_auths_online(
+    auths: Vec<cpa_plugin::auth::PluginAuth>,
+    auth_dir: &str,
+    save: &cpa_exec::login_store::LoginSave,
+) -> Result<Vec<String>, String> {
+    let mut paths = auths
+        .iter()
+        .map(|auth| auth.file_path(auth_dir).map(std::path::PathBuf::from))
+        .collect::<Result<Vec<_>, _>>()?;
+    paths.sort();
+    paths.dedup();
+    cpa_exec::login_store::save_login(Some(save), &paths, || {
+        auths
+            .into_iter()
+            .map(|auth| auth.save_file(auth_dir, false))
+            .collect::<Result<Vec<_>, _>>()
+    })
+    .map(|paths| {
+        paths
+            .into_iter()
+            .filter_map(|path| {
+                std::path::Path::new(&path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_owned)
+            })
+            .collect()
+    })
 }
 
 fn save_auths(
@@ -246,7 +332,7 @@ mod tests {
     fn home_cli_rejects_host_saves_before_writing() {
         use cpa_plugin::hostauth::{AuthManager as _, SavedAuths};
         let mut called = false;
-        let error = CliCredentials(CredentialAuthority::Home)
+        let error = CliCredentials::Owner(CredentialAuthority::Home)
             .save(
                 SavedAuths::Written {
                     path: "unused.json".into(),
@@ -436,7 +522,7 @@ mod tests {
         use cpa_plugin::hostauth::{AuthManager as _, SavedAuths};
         let nested = db.auth_dir().join("nested.json");
         let raw = b"{\"type\":\"acme\",\"opaque\":[1,2]}";
-        CliCredentials(CredentialAuthority::Local(db.clone()))
+        CliCredentials::Owner(CredentialAuthority::Local(db.clone()))
             .save(
                 SavedAuths::Written {
                     path: nested.clone(),
@@ -466,31 +552,20 @@ mod tests {
         drop(db);
         std::fs::remove_file(&explicit).unwrap();
         std::fs::remove_dir_all(&workspace).unwrap();
-        let db = CredentialDb::initialize(
-            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
-            &dir.join("missing"),
-        )
-        .unwrap();
+        let owner = Arc::new(cpa_server::testing::config_store(&path).unwrap());
+        let db = CredentialDb::initialize(owner.clone(), &dir.join("missing")).unwrap();
         assert_eq!(std::fs::read(&explicit).unwrap(), bytes);
-        let blocker = cpa_server::testing::config_store(&path).unwrap();
-        let (locked, acquired) = std::sync::mpsc::channel();
-        let (release, released) = std::sync::mpsc::channel();
-        let writer = std::thread::spawn(move || {
-            blocker
-                .edit("test", "hold write transaction", |_| {
-                    locked.send(()).unwrap();
-                    released.recv().unwrap();
-                    Ok(())
-                })
-                .unwrap()
-        });
-        acquired.recv().unwrap();
+        let mut previous: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        previous["token"] = "before-failed-save".into();
+        let previous = serde_json::to_vec(&previous).unwrap();
+        db.save(&explicit, &previous).unwrap();
+        let blocker = cpa_server::testing::block_checkpoint_install(&owner);
         let code = execute(&host, &[], &CredentialAuthority::Local(db.clone())).await;
-        release.send(()).unwrap();
-        writer.join().unwrap();
+        drop(blocker);
         assert_eq!(code, Some(1));
-        assert_eq!(db.read(&explicit).unwrap().unwrap(), bytes);
-        drop(db);
+        assert_eq!(db.read(&explicit).unwrap().unwrap(), previous);
+        assert_eq!(std::fs::read(&explicit).unwrap(), previous);
+        drop((db, owner));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

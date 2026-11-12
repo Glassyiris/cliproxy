@@ -34,17 +34,38 @@ fn calls(records: &Path, label: &str, method: &str) -> Vec<Value> {
         .collect()
 }
 
+/// Provisional built-in loading is synchronous and independent of ambient hosts.
+fn builtin_auth_files(cfg: &Config) -> Vec<cpa_core::credential::Credential> {
+    use cpa_core::config::credentials::{self, ParseRequest, Parsed, PluginAuthParser};
+    struct BuiltIn;
+    impl PluginAuthParser for BuiltIn {
+        fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
+            Parsed::NotHandled
+        }
+    }
+    credentials::with_thread_plugin_auth_parser(Arc::new(BuiltIn), || {
+        credentials::preparse_auth_dir(cfg);
+        credentials::from_auth_dir(cfg)
+    })
+}
+
 /// A runtime with recorder plugins `(label, caps)` and auth files, serving on a local
 /// port. `prepare` runs on the records dir before the plugins start.
 struct Env {
-    /// The plugin catalog is process-wide; tests in this binary take turns.
-    _serial: tokio::sync::MutexGuard<'static, ()>,
     rt: Arc<cpa_server::Runtime>,
+    config_store: Arc<ConfigStore>,
+    tasks: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    notifications: std::sync::Mutex<Vec<cpa_server::watching::Notifications>>,
+    jobs: tokio_util::task::TaskTracker,
+    cleaned: bool,
+    executor: Option<tokio::runtime::Runtime>,
     dir: PathBuf,
     records: PathBuf,
     plugins: PathBuf,
     yaml: String,
     proxy: SocketAddr,
+    /// Release only after every component field has been destroyed.
+    _serial: tokio::sync::MutexGuard<'static, ()>,
 }
 
 async fn env(
@@ -103,29 +124,68 @@ async fn env_with(
         std::fs::write(auth_dir.join(file), body).unwrap();
     }
     prepare(&records);
-    let cfg = Config::parse(&yaml).unwrap();
-    let credentials = cpa_core::config::credentials::load(&cfg);
-    let rt = Arc::new(cpa_server::testing::runtime(cfg, credentials, executors));
-    cpa_server::plugins::start(&rt).await;
-    let proxy = {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let app = cpa_server::router(rt.clone());
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        addr
-    };
-    Some(Env {
+    let config_store = Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap());
+    config_store.import_yaml(&yaml, "test", "").unwrap();
+    let db = cpa_server::credential_store::CredentialDb::initialize(config_store.clone(), &auth_dir).unwrap();
+    let mut cfg = Config::parse(&yaml).unwrap();
+    cfg.auth_dir = db.auth_dir();
+    // Deliberately provisional, as before plugins start in main. Do not consume a
+    // preceding fixture's ambient native parser or implicitly end bootstrap here.
+    let mut credentials = cpa_core::config::credentials::from_config(&cfg);
+    credentials.extend(builtin_auth_files(&cfg));
+    let rt = Arc::new(cpa_server::testing::runtime_with_db(cfg, credentials, executors, db));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy = listener.local_addr().unwrap();
+    let executor = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let env = Env {
         _serial: serial,
         rt,
+        config_store,
+        tasks: std::sync::Mutex::default(),
+        notifications: std::sync::Mutex::default(),
+        jobs: tokio_util::task::TaskTracker::new(),
+        cleaned: false,
+        executor: Some(executor),
         dir,
         records,
         plugins: plugin_dir,
         yaml,
         proxy,
-    })
+    };
+    env.executor
+        .as_ref()
+        .unwrap()
+        .spawn({
+            let rt = env.rt.clone();
+            async move { cpa_server::plugins::start(&rt).await }
+        })
+        .await
+        .unwrap();
+    let app = cpa_server::router(env.rt.clone());
+    env.own(env.spawn(async move { axum::serve(listener, app).await.unwrap() }));
+    Some(env)
 }
 
 impl Env {
+    /// Return typed completion/abort ownership on the private executor, tracking
+    /// completion even if a panic drops the caller's handle.
+    fn spawn<F>(&self, job: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.jobs.spawn_on(job, self.executor.as_ref().unwrap().handle())
+    }
+
+    fn start_auto_refresh(&self) {
+        let _entered = self.executor.as_ref().unwrap().enter();
+        self.rt.start_auto_refresh();
+    }
+
     async fn chat(&self, model: &str) -> (u16, String) {
         self.post(format!(
             r#"{{"model":"{model}","messages":[{{"role":"user","content":"hi"}}]}}"#
@@ -162,10 +222,94 @@ impl Env {
         }
     }
 
-    async fn finish(self) {
-        self.stop_refreshes().await;
-        self.rt.plugins().shutdown_all(None).await;
-        std::fs::remove_dir_all(self.dir).unwrap();
+    fn own(&self, task: tokio::task::JoinHandle<()>) -> tokio::task::AbortHandle {
+        let abort = task.abort_handle();
+        self.tasks.lock().unwrap().push(task);
+        abort
+    }
+
+    fn watch(&self, management: &Arc<cpa_server::management::Management>) -> tokio_util::sync::CancellationToken {
+        let _entered = self.executor.as_ref().unwrap().enter();
+        let notifications = cpa_server::watching::start(management);
+        let stop = notifications.cancellation_token();
+        self.notifications.lock().unwrap().push(notifications);
+        stop
+    }
+
+    async fn cleanup(
+        rt: &Arc<cpa_server::Runtime>,
+        tasks: Vec<tokio::task::JoinHandle<()>>,
+        notifications: Vec<cpa_server::watching::Notifications>,
+        jobs: &tokio_util::task::TaskTracker,
+    ) {
+        rt.stop_auto_refresh();
+        for notification in &notifications {
+            notification.stop();
+        }
+        for task in &tasks {
+            task.abort();
+        }
+        for task in tasks {
+            if let Err(error) = task.await {
+                assert!(error.is_cancelled(), "fixture service failed: {error}");
+            }
+        }
+        for notification in notifications {
+            notification.shutdown().await.unwrap();
+        }
+        // Do not cancel a finite refresh/reload: a native answer can already own a
+        // grant/checkpoint. Drain it on our executor before releasing its workspace.
+        jobs.close();
+        jobs.wait().await;
+        for credential in rt.store().snapshot() {
+            drop(rt.store().prepare_lock(&credential.id).lock_owned().await);
+        }
+        rt.shutdown_codex_refreshes().await;
+        rt.plugins().shutdown_all(None).await;
+    }
+
+    async fn finish(mut self) {
+        let tasks = std::mem::take(&mut *self.tasks.lock().unwrap());
+        let notifications = std::mem::take(&mut *self.notifications.lock().unwrap());
+        Self::cleanup(&self.rt, tasks, notifications, &self.jobs).await;
+        let executor = self.executor.take().unwrap();
+        tokio::task::spawn_blocking(move || drop(executor)).await.unwrap();
+        self.cleaned = true;
+        std::fs::remove_dir_all(&self.dir).unwrap();
+    }
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        if self.cleaned {
+            return;
+        }
+        // Retained fixture jobs run on our executor. Directly awaited public
+        // operations still exercise the caller context and its cancellation semantics.
+        let tasks = std::mem::take(&mut *self.tasks.lock().unwrap());
+        let notifications = std::mem::take(&mut *self.notifications.lock().unwrap());
+        let executor = self.executor.take().unwrap();
+        let rt = &self.rt;
+        let jobs = &self.jobs;
+        let cleanup = || {
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(move || {
+                        executor.block_on(Self::cleanup(rt, tasks, notifications, jobs));
+                        drop(executor);
+                    })
+                    .join()
+                    .unwrap();
+            })
+        };
+        if tokio::runtime::Handle::try_current()
+            .is_ok_and(|h| h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread)
+        {
+            tokio::task::block_in_place(cleanup);
+        } else {
+            cleanup();
+        }
+        std::fs::remove_dir_all(&self.dir).unwrap();
     }
 }
 
@@ -2113,10 +2257,9 @@ async fn an_auth_provider_can_save_while_it_parses() {
     else {
         return;
     };
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
     // The watcher's first observation reloads the auth folder.
-    let watcher = cpa_server::watching::start(&management);
+    let watcher = env.watch(&management);
     eventually("the reload stalled", || env.rt.store().get("acme-a").is_some()).await;
     let saved = calls(&env.records, "acme", "host_callback");
     assert!(!saved.is_empty());
@@ -2132,7 +2275,7 @@ async fn an_auth_provider_can_save_while_it_parses() {
         env.rt.store().get("saved.json").unwrap().metadata["access_token"],
         "fake"
     );
-    watcher.abort();
+    watcher.cancel();
     drop(management);
     env.finish().await;
 }
@@ -2167,9 +2310,8 @@ async fn a_reload_and_a_serial_plugins_save_both_complete() {
         return;
     };
     let release = Release(env.records.join("respond/slow/auth.parse.hold"));
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
-    let watcher = cpa_server::watching::start(&management);
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
+    let watcher = env.watch(&management);
     eventually("the reload never reached the first file", || {
         !calls(&env.records, "slow", "auth.parse").is_empty()
     })
@@ -2177,7 +2319,7 @@ async fn a_reload_and_a_serial_plugins_save_both_complete() {
     // acme takes its turn and saves; the save needs the disk lock.
     let body = json!({"calls":[{"method":"host.auth.save","request":{
         "name":"saved.json","json":{"type":"claude","access_token":"fake"}}}]});
-    let saving = tokio::spawn({
+    let saving = env.spawn({
         let host = env.rt.plugins().clone();
         async move {
             host.serve_management(cpa_plugin::management::Inbound {
@@ -2212,7 +2354,7 @@ async fn a_reload_and_a_serial_plugins_save_both_complete() {
     })
     .await;
     file_matches_store(&env, "saved.json");
-    watcher.abort();
+    watcher.cancel();
     drop(management);
     env.finish().await;
 }
@@ -2255,8 +2397,7 @@ async fn a_plugin_save_applies_the_files_settings_and_persists_as_go_does() {
     else {
         return;
     };
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
     let store = env.rt.store().clone();
     let auth_dir = env.rt.config().auth_dir.clone();
     let answer = |auth: Value| {
@@ -2406,8 +2547,7 @@ async fn a_plugin_save_registers_what_the_auth_provider_parses() {
     else {
         return;
     };
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     let store = env.rt.store().clone();
     assert!(store.get("acme-1").is_some() && store.get("acme-2").is_some());
@@ -2522,8 +2662,7 @@ async fn a_saved_auth_waits_for_its_parsed_refresh_deadline() {
             json!({"Handled":true,"Auths":[auth]}),
         )
     };
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
     answer("later", Some("2099-01-01T00:00:00Z"));
     let saved = host_save(&env, "acme", "later.json", json!({"type":"acme"})).await;
     assert_eq!(saved["ok"], true, "{saved}");
@@ -2538,7 +2677,7 @@ async fn a_saved_auth_waits_for_its_parsed_refresh_deadline() {
             .filter(|r| r["AuthID"] == id)
             .count()
     };
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("the undated credential's refresh", || refreshed("now") >= 1).await;
     tokio::time::sleep(Duration::from_millis(1500)).await;
     env.rt.stop_auto_refresh();
@@ -2595,8 +2734,7 @@ async fn a_saved_auth_takes_its_refresh_deadline_only_when_registered() {
     // No auth manager: the file is written and nothing is registered.
     answer(vec![auth("orphan", later)]);
     assert_eq!(save("orphan.json").await["ok"], true);
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
     answer(vec![auth("orphan", None)]);
     assert_eq!(save("orphan.json").await["ok"], true);
 
@@ -2658,7 +2796,7 @@ async fn a_saved_auth_takes_its_refresh_deadline_only_when_registered() {
         ["orphan", "refused", "swapped", "reused.json"],
         ["new", "again", "moved-on"],
     );
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     // Bounded, so a credential that never comes due is reported with the others.
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while !due.iter().all(|id| refreshed(id) >= 1) && std::time::Instant::now() < deadline {
@@ -2721,8 +2859,7 @@ async fn a_reload_keeps_a_saved_auths_refresh_deadline() {
             json!({"Handled":true,"Auths":[auth]}),
         )
     };
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
     answer(Some("2099-01-01T00:00:00Z"));
     let saved = host_save(&env, "acme", "kept.json", json!({"type":"acme"})).await;
     assert_eq!(saved["ok"], true, "{saved}");
@@ -2736,7 +2873,7 @@ async fn a_reload_keeps_a_saved_auths_refresh_deadline() {
             .filter(|r| r["AuthID"] == id)
             .count()
     };
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("the other plugin's refresh", || refreshed("pp", "p-1") >= 1).await;
     tokio::time::sleep(Duration::from_millis(1500)).await;
     env.rt.stop_auto_refresh();
@@ -2768,8 +2905,7 @@ async fn a_save_whose_parse_saves_the_same_file_completes_after_one_parse() {
     else {
         return;
     };
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
     let body = json!({"calls":[{"method":"host.auth.save","request":{
         "name":"acme.json","json":{"type":"acme","n":1}}}]});
     let response = tokio::time::timeout(
@@ -2888,7 +3024,7 @@ async fn a_save_from_another_thread_during_a_parse_of_its_file_is_checked_as_in_
     assert_eq!(on_disk, br#"{"type":"acme"}"#);
     drop(release);
     eventually("the reload stalled", || env.rt.store().get("acme-a").is_some()).await;
-    watcher.abort();
+    watcher.cancel();
     drop(management);
     env.finish().await;
 }
@@ -2917,8 +3053,7 @@ async fn a_spawned_save_during_a_saves_parse_is_refused_and_the_recursion_stops(
     else {
         return;
     };
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
     let file = env.rt.config().auth_dir.join("acme.json");
     let n = || serde_json::from_slice::<Value>(&std::fs::read(&file).unwrap()).unwrap()["n"].clone();
     let refused = |response: &Value| {
@@ -3002,7 +3137,7 @@ async fn a_file_changed_after_its_parse_keeps_its_credentials_until_the_next_rel
             br#"{"type":"slow","v":2}"#,
         )
         .unwrap();
-    let reload = tokio::spawn({
+    let reload = env.spawn({
         let rt = env.rt.clone();
         async move { cpa_server::plugins::reload_plugin_auth_files(&rt).await }
     });
@@ -3092,9 +3227,8 @@ async fn unloading_an_auth_provider_reloads_its_files_without_a_file_change() {
     else {
         return;
     };
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
-    let watcher = cpa_server::watching::start(&management);
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
+    let watcher = env.watch(&management);
     let store = env.rt.store().clone();
     eventually("P's credentials never loaded", || {
         store.get("p1").is_some() && store.get("p2").is_some()
@@ -3112,7 +3246,7 @@ async fn unloading_an_auth_provider_reloads_its_files_without_a_file_change() {
     eventually("the file never loaded", || store.get("p.json").is_some()).await;
     settles(&env, "qq").await;
     assert!(store.get("p1").is_none() && store.get("p.json").is_some());
-    watcher.abort();
+    watcher.cancel();
     drop(management);
     env.finish().await;
 }
@@ -3128,11 +3262,15 @@ fn parse_saving(id: &str, save: Value) -> String {
     .to_string()
 }
 
-/// Starts the auth watcher over `env` with an in-memory config store.
-fn watch(env: &Env) -> (Arc<cpa_server::management::Management>, tokio::task::JoinHandle<()>) {
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
-    let watcher = cpa_server::watching::start(&management);
+/// Starts an owned auth watcher over the fixture's live service owner.
+fn watch(
+    env: &Env,
+) -> (
+    Arc<cpa_server::management::Management>,
+    tokio_util::sync::CancellationToken,
+) {
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
+    let watcher = env.watch(&management);
     (management, watcher)
 }
 
@@ -3164,13 +3302,13 @@ async fn management_fields_and_status_reparse_plugin_credentials_after_commit() 
     };
     let management = cpa_server::management::Management::with_options(
         env.rt.clone(),
-        Arc::new(ConfigStore::memory_with(&env.yaml)),
+        env.config_store.clone(),
         cpa_server::management::Options {
             management_password: Some("management-test-only".into()),
             ..Default::default()
         },
     );
-    let watcher = cpa_server::watching::start(&management);
+    let watcher = env.watch(&management);
     let store = env.rt.store().clone();
     eventually("the plugin credential never loaded", || {
         store.get("account-7").is_some()
@@ -3180,11 +3318,11 @@ async fn management_fields_and_status_reparse_plugin_credentials_after_commit() 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let app = cpa_server::management::router(management.clone());
-    let server = tokio::spawn(async move {
+    let server = env.own(env.spawn(async move {
         axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .unwrap();
-    });
+    }));
     let client = wreq::Client::new();
     let path = env.rt.config().auth_dir.join("acme.json");
     // File priority is inherited into parsed metadata and attributes, so this canned
@@ -3221,7 +3359,7 @@ async fn management_fields_and_status_reparse_plugin_credentials_after_commit() 
         settles(&env, "acme").await;
     }
     server.abort();
-    watcher.abort();
+    watcher.cancel();
     drop(management);
     env.finish().await;
 }
@@ -3261,7 +3399,7 @@ async fn a_plugin_that_saves_its_file_while_parsing_ends_with_the_parse_of_the_s
     .await;
     settles(&env, "acme").await;
     assert!(store.get("acme-new").is_some() && store.get("acme-old").is_none());
-    watcher.abort();
+    watcher.cancel();
     drop(management);
     env.finish().await;
 }
@@ -3302,7 +3440,7 @@ async fn a_plugin_rewriting_its_file_on_every_parse_publishes_its_recent_parses(
         published().is_some_and(|n| n > first + 1)
     })
     .await;
-    watcher.abort();
+    watcher.cancel();
     drop(management);
     env.finish().await;
 }
@@ -3348,7 +3486,7 @@ async fn an_auth_identifier_recovering_from_an_error_reparses_the_auth_files() {
         store.get("acme-a").is_some()
     })
     .await;
-    watcher.abort();
+    watcher.cancel();
     drop(management);
     env.finish().await;
 }
@@ -3375,26 +3513,43 @@ async fn a_host_config_change_reparses_the_auth_files() {
     else {
         return;
     };
-    let path = env.dir.join("cook.db");
-    let store = Arc::new(cpa_server::testing::config_store(&path).unwrap());
-    store.import_yaml(&env.yaml, "test", "").unwrap();
-    let management = cpa_server::management::Management::new(env.rt.clone(), store);
-    let watcher = cpa_server::watching::start(&management);
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
+    let watcher = env.watch(&management);
     eventually("the file was never parsed", || env.rt.store().get("acme-a").is_some()).await;
     settles(&env, "acme").await;
+    let path = env.rt.config().auth_dir.join("acme.json");
+    let before = std::fs::read(&path).unwrap();
+    let parsed = calls(&env.records, "acme", "auth.parse").len();
+    let initial = management.config_store().load().unwrap().rev;
     let proxy = "http://127.0.0.1:9";
-    let writer = cpa_server::testing::config_store(&path).unwrap();
-    writer
+    let accepted = management
+        .config_store()
         .import_yaml(&format!("proxy-url: {proxy}\n{}", env.yaml), "test", "")
         .unwrap();
-    management.reload_config();
+    assert!(accepted.rev > initial);
+    assert_eq!(
+        env.rt
+            .config()
+            .document
+            .get("requests")
+            .and_then(|v| v.get("proxy-url"))
+            .and_then(|v| v.as_str()),
+        Some(proxy)
+    );
+    assert_eq!(management.config_store().load().unwrap().rev, accepted.rev);
     eventually("the plugin was never asked with the new host config", || {
         calls(&env.records, "acme", "auth.parse")
             .iter()
             .any(|req| req["Host"]["ProxyURL"] == proxy)
     })
     .await;
-    watcher.abort();
+    assert!(calls(&env.records, "acme", "auth.parse").len() > parsed);
+    assert_eq!(
+        std::fs::read(path).unwrap(),
+        before,
+        "host changes do not edit credential bytes"
+    );
+    watcher.cancel();
     drop(management);
     env.finish().await;
 }
@@ -3462,7 +3617,7 @@ async fn a_refresh_committed_during_the_startup_reload_survives_it() {
         return;
     };
     let release = Release(env.records.join("respond/acme/auth.parse.hold"));
-    let reload = tokio::spawn({
+    let reload = env.spawn({
         let rt = env.rt.clone();
         async move { cpa_server::plugins::reload_plugin_auth_files(&rt).await }
     });
@@ -3552,10 +3707,1022 @@ async fn a_401_from_a_plugin_executor_refreshes_through_its_auth_provider() {
     env.finish().await;
 }
 
+/// A native auth provider's already-returned child result is volatile execution
+/// state: publication recovery admits it once, never into the shared source file.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_native_virtual_grant_waits_for_publication_without_a_shared_file_save() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let grants = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/grant", listener.local_addr().unwrap());
+    let app = axum::Router::new().route(
+        "/grant",
+        axum::routing::get({
+            let (arrived, gate, grants) = (arrived.clone(), gate.clone(), grants.clone());
+            move || {
+                let (arrived, gate, grants) = (arrived.clone(), gate.clone(), grants.clone());
+                async move {
+                    grants.fetch_add(1, Ordering::SeqCst);
+                    arrived.notify_one();
+                    gate.acquire().await.unwrap().forget();
+                    "local granted response"
+                }
+            }
+        }),
+    );
+    let raw = r#"{"type":"acme","wrapped":"shared-private-fixture"}"#;
+    let Some(env) = env("plugin-virtual-pending", &[("catalog", "model_provider"), ("acme", "auth_provider,executor")], "", &[("shared.json", raw)], |records| {
+        canned(records, "catalog", "model.static", json!({"Provider":"acme","Models":[{"ID":"acme-1"}]}));
+        canned(records, "acme", "auth.parse", json!({"Handled":true,"Auths":[
+            {"Provider":"acme","ID":"child-a","Metadata":{"type":"acme","token":"opaque-old","custom":{"old":true}}},
+            {"Provider":"acme","ID":"child-b","Disabled":true,"Metadata":{"type":"acme","token":"opaque-other"}}
+        ]}));
+        std::fs::write(records.join("respond/acme/auth.refresh.json"), json!({
+            "ok":true,"host_calls":[{"method":"host.http.do","request":{"url":endpoint}}],
+            "result":{"Auth":{"Metadata":{"type":"acme","token":"opaque-new","custom":{"returned":true,"opaque":[1,2,3]}}}}
+        }).to_string()).unwrap();
+    }).await else { return };
+    env.own(env.spawn(async move { axum::serve(listener, app).await.unwrap() }));
+    cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let _subscription = env
+        .config_store
+        .subscribe_configuration({
+            let events = events.clone();
+            move |view| {
+                events.lock().unwrap().push((view.revision, view.digest.clone()));
+                Ok(())
+            }
+        })
+        .unwrap();
+    struct ReleaseGate(Arc<tokio::sync::Semaphore>);
+    impl Drop for ReleaseGate {
+        fn drop(&mut self) {
+            self.0.add_permits(1);
+        }
+    }
+    let release = ReleaseGate(gate);
+    let refresh = env.spawn({
+        let rt = env.rt.clone();
+        async move { rt.refresh_credential("child-a").await }
+    });
+    tokio::time::timeout(Duration::from_secs(10), arrived.notified())
+        .await
+        .unwrap();
+    struct BlockedPublication(PathBuf, std::fs::Permissions);
+    impl Drop for BlockedPublication {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+    let publication = env.config_store.path().unwrap();
+    #[cfg(unix)]
+    let publication = publication.parent().unwrap();
+    let permissions = std::fs::metadata(publication).unwrap().permissions();
+    let mut blocked_permissions = permissions.clone();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        blocked_permissions.set_mode(0o500);
+    }
+    #[cfg(not(unix))]
+    blocked_permissions.set_readonly(true);
+    std::fs::set_permissions(publication, blocked_permissions).unwrap();
+    let blocked = BlockedPublication(publication.to_owned(), permissions);
+    let mut next: serde_yaml_ng::Value = serde_yaml_ng::from_str(&env.yaml).unwrap();
+    next["server"]["port"] = 8318.into();
+    assert!(
+        env.config_store
+            .import_yaml(&serde_yaml_ng::to_string(&next).unwrap(), "test", "pending")
+            .is_err()
+    );
+    drop(release);
+    assert!(
+        refresh.await.unwrap().is_err(),
+        "holding must not report an activated refresh"
+    );
+    assert_eq!(env.rt.store().get("child-a").unwrap().str("token"), Some("opaque-old"));
+    assert!(env.rt.store().tokens_rejected(&env.rt.store().get("child-a").unwrap()));
+    assert!(env.rt.refresh_credential("child-a").await.is_err());
+    assert_eq!(grants.load(Ordering::SeqCst), 1);
+    assert_eq!(calls(&env.records, "acme", "auth.refresh").len(), 1);
+    let (status, _) = env.chat("acme-1").await;
+    assert_ne!(status, 200, "old invalidated child cannot dispatch");
+    assert!(calls(&env.records, "acme", "executor.execute").is_empty());
+    let path = env.rt.config().auth_dir.join("shared.json");
+    let backend = env.rt.store().credential_backend();
+    assert_eq!(std::fs::read(&path).unwrap(), raw.as_bytes());
+    assert_eq!(
+        backend.documents().unwrap(),
+        vec![(path.clone(), raw.as_bytes().to_vec())]
+    );
+    assert_eq!(
+        events.lock().unwrap().len(),
+        1,
+        "holding emits no configuration success"
+    );
+    drop(blocked);
+    backend.save(&path, raw.as_bytes()).unwrap();
+    assert_eq!(
+        events.lock().unwrap().len(),
+        2,
+        "original pending configuration event once"
+    );
+    assert_eq!(env.rt.store().get("child-a").unwrap().str("token"), Some("opaque-new"));
+    backend.save(&path, raw.as_bytes()).unwrap();
+    assert_eq!(events.lock().unwrap().len(), 2);
+    let (status, body) = env.chat("acme-1").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        calls(&env.records, "acme", "auth.refresh").len(),
+        1,
+        "recovery/dispatch cannot spend a second grant"
+    );
+    assert_eq!(
+        calls(&env.records, "acme", "executor.execute")[0]["AuthMetadata"]["token"],
+        "opaque-new"
+    );
+    assert_eq!(
+        backend.documents().unwrap(),
+        vec![(path.clone(), raw.as_bytes().to_vec())]
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), raw.as_bytes());
+    env.finish().await;
+}
+
+/// Successful native login responses carry a server-registered session, unlike
+/// an unrelated host.auth.save callback. Keep the returned batch atomic while pending.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_initial_login_batches_preserve_results_but_manual_host_saves_do_not_bypass_pending() {
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/grant", listener.local_addr().unwrap());
+    let app = axum::Router::new().route(
+        "/grant",
+        axum::routing::get({
+            let (arrived, gate) = (arrived.clone(), gate.clone());
+            move || {
+                let (arrived, gate) = (arrived.clone(), gate.clone());
+                async move {
+                    arrived.notify_one();
+                    gate.acquire().await.unwrap().forget();
+                    "native login result"
+                }
+            }
+        }),
+    );
+    let hash = bcrypt::hash("private-management-fixture", 4).unwrap();
+    let Some(env)=env("plugin-initial-pending",&[("acme","auth_provider,management_api"),("other","management_api")],&format!("server: {{port: 8317}}\nmanagement: {{secret-key: '{hash}'}}\n"),&[("existing.json",r#"{"type":"acme","opaque":"original"}"#)],|records|{
+        canned(records,"acme","auth.parse",json!({"Handled":false}));
+        canned(records,"acme","auth.login.start",json!({"Provider":"acme","URL":"https://example.invalid/authorize","State":"native-session"}));
+        std::fs::write(records.join("respond/acme/auth.login.poll.json"),json!({
+            "ok":true,"host_calls":[{"method":"host.http.do","request":{"url":endpoint}},
+                {"method":"host.auth.save","request":{"name":"wrong-provider.json","json":{"type":"claude","access_token":"wrong-source-fixture"}}},
+                {"method":"host.auth.save","request":{"name":"callback.json","json":{"type":"acme","token":"opaque-callback-grant","custom":{"preserve":[1,2,3]}}}}],
+            "result":{"Status":"success","Auths":[
+                {"Provider":"acme","ID":"first","FileName":"first.json","Metadata":{"type":"acme","access_token":"first-grant","refresh_token":"first-refresh"}},
+                {"Provider":"acme","ID":"second","FileName":"second.json","Metadata":{"type":"acme","access_token":"second-grant","refresh_token":"second-refresh"}}
+            ]}
+        }).to_string()).unwrap();
+    }).await else{return};
+    env.own(env.spawn(async move { axum::serve(listener, app).await.unwrap() }));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let router = cpa_server::management::router(management.clone());
+    env.own(env.spawn(async move {
+        axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .unwrap()
+    }));
+    let client = wreq::Client::new();
+    let start = client
+        .get(format!("{base}/v8/management/oauth/auth-url?provider=acme"))
+        .bearer_auth("private-management-fixture")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(start.status().as_u16(), 200);
+    let start: Value = start.json().await.unwrap();
+    assert_eq!(start["state"], "native-session");
+    struct ReleaseGate(Arc<tokio::sync::Semaphore>);
+    impl Drop for ReleaseGate {
+        fn drop(&mut self) {
+            self.0.add_permits(1);
+        }
+    }
+    let release = ReleaseGate(gate.clone());
+    let poll = env.spawn({
+        let (base, client) = (base.clone(), client.clone());
+        async move {
+            client
+                .get(format!("{base}/v8/management/oauth/status?state=native-session"))
+                .bearer_auth("private-management-fixture")
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(10), arrived.notified())
+        .await
+        .unwrap();
+    let callback_id = calls(&env.records, "acme", "auth.login.poll")[0]["host_callback_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let wrong_request=cpa_plugin::api::ManagementRequest{body:bytes::Bytes::from(json!({"calls":[{"method":"host.auth.save","request":{
+        "host_callback_id":callback_id,"name":"wrong-plugin.json","json":{"type":"acme","token":"wrong-plugin-fixture"}
+    }}]}).to_string()),..Default::default()};
+    let wrong: cpa_plugin::api::ManagementResponse = env
+        .rt
+        .plugins()
+        .call_with_callback(
+            &env.rt.plugins().record("other").unwrap(),
+            "management.handle",
+            &wrong_request,
+            &Default::default(),
+        )
+        .await
+        .unwrap();
+    let wrong: Value = serde_json::from_slice(&wrong.body).unwrap();
+    assert!(
+        wrong["results"][0].as_str().unwrap().contains("does not belong"),
+        "a different plugin cannot borrow an active job ID"
+    );
+    struct Blocked(PathBuf, std::fs::Permissions);
+    impl Drop for Blocked {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+    let publication = env.config_store.path().unwrap();
+    #[cfg(unix)]
+    let publication = publication.parent().unwrap();
+    let permissions = std::fs::metadata(publication).unwrap().permissions();
+    let mut blocked_permissions = permissions.clone();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        blocked_permissions.set_mode(0o500);
+    }
+    #[cfg(not(unix))]
+    blocked_permissions.set_readonly(true);
+    std::fs::set_permissions(publication, blocked_permissions).unwrap();
+    let blocked = Blocked(publication.to_owned(), permissions);
+    let mut config = env.config_store.load().unwrap().config.document;
+    config["server"]["port"] = 8318.into();
+    assert!(
+        env.config_store
+            .import_yaml(
+                &serde_yaml_ng::to_string(&config).unwrap(),
+                "test",
+                "pending-native-login"
+            )
+            .is_err()
+    );
+    drop(release);
+    assert_eq!(
+        poll.await.unwrap()["status"],
+        "error",
+        "held batch is not successful login publication"
+    );
+    let replies = calls(&env.records, "acme", "host_callback");
+    assert!(
+        replies.iter().any(|reply| reply["ok"] == false),
+        "a pending scoped save is not a successful host acknowledgement"
+    );
+    let backend = env.rt.store().credential_backend();
+    assert_eq!(
+        backend.documents().unwrap().len(),
+        1,
+        "accepted state is still before the batch"
+    );
+    let paused = client
+        .get(format!("{base}/v8/management/oauth/auth-url?provider=acme"))
+        .bearer_auth("private-management-fixture")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(paused.status().as_u16(), 503);
+    assert_eq!(calls(&env.records, "acme", "auth.login.start").len(), 1);
+    assert_eq!(calls(&env.records, "acme", "auth.login.poll").len(), 1);
+    // A non-grant parse callback tries an ordinary save while recovery is blocked.
+    std::fs::write(env.records.join("respond/acme/auth.parse.json"),json!({"ok":true,"result":{"Handled":false},"host_calls":[{
+        "method":"host.auth.save","request":{"name":"manual.json","json":{"type":"claude","access_token":"manual-fixture"}}
+    }]}).to_string()).unwrap();
+    let parser = env.rt.plugins().auth_parser();
+    let existing = backend.auth_dir().join("existing.json");
+    let raw = backend.read(&existing).unwrap().unwrap();
+    let _ = parser.parse_auths(&cpa_core::config::credentials::ParseRequest {
+        provider: "acme",
+        path: &existing,
+        file_name: "existing.json",
+        raw_json: &raw,
+    });
+    assert!(backend.read(&backend.auth_dir().join("manual.json")).unwrap().is_none());
+    drop(blocked);
+    backend.restore(&existing).unwrap();
+    let documents = backend.documents().unwrap();
+    assert_eq!(
+        documents.len(),
+        4,
+        "the opaque scoped callback and complete returned batch, not the manual callback, are preserved: {replies:?}"
+    );
+    let callback: Value = serde_json::from_slice(
+        &backend
+            .read(&backend.auth_dir().join("callback.json"))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(callback["token"], "opaque-callback-grant");
+    assert_eq!(callback["custom"], json!({"preserve":[1,2,3]}));
+    for name in ["first.json", "second.json"] {
+        let bytes = backend.read(&backend.auth_dir().join(name)).unwrap().unwrap();
+        assert!(
+            serde_json::from_slice::<Value>(&bytes)
+                .unwrap()
+                .get("refresh_token")
+                .is_some()
+        );
+    }
+    assert!(backend.read(&backend.auth_dir().join("manual.json")).unwrap().is_none());
+    assert_eq!(
+        calls(&env.records, "acme", "auth.login.poll").len(),
+        1,
+        "recovery cannot consume another login result"
+    );
+    let expired_request=cpa_plugin::api::ManagementRequest{body:bytes::Bytes::from(json!({"calls":[{"method":"host.auth.save","request":{
+        "host_callback_id":callback_id,"name":"expired-job.json","json":{"type":"acme","token":"expired-job-fixture"}
+    }}]}).to_string()),..Default::default()};
+    let expired: cpa_plugin::api::ManagementResponse = env
+        .rt
+        .plugins()
+        .call_with_callback(
+            &env.rt.plugins().record("acme").unwrap(),
+            "management.handle",
+            &expired_request,
+            &Default::default(),
+        )
+        .await
+        .unwrap();
+    let expired: Value = serde_json::from_slice(&expired.body).unwrap();
+    assert!(
+        expired["results"][0].as_str().unwrap().contains("not open"),
+        "post-job callback authority cannot survive its context"
+    );
+    for name in ["wrong-provider.json", "wrong-plugin.json", "expired-job.json"] {
+        assert!(backend.read(&backend.auth_dir().join(name)).unwrap().is_none());
+    }
+    // Session cancellation expires a still-running poll's save authority too.
+    canned(&env.records, "acme", "auth.parse", json!({"Handled":false}));
+    canned(
+        &env.records,
+        "acme",
+        "auth.login.start",
+        json!({"Provider":"acme","URL":"https://example.invalid/authorize","State":"cancel-session"}),
+    );
+    std::fs::write(env.records.join("respond/acme/auth.login.poll.json"), json!({
+        "ok":true,"host_calls":[{"method":"host.http.do","request":{"url":endpoint}},
+            {"method":"host.auth.save","request":{"name":"cancelled.json","json":{"type":"acme","token":"cancelled-job"}}}],
+        "result":{"Status":"success","Auth":{"Provider":"acme","FileName":"cancelled-return.json","Metadata":{"type":"acme","token":"cancelled-return"}}}
+    }).to_string()).unwrap();
+    let restart = client
+        .get(format!("{base}/v8/management/oauth/auth-url?provider=acme"))
+        .bearer_auth("private-management-fixture")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(restart.status().as_u16(), 200);
+    let release = ReleaseGate(gate);
+    let cancelled_poll = env.spawn({
+        let (base, client) = (base.clone(), client.clone());
+        async move {
+            client
+                .get(format!("{base}/v8/management/oauth/status?state=cancel-session"))
+                .bearer_auth("private-management-fixture")
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(10), arrived.notified())
+        .await
+        .unwrap();
+    let cancelled: Value = client
+        .delete(format!("{base}/v8/management/oauth/session?state=cancel-session"))
+        .bearer_auth("private-management-fixture")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cancelled["cancelled"], true);
+    drop(release);
+    assert_ne!(cancelled_poll.await.unwrap()["status"], "ok");
+    let replies = calls(&env.records, "acme", "host_callback");
+    assert!(
+        replies.iter().any(|reply| reply["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("session cancelled"))),
+        "{replies:?}"
+    );
+    assert_eq!(
+        backend.documents().unwrap(),
+        documents,
+        "cancellation cannot preserve or activate a result"
+    );
+    for name in ["cancelled.json", "cancelled-return.json"] {
+        assert!(backend.read(&backend.auth_dir().join(name)).unwrap().is_none());
+    }
+    drop(management);
+    env.finish().await;
+}
+
+/// A refresh callback can preserve only its own source, even for opaque token data.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn returned_login_batches_refuse_deleted_and_replaced_job_destinations() {
+    for case in ["deleted", "replaced", "deleted-pending", "replaced-pending"] {
+        let arrived = Arc::new(tokio::sync::Notify::new());
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/grant", listener.local_addr().unwrap());
+        let app = axum::Router::new().route(
+            "/grant",
+            axum::routing::get({
+                let (arrived, gate) = (arrived.clone(), gate.clone());
+                move || {
+                    let (arrived, gate) = (arrived.clone(), gate.clone());
+                    async move {
+                        arrived.notify_one();
+                        gate.acquire().await.unwrap().forget();
+                        "login completed"
+                    }
+                }
+            }),
+        );
+        let hash = bcrypt::hash("private-management-fixture", 4).unwrap();
+        let Some(env) = env(&format!("returned-login-{case}"), &[("acme", "auth_provider")],
+            &format!("server: {{port: 8317}}\nmanagement: {{secret-key: '{hash}'}}\n"),
+            &[("existing.json", r#"{"type":"acme","token":"original"}"#)], |records| {
+                canned(records, "acme", "auth.parse", json!({"Handled":false}));
+                canned(records, "acme", "auth.login.start", json!({"Provider":"acme","URL":"https://example.invalid/authorize","State":"fenced-login"}));
+                std::fs::write(records.join("respond/acme/auth.login.poll.json"), json!({"ok":true,
+                    "host_calls":[{"method":"host.http.do","request":{"url":endpoint}}],
+                    "result":{"Status":"success","Auths":[
+                        {"Provider":"acme","FileName":"existing.json","Metadata":{"type":"acme","token":"returned-consumed"}},
+                        {"Provider":"acme","FileName":"legitimate-new.json","Metadata":{"type":"acme","token":"new-batch-member"}}
+                    ]}}).to_string()).unwrap();
+            }).await else { return };
+        env.own(env.spawn(async move { axum::serve(listener, app).await.unwrap() }));
+        let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let router = cpa_server::management::router(management.clone());
+        env.own(env.spawn(async move {
+            axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
+                .await
+                .unwrap()
+        }));
+        let client = wreq::Client::new();
+        let started: Value = client
+            .get(format!("{base}/v8/management/oauth/auth-url?provider=acme"))
+            .bearer_auth("private-management-fixture")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(started["state"], "fenced-login");
+        struct Release(Arc<tokio::sync::Semaphore>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                self.0.add_permits(1);
+            }
+        }
+        let release = Release(gate);
+        let poll = env.spawn({
+            let (base, client) = (base.clone(), client.clone());
+            async move {
+                client
+                    .get(format!("{base}/v8/management/oauth/status?state=fenced-login"))
+                    .bearer_auth("private-management-fixture")
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<Value>()
+                    .await
+                    .unwrap()
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(10), arrived.notified())
+            .await
+            .unwrap();
+        let backend = env.rt.store().credential_backend();
+        let path = backend.auth_dir().join("existing.json");
+        backend.delete(&path).unwrap();
+        let replacement = br#"{"type":"acme","token":"replacement","opaque":"keep"}"#;
+        let expected = if case.starts_with("replaced") {
+            backend.save(&path, replacement).unwrap();
+            Some(replacement.to_vec())
+        } else {
+            None
+        };
+        struct Blocked(PathBuf, std::fs::Permissions);
+        impl Drop for Blocked {
+            fn drop(&mut self) {
+                std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+            }
+        }
+        let blocked = if case.ends_with("pending") {
+            use std::os::unix::fs::PermissionsExt as _;
+            let dir = env.config_store.path().unwrap().parent().unwrap();
+            let permissions = std::fs::metadata(dir).unwrap().permissions();
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+            let blocked = Blocked(dir.to_owned(), permissions);
+            let mut config = env.config_store.load().unwrap().config.document;
+            config["server"]["port"] = 8318.into();
+            assert!(
+                env.config_store
+                    .import_yaml(
+                        &serde_yaml_ng::to_string(&config).unwrap(),
+                        "test",
+                        "pending-deleted-login"
+                    )
+                    .is_err()
+            );
+            Some(blocked)
+        } else {
+            None
+        };
+        drop(release);
+        let status = tokio::time::timeout(Duration::from_secs(10), poll)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            status["status"], "error",
+            "{case}: stale destination refuses entire returned batch"
+        );
+        drop(blocked);
+        backend.restore(&path).unwrap();
+        assert_eq!(
+            backend.read(&path).unwrap(),
+            expected,
+            "{case}: no resurrection or replacement overwrite"
+        );
+        assert!(
+            backend
+                .read(&backend.auth_dir().join("legitimate-new.json"))
+                .unwrap()
+                .is_none(),
+            "batch remains atomic"
+        );
+        assert_eq!(calls(&env.records, "acme", "auth.login.poll").len(), 1);
+        drop(management);
+        env.finish().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shutdown_waits_for_an_issued_native_scope_without_cancelling_its_save() {
+    use std::future::Future as _;
+    use std::task::Poll;
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/grant", listener.local_addr().unwrap());
+    let app = axum::Router::new().route(
+        "/grant",
+        axum::routing::get({
+            let (arrived, gate) = (arrived.clone(), gate.clone());
+            move || {
+                let (arrived, gate) = (arrived.clone(), gate.clone());
+                async move {
+                    arrived.notify_one();
+                    gate.acquire().await.unwrap().forget();
+                    "completed native grant"
+                }
+            }
+        }),
+    );
+    let Some(env) = env("plugin-shutdown-issued-scope", &[("acme", "auth_provider")], "",
+        &[("acme.json", r#"{"type":"acme","token":"opaque-old"}"#)], |records| {
+            canned(records, "acme", "auth.parse", json!({"Handled":true,"Auths":[{"Provider":"acme","ID":"acme.json","Metadata":{"type":"acme","token":"opaque-old"}}]}));
+            std::fs::write(records.join("respond/acme/auth.refresh.json"), json!({"ok":true,"host_calls":[
+                {"method":"host.http.do","request":{"url":endpoint}},
+                {"method":"host.auth.save","request":{"name":"acme.json","json":{"type":"acme","token":"opaque-host","custom":{"kept":true}}}}
+            ],"result":{"Auth":{"Provider":"acme","ID":"acme.json","Metadata":{"type":"acme","token":"opaque-final","custom":{"kept":true}}}}}).to_string()).unwrap();
+        }).await else { return };
+    env.own(env.spawn(async move { axum::serve(listener, app).await.unwrap() }));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
+    cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
+    struct Release(Arc<tokio::sync::Semaphore>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            self.0.add_permits(1);
+        }
+    }
+    let release = Release(gate);
+    let refresh = env.spawn({
+        let rt = env.rt.clone();
+        async move { rt.refresh_credential("acme.json").await }
+    });
+    tokio::time::timeout(Duration::from_secs(10), arrived.notified())
+        .await
+        .unwrap();
+    management.begin_shutdown();
+    env.rt.begin_shutdown();
+    let mut shutdown = Box::pin(management.shutdown());
+    let early = std::future::poll_fn(|cx| Poll::Ready(shutdown.as_mut().poll(cx).is_ready())).await;
+    drop(release);
+    if !early {
+        tokio::time::timeout(Duration::from_secs(10), shutdown.as_mut())
+            .await
+            .unwrap();
+    }
+    drop(shutdown);
+    tokio::time::timeout(Duration::from_secs(10), refresh)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(!early, "native-issued scope outlived management shutdown");
+    env.rt.finish_shutdown().await.unwrap();
+    env.rt.plugins().shutdown_all(None).await;
+    assert_eq!(auth_file(&env, "acme.json")["token"], "opaque-final");
+    assert_eq!(auth_file(&env, "acme.json")["custom"]["kept"], true);
+    assert!(
+        calls(&env.records, "acme", "host_callback")
+            .iter()
+            .all(|reply| reply["ok"] == true)
+    );
+    drop(management);
+    env.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_refresh_host_save_is_scoped_to_its_target_and_expires_with_the_job() {
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/grant", listener.local_addr().unwrap());
+    let app = axum::Router::new().route(
+        "/grant",
+        axum::routing::get({
+            let (arrived, gate) = (arrived.clone(), gate.clone());
+            move || {
+                let (arrived, gate) = (arrived.clone(), gate.clone());
+                async move {
+                    arrived.notify_one();
+                    gate.acquire().await.unwrap().forget();
+                    "opaque refresh complete"
+                }
+            }
+        }),
+    );
+    let Some(env) = env("plugin-refresh-callback-pending", &[("acme", "auth_provider,management_api")], "", &[("acme.json", r#"{"type":"acme","token":"opaque-old"}"#)], |records| {
+        canned(records, "acme", "auth.parse", json!({"Handled":true,"Auths":[{"Provider":"acme","ID":"acme.json","Metadata":{"type":"acme","token":"opaque-old"}}]}));
+        std::fs::write(records.join("respond/acme/auth.refresh.json"), json!({"ok":true,"host_calls":[
+            {"method":"host.http.do","request":{"url":endpoint}},
+            {"method":"host.auth.save","request":{"name":"acme.json","json":{"type":"acme","token":"opaque-new","custom":{"returned":[4,5]}}}},
+            {"method":"host.auth.save","request":{"name":"foreign.json","json":{"type":"acme","token":"wrong-target"}}}
+        ],"result":{"Auth":{"Provider":"acme","ID":"acme.json","Metadata":{"type":"acme","token":"opaque-final","final_only":true}}}}).to_string()).unwrap();
+    }).await else { return };
+    env.own(env.spawn(async move { axum::serve(listener, app).await.unwrap() }));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
+    cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
+    assert_eq!(
+        env.rt.store().get("acme.json").unwrap().str("token"),
+        Some("opaque-old")
+    );
+    struct Release(Arc<tokio::sync::Semaphore>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            self.0.add_permits(1);
+        }
+    }
+    let release = Release(gate);
+    let refresh = env.spawn({
+        let rt = env.rt.clone();
+        async move { rt.refresh_credential("acme.json").await }
+    });
+    tokio::time::timeout(Duration::from_secs(10), arrived.notified())
+        .await
+        .unwrap();
+    let callback_id = calls(&env.records, "acme", "auth.refresh")[0]["host_callback_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    struct Blocked(PathBuf, std::fs::Permissions);
+    impl Drop for Blocked {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+    let publication = env.config_store.path().unwrap();
+    let publication = publication.parent().unwrap();
+    let permissions = std::fs::metadata(publication).unwrap().permissions();
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(publication, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let blocked = Blocked(publication.to_owned(), permissions);
+    let mut config = env.config_store.load().unwrap().config.document;
+    config["server"]["port"] = 8318.into();
+    assert!(
+        env.config_store
+            .import_yaml(
+                &serde_yaml_ng::to_string(&config).unwrap(),
+                "test",
+                "pending-refresh-callback"
+            )
+            .is_err()
+    );
+    canned(
+        &env.records,
+        "acme",
+        "auth.parse",
+        json!({"Handled":true,"Auths":[{"Provider":"acme","ID":"acme.json","Metadata":{"type":"acme","token":"opaque-final","custom":{"returned":[4,5]},"final_only":true}}]}),
+    );
+    std::fs::write(env.records.join("respond/acme/auth.parse.once.json"), json!({"ok":true,"result":{"Handled":true,"Auths":[{"Provider":"acme","ID":"acme.json","Metadata":{"type":"acme","token":"opaque-new","custom":{"returned":[4,5]}}}]}}).to_string()).unwrap();
+    drop(release);
+    assert!(refresh.await.unwrap().is_err(), "a retained callback is not activated");
+    let replies = calls(&env.records, "acme", "host_callback");
+    assert!(
+        replies.iter().any(|reply| reply["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("outside this refresh job"))),
+        "{replies:?}"
+    );
+    let backend = env.rt.store().credential_backend();
+    let path = backend.auth_dir().join("acme.json");
+    let old = env.rt.store().get("acme.json").unwrap();
+    assert_eq!(old.str("token"), Some("opaque-old"));
+    assert!(
+        env.rt.store().tokens_rejected(&old),
+        "pending opaque callback fences the old source"
+    );
+    assert!(env.rt.refresh_credential("acme.json").await.is_err());
+    assert_eq!(calls(&env.records, "acme", "auth.refresh").len(), 1);
+    assert!(
+        backend
+            .read(&backend.auth_dir().join("foreign.json"))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&backend.read(&path).unwrap().unwrap()).unwrap()["token"],
+        "opaque-old"
+    );
+    // A new ordinary management callback cannot inherit the ended refresh job.
+    let ordinary = host_save(&env, "acme", "manual.json", json!({"type":"acme","token":"manual"})).await;
+    assert_eq!(ordinary["ok"], false);
+    drop(blocked);
+    backend.restore(&path).unwrap();
+    let bytes = backend.read(&path).unwrap().unwrap();
+    let raw: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(raw["token"], "opaque-final");
+    assert_eq!(raw["final_only"], true);
+    assert_eq!(raw["custom"], json!({"returned":[4,5]}));
+    cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
+    assert_eq!(
+        env.rt.store().get("acme.json").unwrap().str("token"),
+        Some("opaque-final")
+    );
+    assert_eq!(calls(&env.records, "acme", "auth.refresh").len(), 1);
+    let request = cpa_plugin::api::ManagementRequest {
+        body: bytes::Bytes::from(
+            json!({"calls":[{"method":"host.auth.save","request":{
+                "host_callback_id":callback_id,"name":"acme.json","json":{"type":"acme","token":"expired"}
+            }}]})
+            .to_string(),
+        ),
+        ..Default::default()
+    };
+    let response: cpa_plugin::api::ManagementResponse = env
+        .rt
+        .plugins()
+        .call_with_callback(
+            &env.rt.plugins().record("acme").unwrap(),
+            "management.handle",
+            &request,
+            &Default::default(),
+        )
+        .await
+        .unwrap();
+    let response: Value = serde_json::from_slice(&response.body).unwrap();
+    assert!(response["results"][0].as_str().unwrap().contains("not open"));
+    assert_eq!(
+        backend.read(&path).unwrap().unwrap(),
+        bytes,
+        "expired callback cannot overwrite recovery"
+    );
+    assert_eq!(
+        backend.documents().unwrap().len(),
+        1,
+        "neither wrong target nor ordinary save was admitted"
+    );
+    // Even an authenticated fresh context cannot reuse a cloned, expired grant.
+    let job = env
+        .rt
+        .plugins()
+        .auth_save_job(cpa_plugin::hostauth::AuthSaveJob::LoginStart {
+            provider: "acme".into(),
+        })
+        .unwrap();
+    let expired_scope = job.request_scope();
+    drop(job);
+    let request = cpa_plugin::api::ManagementRequest {
+        body: bytes::Bytes::from(
+            json!({"calls":[{"method":"host.auth.save","request":{
+                "name":"expired-scope.json","json":{"type":"acme","token":"expired-scope"}
+            }}]})
+            .to_string(),
+        ),
+        ..Default::default()
+    };
+    let response: cpa_plugin::api::ManagementResponse = env
+        .rt
+        .plugins()
+        .call_with_callback(
+            &env.rt.plugins().record("acme").unwrap(),
+            "management.handle",
+            &request,
+            &expired_scope,
+        )
+        .await
+        .unwrap();
+    let response: Value = serde_json::from_slice(&response.body).unwrap();
+    assert!(
+        response["results"][0].as_str().unwrap().contains("job expired"),
+        "{response}"
+    );
+    assert!(
+        backend
+            .read(&backend.auth_dir().join("expired-scope.json"))
+            .unwrap()
+            .is_none()
+    );
+    drop(management);
+    env.finish().await;
+}
+
 /// Go `pluginRefreshCompatExecutor`: a credential with no plugin executor refreshes
 /// through the auth provider of its provider. When only its `compat_name` matched an
 /// auth provider, no plugin answers for its provider, and with a refresh token the
 /// refresh fails with Go's error instead of keeping the credential.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_refresh_keeps_final_result_after_its_callback_is_adopted_before_save() {
+    refresh_after_callback_adoption(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_refresh_keeps_final_result_after_its_callback_is_adopted_during_recovery() {
+    refresh_after_callback_adoption(false).await;
+}
+
+async fn refresh_after_callback_adoption(recover_before_callback: bool) {
+    {
+        let before = Arc::new(tokio::sync::Notify::new());
+        let after = Arc::new(tokio::sync::Notify::new());
+        let callback_gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let final_gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let app = axum::Router::new()
+            .route(
+                "/before",
+                axum::routing::get({
+                    let (arrived, gate) = (before.clone(), callback_gate.clone());
+                    move || {
+                        let (arrived, gate) = (arrived.clone(), gate.clone());
+                        async move {
+                            arrived.notify_one();
+                            gate.acquire().await.unwrap().forget();
+                            "callback permitted"
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/after",
+                axum::routing::get({
+                    let (arrived, gate) = (after.clone(), final_gate.clone());
+                    move || {
+                        let (arrived, gate) = (arrived.clone(), gate.clone());
+                        async move {
+                            arrived.notify_one();
+                            gate.acquire().await.unwrap().forget();
+                            "final result permitted"
+                        }
+                    }
+                }),
+            );
+        let Some(env) = env("plugin-refresh-adopted-callback", &[("acme", "auth_provider,management_api,executor,model_provider")], "", &[("acme.json", r#"{"type":"acme","access_token":"R0","refresh_token":"refresh-R0"}"#)], |records| {
+            canned(records, "acme", "auth.parse", json!({"Handled":true,"Auths":[{"Provider":"acme","ID":"acme.json","Metadata":{"type":"acme","access_token":"R0","refresh_token":"refresh-R0"}}]}));
+            canned(records, "acme", "model.static", json!({"Provider":"acme","Models":[{"ID":"acme-model"}]}));
+            std::fs::write(records.join("respond/acme/auth.refresh.json"), json!({"ok":true,"host_calls":[
+                {"method":"host.http.do","request":{"url":format!("{endpoint}/before")}},
+                {"method":"host.auth.save","request":{"name":"acme.json","json":{"type":"acme","access_token":"R1","refresh_token":"refresh-R1","callback_only":{"keep":[4,5]}}}},
+                {"method":"host.http.do","request":{"url":format!("{endpoint}/after")}}
+            ],"result":{"Auth":{"Provider":"acme","ID":"acme.json","Metadata":{"type":"acme","access_token":"R2","refresh_token":"refresh-R2","final_only":true}}}}).to_string()).unwrap();
+        }).await else { return };
+        env.own(env.spawn(async move { axum::serve(listener, app).await.unwrap() }));
+        let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
+        cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
+        let backend = env.rt.store().credential_backend();
+        let path = backend.auth_dir().join("acme.json");
+        let refresh = env.spawn({
+            let rt = env.rt.clone();
+            async move { rt.refresh_credential("acme.json").await }
+        });
+        tokio::time::timeout(Duration::from_secs(10), before.notified())
+            .await
+            .unwrap();
+        struct Blocked(PathBuf, std::fs::Permissions);
+        impl Drop for Blocked {
+            fn drop(&mut self) {
+                std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+            }
+        }
+        use std::os::unix::fs::PermissionsExt as _;
+        let publication = env.config_store.path().unwrap().parent().unwrap().to_owned();
+        let permissions = std::fs::metadata(&publication).unwrap().permissions();
+        std::fs::set_permissions(&publication, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let mut blocked = Some(Blocked(publication, permissions));
+        let mut config = env.config_store.load().unwrap().config.document;
+        config["server"]["port"] = 8318.into();
+        assert!(
+            env.config_store
+                .import_yaml(&serde_yaml_ng::to_string(&config).unwrap(), "test", "pending-callback")
+                .is_err()
+        );
+        canned(
+            &env.records,
+            "acme",
+            "auth.parse",
+            json!({"Handled":true,"Auths":[{"Provider":"acme","ID":"acme.json","Metadata":{"type":"acme","access_token":"R1","refresh_token":"refresh-R1","callback_only":{"keep":[4,5]}}}]}),
+        );
+        if recover_before_callback {
+            drop(blocked.take());
+        }
+        callback_gate.add_permits(1);
+        tokio::time::timeout(Duration::from_secs(10), after.notified())
+            .await
+            .unwrap();
+        if !recover_before_callback {
+            let old = env.rt.store().get("acme.json").unwrap();
+            assert_eq!(old.str("access_token"), Some("R0"));
+            assert!(env.rt.store().tokens_rejected(&old));
+            drop(blocked.take());
+            backend.restore(&path).unwrap();
+            cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
+        }
+        assert_eq!(env.rt.store().get("acme.json").unwrap().str("access_token"), Some("R1"));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&backend.read(&path).unwrap().unwrap()).unwrap()["access_token"],
+            "R1"
+        );
+        final_gate.add_permits(1);
+        let final_result = refresh.await.unwrap().unwrap();
+        assert_eq!(
+            final_result.str("access_token"),
+            Some("R2"),
+            "own R1 admission must not discard R2; recover_before_callback={recover_before_callback}"
+        );
+        let raw: Value = serde_json::from_slice(&backend.read(&path).unwrap().unwrap()).unwrap();
+        assert_eq!(raw["access_token"], "R2");
+        assert_eq!(raw["refresh_token"], "refresh-R2");
+        assert_eq!(raw["callback_only"], json!({"keep":[4,5]}));
+        assert_eq!(raw["final_only"], true);
+        assert_eq!(calls(&env.records, "acme", "auth.refresh").len(), 1);
+        assert_eq!(env.chat("acme-model").await.0, 200);
+        let dispatched = calls(&env.records, "acme", "executor.execute");
+        assert_eq!(dispatched.len(), 1);
+        assert_eq!(
+            dispatched[0]["AuthMetadata"]["access_token"], "R2",
+            "no stale-token dispatch"
+        );
+        assert_eq!(
+            calls(&env.records, "acme", "auth.refresh").len(),
+            1,
+            "dispatch must not exchange again"
+        );
+        drop(management);
+        env.finish().await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_compatible_credential_refreshes_through_its_providers_auth_provider() {
     let Some(env) = env(
@@ -3667,7 +4834,7 @@ async fn a_plugin_refresh_interval_schedules_background_refreshes() {
     };
     // The binary's startup load, as plugins parse auth files.
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     let refreshed = || {
         calls(&env.records, "acme", "auth.refresh")
             .iter()
@@ -3776,7 +4943,7 @@ async fn plugin_refresh_deadlines_follow_gos_lifecycle_fields() {
     // An edit of other fields lands while the plugin refreshes `s.json`.
     let release = Release(env.records.join("respond/acme/auth.refresh.hold"));
     std::fs::write(&release.0, "").unwrap();
-    let pending = tokio::spawn({
+    let pending = env.spawn({
         let rt = env.rt.clone();
         async move { rt.refresh_credential("s.json").await }
     });
@@ -3791,7 +4958,7 @@ async fn plugin_refresh_deadlines_follow_gos_lifecycle_fields() {
     pending.await.unwrap().unwrap();
     assert_eq!(store.get("s.json").unwrap().metadata["note"], "edited");
 
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("the control refresh", || refreshed("c.json") >= 1).await;
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(refreshed("f.json"), 1, "backing off after the failed refresh");
@@ -3849,7 +5016,7 @@ async fn a_failed_background_plugin_refresh_retries_when_the_token_expires() {
         .apply_patch("e.json", store.get("e.json").unwrap().revision, &patch)
         .unwrap();
     let refreshes = || calls(&env.records, "acme", "auth.refresh").len();
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("the failing refresh", || refreshes() >= 1).await;
     assert!(chrono::Utc::now() < expiry, "the first refresh ran before the expiry");
     eventually("the retry at the expiry", || refreshes() >= 2).await;
@@ -3886,21 +5053,15 @@ async fn a_plugin_refresh_that_cannot_be_saved_backs_off() {
     else {
         return;
     };
-    let auth_dir = env.rt.config().auth_dir.clone();
-    let database = auth_dir.to_str().unwrap().strip_suffix(".credentials").unwrap();
-    let store = cpa_server::testing::config_store_without_migration(std::path::Path::new(database)).unwrap();
-    let connection = cpa_server::testing::database_connection(&store);
-    connection.execute_batch(
-        "CREATE TRIGGER refuse_refresh BEFORE UPDATE ON credential_document BEGIN SELECT RAISE(FAIL, 'test credential save failure'); END;",
-    ).unwrap();
+    let blocked = cpa_server::testing::block_checkpoint_install(&env.config_store);
     let refreshes = || calls(&env.records, "acme", "auth.refresh").len();
     // The binary's startup load, as plugins parse auth files.
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("the refresh", || refreshes() >= 1).await;
     tokio::time::sleep(Duration::from_millis(3000)).await;
-    env.rt.stop_auto_refresh();
-    connection.execute_batch("DROP TRIGGER refuse_refresh").unwrap();
+    env.stop_refreshes().await;
+    drop(blocked);
     assert_eq!(refreshes(), 1, "backing off after the unsaved refresh");
     assert_eq!(auth_file(&env, "u.json")["access_token"], "u");
     env.finish().await;
@@ -3997,7 +5158,7 @@ async fn a_credential_registered_afresh_does_not_inherit_a_parsed_refresh_deadli
     canned(&env.records, "pp", "auth.parse", parsed("a.json"));
     write("a.json", wrapped);
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     settle().await;
     assert_eq!(refreshes("a.json"), 0, "waiting for the parsed NextRefreshAfter");
     env.rt
@@ -4034,7 +5195,7 @@ async fn a_credential_registered_afresh_does_not_inherit_a_parsed_refresh_deadli
     write("b.json", ordinary);
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     assert!(env.rt.store().get("a.json").is_none(), "{}", state());
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while !committed("b.json") {
         assert!(std::time::Instant::now() < deadline, "b.json's refresh: {}", state());
@@ -4051,7 +5212,7 @@ async fn a_credential_registered_afresh_does_not_inherit_a_parsed_refresh_deadli
     canned(&env.records, "pp", "auth.parse", parsed("c.json"));
     write("c.json", wrapped);
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     settle().await;
     assert_eq!(refreshes("c.json"), 0, "waiting for the parsed NextRefreshAfter");
     let store = env.rt.store();
@@ -4137,7 +5298,7 @@ async fn an_auth_another_file_registers_does_not_inherit_a_parsed_refresh_deadli
         .unwrap();
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     assert_eq!(env.rt.store().get("b.json").unwrap().metadata["access_token"], "q");
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("b.json's refresh", || refreshes("b.json") >= 1).await;
     env.finish().await;
 }
@@ -4167,7 +5328,7 @@ async fn a_disabling_reload_drops_a_credentials_refresh_schedule() {
         body
     };
     reload(file(json!({}))).await;
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("the first refresh", || refreshes("d.json") == 1).await;
     let refreshed = |c: &cpa_core::credential::Credential| c.metadata["access_token"] == "p2";
     eventually("the committed refresh", || {
@@ -4222,8 +5383,8 @@ async fn startup_refreshes_wait_for_the_plugin_aware_load() {
     let refreshes = || calls(&env.records, "pp", "auth.refresh").len();
     let hold = Release(env.records.join("respond/pp/auth.parse.hold"));
     std::fs::write(&hold.0, "").unwrap();
-    env.rt.start_auto_refresh();
-    let reload = tokio::spawn({
+    env.start_auto_refresh();
+    let reload = env.spawn({
         let rt = env.rt.clone();
         async move { cpa_server::plugins::reload_plugin_auth_files(&rt).await }
     });
@@ -4286,7 +5447,7 @@ async fn a_refresh_from_an_earlier_registration_leaves_the_new_ones_schedule() {
         let hold = Release(env.records.join("respond/pp/auth.refresh.hold"));
         std::fs::write(&hold.0, "").unwrap();
         let since = std::time::Instant::now();
-        let pending = tokio::spawn({
+        let pending = env.spawn({
             let (rt, name) = (env.rt.clone(), name.to_owned());
             async move { rt.refresh_credential(&name).await }
         });
@@ -4314,7 +5475,7 @@ async fn a_refresh_from_an_earlier_registration_leaves_the_new_ones_schedule() {
             assert!(document.get("last_refresh").is_none(), "{name}");
         }
     }
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("both new registrations' refreshes", || {
         refreshes("f.json") == 2 && refreshes("c.json") == 2
     })
@@ -4354,7 +5515,7 @@ async fn a_refresh_across_a_token_replacement_and_back_is_dropped() {
     let hold = Release(env.records.join("respond/pp/auth.refresh.hold"));
     std::fs::write(&hold.0, "").unwrap();
     let since = std::time::Instant::now();
-    let pending = tokio::spawn({
+    let pending = env.spawn({
         let rt = env.rt.clone();
         async move { rt.refresh_credential("x.json").await }
     });
@@ -4372,7 +5533,7 @@ async fn a_refresh_across_a_token_replacement_and_back_is_dropped() {
         assert_eq!(document["access_token"], "q");
         assert!(document.get("last_refresh").is_none());
     }
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("the refresh due at once", || refreshes("x.json") == 2).await;
     env.finish().await;
 }
@@ -4408,7 +5569,7 @@ async fn a_failed_refresh_backs_off_to_the_current_expiry() {
     let hold = Release(env.records.join("respond/pp/auth.refresh.hold"));
     std::fs::write(&hold.0, "").unwrap();
     let since = std::time::Instant::now();
-    let pending = tokio::spawn({
+    let pending = env.spawn({
         let rt = env.rt.clone();
         async move { rt.refresh_credential("e.json").await }
     });
@@ -4419,7 +5580,7 @@ async fn a_failed_refresh_backs_off_to_the_current_expiry() {
     assert_ne!(env.rt.store().get("e.json").unwrap().revision, revision);
     release(hold, since, &pending);
     assert!(pending.await.unwrap().is_err());
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     // Due at the new expiry, about 8 s after the edit; 5 min on without it.
     let deadline = std::time::Instant::now() + Duration::from_secs(60);
     while refreshes("e.json") < 2 {
@@ -4453,8 +5614,7 @@ async fn a_builtin_save_keeps_the_refresh_state_its_watcher_would_keep() {
     else {
         return;
     };
-    let management =
-        cpa_server::management::Management::new(env.rt.clone(), Arc::new(ConfigStore::memory_with(&env.yaml)));
+    let management = cpa_server::management::Management::new(env.rt.clone(), env.config_store.clone());
     cpa_server::plugins::reload_plugin_auth_files(&env.rt).await;
     let refreshes = || calls(&env.records, "acme", "auth.refresh").len();
     let save = |extra: Value| {
@@ -4462,7 +5622,7 @@ async fn a_builtin_save_keeps_the_refresh_state_its_watcher_would_keep() {
         body.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         host_save(&env, "acme", "s.json", body)
     };
-    env.rt.start_auto_refresh();
+    env.start_auto_refresh();
     eventually("the first refresh", || refreshes() == 1).await;
     // The refresh loop coalesces store changes for 1 s.
     tokio::time::sleep(Duration::from_millis(1500)).await;
@@ -4550,7 +5710,7 @@ async fn a_plugin_refresh_saves_its_tokens_disabled_state_and_proxy_url() {
         "Metadata":{"type":"acme","access_token":"y2","proxy_url":"socks5://a:1"}}));
     let release = Release(env.records.join("respond/acme/auth.refresh.hold"));
     std::fs::write(&release.0, "").unwrap();
-    let pending = tokio::spawn({
+    let pending = env.spawn({
         let rt = env.rt.clone();
         async move { rt.refresh_credential("y.json").await }
     });
@@ -4794,4 +5954,128 @@ async fn a_stream_whose_chunks_are_all_dropped_ends_with_done() {
         "the interceptor saw the chunk"
     );
     env.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_native_fixture_joins_before_the_next_fixture_bootstraps() {
+    failed_native_fixture_lifetime("multi", false).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_failed_current_thread_native_fixture_joins_before_the_next_bootstrap() {
+    failed_native_fixture_lifetime("current", false).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_failed_explicit_refresh_fixture_joins_before_the_next_bootstrap() {
+    failed_native_fixture_lifetime("explicit", true).await;
+}
+
+async fn failed_native_fixture_lifetime(flavor: &'static str, explicit: bool) {
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let failed = tokio::spawn(async move {
+        let first = env(
+            &format!("plugin-owned-failed-lifetime-{flavor}"),
+            &[("prior", "auth_provider")],
+            "",
+            &[(
+                "prior.json",
+                r#"{"type":"prior","access_token":"old","refresh_interval":"1h"}"#,
+            )],
+            |records| {
+                canned(
+                    records,
+                    "prior",
+                    "auth.refresh",
+                    json!({"Auth":{"Metadata":{"type":"prior","access_token":"new"}}}),
+                );
+                std::fs::write(records.join("respond/prior/auth.refresh.hold"), "").unwrap();
+            },
+        )
+        .await
+        .expect("native recorder prerequisite");
+        assert!(cpa_core::config::credentials::plugin_auth_parser_active());
+        let release = Release(first.records.join("respond/prior/auth.refresh.hold"));
+        let _pending = if explicit {
+            Some(first.spawn({
+                let rt = first.rt.clone();
+                async move { rt.refresh_credential("prior.json").await }
+            }))
+        } else {
+            cpa_server::plugins::reload_plugin_auth_files(&first.rt).await;
+            first.start_auto_refresh();
+            None
+        };
+        eventually("the failed fixture's native refresh entry", || {
+            calls(&first.records, "prior", "auth.refresh").len() == 1
+        })
+        .await;
+        assert!(first.rt.store().prepare_lock("prior.json").try_lock_owned().is_err());
+        send.send((Arc::downgrade(&first.rt), first.dir.clone(), first.proxy))
+            .unwrap();
+        // Release off the caller executor, then panic without yielding. A caller-owned
+        // refresh cannot poll its answer/release its preparation lock during Drop.
+        std::thread::spawn(move || drop(release)).join().unwrap();
+        panic!("private failed native fixture with refresh in flight");
+    });
+    let (old, removed, proxy) = receive.await.unwrap();
+    assert!(failed.await.unwrap_err().is_panic());
+    assert!(
+        old.upgrade().is_none(),
+        "proxy/refresh task retained the failed fixture"
+    );
+    assert!(!removed.exists());
+    assert!(
+        tokio::net::TcpStream::connect(proxy).await.is_err(),
+        "old proxy still accepts requests"
+    );
+    let next = env(
+        &format!("plugin-owned-after-failed-lifetime-{flavor}"),
+        &[("catalog", "model_provider"), ("acme", "auth_provider,executor")],
+        "",
+        &[(
+            "acme.json",
+            r#"{"type":"acme","access_token":"old","refresh_token":"r1","keep":"x"}"#,
+        )],
+        |records| {
+            canned(
+                records,
+                "catalog",
+                "model.static",
+                json!({"Provider":"acme","Models":[{"ID":"acme-1"}]}),
+            );
+            canned(
+                records,
+                "acme",
+                "auth.refresh",
+                json!({"Auth":{"Metadata":{"type":"acme","access_token":"new","refresh_token":"r2"}}}),
+            );
+            std::fs::write(
+                records.join("respond/acme/executor.execute.once.json"),
+                json!({"ok":false,"error":{"code":"unauthorized","message":"token expired","http_status":401}})
+                    .to_string(),
+            )
+            .unwrap();
+        },
+    )
+    .await
+    .expect("native recorder prerequisite");
+    assert!(
+        next.rt.store().get("acme.json").is_some(),
+        "new provisional credential was deferred by an old native parser"
+    );
+    let (status, body) = next.chat("acme-1").await;
+    assert_eq!(status, 200, "{body}");
+    let refresh = calls(&next.records, "acme", "auth.refresh");
+    assert_eq!(refresh.len(), 1);
+    assert_eq!(refresh[0]["Metadata"]["refresh_token"], "r1");
+    let executed = calls(&next.records, "acme", "executor.execute");
+    assert_eq!(executed.len(), 2);
+    assert_eq!(executed[0]["AuthMetadata"]["access_token"], "old");
+    assert_eq!(executed[1]["AuthMetadata"]["access_token"], "new");
+    assert_eq!(
+        auth_file(&next, "acme.json"),
+        json!({"type":"acme","access_token":"new","refresh_token":"r2","keep":"x","disabled":false})
+    );
+    next.finish().await;
 }

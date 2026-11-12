@@ -8,7 +8,134 @@ fn database_path(name: &str) -> (PathBuf, PathBuf) {
 }
 
 fn live_path(store: &ConfigStore) -> PathBuf {
-    PathBuf::from(store.conn().path().unwrap())
+    PathBuf::from(store.conn().unwrap().path().unwrap())
+}
+
+#[test]
+fn committed_queries_need_neither_working_nor_published_storage() {
+    let (dir, path) = database_path("queries-without-storage");
+    let store = crate::testing::config_store(&path).unwrap();
+    store
+        .import_yaml("server: {port: 8700}\n", "test", "memory queries")
+        .unwrap();
+    let committed = store.load().unwrap();
+    let live = live_path(&store);
+    let displaced = live.with_extension("displaced");
+    std::fs::rename(&live, &displaced).unwrap();
+    assert_eq!(store.snapshot().unwrap().1, committed.resources);
+    assert_eq!(store.load().unwrap().rev, committed.rev);
+    assert_eq!(store.load().unwrap().resources, committed.resources);
+    assert!(!live.exists(), "a read must not create an empty working database");
+    std::fs::rename(displaced, live).unwrap();
+    let displaced = path.with_extension("displaced");
+    std::fs::rename(&path, &displaced).unwrap();
+    assert_eq!(store.head().unwrap(), committed.rev);
+    assert_eq!(store.revisions(10, None).unwrap()[0].rev, committed.rev);
+    assert_eq!(store.get(Kind::Setting, "server").unwrap().unwrap().spec["port"], 8700);
+    assert_eq!(store.load().unwrap().resources, committed.resources);
+    std::fs::rename(displaced, path).unwrap();
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn same_size_same_time_replacement_is_not_an_online_command() {
+    let (dir, path) = database_path("replacement-identity");
+    let store = crate::testing::config_store(&path).unwrap();
+    store
+        .commit(&[put("setting", "server", json!({"port": 8701}))], "test", "", false)
+        .unwrap();
+    let external = crate::testing::config_store(&dir.join("external.db")).unwrap();
+    external
+        .commit(&[put("setting", "server", json!({"port": 8702}))], "test", "", false)
+        .unwrap();
+    let before = std::fs::metadata(&path).unwrap();
+    std::fs::copy(external.path().unwrap(), dir.join("incoming.db")).unwrap();
+    std::fs::rename(dir.join("incoming.db"), &path).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(before.modified().unwrap()))
+        .unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), before.len());
+    assert_eq!(store.load().unwrap().config.port, 8701);
+    store
+        .commit(
+            &[put("setting", "routing", json!({"strategy": "fill-first"}))],
+            "test",
+            "",
+            false,
+        )
+        .unwrap();
+    let copy = dir.join("copy.db");
+    std::fs::copy(&path, &copy).unwrap();
+    let recovered = crate::testing::config_store(&copy).unwrap();
+    assert_eq!(
+        recovered.load().unwrap().config.port,
+        8701,
+        "a legitimate write must not import the replacement"
+    );
+    drop((external, recovered, store));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn identical_snapshot_bytes_do_not_reload_even_when_the_file_is_replaced() {
+    let (dir, path) = database_path("identical-bytes");
+    let store = crate::testing::config_store(&path).unwrap();
+    let accepted = store.load().unwrap();
+    let copy = dir.join("replacement.db");
+    std::fs::copy(&path, &copy).unwrap();
+    std::fs::rename(copy, &path).unwrap();
+    let live = live_path(&store);
+    let displaced = live.with_extension("displaced");
+    std::fs::rename(&live, &displaced).unwrap();
+    assert_eq!(store.load().unwrap().resources, accepted.resources);
+    assert_eq!(store.head().unwrap(), accepted.rev);
+    std::fs::rename(displaced, live).unwrap();
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn replaced_or_invalid_published_bytes_do_not_change_accepted_state() {
+    let (dir, path) = database_path("ignore-replacement");
+    let store = crate::testing::config_store(&path).unwrap();
+    store
+        .commit(&[put("setting", "server", json!({"port": 8711}))], "test", "", false)
+        .unwrap();
+    let live = live_path(&store);
+    let replacement = crate::testing::config_store(&dir.join("replacement.db")).unwrap();
+    replacement
+        .commit(&[put("setting", "server", json!({"port": 8712}))], "test", "", false)
+        .unwrap();
+    let valid = std::fs::read(replacement.path().unwrap()).unwrap();
+    let previous_live = std::fs::read(&live).unwrap();
+    for bytes in [valid.as_slice(), b"not SQLite".as_slice(), b"".as_slice()] {
+        std::fs::write(dir.join("incoming.db"), bytes).unwrap();
+        std::fs::rename(dir.join("incoming.db"), &path).unwrap();
+        assert_eq!(store.load().unwrap().config.port, 8711);
+        assert_eq!(
+            std::fs::read(&live).unwrap(),
+            previous_live,
+            "out-of-band input destroyed working state"
+        );
+    }
+    store
+        .commit(
+            &[put("setting", "routing", json!({"strategy": "fill-first"}))],
+            "test",
+            "",
+            false,
+        )
+        .unwrap();
+    let copy = dir.join("copy.db");
+    std::fs::copy(&path, &copy).unwrap();
+    let recovered = crate::testing::config_store(&copy).unwrap();
+    assert_eq!(recovered.load().unwrap().config.port, 8711);
+    drop((replacement, recovered, store));
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -21,12 +148,19 @@ fn opening_fresh_databases_serializes_migrations() {
             let start = start.clone();
             std::thread::spawn(move || {
                 start.wait();
-                crate::testing::config_store(&path).unwrap()
+                crate::testing::config_store(&path)
             })
         })
         .collect();
-    let stores: Vec<_> = workers.into_iter().map(|worker| worker.join().unwrap()).collect();
-    let conn = stores[0].conn();
+    let mut stores = Vec::new();
+    for worker in workers {
+        match worker.join().unwrap() {
+            Ok(store) => stores.push(store),
+            Err(error) => assert!(error.to_string().contains("already owned"), "{error}"),
+        }
+    }
+    assert_eq!(stores.len(), 1, "only the admitted owner performs bootstrap/migrations");
+    let conn = stores[0].conn().unwrap();
     assert_eq!(schema_version(&conn).unwrap(), MIGRATIONS.len());
     assert!(
         conn.prepare("SELECT kind, id, rev FROM change INDEXED BY change_resource_rev")
@@ -46,7 +180,7 @@ fn opening_fresh_databases_serializes_migrations() {
     drop(stores);
     assert!(
         !working_dir.exists(),
-        "only the process's last handle removes its marker"
+        "the admitted owner removes its settled workspace on exit"
     );
     assert!(working_dir.parent().unwrap().join("coordination.db").exists());
     assert!(!dir.join("cook.db-wal").exists());
@@ -62,13 +196,25 @@ fn offline_open_preserves_old_schema_and_migrating_open_upgrades_it() {
     conn.pragma_update(None, "user_version", 1).unwrap();
     drop(conn);
     let store = crate::testing::config_store_without_migration(&path).unwrap();
-    assert_eq!(schema_version(&store.conn()).unwrap(), 1);
+    assert_eq!(schema_version(&store.conn().unwrap()).unwrap(), 1);
     store.load().unwrap();
-    assert!(store.conn().prepare("SELECT * FROM credential_document").is_err());
+    assert!(
+        store
+            .conn()
+            .unwrap()
+            .prepare("SELECT * FROM credential_document")
+            .is_err()
+    );
     drop(store);
     let store = crate::testing::config_store(&path).unwrap();
-    assert_eq!(schema_version(&store.conn()).unwrap(), MIGRATIONS.len());
-    assert!(store.conn().prepare("SELECT * FROM credential_document").is_ok());
+    assert_eq!(schema_version(&store.conn().unwrap()).unwrap(), MIGRATIONS.len());
+    assert!(
+        store
+            .conn()
+            .unwrap()
+            .prepare("SELECT * FROM credential_document")
+            .is_ok()
+    );
     drop(store);
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -80,11 +226,17 @@ fn opening_tightens_snapshot_and_temporary_database_permissions() {
     let (dir, path) = database_path("perms");
     let store = crate::testing::config_store(&path).unwrap();
     let live = live_path(&store);
+    let image = std::fs::read(&live).unwrap();
+    drop(store);
+    // An unowned surviving image, not a second writer over an active owner's DB.
+    std::fs::create_dir_all(live.parent().unwrap()).unwrap();
+    std::fs::write(&live, image).unwrap();
     for file in [&path, &live] {
         std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
     std::fs::set_permissions(live.parent().unwrap(), std::fs::Permissions::from_mode(0o755)).unwrap();
-    let another = crate::testing::config_store_without_migration(&path).unwrap();
+    let store = Arc::new(crate::testing::config_store_without_migration(&path).unwrap());
+    let another = store.clone();
     for file in [&path, &live] {
         assert_eq!(std::fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
     }
@@ -92,7 +244,7 @@ fn opening_tightens_snapshot_and_temporary_database_permissions() {
         std::fs::metadata(live.parent().unwrap()).unwrap().permissions().mode() & 0o777,
         0o700
     );
-    let mut conn = store.conn();
+    let mut conn = store.conn().unwrap();
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
     tx.execute("INSERT INTO credential_meta VALUES ('permission-test', '1')", [])
         .unwrap();
@@ -165,6 +317,108 @@ fn legacy_uncheckpointed_wal_is_preserved_in_the_published_backup() {
 }
 
 #[test]
+fn legacy_wal_conflict_preserves_sidecars_and_recovers_opaque_state_after_close() {
+    let (dir, path) = database_path("active-legacy-wal");
+    let expected = resources::import_yaml(
+        "server: {port: 8124}\nplugins: {enabled: true, configs: {acme: {ratio: 1.50, binary: !!binary YWJj}}}\n",
+    )
+    .unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy.execute_batch(SCHEMA).unwrap();
+    legacy.execute_batch(MIGRATIONS[2]).unwrap();
+    legacy.pragma_update(None, "user_version", 3).unwrap();
+    legacy.pragma_update(None, "journal_mode", "WAL").unwrap();
+    legacy.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+    legacy
+        .set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)
+        .unwrap();
+    legacy
+        .execute_batch("BEGIN IMMEDIATE; INSERT INTO revision VALUES (1, '2026-01-01', 'legacy', 'WAL state', '');")
+        .unwrap();
+    for resource in &expected {
+        legacy
+            .execute(
+                "INSERT INTO resource(kind,id,ord,spec,description,rev,created_rev) VALUES (?1,?2,?3,?4,?5,1,1)",
+                params![
+                    resource.kind.name(),
+                    resource.id,
+                    resource.ord,
+                    serde_json::to_string(&resource.spec).unwrap(),
+                    resource.description
+                ],
+            )
+            .unwrap();
+    }
+    let raw = b"{\n \"type\":\"private\", \"opaque\":{\"ratio\":1.50,\"keep\":[1,2]}\n}\n";
+    legacy
+        .execute(
+            "INSERT INTO credential_document(name,bytes,rev) VALUES ('local:private.json',?1,7)",
+            [raw.as_slice()],
+        )
+        .unwrap();
+    legacy
+        .execute(
+            "INSERT INTO credential_meta VALUES ('opaque-legacy-meta','preserve')",
+            [],
+        )
+        .unwrap();
+    legacy.execute_batch("COMMIT; BEGIN;").unwrap();
+    assert_eq!(head(&legacy).unwrap(), 1); // Keep the real WAL reader transaction open.
+    let wal = dir.join("cook.db-wal");
+    let shm = dir.join("cook.db-shm");
+    let before_wal = std::fs::read(&wal).unwrap();
+    let before_main = std::fs::read(&path).unwrap();
+    let error = crate::testing::config_store(&path)
+        .err()
+        .expect("active legacy WAL must block conversion");
+    assert!(error.to_string().contains("close old WAL users"), "{error}");
+    assert_eq!(std::fs::read(&path).unwrap(), before_main);
+    assert_eq!(std::fs::read(&wal).unwrap(), before_wal);
+    assert!(shm.exists(), "failed bootstrap must not delete an active sidecar");
+    assert_eq!(head(&legacy).unwrap(), 1);
+    legacy.execute_batch("ROLLBACK").unwrap();
+    legacy.close().unwrap();
+    assert!(wal.exists(), "committed legacy state still needs WAL recovery");
+    let store = Arc::new(crate::testing::config_store(&path).unwrap());
+    assert_eq!(store.load().unwrap().config.port, 8124);
+    for resource in expected {
+        let actual = store.get(resource.kind, &resource.id).unwrap().unwrap();
+        assert_eq!(actual.ord, resource.ord);
+        assert_eq!(actual.spec, resource.spec);
+        assert_eq!((actual.rev, actual.created_rev), (1, 1));
+    }
+    assert!(!wal.exists() && !shm.exists());
+    let copy = dir.join("only-published.db");
+    std::fs::copy(&path, &copy).unwrap();
+    assert_eq!(&std::fs::read(&copy).unwrap()[18..20], &[1, 1]);
+    let restored = Arc::new(crate::testing::config_store(&copy).unwrap());
+    let db = crate::credential_store::CredentialDb::initialize(restored.clone(), &dir.join("absent")).unwrap();
+    assert_eq!(db.read(&db.auth_dir().join("private.json")).unwrap().unwrap(), raw);
+    let conn = restored.conn().unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT value FROM credential_meta WHERE name='opaque-legacy-meta'",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "preserve"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT rev FROM credential_document WHERE name='local:private.json'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        7
+    );
+    drop(conn);
+    drop((db, restored, store));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn publication_does_not_change_an_already_open_raw_copy() {
     use std::io::Read as _;
     let (dir, path) = database_path("open-copy");
@@ -191,11 +445,11 @@ fn publication_does_not_change_an_already_open_raw_copy() {
 #[test]
 fn raw_copies_remain_consistent_during_concurrent_commits() {
     let (dir, path) = database_path("copy-race");
-    let store = crate::testing::config_store(&path).unwrap();
+    let store = std::sync::Arc::new(crate::testing::config_store(&path).unwrap());
     store
         .commit(&[put("setting", "server", json!({"port":8200}))], "t", "", false)
         .unwrap();
-    let second = crate::testing::config_store(&path).unwrap();
+    let second = store.clone();
     let start = std::sync::Arc::new(std::sync::Barrier::new(2));
     let other_start = start.clone();
     let writer = std::thread::spawn(move || {
@@ -240,26 +494,26 @@ fn resume_republishes_a_live_commit_whose_publication_failed() {
     store
         .commit(&[put("setting", "server", json!({"port":8301}))], "t", "", false)
         .unwrap();
-    let saved = dir.join("previous.db");
-    std::fs::rename(&path, &saved).unwrap();
-    std::fs::create_dir(&path).unwrap();
+    let blocked = crate::testing::block_publication(&path);
     assert!(
         store
             .commit(&[put("setting", "server", json!({"port":8302}))], "t", "", false)
             .is_err()
     );
-    std::fs::remove_dir(&path).unwrap();
-    std::fs::rename(&saved, &path).unwrap();
+    drop(blocked);
     assert_eq!(head(&Connection::open(&path).unwrap()).unwrap(), 1);
+    let live = live_path(&store);
+    // Resume is a last-owner exit followed by a new owner, not a concurrent opener.
+    // An unresolved checkpoint must survive that exit without fixture copies.
+    drop(store);
+    assert!(live.exists());
     let resumed = crate::testing::config_store(&path).unwrap();
     assert_eq!(
         resumed.get(Kind::Setting, "server").unwrap().unwrap().spec["port"],
         8302
     );
     assert_eq!(head(&Connection::open(&path).unwrap()).unwrap(), 2);
-    let live = live_path(&resumed);
-    drop(store);
-    assert!(live.exists());
+    assert_eq!(live_path(&resumed), live);
     drop(resumed);
     assert!(!live.parent().unwrap().exists());
     assert!(
@@ -275,12 +529,9 @@ fn failed_publication_can_be_retried_without_a_new_revision() {
     let (dir, path) = database_path("retry-publication");
     let store = crate::testing::config_store(&path).unwrap();
     let op = put("setting", "server", json!({"port":8340}));
-    let saved = dir.join("previous.db");
-    std::fs::rename(&path, &saved).unwrap();
-    std::fs::create_dir(&path).unwrap();
+    let blocked = crate::testing::block_publication(&path);
     assert!(store.commit(std::slice::from_ref(&op), "t", "", false).is_err());
-    std::fs::remove_dir(&path).unwrap();
-    std::fs::rename(&saved, &path).unwrap();
+    drop(blocked);
     assert!(!store.commit(&[op], "t", "", false).unwrap().written);
     assert_eq!(head(&Connection::open(&path).unwrap()).unwrap(), 1);
     drop(store);
@@ -331,7 +582,7 @@ fn schema_empty_nonzero_live_file_falls_back_to_the_snapshot() {
     );
     assert_eq!(head(&Connection::open(&path).unwrap()).unwrap(), 1);
     // An active handle must fail closed, never be unlinked and re-seeded.
-    resumed.conn().pragma_update(None, "user_version", 0).unwrap();
+    resumed.conn().unwrap().pragma_update(None, "user_version", 0).unwrap();
     assert!(crate::testing::config_store(&path).is_err());
     assert!(live.exists());
     drop(resumed);
@@ -339,7 +590,141 @@ fn schema_empty_nonzero_live_file_falls_back_to_the_snapshot() {
 }
 
 #[test]
-fn stale_working_directories_are_swept_but_active_orphans_are_not() {
+fn recovery_uses_native_ownership_not_stale_process_markers() {
+    for kind in ["missing", "empty", "corrupt", "schema-empty"] {
+        let (dir, path) = database_path(kind);
+        let store = Arc::new(crate::testing::config_store(&path).unwrap());
+        store
+            .import_yaml("server: {port: 8381}\n", "test", "original state")
+            .unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &dir.join("absent")).unwrap();
+        let raw = b"{\n \"type\":\"private\", \"opaque\":{\"keep\":[1,2]}\n}\n";
+        db.save(&db.auth_dir().join("raw.json"), raw).unwrap();
+        let cache = db.auth_dir();
+        let live = live_path(&store);
+        drop((db, store));
+        std::fs::remove_dir_all(cache).unwrap();
+        let refs = live.parent().unwrap().join("refs");
+        std::fs::create_dir_all(&refs).unwrap();
+        // A PID can still exist after its former ownership has ended or been reused.
+        std::fs::write(refs.join(std::process::id().to_string()), b"").unwrap();
+        match kind {
+            "missing" => {}
+            "empty" => std::fs::write(&live, b"").unwrap(),
+            "corrupt" => std::fs::write(&live, b"not a SQLite database").unwrap(),
+            _ => {
+                let empty = Connection::open(&live).unwrap();
+                empty
+                    .pragma_update(None, "user_version", MIGRATIONS.len() as i64)
+                    .unwrap();
+                empty.close().unwrap();
+            }
+        }
+        let recovered = Arc::new(crate::testing::config_store(&path).unwrap());
+        assert_eq!(recovered.head().unwrap(), 1, "{kind}");
+        assert_eq!(recovered.load().unwrap().config.port, 8381, "{kind}");
+        assert_eq!(recovered.revisions(10, None).unwrap()[0].message, "original state");
+        let db = crate::credential_store::CredentialDb::initialize(recovered.clone(), &dir.join("absent")).unwrap();
+        assert_eq!(db.read(&db.auth_dir().join("raw.json")).unwrap().unwrap(), raw);
+        assert_eq!(std::fs::read(db.auth_dir().join("raw.json")).unwrap(), raw);
+        drop((db, recovered));
+        assert!(
+            !live.exists(),
+            "a stale PID marker must not prevent settled cleanup: {kind}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
+fn recovery_preserves_newer_schemas_even_without_known_tables() {
+    for known_tables in [false, true] {
+        let (dir, path) = database_path("future-schema");
+        let store = crate::testing::config_store(&path).unwrap();
+        store
+            .import_yaml("server: {port: 8382}\n", "test", "published")
+            .unwrap();
+        let live = live_path(&store);
+        drop(store);
+        std::fs::create_dir_all(live.parent().unwrap()).unwrap();
+        let future = Connection::open(&live).unwrap();
+        if known_tables {
+            future.execute_batch(SCHEMA).unwrap();
+        }
+        future
+            .execute_batch(
+                "CREATE TABLE future_payload(value TEXT); INSERT INTO future_payload VALUES ('keep future data');",
+            )
+            .unwrap();
+        future
+            .pragma_update(None, "user_version", (MIGRATIONS.len() + 1) as i64)
+            .unwrap();
+        future.close().unwrap();
+        let before_live = std::fs::read(&live).unwrap();
+        let before_published = std::fs::read(&path).unwrap();
+        let error = crate::testing::config_store(&path)
+            .err()
+            .expect("unsupported state must not cold-fallback");
+        assert!(error.to_string().contains("newer"), "{error}");
+        assert_eq!(
+            std::fs::read(&live).unwrap(),
+            before_live,
+            "newer checkpoint must not be erased"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before_published);
+        std::fs::remove_file(&live).unwrap();
+        let repaired = crate::testing::config_store(&path).unwrap();
+        assert_eq!(
+            repaired.load().unwrap().config.port,
+            8382,
+            "failed startup releases ownership"
+        );
+        drop(repaired);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
+fn recovery_keeps_an_initialized_empty_checkpoint() {
+    let (dir, path) = database_path("initialized-empty");
+    let store = crate::testing::config_store(&path).unwrap();
+    store
+        .import_yaml("server: {port: 8383}\n", "test", "before empty")
+        .unwrap();
+    let live = live_path(&store);
+    let blocked = crate::testing::block_publication(&path);
+    assert!(
+        store
+            .replace(Vec::new(), "test", "empty but initialized", false)
+            .is_err()
+    );
+    drop(blocked);
+    assert_eq!(head(&Connection::open(&path).unwrap()).unwrap(), 1);
+    drop(store);
+    assert!(live.exists());
+    let resumed = crate::testing::config_store(&path).unwrap();
+    assert_eq!(resumed.head().unwrap(), 2);
+    assert!(
+        !resumed.is_empty().unwrap(),
+        "empty imported state is still initialized"
+    );
+    assert_eq!(
+        resumed.load().unwrap().config.port,
+        0,
+        "do not resurrect the older published setting"
+    );
+    assert_eq!(
+        head(&Connection::open(&path).unwrap()).unwrap(),
+        2,
+        "republished before readiness"
+    );
+    drop(resumed);
+    assert!(!live.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn initializing_another_database_does_not_sweep_other_namespaces() {
     let (dir, path) = database_path("sweep");
     let store = crate::testing::config_store(&path).unwrap();
     let live = live_path(&store);
@@ -351,7 +736,7 @@ fn stale_working_directories_are_swept_but_active_orphans_are_not() {
     std::fs::remove_file(&path).unwrap();
     let another_path = dir.join("another.db");
     let another = crate::testing::config_store(&another_path).unwrap();
-    assert!(!stale.exists());
+    assert_eq!(std::fs::read(stale.join("live.db")).unwrap(), b"abandoned");
     assert!(
         live.exists(),
         "a missing snapshot is not permission to delete an active live database"
@@ -362,21 +747,147 @@ fn stale_working_directories_are_swept_but_active_orphans_are_not() {
     assert!(path.exists());
     drop(another);
     drop(store);
+    std::fs::remove_dir_all(stale).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn exclusive_owner_cannot_be_bypassed_by_another_workspace() {
+    let (dir, path) = database_path("exclusive-workspaces");
+    let store = crate::testing::config_store(&path).unwrap();
+    store
+        .commit(&[put("setting", "server", json!({"port": 8357}))], "t", "", false)
+        .unwrap();
+    let published = std::fs::read(&path).unwrap();
+    let error = ConfigStore::open_in(&path, true, dir.join("other-workspace"))
+        .err()
+        .expect("another working namespace must not bypass the published database owner");
+    assert!(error.to_string().contains("already owned"), "{error}");
+    assert_eq!(std::fs::read(&path).unwrap(), published);
+    assert_eq!(store.load().unwrap().config.port, 8357);
+    drop(store);
+    let next = ConfigStore::open_in(&path, true, dir.join("other-workspace")).unwrap();
+    assert_eq!(next.load().unwrap().config.port, 8357);
+    next.commit(&[put("setting", "server", json!({"port": 8358}))], "t", "", false)
+        .unwrap();
+    drop(next);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn exclusive_owner_is_process_safe_and_released_after_shutdown() {
+    const TEST: &str = "config_store::tests::database::exclusive_owner_is_process_safe_and_released_after_shutdown";
+    const PATH: &str = "COOK_ROUTER_TEST_OWNER_PATH";
+    const PHASE: &str = "COOK_ROUTER_TEST_OWNER_PHASE";
+    if let Some(path) = std::env::var_os(PATH) {
+        let path = PathBuf::from(path);
+        let phase = std::env::var(PHASE).unwrap();
+        let opened = ConfigStore::open_in(&path, true, path.parent().unwrap().join(format!("child-{phase}")));
+        if phase == "owned" {
+            let error = opened
+                .err()
+                .expect("a different process must not acquire an active owner");
+            assert!(error.to_string().contains("already owned"), "{error}");
+        } else {
+            let store = opened.unwrap();
+            assert_eq!(store.head().unwrap(), 1);
+            assert_eq!(store.load().unwrap().config.port, 8357);
+            store
+                .commit(&[put("setting", "server", json!({"port": 8358}))], "child", "", false)
+                .unwrap();
+        }
+        return;
+    }
+    let (dir, path) = database_path("exclusive-processes");
+    let store = crate::testing::config_store(&path).unwrap();
+    store
+        .commit(&[put("setting", "server", json!({"port": 8357}))], "t", "", false)
+        .unwrap();
+    let child = |phase| {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--nocapture"])
+            .env(PATH, &path)
+            .env(PHASE, phase)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    };
+    child("owned");
+    assert_eq!(store.head().unwrap(), 1);
+    drop(store);
+    child("released");
+    let final_store = crate::testing::config_store(&path).unwrap();
+    assert_eq!(final_store.head().unwrap(), 2);
+    assert_eq!(final_store.load().unwrap().config.port, 8358);
+    drop(final_store);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn exclusive_owner_racing_shutdown_never_enters_before_workspace_cleanup() {
+    let (dir, path) = database_path("exclusive-shutdown");
+    for round in 0..4 {
+        let owner = ConfigStore::open_in(&path, true, dir.join("old-workspace")).unwrap();
+        owner
+            .commit(
+                &[put("setting", "server", json!({"port": 8600 + round * 2}))],
+                "t",
+                "",
+                false,
+            )
+            .unwrap();
+        let live = live_path(&owner);
+        let start = Arc::new(std::sync::Barrier::new(2));
+        let closing = start.clone();
+        let shutdown = std::thread::spawn(move || {
+            closing.wait();
+            drop(owner);
+        });
+        start.wait();
+        let contender = ConfigStore::open_in(&path, true, dir.join("new-workspace"));
+        if contender.is_ok() {
+            assert!(
+                !live.exists(),
+                "ownership must remain held until old-workspace cleanup finishes"
+            );
+        }
+        shutdown.join().unwrap();
+        let next = match contender {
+            Ok(store) => store,
+            Err(error) => {
+                assert!(error.to_string().contains("already owned"), "{error}");
+                // A refused racing opener may acquire only after shutdown joins.
+                ConfigStore::open_in(&path, true, dir.join("new-workspace")).unwrap()
+            }
+        };
+        assert_eq!(next.head().unwrap(), round * 2 + 1);
+        next.commit(
+            &[put("setting", "server", json!({"port": 8601 + round * 2}))],
+            "t",
+            "",
+            false,
+        )
+        .unwrap();
+        assert_eq!(next.head().unwrap(), round * 2 + 2);
+        drop(next);
+    }
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 fn concurrent_open_and_last_exit_never_split_the_live_database() {
     let (dir, path) = database_path("lifetime-race");
+    let owner = Arc::new(crate::testing::config_store(&path).unwrap());
     let start = std::sync::Arc::new(std::sync::Barrier::new(4));
     let workers: Vec<_> = (0..4)
         .map(|worker| {
             let path = path.clone();
             let start = start.clone();
+            let store = owner.clone();
             std::thread::spawn(move || {
                 start.wait();
                 for iteration in 0..4 {
-                    let store = crate::testing::config_store(&path).unwrap();
+                    assert!(crate::testing::config_store(&path).is_err(), "no competing owner");
                     store
                         .commit(
                             &[put("setting", "server", json!({"port":8400 + worker * 10 + iteration}))],
@@ -393,6 +904,13 @@ fn concurrent_open_and_last_exit_never_split_the_live_database() {
     for worker in workers {
         worker.join().unwrap();
     }
+    assert_eq!(owner.head().unwrap(), 16);
+    let live = live_path(&owner);
+    drop(owner);
+    assert!(
+        !live.exists(),
+        "settled owner cleans its workspace before releasing admission"
+    );
     let final_store = crate::testing::config_store(&path).unwrap();
     assert_eq!(final_store.head().unwrap(), 16);
     assert_eq!(head(&Connection::open(&path).unwrap()).unwrap(), 16);

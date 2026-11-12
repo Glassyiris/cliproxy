@@ -680,6 +680,7 @@ pub fn credential_file_name(email: &str, subject: &str, now_ms: i64) -> String {
 }
 
 /// A finished login: file name, the saved document and label.
+#[derive(Clone)]
 pub struct LoginRecord {
     pub file_name: String,
     pub metadata: BTreeMap<String, GoValue>,
@@ -950,7 +951,7 @@ pub async fn login(
     login_with(XaiAuth::new(client), &cfg.auth_dir, no_browser, save).await
 }
 
-pub(crate) async fn login_with(
+pub async fn login_with(
     auth: XaiAuth,
     auth_dir: &Path,
     no_browser: bool,

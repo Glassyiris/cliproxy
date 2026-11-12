@@ -172,6 +172,7 @@ pub(crate) fn upgrade_rejected() -> Response {
     response
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn upgrade(
     State(rt): State<Arc<Runtime>>,
     Extension(caller): Extension<Caller>,
@@ -179,6 +180,7 @@ async fn upgrade(
     matched: axum::extract::MatchedPath,
     uri: axum::http::Uri,
     headers: HeaderMap,
+    owner: Option<Extension<crate::listener::ConnectionWork>>,
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
     let Ok(ws) = ws else {
@@ -203,10 +205,11 @@ async fn upgrade(
         connection.request_id = Some(log.request_id()).filter(|id| !id.is_empty());
         connection.timeline = log.detach_websocket();
     }
-    let mut response = ws
-        .max_message_size(MAX_MESSAGE)
-        .max_frame_size(MAX_MESSAGE)
-        .on_upgrade(move |socket| connection.run(socket));
+    let mut response = crate::listener::websocket(
+        ws.max_message_size(MAX_MESSAGE).max_frame_size(MAX_MESSAGE),
+        owner,
+        move |socket| connection.run(socket),
+    );
     if let Some(turn_state) = turn_state {
         response.headers_mut().insert(TURN_STATE, turn_state);
     }

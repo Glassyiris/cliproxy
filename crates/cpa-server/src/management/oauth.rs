@@ -11,7 +11,6 @@ use cpa_core::gostr::GoStr;
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -38,6 +37,7 @@ const CODEX_CALLBACK_PORT: u16 = 1455;
 
 #[derive(Clone)]
 struct Session {
+    identity: Arc<()>,
     provider: String,
     status: String,
     completed: bool,
@@ -88,6 +88,7 @@ impl Sessions {
         self.lock().insert(
             state.to_owned(),
             Session {
+                identity: Arc::new(()),
                 provider,
                 status: String::new(),
                 completed: false,
@@ -115,6 +116,7 @@ impl Sessions {
         map.insert(
             state.to_owned(),
             Session {
+                identity: Arc::new(()),
                 provider,
                 status: String::new(),
                 completed: false,
@@ -175,7 +177,7 @@ impl Sessions {
             .map(|s| (s.provider.clone(), s.status.clone(), s.completed))
     }
 
-    fn is_pending(&self, state: &str, provider: &str) -> bool {
+    pub(super) fn is_pending(&self, state: &str, provider: &str) -> bool {
         let provider = provider.trim().go_lower();
         self.lock().get(state.trim()).is_some_and(|s| {
             !s.completed && s.status.is_empty() && (provider.is_empty() || s.provider.go_eq_fold(&provider))
@@ -240,6 +242,7 @@ impl Sessions {
         map.insert(
             state.to_owned(),
             Session {
+                identity: Arc::new(()),
                 provider: "codex".into(),
                 status: String::new(),
                 completed: false,
@@ -289,6 +292,12 @@ impl Sessions {
         }
     }
 
+    pub(super) fn release_siwc_commit(&self, state: &str, flow: &Arc<super::siwc::Flow>) {
+        if let Some(s) = self.lock().get_mut(state).filter(|s| Self::siwc_pending(s, flow)) {
+            s.siwc_committing = false;
+        }
+    }
+
     fn siwc_pending(s: &Session, flow: &Arc<super::siwc::Flow>) -> bool {
         !s.completed && s.status.is_empty() && s.siwc.as_ref().is_some_and(|f| Arc::ptr_eq(f, flow))
     }
@@ -326,7 +335,7 @@ pub(super) fn valid_state(state: &str) -> bool {
 }
 
 /// Go `NormalizeOAuthCallbackProvider`: the built-in aliases, else a plugin-style name.
-pub(super) fn normalize_callback_provider(provider: &str) -> Option<String> {
+pub(crate) fn normalize_callback_provider(provider: &str) -> Option<String> {
     let p = provider.trim().go_lower();
     let builtin = match p.as_str() {
         "anthropic" | "claude" => Some("anthropic"),
@@ -454,8 +463,27 @@ pub(super) fn login_client(state: &Management) -> wreq::Client {
     state.clients.get(&global_proxy(state))
 }
 
+/// New grant work recovers publication before network I/O, without carrying the
+/// owner gate over a provider call. Home has no local persistence authority.
+pub(super) async fn admit_grant_work(state: &Arc<Management>) -> bool {
+    if state.rt.store().is_home() || state.stopping.is_cancelled() {
+        return false;
+    }
+    let backend = state.rt.store().credential_backend();
+    state
+        .work
+        .clone()
+        .spawn_blocking(move || backend.admit_work())
+        .await
+        .is_ok_and(|result| result.is_ok())
+        && !state.stopping.is_cancelled()
+}
+
 /// Go `StartOAuthV8`.
 pub(crate) async fn auth_url(State(state): State<Arc<Management>>, RawQuery(raw): RawQuery) -> Response {
+    if !admit_grant_work(&state).await {
+        return fail(StatusCode::SERVICE_UNAVAILABLE, "credential recovery required");
+    }
     let raw_query = raw.clone();
     let q = Query::parse(raw);
     let webui = matches!(
@@ -548,27 +576,30 @@ async fn import_vertex(
         location = query.first("location").trim().to_owned();
     }
     let auth_dir = state.rt.config().auth_dir.clone();
-    let saved = tokio::task::spawn_blocking(move || {
-        let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut upload = import_upload(&auth_dir, &file.data, &location)?;
-        if state.rt.store().is_home() {
-            return Err(UploadError::Save("Home owns its credentials remotely".into()));
-        }
-        state
-            .rt
-            .store()
-            .credential_backend()
-            .write_files(std::slice::from_ref(&upload.path.clone()), || {
-                upload
-                    .write()
-                    .map_err(|_| anyhow::anyhow!("failed to write Vertex credential"))
-            })
-            .map_err(|e| UploadError::Save(format!("{e:#}")))?;
-        state.credential_changes.notify_one();
-        state.publish((*state.rt.config()).clone(), None);
-        Ok(upload)
-    })
-    .await;
+    let saved = state
+        .work
+        .clone()
+        .spawn_blocking(move || {
+            let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut upload = import_upload(&auth_dir, &file.data, &location)?;
+            if state.rt.store().is_home() {
+                return Err(UploadError::Save("Home owns its credentials remotely".into()));
+            }
+            state
+                .rt
+                .store()
+                .credential_backend()
+                .write_files(std::slice::from_ref(&upload.path.clone()), || {
+                    upload
+                        .write()
+                        .map_err(|_| anyhow::anyhow!("failed to write Vertex credential"))
+                })
+                .map_err(|e| UploadError::Save(format!("{e:#}")))?;
+            state.credential_changes.notify_one();
+            state.publish((*state.rt.config()).clone(), None);
+            Ok(upload)
+        })
+        .await;
     let message = |error: &str, message: String| {
         reply(
             StatusCode::BAD_REQUEST,
@@ -607,66 +638,223 @@ enum Outcome {
 
 /// Saves through `write` only while the session is still pending (Go
 /// `guardOAuthSessionPendingForSave`), then resyncs credentials.
-async fn save_if_pending<T: Send + 'static>(
+struct PrivateLoginRender(PathBuf);
+impl PrivateLoginRender {
+    fn new() -> anyhow::Result<Self> {
+        let path = std::env::temp_dir().join(format!("cook-login-render-{}", uuid::Uuid::new_v4()));
+        let create = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        let mut create = create;
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut create, 0o700);
+        create.create(&path)?;
+        Ok(Self(path))
+    }
+}
+impl Drop for PrivateLoginRender {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A deterministic refusal cannot be repaired by retrying local I/O.
+#[derive(Debug)]
+pub(crate) struct LoginRejected;
+impl std::fmt::Display for LoginRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("login result is no longer admissible")
+    }
+}
+impl std::error::Error for LoginRejected {}
+
+// ponytail: legacy writers expose strings, not typed effects. Keep opaque
+// failures retryable; migrate this boundary when adding another validation code.
+pub(crate) fn login_render_error(error: String) -> anyhow::Error {
+    if error.starts_with("auth filestore: invalid metadata weight:")
+        || matches!(
+            error.as_str(),
+            "invalid credential email filename"
+                | "claude token storage missing account information"
+                | "codex token storage missing account information"
+                | "meta token storage missing access token"
+        )
+    {
+        anyhow::Error::new(LoginRejected)
+    } else {
+        anyhow::Error::msg(error)
+    }
+}
+
+type LoginRenderer =
+    dyn Fn(&crate::config_store::State) -> anyhow::Result<Vec<(PathBuf, Option<Vec<u8>>)>> + Send + Sync;
+
+/// The returned provider value stays captured here until complete bytes reach the
+/// pending candidate. Cache repair and legacy merge failures can then be retried
+/// without exchanging another grant.
+pub(crate) struct HeldLogin {
+    backend: std::sync::Weak<crate::credential_store::CredentialDb>,
+    // Issued while pending; UI expiry/cancellation cannot un-consume the result.
+    _session: Arc<()>,
+    pub(crate) provider: String,
+    render: Box<LoginRenderer>,
+    destinations: Arc<Mutex<std::collections::BTreeMap<String, [u8; 32]>>>,
+    rejected: Box<dyn Fn() + Send + Sync>,
+}
+impl HeldLogin {
+    pub(crate) fn finish(
+        &self,
+        current: &crate::config_store::State,
+        pending: &mut Option<crate::config_store::Pending>,
+    ) -> anyhow::Result<()> {
+        let backend = self
+            .backend
+            .upgrade()
+            .ok_or_else(|| anyhow::Error::new(LoginRejected))?;
+        let documents = (self.render)(current)?;
+        backend.retain_login(documents, pending)
+    }
+
+    pub(crate) fn reject(&self, current: &crate::config_store::State, store: &crate::config_store::ConfigStore) {
+        store.reject_login_sources(
+            current,
+            &self.destinations.lock().unwrap_or_else(PoisonError::into_inner),
+        );
+        (self.rejected)();
+    }
+}
+
+async fn save_if_pending<T: Clone + Send + Sync + 'static>(
     state: &Arc<Management>,
     sid: &str,
     provider: &str,
     value: T,
-    write: impl FnOnce(PathBuf, T, LoginSave) -> Result<PathBuf, String> + Send + 'static,
+    write: impl Fn(PathBuf, T, LoginSave) -> Result<PathBuf, String> + Send + Sync + 'static,
     save_error: &str,
 ) -> Outcome {
-    let auth_dir = state.rt.config().auth_dir.clone();
-    let (worker, sid, owner) = (state.clone(), sid.to_owned(), provider.to_owned());
-    let saved = tokio::task::spawn_blocking(move || {
-        if worker.rt.store().is_home() {
-            return Err("Home owns its credentials remotely".to_owned());
-        }
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let skipped = cancelled.clone();
-        let owner_state = worker.clone();
-        let save: LoginSave = Arc::new(move |paths, write| {
-            let committed = (|| -> anyhow::Result<()> {
-                let mut paths = paths
-                    .iter()
-                    .map(|path| crate::credential_store::credential_path_key(path))
-                    .collect::<std::io::Result<Vec<_>>>()?;
-                paths.sort();
-                paths.dedup();
-                let _locks = paths
-                    .iter()
-                    .map(|path| cpa_exec::codex_siwc_bind::lock_file(path).map_err(anyhow::Error::msg))
-                    .collect::<anyhow::Result<Vec<_>>>()?;
-                let _disk = owner_state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-                owner_state.rt.store().credential_backend().write_files(&paths, || {
-                    // Check after hydration, immediately before the provider merges/writes.
-                    if !owner_state.oauth.is_pending(&sid, &owner) {
-                        skipped.store(true, Ordering::Relaxed);
-                        return Err(anyhow::anyhow!("OAuth session cancelled"));
-                    }
-                    assert!(!owner_state.login_panic, "injected login panic");
-                    write().map_err(anyhow::Error::msg)
-                })
-            })();
-            committed.map_err(|e| format!("{e:#}"))
-        });
-        let result = write(auth_dir, value, save);
-        if cancelled.load(Ordering::Relaxed) {
-            Ok(None)
-        } else {
-            result.map(|path| {
-                worker.credential_changes.notify_one();
-                Some(path)
-            })
-        }
-    })
-    .await;
-    match saved {
-        Ok(Ok(Some(_))) => Outcome::Saved,
-        Ok(Ok(None)) => Outcome::Cancelled,
-        Ok(Err(_)) => {
-            tracing::error!("failed to save {provider} token");
-            Outcome::Failed(save_error.to_owned())
-        }
+    let session = {
+        let sessions = state.oauth.lock();
+        let Some(session) = sessions
+            .get(sid)
+            .filter(|s| !s.completed && s.status.is_empty() && s.provider.go_eq_fold(provider))
+        else {
+            return Outcome::Cancelled;
+        };
+        session.identity.clone()
+    };
+    if state.rt.store().is_home() {
+        return Outcome::Failed(save_error.to_owned());
+    }
+    let backend = state.rt.store().credential_backend();
+    let expected = Arc::new(Mutex::new(None));
+    let db = Arc::downgrade(&backend);
+    let owner = Arc::downgrade(state);
+    let destinations = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
+    let resolved = destinations.clone();
+    let rejected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let rejection = rejected.clone();
+    let sid = sid.to_owned();
+    let save_error = save_error.to_owned();
+    let failure = save_error.clone();
+    let reporter = owner.clone();
+    let held = HeldLogin {
+        backend: db.clone(),
+        _session: session,
+        provider: provider.to_owned(),
+        destinations,
+        rejected: Box::new(move || {
+            rejection.store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(owner) = reporter.upgrade() {
+                owner.oauth.set_error(&sid, &failure);
+            }
+        }),
+        render: Box::new(move |current| {
+            let output = Arc::new(Mutex::new(None));
+            let result = output.clone();
+            let render_error = Arc::new(Mutex::new(None));
+            let captured_error = render_error.clone();
+            let resolved = resolved.clone();
+            let db = db.clone();
+            let expected = expected.clone();
+            let current = current.clone();
+            {
+                let mut captured = expected.lock().unwrap_or_else(PoisonError::into_inner);
+                if captured.is_none() {
+                    *captured = Some(
+                        db.upgrade()
+                            .ok_or_else(|| anyhow::Error::new(LoginRejected))?
+                            .login_sources(&current)?,
+                    );
+                }
+            }
+            let render_dir = PrivateLoginRender::new()?;
+            db.upgrade()
+                .ok_or_else(|| anyhow::Error::new(LoginRejected))?
+                .hydrate_login_render(&current, &render_dir.0)?;
+            let save: LoginSave = Arc::new(move |paths, write| {
+                let db = db.upgrade().ok_or("login owner stopped")?;
+                let documents = db
+                    .render_login(
+                        &current,
+                        paths,
+                        &mut expected.lock().unwrap_or_else(PoisonError::into_inner),
+                        &mut resolved.lock().unwrap_or_else(PoisonError::into_inner),
+                        write,
+                    )
+                    .map_err(|error| {
+                        let message = format!("{error:#}");
+                        *captured_error.lock().unwrap_or_else(PoisonError::into_inner) = Some(error);
+                        message
+                    })?;
+                *result.lock().unwrap_or_else(PoisonError::into_inner) = Some(documents);
+                Ok(())
+            });
+            assert!(!owner.upgrade().is_some_and(|s| s.login_panic), "injected login panic");
+            if let Err(error) = write(render_dir.0.clone(), value.clone(), save) {
+                return Err(render_error
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take()
+                    .unwrap_or_else(|| login_render_error(error)));
+            }
+            let documents = output
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+                .ok_or_else(|| anyhow::Error::new(LoginRejected))?;
+            Ok(documents)
+        }),
+    };
+    // Transfer ownership before locks, hydration or provider merge/write effects.
+    state.config_store().hold_login(held);
+    let worker = state.clone();
+    match state
+        .work
+        .clone()
+        .spawn_blocking(move || {
+            let admission = {
+                let _disk = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
+                backend.admit_work()
+            };
+            anyhow::ensure!(!rejected.load(std::sync::atomic::Ordering::SeqCst), LoginRejected);
+            let paths = backend
+                .documents()?
+                .into_iter()
+                .map(|(path, _)| path)
+                .collect::<Vec<_>>();
+            let _locks = paths
+                .iter()
+                .map(|path| cpa_exec::codex_siwc_bind::lock_file(path).map_err(anyhow::Error::msg))
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            let _disk = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
+            backend.repair_cache()?;
+            admission?;
+            worker.credential_changes.notify_one();
+            Ok::<_, anyhow::Error>(())
+        })
+        .await
+    {
+        Ok(Ok(())) => Outcome::Saved,
+        Ok(Err(_)) => Outcome::Failed(save_error.to_owned()),
         Err(e) => {
             resume_panic(e);
             Outcome::Failed(save_error.to_owned())
@@ -688,11 +876,14 @@ async fn settle(state: &Arc<Management>, sid: &str, outcome: Outcome) {
             // `disk` can be held by a save that waits on the store's async I/O, so it is
             // never taken on a runtime worker.
             let worker = state.clone();
-            let published = tokio::task::spawn_blocking(move || {
-                let _guard = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
-                worker.publish((*worker.rt.config()).clone(), None);
-            })
-            .await;
+            let published = state
+                .work
+                .clone()
+                .spawn_blocking(move || {
+                    let _guard = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
+                    worker.publish((*worker.rt.config()).clone(), None);
+                })
+                .await;
             if let Err(e) = published {
                 resume_panic(e);
                 return fail_session(state, sid, "Failed to save authentication tokens");
@@ -741,7 +932,7 @@ fn spawn_login(
     work: impl Future<Output = ()> + Send + 'static,
 ) {
     let (worker, sid) = (state.clone(), sid.to_owned());
-    tokio::spawn(async move {
+    state.work.spawn(async move {
         if panicked(&sid, provider, work).await {
             fail_session(&worker, &sid, PANIC_MESSAGE);
         }
@@ -779,6 +970,9 @@ async fn start_claude(state: Arc<Management>, webui: bool) -> Response {
     let forwarder = forwarder.map(|id| (ANTHROPIC_CALLBACK_PORT, id));
     spawn_login(&state, &sid, "anthropic", forwarder, async move {
         if let Some(code) = wait_for_callback(&worker, &login.state, "anthropic", "Bad request").await {
+            if !admit_grant_work(&worker).await {
+                return fail_session(&worker, &login.state, "credential recovery required");
+            }
             let exchanged = match &worker.login_base {
                 Some(base) => {
                     let oauth = cpa_exec::oauth::OAuth::with_endpoints(
@@ -795,9 +989,11 @@ async fn start_claude(state: Arc<Management>, webui: bool) -> Response {
                 Ok(patch) => {
                     let legacy = Arc::new(Mutex::new(None));
                     let slot = legacy.clone();
+                    let canonical_dir = worker.rt.config().auth_dir.clone();
                     let write = move |dir: PathBuf, patch, save: LoginSave| {
                         let (path, old) = ManagedLogin::save(&dir, patch, Some(&save)).map_err(|e| exec_text(&e))?;
-                        *slot.lock().unwrap_or_else(PoisonError::into_inner) = old;
+                        *slot.lock().unwrap_or_else(PoisonError::into_inner) =
+                            old.and_then(|old| old.file_name().map(|name| canonical_dir.join(name)));
                         Ok(path)
                     };
                     let saved = save_if_pending(
@@ -826,11 +1022,14 @@ async fn start_claude(state: Arc<Management>, webui: bool) -> Response {
 /// Removes the legacy document after the canonical Claude credential is durable.
 async fn remove_legacy_claude(state: &Arc<Management>, legacy: PathBuf) -> Outcome {
     let worker = state.clone();
-    let removed = tokio::task::spawn_blocking(move || {
-        let _guard = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        worker.store_delete(&legacy)
-    })
-    .await;
+    let removed = state
+        .work
+        .clone()
+        .spawn_blocking(move || {
+            let _guard = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
+            worker.store_delete(&legacy)
+        })
+        .await;
     match removed {
         Ok(Ok(())) => Outcome::Saved,
         Ok(Err(e)) => {
@@ -868,6 +1067,9 @@ async fn start_codex(state: Arc<Management>, webui: bool) -> Response {
     let forwarder = forwarder.map(|id| (CODEX_CALLBACK_PORT, id));
     spawn_login(&state, &sid, "codex", forwarder, async move {
         if let Some(code) = wait_for_callback(&worker, &flow, "codex", "Bad Request").await {
+            if !admit_grant_work(&worker).await {
+                return fail_session(&worker, &flow, "credential recovery required");
+            }
             let client = login_client(&worker);
             let oauth = match &worker.login_base {
                 Some(base) => CodexOAuth::with_endpoints(
@@ -940,6 +1142,9 @@ async fn start_antigravity(state: Arc<Management>, webui: bool) -> Response {
                 if cb.code.is_empty() {
                     return Outcome::Failed("Authentication failed: code not found".into());
                 }
+                if !admit_grant_work(&worker).await {
+                    return Outcome::Failed("credential recovery required".into());
+                }
                 let client = login_client(&worker);
                 let oauth = match &worker.login_base {
                     Some(base) => OAuth::with_endpoints(
@@ -1009,7 +1214,14 @@ async fn next_callback(state: &Management, sid: &str, provider: &str) -> Option<
         if let Some(cb) = state.oauth.take_callback(sid) {
             return Some(cb);
         }
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::select! {
+            biased;
+            () = state.stopping.cancelled() => {
+                state.oauth.set_error(sid, "Sign-in cancelled because the service is shutting down");
+                return None;
+            },
+            () = tokio::time::sleep(Duration::from_millis(500)) => {},
+        }
     }
 }
 
@@ -1070,6 +1282,9 @@ async fn start_devin(state: Arc<Management>) -> Response {
         }
         if cb.code.trim().is_empty() {
             return fail("Missing authorization code");
+        }
+        if !admit_grant_work(&worker).await {
+            return fail("credential recovery required");
         }
         // Upstream errors can carry tokens or codes: only Go's fixed messages surface.
         let exchanged = tokio::select! {
@@ -1264,9 +1479,24 @@ async fn start_meta(state: Arc<Management>) -> Response {
     response
 }
 
+fn save_xai_login(dir: &std::path::Path, record: cpa_exec::xai_auth::LoginRecord) -> Result<PathBuf, String> {
+    let path = dir.join(&record.file_name);
+    let existing = match std::fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.to_string()),
+    };
+    let document = cpa_exec::xai_auth::saved_document(record.metadata, existing.as_deref())?;
+    let text = cpa_common::json::GoValue::Object(document).encode_indented();
+    std::fs::create_dir_all(dir)
+        .and_then(|()| super::auth_files::write_file(&path, &text))
+        .map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 /// Go `RequestXAIToken`: device flow; the poller saves the credential file.
 async fn start_xai(state: Arc<Management>) -> Response {
-    use cpa_exec::xai_auth::{LoginRecord, MAX_POLL_DURATION, XaiAuth, login_record, saved_document};
+    use cpa_exec::xai_auth::{LoginRecord, MAX_POLL_DURATION, XaiAuth, login_record};
     let sid = format!("xai-{}", unix_nanos());
     let mut auth = XaiAuth::new(login_client(&state));
     if let Some(base) = &state.login_base {
@@ -1292,16 +1522,6 @@ async fn start_xai(state: Arc<Management>) -> Response {
     };
     let response = device_started(url, sid.clone(), &code.user_code, Some(expires));
     // Go `saveTokenRecord` through the file token store: merged with an existing file.
-    fn save_login(dir: &std::path::Path, record: LoginRecord) -> Result<PathBuf, String> {
-        let path = dir.join(&record.file_name);
-        let existing = std::fs::read(&path).ok().filter(|raw| !raw.is_empty());
-        let document = saved_document(record.metadata, existing.as_deref())?;
-        let text = cpa_common::json::GoValue::Object(document).encode_indented();
-        std::fs::create_dir_all(dir)
-            .and_then(|()| super::auth_files::write_file(&path, &text))
-            .map_err(|e| e.to_string())?;
-        Ok(path)
-    }
     let worker = state.clone();
     let flow_sid = sid.clone();
     spawn_login(&state, &flow_sid, "xai", None, async move {
@@ -1320,7 +1540,7 @@ async fn start_xai(state: Arc<Management>) -> Response {
                 let record = login_record(&tokens, &last_refresh, &code.token_endpoint, now.timestamp_millis());
                 let write = |dir: PathBuf, record: LoginRecord, save: LoginSave| {
                     let path = dir.join(&record.file_name);
-                    cpa_exec::login_store::save_login(Some(&save), &[path], || save_login(&dir, record))
+                    save_login(Some(&save), &[path], || save_xai_login(&dir, record))
                 };
                 save_if_pending(&worker, &sid, "xai", record, write, "Failed to save token to file").await
             }
@@ -1364,9 +1584,24 @@ async fn start_forwarder(state: &Management, port: u16, path: &str) -> Result<u6
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .map_err(|_| "failed to start callback server")?;
-    let task = tokio::spawn(async move {
-        while let Ok((stream, _)) = listener.accept().await {
-            tokio::spawn(forward(stream, target.clone()));
+    let work = state.work.clone();
+    let stopping = state.stopping.clone();
+    let task = state.work.spawn(async move {
+        loop {
+            let accepted = tokio::select! {
+                biased;
+                () = stopping.cancelled() => return,
+                accepted = listener.accept() => accepted,
+            };
+            let Ok((stream, _)) = accepted else { return };
+            let (stopping, target) = (stopping.clone(), target.clone());
+            work.spawn(async move {
+                tokio::select! {
+                    biased;
+                    () = stopping.cancelled() => {},
+                    () = forward(stream, target) => {},
+                }
+            });
         }
     });
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -1703,6 +1938,129 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shutdown_stops_online_admission_and_joins_an_already_completed_login() {
+        use std::future::Future as _;
+        use std::task::Poll;
+        use tower::ServiceExt as _;
+        let (root, state, db) = sqlite_state("shutdown-owned-login");
+        let workspace = state.config.working_directory().unwrap().to_owned();
+        let raw = br#"{"type":"vertex","opaque":"owned-completed-grant"}"#.to_vec();
+        let expected = raw.clone();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let release = Arc::new(tokio::sync::Notify::new());
+        state.oauth.register("shutdown-owned", "vertex");
+        let (worker, held) = (state.clone(), release.clone());
+        spawn_login(&state, "shutdown-owned", "vertex", None, async move {
+            entered.send(()).unwrap();
+            held.notified().await;
+            let outcome = save_if_pending(
+                &worker,
+                "shutdown-owned",
+                "vertex",
+                raw,
+                |dir, raw, save| {
+                    let path = dir.join("shutdown-owned.json");
+                    save_login(Some(&save), std::slice::from_ref(&path), || {
+                        std::fs::write(&path, raw).map_err(|error| error.to_string())
+                    })?;
+                    Ok(path)
+                },
+                "save failed",
+            )
+            .await;
+            settle(&worker, "shutdown-owned", outcome).await;
+        });
+        started.await.unwrap();
+        state.begin_shutdown();
+        let revision = state.config.load().unwrap().rev;
+        let response = super::super::router(state.clone())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/admin/v1/apply")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer test-only")
+                    .body(axum::body::Body::from(r#"{"ops":[]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(state.config.load().unwrap().rev, revision);
+        let mut shutdown = Box::pin(state.shutdown());
+        let early = std::future::poll_fn(|cx| Poll::Ready(shutdown.as_mut().poll(cx).is_ready())).await;
+        release.notify_one();
+        if !early {
+            shutdown.as_mut().await;
+        }
+        drop(shutdown);
+        assert!(!early, "shutdown returned before the owned login result was saved");
+        assert_eq!(
+            db.read(&db.auth_dir().join("shutdown-owned.json")).unwrap().unwrap(),
+            expected
+        );
+        assert!(state.oauth.get("shutdown-owned").unwrap().2);
+        state.rt.shutdown_codex_refreshes().await;
+        drop(state);
+        drop(db);
+        assert!(!workspace.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_reports_and_retains_an_unpublished_checkpoint_for_resume() {
+        let (root, state, db) = sqlite_state("shutdown-unresolved");
+        let workspace = state.config.working_directory().unwrap().to_owned();
+        let published = root.join("config.db");
+        std::fs::rename(&published, root.join("old.db")).unwrap();
+        std::fs::create_dir(&published).unwrap();
+        let raw = br#"{"type":"vertex","opaque":"completed-before-publication-failure"}"#;
+        let path = db.auth_dir().join("pending.json");
+        assert!(db.save(&path, raw).is_err());
+        state.shutdown().await;
+        assert!(
+            state
+                .rt
+                .finish_shutdown()
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("incomplete")
+        );
+        drop(state);
+        drop(db);
+        assert!(workspace.is_dir(), "failed shutdown erased the only newer checkpoint");
+        std::fs::remove_dir(&published).unwrap();
+        std::fs::rename(root.join("old.db"), &published).unwrap();
+        let resumed = Arc::new(crate::testing::config_store(&published).unwrap());
+        let db = crate::credential_store::CredentialDb::initialize(resumed.clone(), &root.join("unused")).unwrap();
+        assert_eq!(db.read(&path).unwrap().unwrap(), raw);
+        drop(db);
+        drop(resumed);
+        assert!(!workspace.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_cancels_callback_wait_without_starting_an_exchange() {
+        let (root, state, db) = sqlite_state("shutdown-callback-wait");
+        let response = start_claude(state.clone(), false).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        state.shutdown().await;
+        let sessions = state.oauth.lock();
+        assert_eq!(sessions.len(), 1);
+        assert!(
+            sessions
+                .values()
+                .all(|session| session.status.contains("shutting down") && !session.completed)
+        );
+        drop(sessions);
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn pending_provider_writer_restores_bytes_on_error_and_respects_cancellation() {
         let (root, state, db) = sqlite_state("provider-rollback");
         let fixture: Value = serde_json::from_str(include_str!(concat!(
@@ -1722,7 +2080,8 @@ mod tests {
             "active",
             "vertex",
             upload,
-            |_, mut upload, save| {
+            |dir, mut upload, save| {
+                upload.path = dir.join(upload.path.file_name().unwrap());
                 let path = upload.path.clone();
                 save_login(Some(&save), std::slice::from_ref(&path), || {
                     upload.write().map_err(|_| "Vertex writer failed".to_owned())?;
@@ -1765,6 +2124,503 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[tokio::test]
+    async fn terminal_builtin_login_missing_claude_account_does_not_block_writers() {
+        let (root, state, db) = sqlite_state("terminal-claude-account");
+        let path = db.auth_dir().join("claude-existing.json");
+        let original = br#"{"type":"claude","email":"existing@example.test","access_token":"R0","opaque":"keep"}"#;
+        db.save(&path, original).unwrap();
+        state.publish((*state.rt.config()).clone(), None);
+        state.oauth.register("missing-account", "anthropic");
+        let mut patch = cpa_core::credential::MetadataPatch::default();
+        patch.set.insert("access_token".into(), "discarded-login".into());
+        patch.set.insert("email".into(), "".into());
+        let outcome = save_if_pending(
+            &state,
+            "missing-account",
+            "anthropic",
+            patch,
+            |dir, patch, save| {
+                cpa_exec::claude_login::ManagedLogin::save(&dir, patch, Some(&save))
+                    .map(|(path, _)| path)
+                    .map_err(|error| exec_text(&error))
+            },
+            "Failed to save authentication tokens",
+        )
+        .await;
+        assert!(
+            matches!(outcome, Outcome::Failed(_)),
+            "missing identity must not report success"
+        );
+        settle(&state, "missing-account", outcome).await;
+        let session = state.oauth.get("missing-account").unwrap();
+        assert!(!session.2);
+        assert!(!session.1.is_empty(), "the failed login remains visible");
+        assert_eq!(db.read(&path).unwrap().unwrap(), original);
+        state
+            .config_store()
+            .import_yaml("server: {port: 8319}\n", "test", "unrelated")
+            .expect("missing Claude identity must not wedge unrelated config writers");
+        db.delete(&path).expect("credential deletion remains admitted");
+        let repaired = br#"{"type":"claude","email":"existing@example.test","access_token":"manual-repair"}"#;
+        db.save(&path, repaired).expect("credential repair remains admitted");
+        db.admit_work().unwrap();
+        assert_eq!(
+            db.read(&path).unwrap().unwrap(),
+            repaired,
+            "disposed login must not replay"
+        );
+        assert_eq!(
+            db.documents().unwrap().len(),
+            1,
+            "missing identity must not create another file"
+        );
+        drop((state, db));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn terminal_builtin_login_invalid_xai_weight_does_not_block_writers() {
+        let (root, state, db) = sqlite_state("terminal-xai");
+        let path = db.auth_dir().join("xai-w.json");
+        // The legacy import and ordinary raw-document writer both preserve this
+        // source even though synthesis rejects its metadata weight.
+        let original = br#"{"type":"xai","weight":1000001,"access_token":"R0"}"#;
+        db.save(&path, original).unwrap();
+        state.publish((*state.rt.config()).clone(), None);
+        assert!(state.rt.store().get("xai-w.json").is_none());
+        state.oauth.register("invalid-weight", "xai");
+        let record = cpa_exec::xai_auth::LoginRecord {
+            file_name: "xai-w.json".into(),
+            metadata: [
+                ("type".into(), cpa_common::json::GoValue::String("xai".into())),
+                ("access_token".into(), cpa_common::json::GoValue::String("R2".into())),
+            ]
+            .into(),
+            label: "private test".into(),
+        };
+        let outcome = save_if_pending(
+            &state,
+            "invalid-weight",
+            "xai",
+            record,
+            |dir, record, save| {
+                let path = dir.join(&record.file_name);
+                save_login(Some(&save), &[path], || save_xai_login(&dir, record))
+            },
+            "Failed to save token to file",
+        )
+        .await;
+        assert!(
+            matches!(outcome, Outcome::Failed(_)),
+            "validation must not report success"
+        );
+        settle(&state, "invalid-weight", outcome).await;
+        let session = state.oauth.get("invalid-weight").unwrap();
+        assert!(!session.2);
+        assert!(!session.1.is_empty(), "terminal login failure is visible");
+        assert_eq!(db.read(&path).unwrap().unwrap(), original);
+        state
+            .config_store()
+            .import_yaml("server: {port: 8319}\n", "test", "unrelated")
+            .expect("terminal render must not wedge unrelated config writers");
+        db.delete(&path).expect("the offending source can be deleted");
+        db.save(&path, br#"{"type":"xai","weight":1,"access_token":"manual-repair"}"#)
+            .expect("source repair is admitted");
+        db.admit_work().unwrap();
+        let raw: Value = serde_json::from_slice(&db.read(&path).unwrap().unwrap()).unwrap();
+        assert_eq!(raw["access_token"], "manual-repair", "disposed result never retries");
+        drop((state, db));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn terminal_builtin_login_withholds_only_its_unchanged_valid_destination() {
+        let (root, state, db) = sqlite_state("terminal-exact-fence");
+        let path = db.auth_dir().join("xai-w.json");
+        db.save(&path, br#"{"type":"xai","access_token":"old-w","weight":1}"#)
+            .unwrap();
+        let other = db.auth_dir().join("xai-other.json");
+        db.save(&other, br#"{"type":"xai","access_token":"other"}"#).unwrap();
+        state.publish((*state.rt.config()).clone(), None);
+        let old = state.rt.store().get("xai-w.json").unwrap();
+        let unaffected = state.rt.store().get("xai-other.json").unwrap();
+        assert!(!state.rt.store().tokens_rejected(&old));
+        state.oauth.register("invalid-new-weight", "xai");
+        let record = cpa_exec::xai_auth::LoginRecord {
+            file_name: "xai-w.json".into(),
+            metadata: [
+                ("type".into(), cpa_common::json::GoValue::String("xai".into())),
+                ("access_token".into(), cpa_common::json::GoValue::String("R2".into())),
+                ("weight".into(), cpa_common::json::GoValue::Number("1000001".into())),
+            ]
+            .into(),
+            label: "private test".into(),
+        };
+        let outcome = save_if_pending(
+            &state,
+            "invalid-new-weight",
+            "xai",
+            record,
+            |dir, record, save| {
+                let path = dir.join(&record.file_name);
+                save_login(Some(&save), &[path], || save_xai_login(&dir, record))
+            },
+            "save failed",
+        )
+        .await;
+        assert!(matches!(outcome, Outcome::Failed(_)));
+        settle(&state, "invalid-new-weight", outcome).await;
+        assert!(
+            state.rt.store().tokens_rejected(&old),
+            "do not re-enable superseded source"
+        );
+        assert!(
+            !state.rt.store().tokens_rejected(&unaffected),
+            "dispose provider-wide withholding"
+        );
+        state
+            .config_store()
+            .import_yaml("server: {port: 8319}\n", "test", "unrelated")
+            .unwrap();
+        assert!(
+            state.rt.store().tokens_rejected(&old),
+            "unrelated commit cannot settle exact-source fence"
+        );
+        db.save(&path, br#"{"type":"xai","access_token":"replacement","weight":1}"#)
+            .unwrap();
+        state.publish((*state.rt.config()).clone(), None);
+        let adopted = state.rt.store().get("xai-w.json").unwrap();
+        assert_eq!(adopted.str("access_token"), Some("replacement"));
+        assert!(!state.rt.store().tokens_rejected(&adopted));
+        drop((state, db));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn builtin_login_render_errors_distinguish_rejection_from_retryable_effects() {
+        for error in [
+            "auth filestore: invalid metadata weight: weight must not exceed 1000000",
+            "invalid credential email filename",
+            "claude token storage missing account information",
+            "codex token storage missing account information",
+            "meta token storage missing access token",
+        ] {
+            assert!(login_render_error(error.into()).is::<LoginRejected>(), "{error}");
+        }
+        for error in [
+            "Permission denied",
+            "No space left on device",
+            "injected pre-render effect failure",
+        ] {
+            assert!(!login_render_error(error.into()).is::<LoginRejected>(), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_builtin_login_captured_source_replaced_by_grant_does_not_block_writers() {
+        let (root, state, db) = sqlite_state("terminal-source");
+        let path = db.auth_dir().join("codex.json");
+        db.save(&path, br#"{"type":"codex","access_token":"D0"}"#).unwrap();
+        state.publish((*state.rt.config()).clone(), None);
+        state.oauth.register("captured", "codex");
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = attempts.clone();
+        let outcome = save_if_pending(
+            &state,
+            "captured",
+            "codex",
+            (),
+            move |dir, (), save| {
+                let path = dir.join("codex.json");
+                let first = observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+                if first {
+                    std::fs::remove_file(&path).unwrap();
+                    std::fs::create_dir(&path).unwrap(); // Retryable hydration I/O after D0 capture.
+                }
+                save_login(Some(&save), std::slice::from_ref(&path), || {
+                    std::fs::write(&path, br#"{"type":"codex","access_token":"stale-held"}"#)
+                        .map_err(|e| e.to_string())?;
+                    Ok(path.clone())
+                })
+            },
+            "save failed",
+        )
+        .await;
+        assert!(matches!(outcome, Outcome::Failed(_)));
+        settle(&state, "captured", outcome).await;
+        let old = state.rt.store().get("codex.json").unwrap();
+        assert!(state.rt.store().tokens_rejected(&old));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let captured = sent.clone();
+        let app = axum::Router::new().fallback(move |headers: axum::http::HeaderMap| {
+            let captured = captured.clone();
+            async move {
+                captured
+                    .lock()
+                    .unwrap()
+                    .push(headers.get("authorization").unwrap().to_str().unwrap().to_owned());
+                (StatusCode::IM_A_TEAPOT, "local mock received request")
+            }
+        });
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let d1 = serde_json::to_vec(&serde_json::json!({
+            "type":"codex","access_token":"D1","opaque":"competing-SIWC","base_url":base
+        }))
+        .unwrap();
+        // The same already-in-flight SIWC preservation admission bypasses queue
+        // draining, but not canonical source/version checks in its real adapter.
+        db.granted_command().unwrap().save_checked(&path, &d1, None).unwrap();
+        db.admit_work()
+            .expect("captured D0 conflict must be disposed, not requeued forever");
+        assert_eq!(db.read(&path).unwrap().unwrap(), d1);
+        state
+            .config_store()
+            .import_yaml("server: {port: 8319}\n", "test", "unrelated")
+            .unwrap();
+        state.publish((*state.rt.config()).clone(), None);
+        let adopted = state.rt.store().get("codex.json").unwrap();
+        assert_eq!(adopted.str("access_token"), Some("D1"));
+        assert!(
+            !state.rt.store().tokens_rejected(&adopted),
+            "D1 dispatch admission is not withheld by disposed D0"
+        );
+        let cfg = state.rt.config();
+        let lease = state
+            .rt
+            .lease_credential(
+                "codex.json",
+                crate::runtime::Selection::new("codex", "gpt-5"),
+                &cfg,
+                |credential| {
+                    let mut local = credential.clone();
+                    // Executor endpoints are attributes, not source metadata.
+                    local.attributes.insert("base_url".into(), base.clone());
+                    local.attributes.insert("proxy_url".into(), "direct".into());
+                    local
+                },
+            )
+            .await
+            .expect("D1 receives a real dispatch lease");
+        assert_eq!(lease.credential.attributes.get("base_url"), Some(&base));
+        assert!(base.starts_with("http://127.0.0.1:"));
+        let body = bytes::Bytes::from_static(br#"{"model":"gpt-5","input":"private local mock"}"#);
+        let request = cpa_core::exec::ExecRequest {
+            operation: cpa_core::exec::Operation::Generate,
+            source_format: cpa_core::format::Format::OpenAIResponse,
+            response_format: cpa_core::format::Format::OpenAIResponse,
+            requested_model: "gpt-5".into(),
+            model: "gpt-5".into(),
+            original_body: body.clone(),
+            body,
+            stream: false,
+            stream_payloads: false,
+            alt: None,
+            session: None,
+            execution_session: None,
+            derived_session: None,
+            headers: axum::http::HeaderMap::new(),
+            resolved_model: None,
+            usage: Default::default(),
+            request_path: String::new(),
+            caller: cpa_core::exec::Caller {
+                principal: String::new(),
+                source: "authorization",
+                provider: String::new(),
+            },
+        };
+        let dispatch = state
+            .rt
+            .executors
+            .codex
+            .execute(&crate::testing::guarded(&lease.credential, &cfg), request, &cfg)
+            .await;
+        match dispatch {
+            Err(error) => assert_eq!(
+                error.status,
+                418,
+                "local dispatch error: {}",
+                String::from_utf8_lossy(&error.body)
+            ),
+            Ok(_) => panic!("local mock must reject with 418"),
+        }
+        assert_eq!(
+            *sent.lock().unwrap(),
+            ["Bearer D1"],
+            "only D1 reaches the local upstream"
+        );
+        drop(lease);
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+        db.admit_work().unwrap();
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+        // Dispatch preparation may canonically normalize disabled:false. It must
+        // retain D1 and the competing grant's fields, never the disposed result.
+        let after_dispatch: Value = serde_json::from_slice(&db.read(&path).unwrap().unwrap()).unwrap();
+        assert_eq!(after_dispatch["access_token"], "D1");
+        assert_eq!(after_dispatch["opaque"], "competing-SIWC");
+        let session = state.oauth.get("captured").unwrap();
+        assert!(!session.2);
+        assert!(!session.1.is_empty());
+        // Dropping a dispatch lease can schedule owned cooldown persistence.
+        state.rt.shutdown_codex_refreshes().await;
+        drop((state, db));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn completed_builtin_login_survives_failures_before_complete_bytes_exist() {
+        for phase in ["before-writer", "hydrate"] {
+            let (root, state, db) = sqlite_state(phase);
+            let path = db.auth_dir().join("codex.json");
+            db.save(&path, br#"{"type":"codex","access_token":"R0","opaque":"keep"}"#)
+                .unwrap();
+            state.publish((*state.rt.config()).clone(), None);
+            state.oauth.register("consumed", "codex");
+            let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let observed = attempts.clone();
+            let runtime = state.rt.clone();
+            // This value represents one completed exchange. Only local rendering
+            // is repeated: no upstream effect is inside the held result.
+            let outcome = save_if_pending(
+                &state,
+                "consumed",
+                "codex",
+                "R2".to_owned(),
+                move |dir, token, save| {
+                    let first = observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+                    if !first {
+                        let old = runtime.store().get("codex.json").unwrap();
+                        assert!(
+                            runtime.store().tokens_rejected(&old),
+                            "withhold through rendering, not only until owner admission"
+                        );
+                    }
+                    if first && phase == "before-writer" {
+                        return Err("injected pre-render effect failure".into());
+                    }
+                    let path = dir.join("codex.json");
+                    if first && phase == "hydrate" {
+                        std::fs::remove_file(&path).unwrap();
+                        std::fs::create_dir(&path).unwrap(); // Real hydration I/O fails before writer output.
+                    }
+                    save_login(Some(&save), std::slice::from_ref(&path), || {
+                        let mut raw: Value =
+                            serde_json::from_slice(&std::fs::read(&path).map_err(|e| e.to_string())?).unwrap();
+                        raw["access_token"] = token.into();
+                        std::fs::write(&path, serde_json::to_vec(&raw).unwrap()).map_err(|e| e.to_string())?;
+                        Ok(path.clone())
+                    })
+                },
+                "save failed",
+            )
+            .await;
+            assert!(
+                matches!(outcome, Outcome::Failed(_)),
+                "{phase}: do not acknowledge unresolved result"
+            );
+            assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
+            let old = state.rt.store().get("codex.json").unwrap();
+            assert!(
+                state.rt.store().tokens_rejected(&old),
+                "{phase}: withhold potentially invalidated old credentials"
+            );
+            assert_eq!(
+                serde_json::from_slice::<Value>(&db.read(&path).unwrap().unwrap()).unwrap()["access_token"],
+                "R0"
+            );
+            state.oauth.set_error("consumed", "save failed"); // Reported failure is not cancellation.
+            // UI expiry must not expire an already-consumed provider result.
+            state.oauth.0.lock().unwrap().get_mut("consumed").unwrap().expires = Instant::now();
+            assert!(state.oauth.get("consumed").is_none());
+            assert!(
+                state.rt.store().tokens_rejected(&old),
+                "expiry cannot release the source fence"
+            );
+            db.admit_work().unwrap();
+            let raw: Value = serde_json::from_slice(&db.read(&path).unwrap().unwrap()).unwrap();
+            assert_eq!(
+                raw["access_token"], "R2",
+                "{phase}: original completed result recovered"
+            );
+            assert_eq!(raw["opaque"], "keep");
+            state.publish((*state.rt.config()).clone(), None);
+            let adopted = state.rt.store().get("codex.json").unwrap();
+            assert_eq!(adopted.str("access_token"), Some("R2"));
+            assert!(!state.rt.store().tokens_rejected(&adopted));
+            assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+            db.admit_work().unwrap();
+            assert_eq!(
+                attempts.load(std::sync::atomic::Ordering::SeqCst),
+                2,
+                "result finished once"
+            );
+            drop((state, db));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn completed_login_results_merge_behind_pending_publication_without_success() {
+        let (root, state, db) = sqlite_state("pending-logins");
+        let database = state.config_store().clone();
+        let blocked = crate::testing::block_publication(database.path().unwrap());
+        assert!(
+            database
+                .import_yaml("server: {port: 8318}\n", "test", "pending")
+                .is_err()
+        );
+        for name in ["a.json", "b.json"] {
+            state.oauth.register(name, "codex");
+            let outcome = save_if_pending(
+                &state,
+                name,
+                "codex",
+                name.to_owned(),
+                |dir, name, save| {
+                    let path = dir.join(&name);
+                    save_login(Some(&save), std::slice::from_ref(&path), || {
+                        cpa_plugin::auth::atomic_write(&path,&serde_json::to_vec(&serde_json::json!({
+                        "type":"codex","access_token":format!("grant-{name}"),"refresh_token":format!("refresh-{name}")
+                    })).unwrap())?;
+                        Ok(path.clone())
+                    })
+                },
+                "save pending",
+            )
+            .await;
+            assert!(
+                matches!(outcome, Outcome::Failed(_)),
+                "preservation is not save success"
+            );
+        }
+        let ordinary = db.auth_dir().join("ordinary.json");
+        assert!(
+            db.save(&ordinary, br#"{"type":"codex","access_token":"manual"}"#)
+                .is_err()
+        );
+        assert!(db.documents().unwrap().is_empty(), "accepted memory is still old");
+        drop(blocked);
+        db.admit_work().unwrap();
+        let docs = db.documents().unwrap();
+        assert_eq!(
+            docs.len(),
+            2,
+            "both completed initial results survive, not the refused ordinary save"
+        );
+        for (path, bytes) in docs {
+            let document: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                document["refresh_token"],
+                format!("refresh-{}", path.file_name().unwrap().to_str().unwrap())
+            );
+        }
+        drop((state, db, database));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn pending_provider_save_waits_for_document_before_taking_disk() {
         let (root, state, db) = sqlite_state("provider-lock-order");
@@ -1773,6 +2629,7 @@ mod tests {
         let document = cpa_exec::codex_siwc_bind::lock_file(&path).unwrap();
         state.oauth.register("lock-order", "vertex");
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let started_tx = Arc::new(Mutex::new(Some(started_tx)));
         let saving = tokio::spawn({
             let state = state.clone();
             async move {
@@ -1783,7 +2640,9 @@ mod tests {
                     (),
                     move |dir, (), save| {
                         let path = dir.join("vertex.json");
-                        started_tx.send(()).unwrap();
+                        if let Some(started) = started_tx.lock().unwrap().take() {
+                            started.send(()).unwrap();
+                        }
                         save_login(Some(&save), std::slice::from_ref(&path), || {
                             std::fs::write(&path, br#"{"type":"vertex","prefix":"saved"}"#)
                                 .map_err(|error| error.to_string())?;

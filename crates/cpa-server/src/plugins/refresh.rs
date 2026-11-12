@@ -331,6 +331,9 @@ pub(crate) fn call_error(e: cpa_plugin::rpc::CallError) -> ExecError {
 pub(crate) struct Refreshed {
     pub patch: MetadataPatch,
     pub answered: bool,
+    pub completed_grant: bool,
+    pub source: Option<cpa_plugin::auth::AuthProviderFence>,
+    pub preserved_source: Option<cpa_plugin::hostauth::AuthSaveSourceFence>,
 }
 
 /// Refreshes `c` through its plugin and returns what to commit. `stored` is the
@@ -341,11 +344,11 @@ pub(crate) async fn refresh(
     route: &Route,
     c: &Credential,
     stored: &Credential,
-    registration: u64,
+    registered: Registered,
 ) -> Result<Refreshed, ExecError> {
-    let result = refresh_once(rt, route, c, stored).await;
+    let result = refresh_once(rt, route, c, stored, registered).await;
     if result.is_err() {
-        failed(rt.store(), &c.id, registration, Utc::now());
+        failed(rt.store(), &c.id, registered.registration, Utc::now());
     }
     result
 }
@@ -364,6 +367,7 @@ async fn refresh_once(
     route: &Route,
     c: &Credential,
     stored: &Credential,
+    registered: Registered,
 ) -> Result<Refreshed, ExecError> {
     let metadata: cpa_plugin::gojson::Metadata = c.metadata.clone().into_iter().collect();
     let view = cpa_plugin::auth::AuthView {
@@ -384,9 +388,17 @@ async fn refresh_once(
         attributes: crate::management::quota::go_attributes(c),
         ..Default::default()
     };
-    let refreshed = rt
+    let source = rt.plugins().auth_provider_fence(&c.provider);
+    let job = rt.plugins().auth_save_job(cpa_plugin::hostauth::AuthSaveJob::Refresh {
+        provider: c.provider.clone(),
+        id: stored.id.clone(),
+        registration: registered.registration,
+        version: registered.credential_version,
+    });
+    let scope = job.as_ref().map(|job| job.request_scope()).unwrap_or_default();
+    let (refreshed, completed_grant) = rt
         .plugins()
-        .refresh_auth(&view, &Default::default())
+        .refresh_auth_result(&view, &scope)
         .await
         .map_err(call_error)?;
     let own_proxy = stored.attributes.get("proxy_url").map_or("", |p| p.trim()).to_owned();
@@ -395,6 +407,9 @@ async fn refresh_once(
         let unchanged = Refreshed {
             patch: MetadataPatch::default(),
             answered: false,
+            completed_grant: false,
+            source: None,
+            preserved_source: None,
         };
         return match route {
             Route::Executor => Ok(unchanged),
@@ -496,6 +511,12 @@ async fn refresh_once(
     Ok(Refreshed {
         patch: diff(&c.metadata, &next),
         answered: true,
+        completed_grant,
+        source,
+        preserved_source: match &stored.source {
+            cpa_core::credential::Source::File(path) => job.as_ref().and_then(|job| job.source_fence(path)),
+            _ => None,
+        },
     })
 }
 
@@ -596,13 +617,13 @@ mod tests {
             let metadata =
                 serde_json::json!({"type":"pp","access_token":token,"refresh_interval":"1h","disabled":disabled});
             let path = dir.join("a.json");
-            db.save(&path, metadata.to_string().as_bytes()).unwrap();
             Credential::from_file(&dir, &path, metadata.as_object().cloned().unwrap()).unwrap()
         };
-        let store = crate::runtime::CredentialStore::new(
-            vec![credential("q", false)],
-            crate::runtime::CredentialAuthority::Local(db.clone()),
-        );
+        let initial = credential("q", false);
+        let path = dir.join("a.json");
+        db.save(&path, &serde_json::to_vec(&initial.metadata).unwrap()).unwrap();
+        let store =
+            crate::runtime::CredentialStore::new(vec![initial], crate::runtime::CredentialAuthority::Local(db.clone()));
         store.end_bootstrap();
         let schedule = || lock(store.refresh_schedules()).get("a.json").copied().unwrap();
         let mut patch = MetadataPatch::default();
@@ -611,31 +632,27 @@ mod tests {
         let fence = crate::runtime::RefreshFence {
             registered,
             plugin: true,
+            completed_plugin_grant: false,
+            plugin_source: None,
+            preserved_source: None,
         };
         let (committed, _) = store
-            .apply_refresh(
-                "a.json",
-                current.revision,
-                fence,
-                &patch,
-                |_| {},
-                |_| {
-                    // Both reloads land after the commit, before the writer returns.
-                    assert!(schedule().last.is_some(), "recorded with the commit");
-                    for disabled in [true, false] {
-                        store.reconcile(vec![credential("p2", disabled)]);
-                    }
-                    true
-                },
-            )
+            .apply_refresh("a.json", current.revision, fence.clone(), &patch, |_| {}, |_| true)
             .unwrap();
         assert_eq!(committed.metadata["access_token"], "p2");
+        assert!(schedule().last.is_some(), "recorded with the commit");
+        for disabled in [true, false] {
+            store.reconcile(vec![credential("p2", disabled)]);
+        }
         assert!(!store.get("a.json").unwrap().disabled);
         assert_eq!(schedule().last, None, "the enabling reload's own");
         // Registered again under its ID: the earlier registration's refresh is refused
         // before it writes anything.
         store.reconcile(vec![]);
-        store.reconcile(vec![credential("q", false)]);
+        let replacement = credential("q", false);
+        db.save(&path, &serde_json::to_vec(&replacement.metadata).unwrap())
+            .unwrap();
+        store.reconcile(vec![replacement]);
         let current = store.get("a.json").unwrap();
         let refused = store.apply_refresh("a.json", current.revision, fence, &patch, |_| {}, |_| true);
         assert!(
@@ -646,6 +663,8 @@ mod tests {
         assert_eq!(on_disk["access_token"], "q");
         assert_eq!(store.get("a.json").unwrap().metadata["access_token"], "q");
         assert_eq!(schedule().last, None);
+        drop(store);
+        drop(db);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

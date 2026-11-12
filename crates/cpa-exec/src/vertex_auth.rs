@@ -806,7 +806,7 @@ fn normalize_decoded(sa: Option<BTreeMap<String, GoValue>>) -> Result<BTreeMap<S
 }
 
 /// A checked service account ready for the Management API's durable writer.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Upload {
     pub path: PathBuf,
     pub project: String,

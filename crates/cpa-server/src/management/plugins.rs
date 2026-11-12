@@ -445,7 +445,7 @@ async fn save_and_answer(
     state: Arc<Management>,
     edit: impl FnOnce(&mut ConfigDocument) -> Res<()> + Send + 'static,
 ) -> Response {
-    match tokio::task::spawn_blocking(move || save(&state, edit)).await {
+    match state.work.clone().spawn_blocking(move || save(&state, edit)).await {
         Ok(Ok(())) => ok_status(),
         Ok(Err(fail)) => fail.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -568,23 +568,26 @@ pub(crate) async fn delete(State(state): State<Arc<Management>>, UrlPath(raw): U
     let saved = {
         let state = state.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            if !configured {
-                // Go reloads even without a save, so the host drops the deleted file.
-                let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
-                state.publish((*state.rt.config()).clone(), None);
-                return Ok(());
-            }
-            match save(&state, |doc| {
-                doc.delete(&["plugins", "configs", &id]);
-                Ok(())
-            }) {
-                Err(Fail::Save(e)) => Err(e),
-                _ => Ok(()),
-            }
-        })
-        .await
-        .unwrap_or_else(|_| Err("save task failed".into()))
+        state
+            .work
+            .clone()
+            .spawn_blocking(move || {
+                if !configured {
+                    // Go reloads even without a save, so the host drops the deleted file.
+                    let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
+                    state.publish((*state.rt.config()).clone(), None);
+                    return Ok(());
+                }
+                match save(&state, |doc| {
+                    doc.delete(&["plugins", "configs", &id]);
+                    Ok(())
+                }) {
+                    Err(Fail::Save(e)) => Err(e),
+                    _ => Ok(()),
+                }
+            })
+            .await
+            .unwrap_or_else(|_| Err("save task failed".into()))
     };
     if let Err(e) = saved {
         return map_json(

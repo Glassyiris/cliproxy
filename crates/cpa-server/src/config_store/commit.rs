@@ -93,9 +93,9 @@ impl ConfigStore {
         })
     }
 
-    /// The write path every commit takes: under SQLite's write lock, `edit` turns the
-    /// current resources into the next ones, which must compile; their differences
-    /// become one revision.
+    /// The write path every config commit takes: under the owner gate, `edit`
+    /// derives the next resources from accepted memory; validated differences
+    /// become one revision in the complete candidate image.
     fn transact(
         &self,
         actor: &str,
@@ -107,13 +107,10 @@ impl ConfigStore {
         if actor.len() > 256 || message.len() > 4096 {
             return Err(CommitError::invalid("actor or message exceeds size limit"));
         }
-        let _coordination = self.write_guard().map_err(CommitError::db)?;
-        let mut conn = self.conn();
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(CommitError::db)?;
-        let current = all(&tx).map_err(CommitError::db)?;
-        let rev = head(&tx).map_err(CommitError::db)?;
+        let mut pending = self.writer().map_err(CommitError::db)?;
+        let accepted = self.current();
+        let current = accepted.resources.as_ref();
+        let rev = accepted.rev();
         let matches = match &condition {
             None => true,
             Some(Precondition::Revision(want)) => rev == *want,
@@ -131,7 +128,7 @@ impl ConfigStore {
         if current.len() > resources::MAX_RESOURCES {
             return Err(CommitError::invalid("too many resources"));
         }
-        let next = edit(&current)?;
+        let next = edit(current)?;
         if next.len() > resources::MAX_RESOURCES {
             return Err(CommitError::invalid("too many resources"));
         }
@@ -147,16 +144,15 @@ impl ConfigStore {
                 ));
             }
         }
-        let (config, text) = resources::config(&next).map_err(|f| fault_422(culprit(&current, &next, f)))?;
+        let (config, text) = resources::config(&next).map_err(|f| fault_422(culprit(current, &next, f)))?;
         let digest = public_digest(&next);
-        let changes = diff(&current, &next);
+        let changes = diff(current, &next);
         let shown: Vec<Change> = changes.iter().map(|(b, a)| shown_change(*b, *a)).collect();
         if changes.is_empty() && rev != 0 || dry_run {
-            drop(tx);
             if !dry_run {
                 // A retry can match an already committed write whose publication
                 // failed. It still needs a durable snapshot before success.
-                self.publish(&conn).map_err(CommitError::db)?;
+                self.publish(&accepted).map_err(CommitError::db)?;
             }
             return Ok(Committed {
                 rev,
@@ -170,56 +166,6 @@ impl ConfigStore {
         }
         let rev = rev + 1;
         let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let write = || -> rusqlite::Result<()> {
-            tx.execute(
-                "INSERT INTO revision (rev, at, actor, message, digest) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![rev as i64, at, actor, message, digest],
-            )?;
-            for ((before, after), change) in changes.iter().zip(&shown) {
-                let (kind, id) = after
-                    .or(*before)
-                    .map(|r| (r.kind, r.id.as_str()))
-                    .expect("a change has a side");
-                match after {
-                    Some(r) => {
-                        let created = before.map_or(rev, |b| b.created_rev);
-                        tx.execute(
-                            "INSERT OR REPLACE INTO resource (kind, id, ord, spec, description, rev, created_rev)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                            params![
-                                kind.name(),
-                                id,
-                                r.ord,
-                                r.spec.to_string(),
-                                r.description,
-                                rev as i64,
-                                created as i64
-                            ],
-                        )?;
-                    }
-                    None => {
-                        tx.execute(
-                            "DELETE FROM resource WHERE kind = ?1 AND id = ?2",
-                            params![kind.name(), id],
-                        )?;
-                    }
-                }
-                tx.execute(
-                    "INSERT INTO change (rev, kind, id, before, after) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        rev as i64,
-                        kind.name(),
-                        id,
-                        change.before.as_ref().map(Json::to_string),
-                        change.after.as_ref().map(Json::to_string)
-                    ],
-                )?;
-            }
-            Ok(())
-        };
-        write().map_err(CommitError::db)?;
-        tx.commit().map_err(CommitError::db)?;
-        self.publish(&conn).map_err(CommitError::db)?;
         let mut resources = next;
         for r in &mut resources {
             if !current
@@ -232,6 +178,31 @@ impl ConfigStore {
                 }
             }
         }
+        resources.sort_by(|a, b| (a.kind, a.ord, &a.id).cmp(&(b.kind, b.ord, &b.id)));
+        let mut candidate = accepted.as_ref().clone();
+        candidate.resources = Arc::new(resources.clone());
+        candidate.revisions.insert(
+            rev,
+            Arc::new(Revision {
+                rev,
+                at,
+                actor: actor.to_owned(),
+                message: message.to_owned(),
+                digest: digest.clone(),
+            }),
+        );
+        let mut history: Vec<_> = shown
+            .iter()
+            .map(|change| state::HistoryChange {
+                kind: change.kind,
+                id: change.id.clone(),
+                before: change.before.as_ref().map(Json::to_string),
+                after: change.after.as_ref().map(Json::to_string),
+            })
+            .collect();
+        history.sort_by(|a, b| (a.kind.name(), &a.id).cmp(&(b.kind.name(), &b.id)));
+        candidate.changes.insert(rev, Arc::new(history));
+        self.accept(candidate, &mut pending).map_err(CommitError::db)?;
         Ok(Committed {
             rev,
             written: true,

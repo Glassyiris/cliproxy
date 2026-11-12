@@ -232,13 +232,8 @@ impl PluginAuth {
         })
     }
 
-    /// Go `FileTokenStore.Save` for a plugin auth: the file under `base_dir` (or the
-    /// auth's own path), written atomically with mode 0600 unless it already holds the
-    /// same JSON. Returns the path; without `create` (Go's auth creation intent, which
-    /// logins carry and command-line plugins do not) a disabled auth whose file does not
-    /// exist is skipped with an empty path.
-    pub fn save_file(mut self, base_dir: &str, create: bool) -> Result<String, String> {
-        use std::path::Path;
+    /// Validates and renders a completed auth before any persistence effect.
+    pub fn save_payload(&mut self) -> Result<Bytes, String> {
         let mut metadata: serde_json::Map<String, Value> = std::mem::take(&mut self.metadata).into_iter().collect();
         normalize_credential_metadata(&mut metadata);
         // Go `ValidateAuthWeight`.
@@ -259,6 +254,19 @@ impl PluginAuth {
                 )
             })?;
         }
+        metadata.insert("disabled".into(), self.disabled.into());
+        self.metadata = metadata.into_iter().collect();
+        self.storage_payload()
+    }
+
+    /// Go `FileTokenStore.Save` for a plugin auth: the file under `base_dir` (or the
+    /// auth's own path), written atomically with mode 0600 unless it already holds the
+    /// same JSON. Returns the path; without `create` (Go's auth creation intent, which
+    /// logins carry and command-line plugins do not) a disabled auth whose file does not
+    /// exist is skipped with an empty path.
+    pub fn save_file(mut self, base_dir: &str, create: bool) -> Result<String, String> {
+        use std::path::Path;
+        let payload = self.save_payload()?;
         let path = self.file_path(base_dir)?;
         let path_ref = Path::new(&path);
         // Only a missing file skips the save; any other stat failure goes on to fail
@@ -277,10 +285,6 @@ impl PluginAuth {
                 )
             })?;
         }
-        metadata.insert("disabled".into(), self.disabled.into());
-        self.metadata = metadata.into_iter().collect();
-        // pluginTokenStorage.SaveTokenToFile.
-        let payload = self.storage_payload()?;
         if let Ok(current) = std::fs::read(path_ref)
             && json_payload_equal(&current, &payload)
         {
@@ -531,7 +535,35 @@ pub(crate) fn host_config_summary_of(cfg: &cpa_core::config::Config) -> HostConf
     }
 }
 
+/// Captured provider identity for a returned refresh, independent of job liveness.
+#[derive(Clone)]
+pub struct AuthProviderFence {
+    host: std::sync::Weak<crate::host::Inner>,
+    record: crate::host::Record,
+}
+impl std::fmt::Debug for AuthProviderFence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthProviderFence")
+            .field("record", &self.record)
+            .finish_non_exhaustive()
+    }
+}
+impl AuthProviderFence {
+    pub fn current(&self) -> bool {
+        self.host
+            .upgrade()
+            .is_some_and(|host| Host::from_inner(host).record_current(&self.record))
+    }
+}
+
 impl Host {
+    pub fn auth_provider_fence(&self, provider: &str) -> Option<AuthProviderFence> {
+        Some(AuthProviderFence {
+            host: std::sync::Arc::downgrade(&self.inner),
+            record: self.auth_provider_record(provider)?,
+        })
+    }
+
     /// Go `hostConfigSummary`.
     pub fn host_config_summary(&self) -> HostConfigSummary {
         self.config()
@@ -713,11 +745,21 @@ impl Host {
 
     /// Go `RefreshAuth`: `Ok(None)` when no plugin owns the credential's provider.
     pub async fn refresh_auth(&self, auth: &AuthView, scope: &RequestScope) -> Result<Option<PluginAuth>, CallError> {
+        self.refresh_auth_result(auth, scope).await.map(|(auth, _)| auth)
+    }
+
+    /// The successful returned credential data is a trusted completion boundary;
+    /// an empty Auth or a scheduling/progress-only answer is not a grant.
+    pub async fn refresh_auth_result(
+        &self,
+        auth: &AuthView,
+        scope: &RequestScope,
+    ) -> Result<(Option<PluginAuth>, bool), CallError> {
         let Some(record) = self.auth_provider_record(&auth.provider) else {
-            return Ok(None);
+            return Ok((None, false));
         };
         if !self.record_current(&record) {
-            return Ok(None);
+            return Ok((None, false));
         }
         let req = AuthRefreshRequest {
             auth_id: auth.id.clone(),
@@ -730,11 +772,13 @@ impl Host {
         let resp: AuthRefreshResponse = self
             .call_with_callback(&record, method::AUTH_REFRESH, &req, scope)
             .await?;
+        let completed =
+            !resp.auth.storage_json.is_empty() || !resp.auth.metadata.is_empty() || !resp.auth.attributes.is_empty();
         let data = refreshed_auth_data(resp, auth);
         let path = auth.attributes.get(ATTRIBUTE_PATH).cloned().unwrap_or_default();
         let file_name = data.file_name.clone();
         PluginAuth::from_auth_data(data, &path, &file_name, &self.host_config_summary().auth_dir)
-            .map(Some)
+            .map(|auth| (Some(auth), completed))
             .ok_or_else(|| CallError::Other("auth provider refresh returned invalid auth data".into()))
     }
 
