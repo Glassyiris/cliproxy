@@ -188,15 +188,17 @@ The first bootstrap imports `/data/config.yaml`; later starts use `/data/cook.db
 - Set `management.allow-remote: true` for the dashboard. Docker bridge requests are non-local; publishing on `127.0.0.1` as above still keeps other machines out.
 - Point any legacy `oauth.auth-dir` at the private credential import source only; ongoing login and refresh state belongs to SQLite.
 
-The image declares no `VOLUME`: mount `/data` as a persistent directory so published database snapshots survive replacement. Keep OS tmp writable for the private working database; it does not need persistent storage. A YAML-only mount, remote config store or unmounted container filesystem is insufficient. On Railway attach a Volume at `/data`; its volume ownership must permit writes by the service user (see [Railway permissions](https://docs.railway.com/volumes#permissions)). The image runs as UID/GID 10001. Older images up to 0.2.5 could create an anonymous `/data` volume; preserve/import its private legacy data before replacing it.
+The image declares no `VOLUME`: mount `/data` as a persistent directory so published database snapshots survive replacement. Keep OS tmp writable for the private working database; it does not need persistent storage. Every acknowledged change is already in the published `/data/cook.db`, so losing tmp with the container only means the next start seeds a fresh working database from that file; a change reported as failed may be lost with it. A YAML-only mount, remote config store or unmounted container filesystem is insufficient. On Railway attach a Volume at `/data`; its volume ownership must permit writes by the service user (see [Railway permissions](https://docs.railway.com/volumes#permissions)). The image runs as UID/GID 10001. Older images up to 0.2.5 could create an anonymous `/data` volume; preserve/import its private legacy data before replacing it.
 
 The service must write the snapshot directory for atomic replacement and its OS temporary directory for working databases. Keep both private; SQLite contains configuration secrets and OAuth tokens. Copy the `--db` file directly for a complete live backup, or use `config backup`. See [Database safety](CONFIGURATION.md#database-safety-and-backup). Publish on loopback unless other machines need access.
 
 Browser sign-in inside a container needs the OAuth callback ports (54545 for Claude, 1455 for Codex) published to your machine, so it is usually easier to sign in from the dashboard and paste the final callback URL, or to use `--codex-device-login`, Kimi or Meta, which use device codes:
 
 ```sh
-docker exec -it cook-router cook-router --db /data/cook.db --codex-device-login
+docker exec -it cook-router cook-router --management-base-url http://127.0.0.1:8317 --codex-device-login --no-browser
 ```
+
+The running server owns `/data/cook.db`, so the sign-in goes through its management API and asks for the management key; `--db /data/cook.db` alone would be refused as `already owned`.
 
 ## First run without the install script
 
@@ -225,7 +227,7 @@ If you installed the binary another way, set it up by hand:
    ```
 
    `--db` overrides `COOK_DB`; without either the default is `cook.db` beside `--config` (`config.yaml` by default). `--config FILE` is a first-bootstrap compatibility import selector only. A fresh ordinary startup needs that source; once initialized, the server does not read or watch it. Check `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
-3. Connect accounts from `/management.html` or use the same database path with `--claude-login`, `--codex-login`, `--codex-device-login`, `--antigravity-login`, `--kimi-login`, `--kimi-ai-login`, `--meta-login`, `--xai-login` or `--devin-login`. Import a Vertex service account with `--vertex-import key.json`. Add `--no-browser` on a machine without a browser. Sign-ins and refresh tokens are saved in SQLite, not a watched directory.
+3. Connect accounts from `/management.html`, or from a terminal through the running server with `--management-base-url http://127.0.0.1:8317` (it reads the management key from `COOK_ROUTER_MANAGEMENT_KEY` or asks for it) and one of `--claude-login`, `--codex-login`, `--codex-device-login`, `--antigravity-login`, `--kimi-login`, `--kimi-ai-login`, `--meta-login`, `--xai-login` or `--devin-login`. Import a Vertex service account with `--vertex-import key.json`. Add `--no-browser` on a machine without a browser. With the server stopped, the same flags with `--db ~/.cook-router/cook.db` write the database directly. Sign-ins and refresh tokens are saved in SQLite, not a watched directory.
 
 Change configuration through the dashboard or `/admin/v1`; old v0/v8 config endpoints are removed. Go-style single-dash flags still work. `RUST_LOG=debug` enables detailed logging; the default is `info`.
 
@@ -259,6 +261,6 @@ sudo systemctl enable --now cook-router
 journalctl -u cook-router -f
 ```
 
-Initialize the database under `/var/lib/cook-router` before starting the service, using the service user. The persistent directory must be writable for atomic snapshot publication, and OS tmp must be writable for the private working database; keep both private and set `UMask=0077` in the unit as defense in depth. Server and CLI writers must share the same user and OS temporary directory/namespace. Mount this directory persistently in ephemeral deployments. No legacy PostgreSQL/S3/git config authority or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).
+Initialize the database under `/var/lib/cook-router` before starting the service, using the service user. The persistent directory must be writable for atomic snapshot publication, and OS tmp must be writable for the private working database; keep both private and set `UMask=0077` in the unit as defense in depth. While the service runs, CLI changes go through its management API (`--management-base-url`); offline CLI writes wait for it to stop. Keep the same user and OS temporary directory across restarts so a surviving working database can resume; with `PrivateTmp=yes` every service restart, and with a tmpfs `/tmp` every reboot, cold-starts from the published file instead, which already holds every acknowledged change. Mount this directory persistently in ephemeral deployments. No legacy PostgreSQL/S3/git config authority or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).
 
 On Windows, to run it as a system service without a signed-in user, wrap it with a service manager such as NSSM.

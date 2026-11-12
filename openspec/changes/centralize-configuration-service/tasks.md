@@ -47,7 +47,7 @@
 
 - [x] 7.1 Remove the configuration interval, hash/metadata/data-version polling and external-snapshot adoption once all online writers are routed; verify out-of-band replacement is not hot-adopted, internal notifications still work, and no startup/read path accidentally starts another watcher.
 - [x] 7.2 Restrict mutable ConfigStore/CredentialDb/connection escape hatches and retire online multiwriter coordinator/ref-marker machinery; verify a whole-repository caller audit includes harness and test wiring, permitted private SQL remains behind the service, and test fixtures cannot sweep a production workspace.
-- [ ] 7.3 Update CLI/setup/container/restore guidance to match the implemented boundary and link the accepted design contract; verify examples distinguish current behavior from target design, keep the single-file copy promise, and explain deliberate cold restore plus temporary-storage loss without promising tmpfs survives reboot.
+- [x] 7.3 Update CLI/setup/container/restore guidance to match the implemented boundary and link the accepted design contract; verify examples distinguish current behavior from target design, keep the single-file copy promise, and explain deliberate cold restore plus temporary-storage loss without promising tmpfs survives reboot.
 
 ## 8. Final-tree verification and handoff
 

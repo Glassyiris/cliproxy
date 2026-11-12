@@ -125,11 +125,14 @@ Tell the user: the management key to sign in with is the `COOK_ROUTER_MANAGEMENT
 
 ## 7. Hand over the sign-in to the user
 
-Tell the user to connect their accounts themselves, in the dashboard (Connect account) or in their own terminal:
+Tell the user to connect their accounts themselves, in the dashboard (Connect account) or in their own terminal. The running proxy owns its database, so a terminal sign-in goes through it:
 
 ```sh
-cook-router --db ~/.cook-router/cook.db --claude-login
+set -a; . ~/.cook-router/keys.env; set +a
+cook-router --management-base-url "http://127.0.0.1:$COOK_ROUTER_PORT" --claude-login
 ```
+
+The command reads the management key from `COOK_ROUTER_MANAGEMENT_KEY`, or asks for it without echo if the variable is unset. Do not pass it with `--password`. Running a sign-in flag with only `--db` while the proxy runs fails with `already owned`.
 
 (`--codex-login`, `--codex-device-login`, `--kimi-login`, `--meta-login`, `--xai-login` and `--devin-login` work the same way; add `--no-browser` on a machine without a browser.) Wait until the user says they are done. Point them to [Accounts and provider terms](../README.md#accounts-and-provider-terms). This setup is for one person using their own accounts on their own machines. Use provider-sanctioned integrations or API keys where available.
 

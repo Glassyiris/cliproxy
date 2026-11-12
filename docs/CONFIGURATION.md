@@ -2,7 +2,7 @@
 
 > **Design contract:** [State and concurrency](STATE-AND-CONCURRENCY.md) records the accepted single-owner, memory-snapshot, callback, recovery and single-portable-file invariants for the in-progress configuration-service refactor. Interface names and code layout may evolve; that model must not drift. The operational details below are not a claim that the refactor is complete.
 
-SQLite is the sole durable authority for configuration and OAuth credentials. Select the database with `--db PATH`, then `COOK_DB`; otherwise it is `cook.db` beside the `--config` path (whose default is `config.yaml`). Use the same database path for the server, login commands and config commands.
+SQLite is the sole durable authority for configuration and OAuth credentials. Select the database with `--db PATH`, then `COOK_DB`; otherwise it is `cook.db` beside the `--config` path (whose default is `config.yaml`). Use the same database path for the server, login commands and config commands. While the server runs it owns that database: change it through the dashboard, `/admin/v1` or `--management-base-url`, not through an offline command.
 
 Legacy YAML is a first-import format, not a watched runtime file. A first bootstrap can import the selected `--config` file; subsequent starts do not read it. Prefer an explicit import before starting the server:
 
@@ -18,7 +18,7 @@ Accepted commands deliver configuration views directly. Credential/plugin change
 
 ## Config commands
 
-Without `--management-base-url`, these commands are offline: they acquire exclusive ownership, so a running service using the same database refuses them. For a backup while running, copy the published `--db` file directly.
+Without `--management-base-url`, these commands are offline. `config import` takes exclusive ownership, so a running service using the same database refuses it. `config validate`, `config export`, `config backup` and `config listener` only read: with the service running they read its published `--db` file without taking ownership. Copying that file directly is also a complete backup.
 
 ```sh
 cook-router --db cook.db config import config.yaml       # FILE=- reads stdin
@@ -33,15 +33,17 @@ cook-router --db cook.db config listener                 # committed bind settin
 To import into a running service, explicitly select its management endpoint and key:
 
 ```sh
-cook-router --management-base-url http://127.0.0.1:8317 \
-  --password "$MANAGEMENT_PASSWORD" config import config.yaml
+export COOK_ROUTER_MANAGEMENT_KEY=...   # or let the command prompt for it
+cook-router --management-base-url http://127.0.0.1:8317 config import config.yaml
 ```
+
+Online commands take the management key from `--password`, else from `COOK_ROUTER_MANAGEMENT_KEY`, else from a prompt that does not echo when run in a terminal. Prefer the variable or the prompt: a `--password` value is visible to other local users' process listings while the command runs. Without a terminal and without either, the command sends no key and the service refuses it.
 
 This submits the configuration through the existing authenticated API and waits for committed runtime publication. It never opens or writes a local `--db`, even if authentication, TLS, transport or persistence fails. The client uses the current global revision as `If-Match`; a concurrent change returns an error (**412**) instead of silently retrying over it. Use the final endpoint URL: owner mutations under `/admin/v1/` do not follow redirects, including responses without a `Location` header. Existing management access controls and TLS certificate verification still apply.
 
 The TUI's setting and client-key commands acknowledge `/admin/v1/apply` only after a direct HTTP200 response with a numeric committed `revision`. A redirected read, an empty success body or HTTP202 is not a saved setting. Generic reads and non-owner requests retain the existing Go-style redirect behavior.
 
-The explicit online context currently supports **config import only**. Other config commands remain offline; online export/validation and login/plugin credential adapters are subsequent implementation work, not local fallback paths.
+Among config commands the online context supports **import** only. `config export`, `config validate`, `config backup` and `config listener` stay local: while a service owns the database they read its published file read-only. Online logins, Vertex import, SIWC binding and plugin commands are described under [Online credential commands](#online-credential-commands).
 
 `config import` and file-based `config validate` accept legacy YAML or the versioned JSON resource envelope. `config export` emits that same management-compatible JSON envelope (`format: "cook-router-config"`, `version: 1`, `revision`, `resources`), not YAML. This preserves versioned plugin raw data and OAuth-only scope that canonical YAML would lose. Exports redact secrets by default; `--secrets` includes configuration secrets for a lossless full-config export. Protect it as credentials. New output files are private (0600 on Unix). A configuration export is not a credential backup; use `config backup` for the complete SQLite database, including history and credential secrets.
 
@@ -90,15 +92,24 @@ The masking contract covers `/admin/v1` resource/configuration reads, revisions 
 
 A document may include `if_match` containing the 64 hexadecimal SHA-256 digits of its current **raw bytes**, or `if_none_match: true` to require absence. These are per-document conditions, not configuration revision ETags; they cannot be combined. A later invalid document returns **400**, and a failed condition returns **412**, with no earlier credential changed. A batch may also contain `deletions: [{"name":"old.json","if_match":"<current raw SHA-256>"}]`; each deletion requires a captured hash. Upsert/delete targets cannot overlap. All targets and conditions are checked before one mixed owner commit; the response adds `deleted: N` when removals were requested. Deletion-only batches may omit `documents`. A missing or changed deletion source returns **412**, not an unconditional removal. Deleted credentials are revoked before acknowledgement, and a standalone copied database preserves the deletion. Store/publication errors never report success. This endpoint is an ordinary authenticated mutation, not a provider-grant preservation capability. The existing multipart credential upload remains separate and can return **207** partial success.
 
-Online built-in logins and Vertex import use this port:
+### Online credential commands
+
+While a service owns the database, a terminal sign-in goes through it: a login flag with `--db` alone is an offline write and is refused with `already owned`. Run the login against the service and type the management key when asked, or load it from the install script's keys file first:
 
 ```sh
-cook-router --management-base-url https://proxy.example \
-  --password "$MANAGEMENT_KEY" --vertex-import ./service-account.json
-cook-router --management-base-url https://proxy.example \
-  --password "$MANAGEMENT_KEY" --codex-device-login --no-browser
-cook-router --management-base-url https://proxy.example \
-  --password "$MANAGEMENT_KEY" --siwc-bind codex-account.json --no-browser
+set -a; . ~/.cook-router/keys.env; set +a
+cook-router --management-base-url "http://127.0.0.1:$COOK_ROUTER_PORT" --claude-login --no-browser
+```
+
+With the service stopped, the same login flag with `--db` writes the database directly.
+
+Online built-in logins and Vertex import use the credential batch port:
+
+```sh
+export COOK_ROUTER_MANAGEMENT_KEY=...
+cook-router --management-base-url https://proxy.example --vertex-import ./service-account.json
+cook-router --management-base-url https://proxy.example --codex-device-login --no-browser
+cook-router --management-base-url https://proxy.example --siwc-bind codex-account.json --no-browser
 ```
 
 `--codex-login` uses the browser flow instead. These commands do not load the local `--db` or `--config`, even if they identify the running owner's database. Before provider work, an authenticated ordinary dry-run checks owner admission, callers that need provider/network options obtain them from the authorized plaintext resource export through the SQL-free resource importer/compiler, and `GET /admin/v1/credentials` captures original managed bytes, hashes and the owner's managed directory descriptor from memory. The blocking writer hydrates only its needed files in private client scratch, preserving existing opaque metadata for Codex merges; one conditional batch saves the result. SIWC hydrates its captured target **before** file validation, device-ID selection or upstream work, preserving outer Codex tokens and opaque fields while replacing the SIWC partition. Use a managed filename, or an absolute native owner path whose direct parent matches the returned managed directory; unsupported aliases, nested/foreign paths and missing targets are rejected before authorization, without consulting client filesystem state. The caller's accepted destination is not silently replaced with a client-local file. A replacement or deletion since that captured view returns **412** instead of overwriting or resurrecting it.
@@ -115,7 +126,7 @@ Only one service or offline command may own a selected database. Before workspac
 
 Offline writes, including `config import` and local logins or Vertex imports, refuse a database another process owns, even when its management API is unreachable. Read-only `config export`, `config validate`, `config backup` and `config listener` are not competing mutations: while another process owns the database they read its published snapshot file read-only, without taking ownership or touching the working checkpoint. They see the latest completed publication, which can trail an in-flight write.
 
-The old private `coordination.db` still exists internally pending retirement; it does not authorize independent online writers. PID markers and the old multi-handle registry are no longer ownership inputs and are not created. A settled owner removes its own working directory. Unresolved recovery checkpoints are retained and incomplete cleanup is reported. Startup does not sweep another database's abandoned workspace. Keep the same temporary namespace when intending to resume its surviving work; changing TMPDIR cannot bypass a live owner but can deliberately select a cold start after it stops.
+No shared `coordination.db` or other cross-database lock is created; each database's guard is its only cross-process exclusion, so databases sharing a temporary namespace publish independently. A `coordination.db` left there by an older version is unused and may be deleted once no older version runs. PID markers and the old multi-handle registry are no longer ownership inputs and are not created. A settled owner removes its own working directory. Unresolved recovery checkpoints are retained and incomplete cleanup is reported. Startup does not sweep another database's abandoned workspace. Keep the same temporary namespace when intending to resume its surviving work; changing TMPDIR cannot bypass a live owner but can deliberately select a cold start after it stops.
 
 **Copy the `--db` file directly, even while the service runs, for a complete usable backup.** An in-progress copy reads one immutable published snapshot; concurrent writes replace its path rather than modify those bytes. The copy can reflect an older completed state, but not a partially written database. `config backup` remains available and encodes the accepted complete state into a new standalone SQLite database. Keep backups private and stop all server/CLI users before restoring a snapshot. A full backup includes credential state: an old backup can contain revoked tokens, and providers may have invalidated rotated refresh tokens. Configuration-history restore cannot revive those tokens. Logical deletion and SQLite secure-delete settings are not a guarantee of physical erasure from SSDs, snapshots, backups or the underlying disk.
 
@@ -126,7 +137,7 @@ A normal cold start seeds its temporary working database from the published snap
 **Replacing only the snapshot after an unclean exit can be ignored:** a surviving valid live database takes precedence and republishes over it. To force a cold restore:
 
 1. Stop every server and CLI process using the selected `--db` path.
-2. After the owner has stopped, ensure the old working database cannot resume. Either identify its exact `<TMPDIR>/cook-router/<canonical-db-path-hash>` directory and remove only that stopped owner's directory; or configure a fresh private, trusted OS temporary directory for the next start. Keep that namespace on later starts; switching back can resume old working state. PID references alone are not proof that ownership is free. Never delete `coordination.db`, ownership guards, or an active workspace.
+2. After the owner has stopped, ensure the old working database cannot resume. Either identify its exact `<TMPDIR>/cook-router/<canonical-db-path-hash>` directory and remove only that stopped owner's directory; or configure a fresh private, trusted OS temporary directory for the next start. Keep that namespace on later starts; switching back can resume old working state. PID references alone are not proof that ownership is free. Never delete ownership guards or an active workspace.
 3. Copy the backup over the selected `--db` file, preserving the service user's ownership and private permissions (0600 on Unix).
 4. Start the server with the selected temporary namespace. With no old checkpoint there, it seeds from the restored snapshot. Online imports use its management API; offline commands must wait for the service to stop and use the intended recovery namespace.
 

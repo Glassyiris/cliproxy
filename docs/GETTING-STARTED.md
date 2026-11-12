@@ -49,11 +49,13 @@ On a new server, the Overview shows a short Get started card with three steps: c
 
 In the dashboard, choose Connect account and pick a provider. Claude and ChatGPT (Codex) open the provider's own sign-in page; Kimi, Meta, xAI and Devin show a device code to enter on their site. The proxy stores sign-in and refresh tokens in SQLite, not `auth-dir`. It never sees your password.
 
-You can also sign in from a terminal, which helps on a server without a browser:
+You can also sign in from a terminal, which helps on a server without a browser. The running proxy owns its database, so the terminal sign-in goes through it:
 
 ```sh
-cook-router --db ~/.cook-router/cook.db --claude-login --no-browser
+cook-router --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
 ```
+
+Use your port if the script picked another. When asked, type `COOK_ROUTER_MANAGEMENT_KEY` from `keys.env`; it is not shown as you type.
 
 The other sign-in flags are `--codex-login`, `--codex-device-login`, `--kimi-login`, `--meta-login`, `--xai-login` and `--devin-login`. API keys for Claude, Codex, Gemini, Vertex AI, xAI and OpenAI-compatible services go on the dashboard's Provider keys page.
 
