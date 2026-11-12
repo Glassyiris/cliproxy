@@ -358,6 +358,20 @@ pub(crate) fn with_extended_ttl(betas: &str) -> String {
     parts.join(",")
 }
 
+/// Adds the beta required by `thinking.block_binding`, including after custom headers.
+pub(crate) fn with_thinking_binding(betas: &str) -> String {
+    let mut parts = dedup(betas, "");
+    if !parts.iter().any(|p| p == THINKING_BINDING) {
+        parts.push(THINKING_BINDING.into());
+    }
+    parts.join(",")
+}
+
+/// Removes the recovery beta when the executor performs client-side recovery instead.
+pub(crate) fn without_thinking_binding(betas: &str) -> String {
+    without(betas, THINKING_BINDING)
+}
+
 /// `withClaudeAdvisorToolBeta`: advisor goes before the first beta that follows it
 /// on the native wire.
 pub(crate) fn with_advisor(betas: &str) -> String {
