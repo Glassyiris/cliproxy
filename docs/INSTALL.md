@@ -83,7 +83,7 @@ The project was called cliproxy-rs, and its binary `cliproxy`. Run the install s
 
 ### Removing it
 
-Stop the server (`kill $(cat ~/.cook-router/cook-router.pid)` or the service command above), then delete the binary. On Windows stop the intended instance using its service/process command and selected database path, not a stale YAML path. This leaves other instances alone. Your data directory contains the published SQLite snapshot, bootstrap files, keys and signed-in accounts; delete it only if no longer needed. Mutable databases live under OS tmp, and clean shutdown removes the instance's per-database temporary directory when its last user exits. Logical deletion does not guarantee physical erasure from disk or backups.
+Stop the server (`kill $(cat ~/.cook-router/cook-router.pid)` or the service command above), then delete the binary. On Windows stop the intended instance using its service/process command and selected database path, not a stale YAML path. This leaves other instances alone. Your data directory contains the published SQLite snapshot, bootstrap files, keys and signed-in accounts; delete it only if no longer needed. Mutable databases live under OS tmp, and clean shutdown removes the instance's per-database temporary directory when its owning process exits. Logical deletion does not guarantee physical erasure from disk or backups.
 
 ## Homebrew
 

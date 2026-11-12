@@ -100,6 +100,8 @@ A checkpoint written before failed publication can be recovered on resume even t
 
 An ordinary subscriber failure does not undo a committed state. Report it and continue notifying eligible ordinary subscribers. Required canonical/runtime installation is different: it is part of success, precedes ordinary notifications, and must propagate failure. A post-durability installation failure does not roll back the snapshot. Retain the candidate and its original versioned configuration event, withhold ordinary success notifications, and refuse ordinary mutations until the required projection completes. Retry must not infer a no-op from an already advanced canonical pointer and lose that event. Initial required-registration failure removes the registration and does not leave a previously unbound runtime bound. Commit success does not imply that an ordinary subscriber's expensive downstream work finished.
 
+**Commit cost.** Every accepted commit, including a credential refresh or a coalesced cooldown checkpoint, encodes a complete image of all credentials and the whole configuration history; configuration history has no retention limit. Commits therefore cost more than a row update and queue behind the single commit authority. Measured with 2,000 credentials (release builds, loopback): a setting or credential commit took 1.4–1.6× the WAL design's time, 50 concurrent credential uploads finished in about 4.5 s instead of about 2.1 s, and setting commits slowed by about 12% over 1,000 revisions.
+
 ## Functional core, explicit effects
 
 Snapshot export has two logical transformations: obtain immutable complete state, then encode that value into a fresh SQLite image. These are roles, not required function names.
@@ -114,7 +116,7 @@ Results carry the relevant input preconditions. The owner accepts or rejects the
 
 The service registers, invokes and releases subscriptions. Registration establishes an initial view and future notifications atomically with respect to publication.
 
-Callbacks receive an immutable authorized view, its version and change category. They use that input instead of rereading ambient configuration. Notification dispatch follows commit order and runs without the memory or subscriber-list lock held.
+Callbacks receive an immutable authorized view, its version and change category. They use that input instead of rereading ambient configuration. Notification dispatch follows commit order and runs without the memory or subscriber-list lock held. Runtime consumers (model catalogs, the debug listener, discovery, the refresh loop) receive the same order through the runtime: each publication arrives on a per-subscriber queue with its own view and sequence, and a consumer computes from the view it holds, never from the runtime's current configuration.
 
 Callbacks are short notifications. Expensive work belongs to the receiving component's owned execution scope; a follow-up mutation is scheduled as a later command, not a synchronous reentry into the active commit gate. An ownership handle releases registration when the component exits, preventing strong-reference cycles and stale subscribers. Remove a callback from its list under the list lock, then release that lock before destroying its captures: a capture can itself own another subscription.
 

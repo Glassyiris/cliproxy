@@ -164,7 +164,7 @@ Use existing cancellation/task tracking and joins, not a new scheduler framework
 
 ## Risks / Trade-offs
 
-- **Complete in-memory history plus image construction increases peak memory and full-image save cost** -> retain data losslessly, use immutable sharing/bounded buffers where useful, and measure representative sizes and current idle/heap/latency budgets. Do not silently truncate history or raise budgets.
+- **Complete in-memory history plus image construction increases peak memory and full-image save cost** -> retain data losslessly, use immutable sharing/bounded buffers where useful, and measure representative sizes and current idle/heap/latency budgets. Do not silently truncate history or raise budgets. Every commit re-encodes all credentials and the unbounded configuration history, so commits queue at the single authority; measured costs are recorded in `docs/STATE-AND-CONCURRENCY.md`.
 - **API-only CLI behavior changes authentication and offline expectations** -> reuse trusted management discovery/client behavior, document explicit online context, and test authentication/transport failure without disk fallback.
 - **Reentrant or slow callbacks can stall writes** -> notification-only dispatch outside memory/list locks, owned follow-up work, explicit non-reentrancy and per-subscriber errors.
 - **A checkpoint can be newer than accepted memory after failed export** -> retain explicit publication-pending state, refuse ordinary new mutations until it is resolved, merge already-in-flight required grants only into the latest pending checkpoint, and preserve unresolved work on exit. Test an unrelated mutation between failure and recovery so an old full-state image cannot erase a grant.
