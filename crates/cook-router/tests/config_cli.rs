@@ -605,6 +605,25 @@ async fn online_import_uses_the_owner_without_local_fallback() {
         "the environment key authorizes the import"
     );
     assert_eq!(std::fs::read(dir.join("local.db")).unwrap(), local_before);
+    // Ambient selectors (COOK_DB, a config.yaml and .env in the working directory)
+    // do not change what an online import computes or where it commits.
+    std::fs::write(dir.join("config.yaml"), source(8499)).unwrap();
+    std::fs::write(dir.join(".env"), "COOK_DB=dotenv.db\n").unwrap();
+    std::fs::write(dir.join("source.yaml"), source(8454)).unwrap();
+    let ambient = cli_command(
+        &dir,
+        &["--management-base-url", &owner.base, "config", "import", "source.yaml"],
+    )
+    .env("COOK_DB", dir.join("ambient.db"))
+    .env("COOK_ROUTER_MANAGEMENT_KEY", MANAGEMENT_KEY)
+    .stdin(std::process::Stdio::null())
+    .output()
+    .unwrap();
+    success(ambient);
+    assert_eq!(owner.runtime.config().port, 8454);
+    assert!(!dir.join("ambient.db").exists() && !dir.join("dotenv.db").exists());
+    std::fs::remove_file(dir.join(".env")).unwrap();
+    std::fs::remove_file(dir.join("config.yaml")).unwrap();
     std::fs::write(dir.join("source.yaml"), source(8451)).unwrap();
     success(online(&owner.base, MANAGEMENT_KEY));
     let remote_before = std::fs::read(dir.join("service.db")).unwrap();
