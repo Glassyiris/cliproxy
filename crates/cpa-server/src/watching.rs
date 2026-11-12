@@ -248,6 +248,9 @@ mod tests {
     #[tokio::test]
     async fn database_watcher_keeps_owner_state_after_external_snapshot_replacement() {
         let (state, db, root) = state();
+        // Go `authIDForPath`: the credential ID uses the platform separator.
+        let nested = std::path::Path::new("sub").join("nested.json");
+        let nested = nested.to_string_lossy();
         let hash = bcrypt::hash("watcher-test-key", 4).unwrap();
         state
             .commit_with(|store| {
@@ -264,7 +267,7 @@ mod tests {
         db.save(&root.join("external.json"), canonical).unwrap();
         let watcher = start(&state);
         tokio::time::timeout(Duration::from_secs(3), async {
-            while state.rt.store().get("sub/nested.json").is_none() {
+            while state.rt.store().get(&nested).is_none() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
@@ -291,7 +294,7 @@ mod tests {
         std::fs::rename(root.join("replacement.db"), root.join("cook.db")).unwrap();
         reload(&state).unwrap();
         assert_eq!(
-            state.rt.store().get("sub/nested.json").unwrap().str("email"),
+            state.rt.store().get(&nested).unwrap().str("email"),
             Some("canonical@example.invalid")
         );
         assert!(state.rt.store().get("unadmitted.json").is_none());
@@ -330,7 +333,7 @@ mod tests {
             Some("owner@example.invalid")
         );
         assert_eq!(
-            state.rt.store().get("sub/nested.json").unwrap().str("email"),
+            state.rt.store().get(&nested).unwrap().str("email"),
             Some("canonical@example.invalid")
         );
         assert!(state.rt.store().get("unadmitted.json").is_none());
