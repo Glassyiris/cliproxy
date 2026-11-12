@@ -84,18 +84,23 @@ fn env_bytes(key: &str) -> Vec<u8> {
     return value.to_string_lossy().into_owned().into_bytes();
 }
 
-/// Go `startAttemptCleanup`: an hourly purge for as long as the management state
-/// lives. Without a Tokio runtime (synchronous callers) there is no timer.
+/// Go `startAttemptCleanup`: an hourly purge owned by the management state. Shutdown
+/// stops it and joins it with the rest of its work. Without a Tokio runtime
+/// (synchronous callers) there is no timer.
 pub(super) fn start_purge(state: &std::sync::Arc<Management>) {
-    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+    if tokio::runtime::Handle::try_current().is_err() {
         return;
-    };
-    let state = std::sync::Arc::downgrade(state);
-    runtime.spawn(async move {
+    }
+    let stopping = state.stopping.clone();
+    let state_ref = std::sync::Arc::downgrade(state);
+    state.work.spawn(async move {
         let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + PURGE_EVERY, PURGE_EVERY);
         loop {
-            ticks.tick().await;
-            let Some(state) = state.upgrade() else { return };
+            tokio::select! {
+                () = stopping.cancelled() => return,
+                _ = ticks.tick() => {}
+            }
+            let Some(state) = state_ref.upgrade() else { return };
             state.access.purge_stale(Instant::now());
         }
     });
@@ -397,6 +402,42 @@ pub(crate) fn cors_headers(response: &mut Response) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hourly purge belongs to the management state: shutdown stops it and joins
+    /// it, rather than leaving it asleep for up to an hour.
+    #[tokio::test]
+    async fn shutdown_stops_and_joins_the_hourly_purge() {
+        let root = std::env::temp_dir().join(format!("access-purge-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let config = std::sync::Arc::new(crate::testing::config_store(&root.join("config.db")).unwrap());
+        let db = crate::credential_store::CredentialDb::initialize(config.clone(), &root.join("legacy")).unwrap();
+        let mut cfg = config.load().unwrap().config;
+        cfg.auth_dir = db.auth_dir();
+        let rt = std::sync::Arc::new(crate::testing::runtime_with_db(
+            cfg,
+            Vec::new(),
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            db.clone(),
+        ));
+        let state = Management::new(rt, config);
+        // The purge task holds the only extra weak reference that ends with it.
+        let running = std::sync::Arc::weak_count(&state);
+        tokio::time::timeout(Duration::from_secs(5), state.shutdown())
+            .await
+            .expect("shutdown joins its work");
+        assert!(
+            std::sync::Arc::weak_count(&state) < running,
+            "the purge task ended with shutdown"
+        );
+        drop((state, db));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn failures_only_expire_through_the_hourly_purge() {

@@ -13,7 +13,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use cpa_core::config::Config;
@@ -40,7 +40,9 @@ static LOG_FILE: OnceLock<PathBuf> = OnceLock::new();
 static HOOK: Mutex<Option<Arc<LogHook>>> = Mutex::new(None);
 static STATE: Mutex<Option<Applied>> = Mutex::new(None);
 static LEVEL: OnceLock<reload::Handle<LevelFilter, tracing_subscriber::Registry>> = OnceLock::new();
-static CLEANER_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// The running log directory cleaner; replaced on reconfiguration, stopped by
+/// [`stop_cleaner`].
+static CLEANER: Mutex<Option<Cleaner>> = Mutex::new(None);
 /// Set once [`init`] installed the subscriber; [`configure`] does nothing before.
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static HOOKS: Mutex<Vec<(u64, Hook)>> = Mutex::new(Vec::new());
@@ -305,10 +307,27 @@ pub fn resolve_log_dir(cfg: &Config) -> PathBuf {
     cfg.auth_dir.join("logs")
 }
 
-/// Go `configureLogDirCleanerLocked`: replaces the running cleaner. A positive
-/// limit starts one that runs now and every minute.
+struct Cleaner {
+    stop: Arc<(Mutex<bool>, Condvar)>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl Cleaner {
+    /// Wakes the cleaner, then waits for at most its in-progress size check.
+    fn stop(self) {
+        *self.stop.0.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        self.stop.1.notify_all();
+        let _ = self.thread.join();
+    }
+}
+
+/// Go `configureLogDirCleanerLocked`: stops and joins the running cleaner, then
+/// starts one that runs now and every minute when the limit is positive.
 fn start_cleaner(dir: &Path, max_total_mb: i64, protected: Option<PathBuf>) {
-    let generation = CLEANER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let mut cleaner = CLEANER.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(previous) = cleaner.take() {
+        previous.stop();
+    }
     let Some(max_bytes) = u64::try_from(max_total_mb)
         .ok()
         .filter(|&mb| mb > 0)
@@ -317,11 +336,16 @@ fn start_cleaner(dir: &Path, max_total_mb: i64, protected: Option<PathBuf>) {
         return;
     };
     let dir = dir.to_owned();
-    // ponytail: a stopped cleaner notices on its next wake-up, up to a minute later.
+    let stop = Arc::new((Mutex::new(false), Condvar::new()));
+    let signal = stop.clone();
     let spawned = std::thread::Builder::new()
         .name("log-dir-cleaner".into())
         .spawn(move || {
-            while CLEANER_GENERATION.load(Ordering::SeqCst) == generation {
+            let (stopped, wake) = &*signal;
+            loop {
+                if *stopped.lock().unwrap_or_else(PoisonError::into_inner) {
+                    return;
+                }
                 match enforce_size_limit(
                     &dir,
                     max_bytes,
@@ -334,11 +358,25 @@ fn start_cleaner(dir: &Path, max_total_mb: i64, protected: Option<PathBuf>) {
                     ),
                     Err(error) => tracing::warn!("logging: failed to enforce log directory size limit: {error}"),
                 }
-                std::thread::sleep(CLEANER_INTERVAL);
+                let guard = stopped.lock().unwrap_or_else(PoisonError::into_inner);
+                drop(
+                    wake.wait_timeout_while(guard, CLEANER_INTERVAL, |stopped| !*stopped)
+                        .unwrap_or_else(PoisonError::into_inner),
+                );
             }
         });
-    if let Err(error) = spawned {
-        tracing::warn!("logging: failed to start the log directory cleaner: {error}");
+    match spawned {
+        Ok(thread) => *cleaner = Some(Cleaner { stop, thread }),
+        Err(error) => tracing::warn!("logging: failed to start the log directory cleaner: {error}"),
+    }
+}
+
+/// Stops the log directory cleaner and waits for it, so no log cleanup runs after
+/// its owner stopped. Blocking: waits for at most one in-progress size check.
+pub fn stop_cleaner() {
+    let cleaner = CLEANER.lock().unwrap_or_else(PoisonError::into_inner).take();
+    if let Some(cleaner) = cleaner {
+        cleaner.stop();
     }
 }
 
@@ -1214,6 +1252,23 @@ mod tests {
 
         // Stop the asynchronous cleaner before checking exact deletion counts.
         configure_output(&logs, Applied { max_total_mb: 0, ..on }).unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            // Every replaced or disabled cleaner was joined, not left asleep.
+            let cleaners = || {
+                std::fs::read_dir("/proc/self/task")
+                    .unwrap()
+                    .filter_map(|task| std::fs::read_to_string(task.ok()?.path().join("comm")).ok())
+                    .filter(|name| name.trim() == "log-dir-cleaner")
+                    .count()
+            };
+            assert_eq!(cleaners(), 0, "replaced cleaners must be joined");
+            configure_output(&logs, on).unwrap();
+            assert_eq!(cleaners(), 1);
+            stop_cleaner();
+            assert_eq!(cleaners(), 0, "stop_cleaner joins the cleaner");
+            configure_output(&logs, Applied { max_total_mb: 0, ..on }).unwrap();
+        }
         let inside = logs.join("process.log");
         let spelling = logs.join("..").join("logs").join("process.log");
         *OUTPUT.lock().unwrap() = Output::ProcessFile(RotatingFile::new(spelling.clone()));
