@@ -367,6 +367,86 @@ fn argv_enables_bool_flag(args: &[String], name: &str) -> bool {
     enabled
 }
 
+/// The environment variable an online command reads its management key from; the
+/// install script's `keys.env` uses the same name.
+const MANAGEMENT_KEY_ENV: &str = "COOK_ROUTER_MANAGEMENT_KEY";
+
+/// The management key for an online command: `--password` when given, else
+/// `COOK_ROUTER_MANAGEMENT_KEY`, else a prompt that does not echo on an interactive
+/// terminal. Non-interactive callers without either send no key, as before.
+pub(crate) fn management_key(explicit: &str) -> anyhow::Result<String> {
+    use std::io::IsTerminal as _;
+    resolve_management_key(
+        explicit,
+        std::env::var_os(MANAGEMENT_KEY_ENV),
+        io::stdin().is_terminal() && io::stderr().is_terminal(),
+        prompt_management_key,
+    )
+}
+
+fn resolve_management_key(
+    explicit: &str,
+    env: Option<std::ffi::OsString>,
+    interactive: bool,
+    prompt: impl FnOnce() -> anyhow::Result<String>,
+) -> anyhow::Result<String> {
+    if !explicit.is_empty() {
+        return Ok(explicit.to_owned());
+    }
+    if let Some(env) = env.filter(|value| !value.is_empty()) {
+        return env
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("{MANAGEMENT_KEY_ENV} is not valid UTF-8"));
+    }
+    if interactive { prompt() } else { Ok(String::new()) }
+}
+
+async fn online_management_key(explicit: String) -> anyhow::Result<String> {
+    tokio::task::spawn_blocking(move || management_key(&explicit))
+        .await
+        .context("read the management key")?
+}
+
+/// Reads one line from the terminal in raw mode, so the key is never echoed.
+fn prompt_management_key() -> anyhow::Result<String> {
+    use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+    use ratatui::crossterm::terminal;
+    use std::io::Write as _;
+    struct Raw;
+    impl Drop for Raw {
+        fn drop(&mut self) {
+            let _ = terminal::disable_raw_mode();
+        }
+    }
+    let mut stderr = io::stderr();
+    write!(stderr, "Management key: ")?;
+    stderr.flush()?;
+    terminal::enable_raw_mode().context("read the management key")?;
+    let raw = Raw;
+    let mut key = String::new();
+    let result = loop {
+        let Event::Key(press) = event::read()? else { continue };
+        if press.kind == KeyEventKind::Release {
+            continue;
+        }
+        match press.code {
+            KeyCode::Enter => break Ok(key),
+            KeyCode::Esc => break Err(anyhow::anyhow!("management key prompt cancelled")),
+            KeyCode::Char('c' | 'd') if press.modifiers.contains(KeyModifiers::CONTROL) => {
+                break Err(anyhow::anyhow!("management key prompt cancelled"));
+            }
+            KeyCode::Backspace => {
+                key.pop();
+            }
+            KeyCode::Char(c) => key.push(c),
+            _ => {}
+        }
+    };
+    drop(raw);
+    writeln!(stderr)?;
+    result.map(|key| key.trim().to_owned())
+}
+
 /// The value of the built-in flag `wanted` (`-flag V`, `--flag V`, `-flag=V`,
 /// `--flag=V`; the last one wins), read from the raw arguments for what must happen
 /// before the parse: `-working-dir` changes the directory before `.env`, the plugin
@@ -1506,7 +1586,8 @@ fn online_login_save(
 }
 
 async fn online_command(args: &Args) -> anyhow::Result<()> {
-    let client = Arc::new(tui::Client::new(&args.management_base_url, &args.password));
+    let password = online_management_key(args.password.clone()).await?;
+    let client = Arc::new(tui::Client::new(&args.management_base_url, &password));
     client.credential_admission().await.map_err(anyhow::Error::msg)?;
     let mut config = if matches!(
         selected_command(args),
@@ -1580,7 +1661,7 @@ async fn online_command(args: &Args) -> anyhow::Result<()> {
 
 async fn online_plugin_command(raw: &[String]) -> anyhow::Result<i32> {
     let base = prescan_value(&raw[1..], "management-base-url").context("online management URL is required")?;
-    let password = prescan_value(&raw[1..], "password").unwrap_or_default();
+    let password = online_management_key(prescan_value(&raw[1..], "password").unwrap_or_default()).await?;
     let client = Arc::new(tui::Client::new(&base, &password));
     client.credential_admission().await.map_err(anyhow::Error::msg)?;
     let mut config = client.login_config().await.map_err(anyhow::Error::msg)?;
@@ -2023,6 +2104,28 @@ async fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn online_management_key_prefers_flag_then_environment_then_terminal_prompt() {
+        let never = || -> anyhow::Result<String> { panic!("must not prompt") };
+        let env = |v: &str| Some(std::ffi::OsString::from(v));
+        assert_eq!(resolve_management_key("flag", env("env"), true, never).unwrap(), "flag");
+        assert_eq!(resolve_management_key("", env("env"), true, never).unwrap(), "env");
+        assert_eq!(resolve_management_key("", env(""), false, never).unwrap(), "");
+        assert_eq!(resolve_management_key("", None, false, never).unwrap(), "");
+        assert_eq!(
+            resolve_management_key("", env(""), true, || Ok("typed".into())).unwrap(),
+            "typed"
+        );
+        let cancelled = resolve_management_key("", None, true, || anyhow::bail!("management key prompt cancelled"));
+        assert!(cancelled.unwrap_err().to_string().contains("cancelled"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt as _;
+            let invalid = Some(std::ffi::OsString::from_vec(vec![0xff]));
+            assert!(resolve_management_key("", invalid, true, never).is_err());
+        }
+    }
 
     fn credential_test_dir() -> PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

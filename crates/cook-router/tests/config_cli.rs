@@ -572,6 +572,41 @@ async fn online_import_uses_the_owner_without_local_fallback() {
     assert_eq!(owner.store.load().unwrap().config.port, 8451);
     assert_eq!(owner.runtime.config().port, 8451, "success follows runtime publication");
     assert_eq!(std::fs::read(dir.join("local.db")).unwrap(), local_before);
+
+    // The key can come from the environment instead of the command line; without
+    // either, a non-interactive command sends none and the owner refuses it.
+    let keyless = |key: Option<&str>| {
+        let mut command = cli_command(
+            &dir,
+            &[
+                "--db",
+                "local.db",
+                "--management-base-url",
+                &owner.base,
+                "config",
+                "import",
+                "source.yaml",
+            ],
+        );
+        match key {
+            Some(key) => command.env("COOK_ROUTER_MANAGEMENT_KEY", key),
+            None => command.env_remove("COOK_ROUTER_MANAGEMENT_KEY"),
+        };
+        command.stdin(std::process::Stdio::null()).output().unwrap()
+    };
+    std::fs::write(dir.join("source.yaml"), source(8453)).unwrap();
+    let refused = keyless(None);
+    assert!(!refused.status.success(), "no key must not authorize an online import");
+    assert_eq!(owner.runtime.config().port, 8451);
+    success(keyless(Some(MANAGEMENT_KEY)));
+    assert_eq!(
+        owner.runtime.config().port,
+        8453,
+        "the environment key authorizes the import"
+    );
+    assert_eq!(std::fs::read(dir.join("local.db")).unwrap(), local_before);
+    std::fs::write(dir.join("source.yaml"), source(8451)).unwrap();
+    success(online(&owner.base, MANAGEMENT_KEY));
     let remote_before = std::fs::read(dir.join("service.db")).unwrap();
     std::fs::write(dir.join("source.yaml"), source(8452)).unwrap();
     let unavailable = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

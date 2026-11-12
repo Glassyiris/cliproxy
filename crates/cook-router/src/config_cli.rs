@@ -150,7 +150,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             // Parse and validate before creating a database; replace commits atomically.
             let resources = import_config(&text)?;
             if online {
-                let client = crate::tui::Client::new(&cli.management_base_url, &cli.password);
+                let client = crate::tui::Client::new(&cli.management_base_url, &crate::management_key(&cli.password)?);
                 let document = serde_json::to_string(&resources::export_json(0, &resources, true))?;
                 let revision = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
