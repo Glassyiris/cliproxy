@@ -1,6 +1,6 @@
 # Configuration
 
-> **Design contract:** [State and concurrency](STATE-AND-CONCURRENCY.md) records the accepted single-owner, memory-snapshot, callback, recovery and single-portable-file invariants for the in-progress configuration-service refactor. Interface names and code layout may evolve; that model must not drift. The operational details below are not a claim that the refactor is complete.
+> **Design contract:** [State and concurrency](STATE-AND-CONCURRENCY.md) records the single-owner, memory-snapshot, callback, recovery and single-portable-file invariants of the configuration service. Interface names and code layout may evolve; that model must not drift. The operational details below describe the implemented behavior; the limits it does not prove are listed in that document.
 
 SQLite is the sole durable authority for configuration and OAuth credentials. Select the database with `--db PATH`, then `COOK_DB`; otherwise it is `cook.db` beside the `--config` path (whose default is `config.yaml`). Use the same database path for the server, login commands and config commands. While the server runs it owns that database: change it through the dashboard, `/admin/v1` or `--management-base-url`, not through an offline command.
 
