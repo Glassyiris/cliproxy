@@ -769,7 +769,7 @@ async fn concurrent_cli_writers_publish_one_complete_latest_snapshot() {
     assert_eq!(exported["revision"], 1 + accepted);
     assert_eq!(&std::fs::read(dir.join("shared.db")).unwrap()[18..20], &[1, 1]);
     let temporary = dir.join("tmp/cook-router");
-    assert!(temporary.join("coordination.db").exists());
+    assert!(!temporary.join("coordination.db").exists());
     assert!(
         !std::fs::read_dir(&temporary)
             .unwrap()

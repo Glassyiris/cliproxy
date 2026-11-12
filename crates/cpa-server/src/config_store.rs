@@ -64,8 +64,8 @@ pub(crate) enum StoreConnection<'a> {
     Memory(std::sync::MutexGuard<'a, Connection>),
     Disk {
         conn: Connection,
-        // The live connection must close before publication/lifecycle coordination ends.
-        _coordination: Box<Connection>,
+        // The live connection closes before the checkpoint may be replaced.
+        _storage: std::sync::MutexGuard<'a, ()>,
     },
 }
 

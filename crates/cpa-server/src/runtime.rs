@@ -447,11 +447,11 @@ impl Runtime {
     /// The credential an executor call receives: the stored one, or in a test runtime
     /// ([`crate::testing`]) a copy that cannot leave the machine.
     pub(crate) fn for_executor(&self, credential: &Arc<Credential>) -> Arc<Credential> {
+        #[cfg(any(test, feature = "testing"))]
         if self.deny_external.load(std::sync::atomic::Ordering::Relaxed) {
-            crate::testing::guarded(credential, &self.config())
-        } else {
-            credential.clone()
+            return crate::testing::guarded(credential, &self.config());
         }
+        credential.clone()
     }
 
     /// The model registry for the current config and credential set. Rebuilt only when
@@ -7836,7 +7836,7 @@ pub(crate) mod tests {
         let backup = root.join("cold");
         std::fs::create_dir(&backup).unwrap();
         std::fs::copy(database.path().unwrap(), backup.join("state.db")).unwrap();
-        let cold = Arc::new(crate::config_store::ConfigStore::open(&backup.join("state.db")).unwrap());
+        let cold = Arc::new(crate::testing::config_store(&backup.join("state.db")).unwrap());
         let cold_db = crate::credential_store::CredentialDb::initialize(cold, &backup.join("absent-auth")).unwrap();
         assert!(
             cold_db.documents().unwrap().iter().all(|(_, bytes)| bytes == raw),

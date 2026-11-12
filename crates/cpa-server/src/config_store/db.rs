@@ -75,6 +75,8 @@ impl ConfigStore {
         super::published::open(path, migrate)
     }
 
+    /// Fixtures choose a private namespace; production always uses OS tmp.
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Result<Self> {
         super::published::open_in(path, migrate, root)
     }

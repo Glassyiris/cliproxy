@@ -945,6 +945,7 @@ dependencies = [
  "cpa-core",
  "cpa-exec",
  "cpa-plugin",
+ "cpa-server",
  "cpa-translate",
  "flate2",
  "futures-util",

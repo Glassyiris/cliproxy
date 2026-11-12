@@ -150,6 +150,8 @@ The same component acquires exclusive ownership, creates the private workspace, 
 
 A tmpfs can disappear on power loss. Resume is possible only if recoverable work survives; otherwise use the durable published file. Stable ownership-lock identity must not be removed beneath a waiting process, and is not part of the recyclable checkpoint or portable backup. Resolve it from the canonical published target, independently of TMPDIR or an explicit working root, and hold it until cleanup finishes. The implementation reuses the existing native file-lock helper; generated lock files are not restore inputs.
 
+That per-database guard is the only cross-process exclusion. No shared lock or coordination database spans the databases of one temporary namespace, so one database's publication never waits for another's. Inside the owner, replacing the working checkpoint and holding a (test-only) working connection exclude each other through a plain per-database mutex taken by the single commit sequence. It is not reentrant: never open a working connection, or start another publication, while one is held on the same thread.
+
 A deliberate older-backup restore stops all owners and prevents stale working state from resuming before the published file is replaced. Replacing the file while running is not a configuration API. There is no periodic hash, metadata, SQLite or filesystem-event reconciliation to repair bypass writes.
 
 ## What a refactor must demonstrate

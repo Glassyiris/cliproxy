@@ -6,9 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 // A store owns the working directory even while no SQLite connection is open.
 pub(super) struct Disk {
-    root: PathBuf,
     directory: PathBuf,
     unresolved: AtomicBool,
+    // Exclusive ownership already keeps other processes out of this workspace;
+    // in process, an open working connection must not see its inode replaced.
+    storage: std::sync::Mutex<()>,
     // Released only after Drop has finished checkpoint/workspace cleanup.
     _ownership: File,
 }
@@ -17,10 +19,9 @@ impl Disk {
     pub(super) fn recovery(&self, unresolved: bool) {
         self.unresolved.store(unresolved, Ordering::Release);
     }
-    pub(super) fn connection(&self, _store: &ConfigStore, _writing: bool) -> anyhow::Result<StoreConnection<'static>> {
-        // Reads also own this lock: a reload must never replace an inode that
-        // another operation still has open, even in another process.
-        let coordination = lock(&self.root)?;
+    pub(super) fn connection(&self, _store: &ConfigStore, _writing: bool) -> anyhow::Result<StoreConnection<'_>> {
+        // Publication never replaces the checkpoint while this connection is open.
+        let storage = self.storage.lock().unwrap_or_else(PoisonError::into_inner);
         let path = self.directory.join("live.db");
         let metadata = std::fs::symlink_metadata(&path)?;
         anyhow::ensure!(metadata.is_file() && owned(&metadata), "unsafe temporary database file");
@@ -30,12 +31,13 @@ impl Disk {
         super::db::configure(&conn, true)?;
         Ok(StoreConnection::Disk {
             conn,
-            _coordination: Box::new(coordination),
+            _storage: storage,
         })
     }
 }
 
 impl ConfigStore {
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn working_directory(&self) -> Option<&Path> {
         self.disk.as_ref().map(|disk| disk.directory.as_path())
     }
@@ -47,8 +49,8 @@ impl ConfigStore {
     ) -> anyhow::Result<()> {
         let state = &retained.state;
         let Some(disk) = &self.disk else { return Ok(()) };
-        // Coordinate replacement without ever opening the old checkpoint in SQLite.
-        let _coordination = lock(&disk.root)?;
+        // Replace the checkpoint without ever opening the old one in SQLite.
+        let _storage = disk.storage.lock().unwrap_or_else(PoisonError::into_inner);
         let mut image = install(
             &disk.directory.join("live.db"),
             |temporary| state.encode(temporary),
@@ -88,9 +90,10 @@ pub(super) fn open(path: &Path, migrate: bool) -> anyhow::Result<ConfigStore> {
 
 pub(super) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Result<ConfigStore> {
     let path = canonical_path(path, migrate)?;
+    // The native guard is the only cross-process exclusion: no shared SQL
+    // coordinator spans the databases of one temporary namespace.
     let ownership = ownership(&path)?;
     private_dir(&root)?;
-    let _coordination = lock(&root)?;
     let directory = root.join(path_hash(&path));
     // Other namespaces may contain valid unacknowledged grants. Only their own
     // resumed owner can decide that recovery is settled and clean them up.
@@ -146,9 +149,9 @@ pub(super) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Resu
     // Ordinary publications below encode the canonical State, not this connection.
     publish_bootstrap(&*store.conn()?, &path)?;
     store.disk = Some(Disk {
-        root,
         directory,
         unresolved: AtomicBool::new(false),
+        storage: std::sync::Mutex::new(()),
         _ownership: ownership,
     });
     // The runtime retains only paths/lifetime ownership, not a SQLite connection.
@@ -244,20 +247,6 @@ fn corrupt(error: &anyhow::Error) -> bool {
         matches!(error, rusqlite::Error::SqliteFailure(code, _) if matches!(code.code,
             rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase))
     }) || error.to_string() == "temporary config database failed its integrity check"
-}
-
-fn lock(root: &Path) -> anyhow::Result<Connection> {
-    let path = root.join("coordination.db");
-    let conn = open_database(&path)?;
-    super::db::delete_journal(&conn).context("configure snapshot coordinator")?;
-    // Startup and publication for separate databases share this small lock.
-    // Give that queue its own bounded budget; live SQLite transactions retain 5s.
-    conn.busy_timeout(std::time::Duration::from_secs(30))?;
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS coordination (id INTEGER PRIMARY KEY) STRICT")
-        .context("initialize snapshot coordinator")?;
-    conn.execute_batch("BEGIN IMMEDIATE")
-        .context("wait for snapshot publication coordinator")?;
-    Ok(conn) // Dropping the connection releases the reserved SQLite write lock.
 }
 
 /// Bootstrap/migration is the only publication sourced from an imported database.
@@ -437,7 +426,6 @@ fn owned(metadata: &std::fs::Metadata) -> bool {
 impl Drop for Disk {
     fn drop(&mut self) {
         let release = || -> anyhow::Result<()> {
-            let _coordination = lock(&self.root)?;
             if self.unresolved.load(Ordering::Acquire) {
                 bail!("publication recovery is unresolved; temporary checkpoint retained");
             }

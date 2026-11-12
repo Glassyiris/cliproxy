@@ -182,7 +182,9 @@ fn opening_fresh_databases_serializes_migrations() {
         !working_dir.exists(),
         "the admitted owner removes its settled workspace on exit"
     );
-    assert!(working_dir.parent().unwrap().join("coordination.db").exists());
+    // Exclusive ownership replaced the shared SQL coordinator: the namespace keeps
+    // no global coordination database beside the per-database workspaces.
+    assert!(!working_dir.parent().unwrap().join("coordination.db").exists());
     assert!(!dir.join("cook.db-wal").exists());
     assert!(!dir.join("cook.db-shm").exists());
     std::fs::remove_dir_all(dir).unwrap();
@@ -720,6 +722,63 @@ fn recovery_keeps_an_initialized_empty_checkpoint() {
     );
     drop(resumed);
     assert!(!live.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn databases_sharing_a_temporary_namespace_publish_independently() {
+    let (dir, first_path) = database_path("independent");
+    let second_path = dir.join("second.db");
+    let first = std::sync::Arc::new(crate::testing::config_store(&first_path).unwrap());
+    let second = crate::testing::config_store(&second_path).unwrap();
+    assert_eq!(
+        live_path(&first).parent().unwrap().parent(),
+        live_path(&second).parent().unwrap().parent(),
+        "both workspaces live in one temporary namespace"
+    );
+    // The same database still admits exactly one owner.
+    let error = crate::testing::config_store(&first_path)
+        .err()
+        .expect("a second owner of the same database");
+    assert!(error.to_string().contains("already owned"), "{error}");
+
+    // Holding the first database's working connection must not stall the second's
+    // publication: no lock spans databases.
+    let (held, ready) = std::sync::mpsc::channel();
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    let holder = std::thread::spawn({
+        let first = first.clone();
+        move || {
+            let _conn = first.conn().unwrap();
+            held.send(()).unwrap();
+            let _ = gate.recv_timeout(std::time::Duration::from_secs(60));
+        }
+    });
+    ready.recv().unwrap();
+    let (done, finished) = std::sync::mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        let committed = second.commit(&[put("setting", "server", json!({"port": 8371}))], "t", "", false);
+        done.send(committed.map(|c| c.rev).map_err(|e| e.to_string())).unwrap();
+        second
+    });
+    let outcome = finished.recv_timeout(std::time::Duration::from_secs(5));
+    release.send(()).unwrap();
+    holder.join().unwrap();
+    let second = writer.join().unwrap();
+    assert_eq!(
+        outcome.expect("another database's open connection stalled this publication"),
+        Ok(1)
+    );
+    let published = crate::testing::config_store_without_migration(&dir.join("copy.db"));
+    assert!(published.is_err(), "no copy exists yet");
+    std::fs::copy(&second_path, dir.join("copy.db")).unwrap();
+    let copy = crate::testing::config_store_without_migration(&dir.join("copy.db")).unwrap();
+    assert_eq!(copy.load().unwrap().config.port, 8371);
+    first
+        .commit(&[put("setting", "server", json!({"port": 8372}))], "t", "", false)
+        .unwrap();
+    assert_eq!(first.load().unwrap().config.port, 8372);
+    drop((copy, second, first));
     std::fs::remove_dir_all(dir).unwrap();
 }
 

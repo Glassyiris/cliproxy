@@ -156,6 +156,7 @@ impl Drop for Writer<'_> {
 }
 
 impl ConfigStore {
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn fixture_execute(&self, sql: &str) -> anyhow::Result<()> {
         let mut pending = self.writer()?;
         // Seed fixture SQL from accepted state, never a stale/bypassed checkpoint.

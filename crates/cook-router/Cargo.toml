@@ -56,4 +56,5 @@ wreq.workspace = true
 
 [dev-dependencies]
 cpa-plugin = { workspace = true, features = ["test-support"] }
+cpa-server = { workspace = true, features = ["testing"] }
 cpa-home = { workspace = true, features = ["fake"] }

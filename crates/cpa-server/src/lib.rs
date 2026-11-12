@@ -48,6 +48,7 @@ mod sanitize;
 pub mod scheduler;
 mod session;
 mod speech;
+#[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub mod testing;
 pub mod usage;
