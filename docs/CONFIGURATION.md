@@ -143,6 +143,10 @@ Provider settings shared by account sign-ins and provider API keys. Settings lef
 
 Legacy imports spell these as `oauth.providers.codex.*`, `oauth.providers.claude.*` (with `claude-code.disable-cloaking-model-list`) and `oauth.providers.xai.*`, or as the flat `codex`, `claude`, `claude-code`, `disable-claude-cloak-mode`, `claude-header-defaults` and `xai` keys. Precedence on import is `upstream`, then `oauth.providers`, then the flat key. OAuth-only settings retain their scope rather than being broadened to API-key credentials. New configuration edits use `/admin/v1` resources, not the removed v8 setting paths.
 
+With `upstream.codex.stream-bootstrap-buffering: true`, HTTP/SSE and non-steering WebSocket attempts hold their initial handshake frames within the existing 48-frame / 1 MiB bounds and optional `stream-bootstrap-timeout`. A retryable disconnect or upstream rejection before those frames are released can move an unpinned request to the next eligible credential through normal selection. Invalid client requests and request-scoped empty-incomplete failures still stop; once output is released, the router does not replay it on another credential. Stateful continuations remain pinned: a lost upstream session needs client replay, not an in-place credential switch.
+
+A retired socket's disconnect notification cannot overtake the next attempt's reset and close its healthy replacement. Local validation and prewarm replies also stop when the upstream socket is lost, even if the downstream writer is blocked.
+
 ## api-keys
 
 Provider API keys, as opposed to account sign-ins, go here, grouped by provider: `claude`, `codex`, `gemini`, `vertex`, `xai` and `openai-compatibility` for any service that speaks the OpenAI API. The dashboard's Provider keys page edits them. An OpenAI-compatible service, for example:

@@ -269,6 +269,12 @@ impl Executors {
         }
     }
 
+    /// Starts another downstream session attempt without retaining its predecessor's loss.
+    pub fn clear_session_loss(&self, id: &str) {
+        self.codex.ws.clear_loss(id);
+        self.openai.xai.ws.clear_loss(id);
+    }
+
     /// Resolves when an upstream socket held for session `id` is lost; pending forever
     /// when no executor holds one.
     pub fn session_closed(&self, id: &str) -> impl std::future::Future<Output = ExecError> + Send + 'static {

@@ -1139,8 +1139,8 @@ impl Gate {
 
 /// Codex stream bootstrap buffering (`codex.stream-bootstrap-buffering`, M5-0025): hold
 /// handshake frames (created, rate limits, empty `*.added`, heartbeats) up to 48 frames,
-/// 1 MiB and the optional timeout, so an overload/rate-limit rejection smuggled into a 200
-/// stream fails over before headers are committed. Lines count as frames, as in Go.
+/// 1 MiB and the optional timeout, so early failures and disconnects can fail over before
+/// headers are committed. Lines count as frames, as in Go.
 pub(crate) async fn bootstrap(
     mut upstream: ExecStream,
     mut processor: Processor,
@@ -1162,16 +1162,21 @@ pub(crate) async fn bootstrap(
                 return Bootstrap::Stream(futures_util::stream::empty().boxed());
             }
             None => {
-                let error = request_scoped(408, INCOMPLETE_MESSAGE);
+                // Only handshake frames were buffered; no client output needs replay.
+                let error = ExecError::local(408, FailureScope::Transport, INCOMPLETE_MESSAGE);
                 processor.record(&error);
                 return Bootstrap::Reject(error);
             }
         };
         match processor.event_with(&event, Some(&mut gate)) {
             Step::Fail { error, body, before } => {
-                // Once a line has released the stream, the overload is delivered in-stream.
-                if !gate.released && !gate.timed_out() && body.as_deref().is_some_and(is_overload) {
-                    return Bootstrap::Reject(bootstrap_overload(body.as_deref().unwrap_or_default()));
+                // Only a released stream must deliver its failure in-band.
+                if !gate.released && !gate.timed_out() {
+                    return Bootstrap::Reject(if body.as_deref().is_some_and(is_overload) {
+                        bootstrap_overload(body.as_deref().unwrap_or_default())
+                    } else {
+                        error
+                    });
                 }
                 held.extend(before.map(Ok));
                 held.push_back(Err(error));

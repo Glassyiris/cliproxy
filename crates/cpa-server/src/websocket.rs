@@ -49,7 +49,7 @@ use cpa_core::exec::{Caller, ExecError, ExecSession, ExecStream, Operation};
 use cpa_core::format::Format;
 use cpa_exec::codex::{CodexExecutor, InterruptError, SteeringInput};
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{FutureExt, SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{Notify, mpsc, watch};
 
 use crate::registry::provider_key;
@@ -303,9 +303,6 @@ struct Connection {
     /// The turn's selected credential runs full duplex (`codexDuplexStream`); its stream
     /// owns the connection's closure.
     duplex: Arc<AtomicBool>,
-    /// The turn is a native continuation that attempted its pinned credential, so a
-    /// 401/429 makes the client replay over HTTP (1012) rather than close on the loss.
-    replays: Arc<AtomicBool>,
     /// The upgrade request's log: upstream capture for every turn and its middleware ID.
     capture: cpa_core::exec::CaptureSink,
     request_id: Option<String>,
@@ -638,7 +635,6 @@ impl Connection {
             upstream_auth: String::new(),
             steering: false,
             duplex: Arc::default(),
-            replays: Arc::default(),
             capture: Default::default(),
             request_id: None,
             timeline: None,
@@ -677,9 +673,7 @@ impl Connection {
                 .attach_steering(&self.session, SteeringInput::new(client.frames.clone(), enabled));
             self.steering = true;
         }
-        let (duplex, replays) = (self.duplex.clone(), self.replays.clone());
-        // Fused: a loss ignored during a duplex turn never fires again.
-        let mut lost = Box::pin(self.rt.executors.session_closed(&self.session).fuse());
+        let mut lost = Box::pin(self.rt.executors.session_closed(&self.session));
         loop {
             let frame = tokio::select! {
                 frame = client.next() => frame,
@@ -697,44 +691,19 @@ impl Connection {
             };
             sink.event("request", &frame);
             let payload = String::from_utf8_lossy(&frame).into_owned();
-            // The turn wins ties so frames already received reach the client before a
-            // simultaneous upstream-loss signal closes the connection. A duplex turn owns
-            // closure: it drains acknowledgements and pending events in order first. A
-            // client that went away cancels the turn (Go's reader cancels the request).
-            let flow = {
-                let turn = self.turn(&mut sink, payload);
-                tokio::pin!(turn);
-                tokio::select! {
-                    biased;
-                    flow = &mut turn => Ok(flow),
-                    error = &mut lost => {
-                        // A pinned continuation's own 401/429 lost the socket: the turn
-                        // sends the replay close (1012) instead.
-                        let replay = replays.load(Ordering::Acquire) && matches!(error.status, 401 | 429);
-                        if duplex.load(Ordering::Acquire) || replay {
-                            tokio::select! {
-                                biased;
-                                flow = &mut turn => Ok(flow),
-                                () = client.gone() => Err(None),
-                            }
-                        } else {
-                            Err(Some(error))
-                        }
-                    }
-                    () = client.gone() => Err(None),
-                }
+            // Dispatch owns pre-output failures so it can select another credential.
+            // Forwarding still watches for loss while a client write is blocked.
+            let flow = tokio::select! {
+                biased;
+                flow = self.turn(&mut sink, payload) => Some(flow),
+                () = client.gone() => None,
             };
             // A finished turn wakes idle work such as the heap trim (one atomic load).
             cpa_common::idle::activity();
             match flow {
-                Ok(Flow::Next) => {}
-                Ok(Flow::End) => break,
-                Err(Some(error)) => {
-                    close_for_upstream_loss(&mut sink, &error).await;
-                    break;
-                }
-                // The client left mid-turn: Go's forward returns the cancelled context.
-                Err(None) => {
+                Some(Flow::Next) => {}
+                Some(Flow::End) => break,
+                None => {
                     sink.terminate("context canceled");
                     break;
                 }
@@ -829,7 +798,7 @@ impl Connection {
             Err(error) => {
                 // Request-shape errors keep the connection open.
                 let frame = error_payload(error.status, &error.message, None);
-                return match send_text(socket, frame).await {
+                return match self.send_local(socket, frame).await {
                     true => Flow::Next,
                     false => Flow::End,
                 };
@@ -860,7 +829,7 @@ impl Connection {
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs() as i64);
             for frame in requests::prewarm_payloads(&request, &id, created_at) {
-                if !send_text(socket, frame).await {
+                if !self.send_local(socket, frame).await {
                     return Flow::End;
                 }
             }
@@ -893,7 +862,26 @@ impl Connection {
         let model = gjson::get(&request, "model").str().to_owned();
         let started = self.attempt(&request, &model, &mut ctx).await;
         let forwarded = match started {
-            Ok(started) => self.forward(socket, started, &cfg, &mut ctx).await,
+            Ok(started) => {
+                let duplex = self.duplex.load(Ordering::Acquire);
+                let forwarded = {
+                    let forward = self.forward(socket, started, &cfg, &mut ctx);
+                    tokio::pin!(forward);
+                    tokio::select! {
+                        biased;
+                        forwarded = &mut forward => Ok(forwarded),
+                        error = self.rt.executors.session_closed(&self.session), if !duplex => Err(error),
+                    }
+                };
+                match forwarded {
+                    Ok(forwarded) => forwarded,
+                    Err(error) if ctx.suppress(error.status) => Forwarded::Suppressed,
+                    Err(error) => {
+                        close_for_upstream_loss(socket, &error).await;
+                        Forwarded::End
+                    }
+                }
+            }
             Err(error) => {
                 let failure = Failure::from_dispatch(&error);
                 // A pinned continuation's credential failure also lost the session's
@@ -1088,6 +1076,22 @@ impl Connection {
         }
     }
 
+    /// Local replies bypass dispatch but must still end when the upstream is lost.
+    async fn send_local(&self, socket: &mut Sink, payload: String) -> bool {
+        let sent = tokio::select! {
+            biased;
+            sent = send_text(socket, payload) => Ok(sent),
+            error = self.rt.executors.session_closed(&self.session) => Err(error),
+        };
+        match sent {
+            Ok(sent) => sent,
+            Err(error) => {
+                close_for_upstream_loss(socket, &error).await;
+                false
+            }
+        }
+    }
+
     /// One turn through the shared dispatch loop (`ExecuteStreamWithAuthManager` with the
     /// pinned auth, the selected-auth callback and the execution session), including
     /// bootstrap retries. Returns once the stream yielded its first event.
@@ -1106,17 +1110,16 @@ impl Connection {
             preserve_output: ctx.preserve_output,
         }));
         self.duplex.store(false, Ordering::Release);
-        self.replays.store(false, Ordering::Release);
         let on_selected: dispatch::OnSelected = {
             let (selected, rt, pinned) = (selected.clone(), self.rt.clone(), self.pinned.clone());
             let native_request = ctx.native_request;
-            let continuation = ctx.native && ctx.requires_current;
-            let (duplex, replays, steering) = (self.duplex.clone(), self.replays.clone(), self.steering);
+            let (duplex, steering) = (self.duplex.clone(), self.steering);
+            let session = self.session.clone();
             Box::new(move |credential: &Credential| {
+                rt.executors.clear_session_loss(&session);
                 let mut s = selected.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 s.last.clone_from(&credential.id);
                 s.pinned_attempted |= !pinned.is_empty() && credential.id == pinned;
-                replays.store(continuation && s.pinned_attempted, Ordering::Release);
                 s.mode = if rt.executors.session_upstream(credential) {
                     Mode::Websocket
                 } else {
