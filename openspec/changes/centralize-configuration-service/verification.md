@@ -1827,3 +1827,9 @@ Round 2 (`/var/tmp/cook-router-parent-batch/review84b/` and subagent artifact `3
 Focused suites after the repairs: 72/0 (ordered, runtime consumers, in-flight refresh, logging, access, aa, pprof, watching), `media_go` 1/0, clippy `-D warnings` clean for cpa-server and cook-router.
 
 Task status: 3.4, 6.2, 6.3, 6.4 and 7.3 are checked on this evidence; for 3.4 and 6.3 the cleaner ordering is verified from source and the bounded-admission position is the user's no-hard-bound decision, not a reviewer agreement. 8.4: two independent review rounds are recorded; human acceptance is the user's explicit instruction to merge once the work is done.
+
+Final local gate on `58207897` (`/var/tmp/cook-router-parent-batch/gate8/`, all 546 `.rs`/`.toml`/`.lock` hashes unchanged): fmt, no-feature lib/bin clippy, shipped-feature check, harness `--locked`, workspace all-target clippy, workspace tests **2161 passed / 0 failed / 2 ignored**, `alloc_budget`, notices, changelog, `npm run check` and strict spec validation all pass.
+
+CI on `58207897` (run 43198217074) failed two tests besides the RSS lane:
+- `logging::tests::log_file_replaces_only_stdout` counted one `log-dir-cleaner` thread right after `stop_cleaner` had joined it: a joined thread's `/proc/self/task` entry can outlive the join briefly. The count now allows the kernel up to two seconds; an unjoined cleaner sleeps for a minute, so the check still fails on the old code.
+- `pprof::tests::pprof_listener_reload_failure_and_shutdown` found something listening on the just-freed "stale" port after the drain deadline. It passed 12/12 runs locally and 10/10 with `--features pprof`; CI runs the crate under nextest, where other test processes in the same network namespace bind ephemeral ports concurrently. Not reproduced; recorded rather than changed.
