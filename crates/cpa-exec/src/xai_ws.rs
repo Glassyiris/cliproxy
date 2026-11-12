@@ -126,6 +126,10 @@ impl Ws {
     pub(crate) fn closed(&self, id: &str) -> impl std::future::Future<Output = ExecError> + Send + 'static {
         self.pool.closed(id.trim())
     }
+
+    pub(crate) fn clear_loss(&self, id: &str) {
+        self.pool.clear_loss(id.trim());
+    }
 }
 
 // --- per-session ID state (xaiWebsocketIDState) --------------------------------------------

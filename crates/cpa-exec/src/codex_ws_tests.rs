@@ -280,6 +280,50 @@ async fn a_turn_activating_after_the_reader_stopped_gets_its_error() {
     }
 }
 
+/// A retired reader cannot publish its loss after the replacement attempt clears it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn clearing_loss_waits_for_the_retired_readers_notification() {
+    let (_up, url) = upstream(vec![]).await;
+    let executor = CodexExecutor::new().unwrap();
+    let state = executor.ws.session("conn-1");
+    let old = pooled(&executor, &url).await;
+    let (entered, notification) = std::sync::mpsc::channel();
+    let (resume, released) = std::sync::mpsc::channel();
+    *state.before_notify.lock().unwrap() = Some((entered, released));
+    let (started, clearing) = std::sync::mpsc::channel();
+    let (cleared, completed) = std::sync::mpsc::channel();
+    let (retiring, retired, pool) = (state.clone(), old.clone(), executor.ws.clone());
+    let runtime = tokio::runtime::Handle::current();
+    let cleared_early = std::thread::scope(move |threads| {
+        threads.spawn(move || {
+            let _runtime = runtime.enter();
+            retiring.invalidate(&retired, &transport("old upstream EOF"), true);
+        });
+        notification.recv_timeout(Duration::from_secs(5)).unwrap();
+        threads.spawn(move || {
+            started.send(()).unwrap();
+            pool.clear_loss("conn-1");
+            cleared.send(()).unwrap();
+        });
+        clearing.recv_timeout(Duration::from_secs(5)).unwrap();
+        let cleared_early = completed.recv_timeout(Duration::from_millis(100)).is_ok();
+        let _ = resume.send(());
+        (cleared_early, completed)
+    });
+    let (cleared_early, _completion) = cleared_early;
+    let replacement = pooled(&executor, &url).await;
+    // A late callback from the old socket must not poison or remove the replacement.
+    state.invalidate(&old, &transport("late old EOF"), true);
+    assert!(executor.session_loss("conn-1").is_none());
+    assert!(state.current().is_some_and(|conn| Arc::ptr_eq(&conn, &replacement)));
+    let closed = executor.session_closed("conn-1");
+    state.invalidate(&replacement, &closed_too_big("replacement"), true);
+    let loss = tokio::time::timeout(Duration::from_secs(5), closed).await.unwrap();
+    executor.close_session("conn-1");
+    assert!(!cleared_early, "the reset overtook the retired reader's notification");
+    assert_eq!(loss.status, 413, "the replacement's own loss must still be delivered");
+}
+
 #[tokio::test]
 async fn continuation_without_a_socket_requires_replay() {
     let (up, url) = upstream(vec![]).await;

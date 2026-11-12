@@ -358,8 +358,11 @@ pub(crate) struct Session {
     /// Serialises turns (`reqMu`).
     pub(crate) turn: Arc<tokio::sync::Mutex<()>>,
     pub(crate) conn: Mutex<Option<Arc<Upstream>>>,
-    /// Set once when the session's socket is lost (`notifyUpstreamDisconnect`).
+    /// The current attempt's socket loss; cleared when another credential is selected.
     closed: watch::Sender<Option<ExecError>>,
+    /// Pauses a test's disconnect immediately before it is published.
+    #[cfg(test)]
+    before_notify: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
     /// The downstream connection's client frames when response steering is configured.
     steering: Mutex<Option<Arc<SteeringInput>>>,
     /// The credential of the last socket dialed (Go keeps `sess.authID` after the socket
@@ -394,15 +397,20 @@ impl Session {
                 return;
             }
             *current = None;
-        }
-        if notify {
-            self.closed.send_if_modified(|slot| {
-                let first = slot.is_none();
-                if first {
-                    *slot = Some(error.clone());
+            if notify {
+                #[cfg(test)]
+                if let Some((entered, resume)) = self.before_notify.lock().expect("notify hook").take() {
+                    let _ = entered.send(());
+                    let _ = resume.recv();
                 }
-                first
-            });
+                self.closed.send_if_modified(|slot| {
+                    let first = slot.is_none();
+                    if first {
+                        *slot = Some(error.clone());
+                    }
+                    first
+                });
+            }
         }
         conn.shutdown();
     }
@@ -453,6 +461,8 @@ impl Pool {
                     turn: Arc::default(),
                     conn: Mutex::default(),
                     closed: watch::channel(None).0,
+                    #[cfg(test)]
+                    before_notify: Mutex::default(),
                     steering: Mutex::default(),
                     credential: Mutex::default(),
                 })
@@ -522,6 +532,15 @@ impl Pool {
     pub fn loss(&self, id: &str) -> Option<ExecError> {
         let session = self.get(id)?;
         session.closed.borrow().clone()
+    }
+
+    /// A failed attempt must not close the next credential's downstream connection.
+    pub(crate) fn clear_loss(&self, id: &str) {
+        if let Some(session) = self.get(id) {
+            // Pair with invalidate: a retired reader must publish before this reset.
+            let _current = session.conn.lock().expect("session conn");
+            session.closed.send_if_modified(|loss| loss.take().is_some());
+        }
     }
 
     /// `InterruptExecutionSession`: writes the client's `response.interrupt` unchanged
@@ -847,7 +866,6 @@ enum Frame {
         error: ExecError,
         overload: bool,
         read: bool,
-        status_frame: bool,
     },
 }
 
@@ -909,7 +927,6 @@ impl Turn {
                     error,
                     overload: false,
                     read: true,
-                    status_frame: false,
                 };
             }
             // A full channel can drop the reader's terminal error; the session still
@@ -922,7 +939,6 @@ impl Turn {
                     ),
                     overload: false,
                     read: true,
-                    status_frame: false,
                 };
             }
         };
@@ -942,7 +958,6 @@ impl Turn {
                 error,
                 overload: false,
                 read: false,
-                status_frame: true,
             };
         }
         if let Some((error, body)) = response::terminal_failure(payload, self.cooling) {
@@ -952,7 +967,6 @@ impl Turn {
                 error,
                 overload: response::is_overload(&body),
                 read: false,
-                status_frame: false,
             };
         }
         let kind = gjson::get(payload, "type");
@@ -971,7 +985,6 @@ impl Turn {
                 error,
                 overload: false,
                 read: false,
-                status_frame: false,
             };
         }
         let bufferable = response::bufferable(payload);
@@ -1061,26 +1074,16 @@ async fn bootstrap(mut turn: Turn, timeout: Option<Duration>, started: Instant) 
             Frame::Skip if window_open => continue,
             Frame::Skip => break,
             Frame::Failed { error, read: true, .. } => return Err(error),
-            Frame::Failed {
-                error,
-                status_frame: true,
-                ..
-            } => {
-                turn.invalidate(&error, true);
-                if !timed_out {
-                    return Err(error);
-                }
-                held.push(Err(error));
-                return Ok(futures_util::stream::iter(held).boxed());
-            }
             Frame::Failed { error, overload, .. } => {
-                if overload && !timed_out {
-                    // Fail over before anything was shown; the downstream session survives.
-                    turn.invalidate(&error, false);
-                    let body = String::from_utf8_lossy(&error.body).into_owned();
-                    return Err(response::bootstrap_overload(&body));
+                turn.invalidate(&error, timed_out);
+                if !timed_out {
+                    // No buffered frame reached the client: let dispatch classify and retry.
+                    return Err(if overload {
+                        response::bootstrap_overload(&String::from_utf8_lossy(&error.body))
+                    } else {
+                        error
+                    });
                 }
-                turn.invalidate(&error, true);
                 held.push(Err(error));
                 return Ok(futures_util::stream::iter(held).boxed());
             }

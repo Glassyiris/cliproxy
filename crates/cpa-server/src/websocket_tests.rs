@@ -13,11 +13,48 @@ use serde_json::Value;
 use crate::router;
 use crate::websocket_tools::is_retained;
 
-async fn serve(app: axum::Router) -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    format!("127.0.0.1:{}", addr.port())
+/// Owns each test or scenario's listeners, including graceful shutdown and joining.
+struct Servers {
+    tasks: tokio::task::JoinSet<()>,
+    stop: tokio::sync::watch::Sender<()>,
+}
+
+impl Default for Servers {
+    fn default() -> Self {
+        Self {
+            tasks: tokio::task::JoinSet::new(),
+            stop: tokio::sync::watch::channel(()).0,
+        }
+    }
+}
+
+impl Servers {
+    async fn serve(&mut self, app: axum::Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut stopped = self.stop.subscribe();
+        self.tasks.spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = stopped.changed().await;
+                })
+                .await
+                .unwrap();
+        });
+        format!("127.0.0.1:{}", addr.port())
+    }
+
+    async fn shutdown(mut self) {
+        self.stop.send_replace(());
+        let stopped = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(result) = self.tasks.join_next().await {
+                result.expect("mock server failed");
+            }
+        })
+        .await;
+        self.tasks.shutdown().await;
+        stopped.expect("mock servers did not shut down");
+    }
 }
 
 /// Answers the first request with far more than the loopback buffers hold, then closes
@@ -48,9 +85,10 @@ async fn flood_then_close(mut socket: AxSocket) {
 /// session state (Go closes the socket instead of waiting behind the writer).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn upstream_loss_while_the_client_stalls_releases_the_session() {
-    let upstream =
-        serve(axum::Router::new().fallback(|ws: WebSocketUpgrade| async move { ws.on_upgrade(flood_then_close) }))
-            .await;
+    let mut servers = Servers::default();
+    let upstream = servers
+        .serve(axum::Router::new().fallback(|ws: WebSocketUpgrade| async move { ws.on_upgrade(flood_then_close) }))
+        .await;
     let cfg = Config::parse(&format!(
         "codex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    websockets: true\n    models:\n      - name: gpt-fixture\n"
     ))
@@ -67,7 +105,9 @@ async fn upstream_loss_while_the_client_stalls_releases_the_session() {
         openai: Default::default(),
         google: Default::default(),
     };
-    let proxy = serve(router(Arc::new(crate::testing::runtime(cfg, credentials, executors)))).await;
+    let proxy = servers
+        .serve(router(Arc::new(crate::testing::runtime(cfg, credentials, executors))))
+        .await;
 
     let key = "stalled-client-session";
     let mut socket = wreq::Client::new()
@@ -90,12 +130,121 @@ async fn upstream_loss_while_the_client_stalls_releases_the_session() {
         seen |= retained;
         if seen && !retained {
             // The client never read a byte: the server gave up on the flush and cleaned up.
+            drop(socket);
+            servers.shutdown().await;
             return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     let state: Value = serde_json::json!({ "connection_seen": seen });
     panic!("connection still holds its session after 10s: {state}");
+}
+
+/// Local validation replies, like generated output, stop when the upstream is lost.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn upstream_loss_cancels_a_blocked_local_error_reply() {
+    use super::{Connection, Flow, Sink};
+    use futures_util::StreamExt;
+    let mut servers = Servers::default();
+
+    let close = Arc::new(tokio::sync::Notify::new());
+    let ended = Arc::new(tokio::sync::Notify::new());
+    let (accepted, downstream) = tokio::sync::oneshot::channel::<AxSocket>();
+    let accepted = Arc::new(std::sync::Mutex::new(Some(accepted)));
+    let app = axum::Router::new()
+        .route(
+            "/downstream",
+            axum::routing::get(move |ws: WebSocketUpgrade| {
+                let accepted = accepted.lock().unwrap().take().unwrap();
+                async move {
+                    ws.on_upgrade(move |socket| async move {
+                        let _ = accepted.send(socket);
+                    })
+                }
+            }),
+        )
+        .route(
+            "/upstream/responses",
+            axum::routing::get({
+                let (close, ended) = (close.clone(), ended.clone());
+                move |ws: WebSocketUpgrade| {
+                    let (close, ended) = (close.clone(), ended.clone());
+                    async move {
+                        ws.on_upgrade(move |mut socket: AxSocket| async move {
+                            assert!(matches!(socket.recv().await, Some(Ok(AxMessage::Text(_)))));
+                            for event in [
+                                r#"{"type":"response.created","response":{"id":"r1","output":[]}}"#,
+                                r#"{"type":"response.completed","response":{"id":"r1","output":[]}}"#,
+                            ] {
+                                socket.send(AxMessage::Text(event.into())).await.unwrap();
+                            }
+                            close.notified().await;
+                            let _ = socket.send(AxMessage::Close(None)).await;
+                            ended.notify_one();
+                        })
+                    }
+                }
+            }),
+        );
+    let address = servers.serve(app).await;
+    let cfg = Config::parse(&format!(
+        "codex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{address}/upstream\n    websockets: true\n    models:\n      - name: gpt-fixture\n"
+    )).unwrap();
+    let credentials = cpa_core::config::credentials::from_config(&cfg);
+    let executors = Executors {
+        claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+        codex: cpa_exec::codex::CodexExecutor::new().unwrap(),
+        devices: Default::default(),
+        openai: Default::default(),
+        google: Default::default(),
+    };
+    let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
+    let client = wreq::Client::new()
+        .websocket(format!("ws://{address}/downstream"))
+        .send()
+        .await
+        .unwrap()
+        .into_websocket()
+        .await
+        .unwrap();
+    let (writer, reader) = downstream.await.unwrap().split();
+    let mut sink = Sink {
+        inner: Arc::new(tokio::sync::Mutex::new(writer)),
+        timeline: None,
+        terminated: None,
+    };
+    let mut connection = Connection::new(
+        rt.clone(),
+        cpa_core::exec::Caller {
+            principal: "client-key-FAKE".into(),
+            source: "authorization",
+            provider: String::new(),
+        },
+        Default::default(),
+    );
+    let create = r#"{"type":"response.create","model":"gpt-fixture","input":[]}"#.to_owned();
+    assert!(matches!(connection.turn(&mut sink, create).await, Flow::Next));
+
+    // A writer already in flight backpressures this local reply without a huge allocation.
+    let blocked_writer = sink.inner.clone().lock_owned().await;
+    let result = {
+        let turn = connection.turn(&mut sink, r#"{"type":"unsupported","model":"gpt-fixture"}"#.to_owned());
+        tokio::pin!(turn);
+        assert!(futures_util::poll!(&mut turn).is_pending());
+        close.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), &mut turn).await
+    };
+    drop(blocked_writer);
+    rt.executors.close_session(&connection.session);
+    tokio::time::timeout(Duration::from_secs(5), ended.notified())
+        .await
+        .unwrap();
+    drop((connection, sink, reader, client, rt));
+    servers.shutdown().await;
+    assert!(
+        matches!(result, Ok(Flow::End)),
+        "upstream loss did not cancel the local reply"
+    );
 }
 
 /// Drops with the upstream response body: the proxy cancelled its request.
@@ -112,30 +261,32 @@ impl Drop for BodyDropped {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn steering_reader_cancels_the_turn_when_the_client_leaves() {
     use futures_util::StreamExt;
+    let mut servers = Servers::default();
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flag = dropped.clone();
-    let upstream = serve(axum::Router::new().fallback(move || {
-        let guard = BodyDropped(flag.clone());
-        async move {
-            let events = concat!(
-                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\",\"output\":[]}}\n\n",
-                "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"hi\"}\n\n",
-            );
-            // The response never completes; only a cancelled request releases it.
-            let body =
-                futures_util::stream::once(async move { Ok::<_, std::io::Error>(axum::body::Bytes::from(events)) })
-                    .chain(futures_util::stream::pending())
-                    .map(move |chunk| {
-                        let _ = &guard;
-                        chunk
-                    });
-            (
-                [("content-type", "text/event-stream")],
-                axum::body::Body::from_stream(body),
-            )
-        }
-    }))
-    .await;
+    let upstream = servers
+        .serve(axum::Router::new().fallback(move || {
+            let guard = BodyDropped(flag.clone());
+            async move {
+                let events = concat!(
+                    "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\",\"output\":[]}}\n\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"hi\"}\n\n",
+                );
+                // The response never completes; only a cancelled request releases it.
+                let body =
+                    futures_util::stream::once(async move { Ok::<_, std::io::Error>(axum::body::Bytes::from(events)) })
+                        .chain(futures_util::stream::pending())
+                        .map(move |chunk| {
+                            let _ = &guard;
+                            chunk
+                        });
+                (
+                    [("content-type", "text/event-stream")],
+                    axum::body::Body::from_stream(body),
+                )
+            }
+        }))
+        .await;
     let cfg = Config::parse(&format!(
         "codex:\n  response-steering: true\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n"
     ))
@@ -148,7 +299,9 @@ async fn steering_reader_cancels_the_turn_when_the_client_leaves() {
         openai: Default::default(),
         google: Default::default(),
     };
-    let proxy = serve(router(Arc::new(crate::testing::runtime(cfg, credentials, executors)))).await;
+    let proxy = servers
+        .serve(router(Arc::new(crate::testing::runtime(cfg, credentials, executors))))
+        .await;
 
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
@@ -184,6 +337,7 @@ async fn steering_reader_cancels_the_turn_when_the_client_leaves() {
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    servers.shutdown().await;
 }
 
 /// The request log of a Responses WebSocket connection: Go's downstream timeline
@@ -195,15 +349,17 @@ async fn steering_reader_cancels_the_turn_when_the_client_leaves() {
 async fn request_log_records_the_websocket_timeline_and_each_turn() {
     use futures_util::StreamExt;
     use wreq::ws::message::{CloseFrame as WsClose, Message as WsMessage};
+    let mut servers = Servers::default();
     const CREATED: &str = r#"{"type":"response.created","response":{"id":"r1","output":[]}}"#;
     const COMPLETED: &str = r#"{"type":"response.completed","response":{"id":"r1","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}"#;
-    let upstream = serve(axum::Router::new().fallback(|| async {
-        (
-            [("content-type", "text/event-stream")],
-            format!("data: {CREATED}\n\ndata: {COMPLETED}\n\n"),
-        )
-    }))
-    .await;
+    let upstream = servers
+        .serve(axum::Router::new().fallback(|| async {
+            (
+                [("content-type", "text/event-stream")],
+                format!("data: {CREATED}\n\ndata: {COMPLETED}\n\n"),
+            )
+        }))
+        .await;
     let dir = std::env::temp_dir().join(format!("cpa-ws-timeline-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
@@ -231,7 +387,9 @@ async fn request_log_records_the_websocket_timeline_and_each_turn() {
             ..Default::default()
         },
     );
-    let proxy = serve(crate::request_logging::router(&management, router(rt))).await;
+    let proxy = servers
+        .serve(crate::request_logging::router(&management, router(rt)))
+        .await;
 
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
@@ -265,6 +423,7 @@ async fn request_log_records_the_websocket_timeline_and_each_turn() {
     drop(socket);
 
     let log = written_log(&dir).await;
+    servers.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
     let section = |name: &str| -> String {
         let start = log
@@ -313,36 +472,38 @@ async fn request_log_records_the_websocket_timeline_and_each_turn() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_client_close_cancels_a_stalled_steering_turn() {
     use futures_util::StreamExt;
+    let mut servers = Servers::default();
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flag = dropped.clone();
-    let upstream = serve(axum::Router::new().fallback(move || {
-        let guard = BodyDropped(flag.clone());
-        async move {
-            let created = axum::body::Bytes::from_static(
-                b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\",\"output\":[]}}\n\n",
-            );
-            let delta = axum::body::Bytes::from(format!(
-                "data: {{\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"{}\"}}\n\n",
-                "x".repeat(1 << 20)
-            ));
-            // Far more than the socket buffers hold, then a response that never ends.
-            let body = futures_util::stream::iter(
-                std::iter::once(created)
-                    .chain(std::iter::repeat_n(delta, 32))
-                    .map(Ok::<_, std::io::Error>),
-            )
-            .chain(futures_util::stream::pending())
-            .map(move |chunk| {
-                let _ = &guard;
-                chunk
-            });
-            (
-                [("content-type", "text/event-stream")],
-                axum::body::Body::from_stream(body),
-            )
-        }
-    }))
-    .await;
+    let upstream = servers
+        .serve(axum::Router::new().fallback(move || {
+            let guard = BodyDropped(flag.clone());
+            async move {
+                let created = axum::body::Bytes::from_static(
+                    b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\",\"output\":[]}}\n\n",
+                );
+                let delta = axum::body::Bytes::from(format!(
+                    "data: {{\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"{}\"}}\n\n",
+                    "x".repeat(1 << 20)
+                ));
+                // Far more than the socket buffers hold, then a response that never ends.
+                let body = futures_util::stream::iter(
+                    std::iter::once(created)
+                        .chain(std::iter::repeat_n(delta, 32))
+                        .map(Ok::<_, std::io::Error>),
+                )
+                .chain(futures_util::stream::pending())
+                .map(move |chunk| {
+                    let _ = &guard;
+                    chunk
+                });
+                (
+                    [("content-type", "text/event-stream")],
+                    axum::body::Body::from_stream(body),
+                )
+            }
+        }))
+        .await;
     let cfg = Config::parse(&format!(
         "codex:\n  response-steering: true\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n"
     ))
@@ -355,7 +516,9 @@ async fn a_client_close_cancels_a_stalled_steering_turn() {
         openai: Default::default(),
         google: Default::default(),
     };
-    let proxy = serve(router(Arc::new(crate::testing::runtime(cfg, credentials, executors)))).await;
+    let proxy = servers
+        .serve(router(Arc::new(crate::testing::runtime(cfg, credentials, executors))))
+        .await;
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
         .send()
@@ -391,6 +554,7 @@ async fn a_client_close_cancels_a_stalled_steering_turn() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     drop(socket);
+    servers.shutdown().await;
 }
 
 /// Home with a gated request-log forward and a refused pick: the turn fails and the
@@ -433,6 +597,7 @@ impl crate::remote::RemoteDispatch for GatedHome {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_socket_closes_before_the_request_log_is_delivered() {
     use futures_util::StreamExt;
+    let mut servers = Servers::default();
     let dir = std::env::temp_dir().join(format!("cpa-ws-gated-log-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
@@ -462,7 +627,9 @@ async fn the_socket_closes_before_the_request_log_is_delivered() {
             ..Default::default()
         },
     );
-    let proxy = serve(crate::request_logging::router(&management, router(rt))).await;
+    let proxy = servers
+        .serve(crate::request_logging::router(&management, router(rt)))
+        .await;
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
         .send()
@@ -488,6 +655,8 @@ async fn the_socket_closes_before_the_request_log_is_delivered() {
     })
     .await;
     gate.notify_one();
+    drop(socket);
+    servers.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
     assert!(closed.is_ok(), "the socket stayed open while the request log was held");
 }
@@ -496,14 +665,16 @@ async fn the_socket_closes_before_the_request_log_is_delivered() {
 /// answers `status` with `body`: the text frames the client saw and the written log.
 async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String) {
     use futures_util::StreamExt;
-    let upstream = serve(axum::Router::new().fallback(move || async move {
-        (
-            axum::http::StatusCode::from_u16(status).unwrap(),
-            [("content-type", "application/json")],
-            body,
-        )
-    }))
-    .await;
+    let mut servers = Servers::default();
+    let upstream = servers
+        .serve(axum::Router::new().fallback(move || async move {
+            (
+                axum::http::StatusCode::from_u16(status).unwrap(),
+                [("content-type", "application/json")],
+                body,
+            )
+        }))
+        .await;
     let dir = std::env::temp_dir().join(format!("cpa-ws-timeline-error-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
@@ -531,7 +702,9 @@ async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String
             ..Default::default()
         },
     );
-    let proxy = serve(crate::request_logging::router(&management, router(rt))).await;
+    let proxy = servers
+        .serve(crate::request_logging::router(&management, router(rt)))
+        .await;
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
         .send()
@@ -556,6 +729,7 @@ async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String
     }
     drop(socket);
     let log = written_log(&dir).await;
+    servers.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
     (frames, log)
 }
@@ -628,24 +802,26 @@ async fn request_log_records_terminal_errors_like_go() {
 async fn interrupt_diagnostics_are_sanitized() {
     use futures_util::StreamExt;
     use wreq::ws::message::{CloseFrame as WsClose, Message as WsMessage};
+    let mut servers = Servers::default();
     const CREATED: &str = r#"{"type":"response.created","response":{"id":"r-http","output":[]}}"#;
     // Releases the bootstrap buffer, which holds `response.created`. Event lines close
     // each frame, as Codex sends them.
     const ITEM: &str = r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","id":"msg_1","content":[{"type":"output_text","text":"partial"}]}}"#;
     // An HTTP turn that stays open until the proxy cancels it.
-    let upstream = serve(axum::Router::new().fallback(|| async {
-        let events = futures_util::stream::once(async {
-            Ok::<_, std::io::Error>(format!(
-                "event: response.created\ndata: {CREATED}\n\nevent: response.output_item.done\ndata: {ITEM}\n\n"
-            ))
-        })
-        .chain(futures_util::stream::pending());
-        (
-            [("content-type", "text/event-stream")],
-            axum::body::Body::from_stream(events),
-        )
-    }))
-    .await;
+    let upstream = servers
+        .serve(axum::Router::new().fallback(|| async {
+            let events = futures_util::stream::once(async {
+                Ok::<_, std::io::Error>(format!(
+                    "event: response.created\ndata: {CREATED}\n\nevent: response.output_item.done\ndata: {ITEM}\n\n"
+                ))
+            })
+            .chain(futures_util::stream::pending());
+            (
+                [("content-type", "text/event-stream")],
+                axum::body::Body::from_stream(events),
+            )
+        }))
+        .await;
     let dir = std::env::temp_dir().join(format!("cpa-ws-interrupt-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
@@ -673,7 +849,9 @@ async fn interrupt_diagnostics_are_sanitized() {
             ..Default::default()
         },
     );
-    let proxy = serve(crate::request_logging::router(&management, router(rt))).await;
+    let proxy = servers
+        .serve(crate::request_logging::router(&management, router(rt)))
+        .await;
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
         .send()
@@ -717,6 +895,7 @@ async fn interrupt_diagnostics_are_sanitized() {
     drop(socket);
 
     let log = written_log(&dir).await;
+    servers.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
     let part = |event: &str, payload: &str| (event.to_owned(), payload.to_owned());
     let hashed = |hash: &str, outcome: &str| {
@@ -775,12 +954,13 @@ async fn read_text(socket: &mut wreq::ws::WebSocket) -> String {
 async fn uninterrupted_claude_turns_send_masters_bytes() {
     use futures_util::StreamExt;
     use wreq::ws::message::Message as WsMessage;
+    let mut servers = Servers::default();
     const FIRST: &str = r#"{"model":"claude-opus-5-5","max_tokens":128000,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}],"metadata":{"user_id":"2b35ba29f7cec38e9220a584fafaa8f9eb2a8d01350e9d1c3653ae728471c5bb"},"stream":true,"system":[{"type":"text","text":"be brief","cache_control":{"type":"ephemeral"}}]}"#;
     const SECOND: &str = r#"{"model":"claude-opus-5-5","max_tokens":128000,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"},{"role":"user","content":[{"type":"text","text":"again","cache_control":{"type":"ephemeral"}}]}],"metadata":{"user_id":"2b35ba29f7cec38e9220a584fafaa8f9eb2a8d01350e9d1c3653ae728471c5bb"},"stream":true,"system":[{"type":"text","text":"be brief","cache_control":{"type":"ephemeral"}}]}"#;
     let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
     let upstream = {
         let seen = seen.clone();
-        serve(axum::Router::new().fallback(move |body: axum::body::Bytes| {
+        servers.serve(axum::Router::new().fallback(move |body: axum::body::Bytes| {
             let seen = seen.clone();
             async move {
                 seen.lock().unwrap().push(String::from_utf8_lossy(&body).into_owned());
@@ -816,7 +996,7 @@ async fn uninterrupted_claude_turns_send_masters_bytes() {
         google: Default::default(),
     };
     let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
-    let proxy = serve(router(rt)).await;
+    let proxy = servers.serve(router(rt)).await;
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
         .send()
@@ -844,6 +1024,7 @@ async fn uninterrupted_claude_turns_send_masters_bytes() {
         }
     }
     drop(socket);
+    servers.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
     let seen = seen.lock().unwrap().clone();
     assert_eq!(seen, [FIRST, SECOND]);
@@ -886,15 +1067,17 @@ impl crate::remote::RemoteDispatch for HomeGrant {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interrupt_accepts_the_sessions_home_credential() {
     use wreq::ws::message::Message as WsMessage;
+    let mut servers = Servers::default();
     const INTERRUPT: &str =
         r#"{"type":"response.interrupt","response_id":"r1","mode":"discard_partial_items","extension":"keep"}"#;
     let frames: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
     let upstream = {
         let frames = frames.clone();
-        serve(axum::Router::new().fallback(move |ws: WebSocketUpgrade| {
-            let frames = frames.clone();
-            async move {
-                ws.on_upgrade(move |mut socket: AxSocket| async move {
+        servers
+            .serve(axum::Router::new().fallback(move |ws: WebSocketUpgrade| {
+                let frames = frames.clone();
+                async move {
+                    ws.on_upgrade(move |mut socket: AxSocket| async move {
                     while let Some(Ok(AxMessage::Text(text))) = socket.recv().await {
                         frames.lock().unwrap().push(text.as_str().to_owned());
                         // The create starts r1; only the interrupt finishes it.
@@ -908,9 +1091,9 @@ async fn interrupt_accepts_the_sessions_home_credential() {
                         }
                     }
                 })
-            }
-        }))
-        .await
+                }
+            }))
+            .await
     };
     let dir = std::env::temp_dir().join(format!("cpa-ws-home-interrupt-{}", uuid::Uuid::new_v4()));
     let cfg = Config::parse(&format!(
@@ -942,7 +1125,7 @@ async fn interrupt_accepts_the_sessions_home_credential() {
         home.attributes.insert(k.into(), v.into());
     }
     rt.set_remote_dispatch(Some(Arc::new(HomeGrant(home))));
-    let proxy = serve(router(rt.clone())).await;
+    let proxy = servers.serve(router(rt.clone())).await;
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
         .send()
@@ -973,6 +1156,8 @@ async fn interrupt_accepts_the_sessions_home_credential() {
     let frames = frames.lock().unwrap().clone();
     assert_eq!(frames.len(), 2, "{frames:?}");
     assert_eq!(frames[1], INTERRUPT, "the interrupt reaches upstream unchanged");
+    drop(socket);
+    servers.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1006,30 +1191,32 @@ async fn written_log(dir: &std::path::Path) -> String {
 async fn pinned_continuation_failure(shown: &'static [&'static str], failure: &'static str) -> Vec<String> {
     use futures_util::StreamExt;
     use wreq::ws::message::Message as WsMessage;
+    let mut servers = Servers::default();
     const FIRST: [&str; 2] = [
         r#"{"type":"response.created","response":{"id":"r1","status":"in_progress","output":[]}}"#,
         r#"{"type":"response.completed","response":{"id":"r1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}"#,
     ];
-    let upstream = serve(axum::Router::new().fallback(move |ws: WebSocketUpgrade| async move {
-        ws.on_upgrade(move |mut socket: AxSocket| async move {
-            let mut turn = 0;
-            while let Some(Ok(message)) = socket.recv().await {
-                if !matches!(message, AxMessage::Text(_)) {
-                    continue;
+    let upstream = servers
+        .serve(axum::Router::new().fallback(move |ws: WebSocketUpgrade| async move {
+            ws.on_upgrade(move |mut socket: AxSocket| async move {
+                let mut turn = 0;
+                while let Some(Ok(message)) = socket.recv().await {
+                    if !matches!(message, AxMessage::Text(_)) {
+                        continue;
+                    }
+                    turn += 1;
+                    let events: Vec<&str> = if turn == 1 {
+                        FIRST.to_vec()
+                    } else {
+                        shown.iter().copied().chain([failure]).collect()
+                    };
+                    for event in events {
+                        let _ = socket.send(AxMessage::Text(event.into())).await;
+                    }
                 }
-                turn += 1;
-                let events: Vec<&str> = if turn == 1 {
-                    FIRST.to_vec()
-                } else {
-                    shown.iter().copied().chain([failure]).collect()
-                };
-                for event in events {
-                    let _ = socket.send(AxMessage::Text(event.into())).await;
-                }
-            }
-        })
-    }))
-    .await;
+            })
+        }))
+        .await;
     let dir = std::env::temp_dir().join(format!("cpa-ws-pinned-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
@@ -1045,7 +1232,9 @@ async fn pinned_continuation_failure(shown: &'static [&'static str], failure: &'
         openai: Default::default(),
         google: Default::default(),
     };
-    let proxy = serve(router(Arc::new(crate::testing::runtime(cfg, credentials, executors)))).await;
+    let proxy = servers
+        .serve(router(Arc::new(crate::testing::runtime(cfg, credentials, executors))))
+        .await;
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
         .send()
@@ -1100,6 +1289,8 @@ async fn pinned_continuation_failure(shown: &'static [&'static str], failure: &'
         .await
         .unwrap();
     let frames = read(&mut socket).await;
+    drop(socket);
+    servers.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
     frames
 }
@@ -1143,19 +1334,21 @@ async fn an_upstream_error_that_loses_the_socket_still_cools_the_credential() {
         r#"{"type":"error","status":429,"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","resets_in_seconds":600}}"#,
         r#"{"type":"response.failed","response":{"error":{"type":"usage_limit_reached","status_code":429,"message":"The usage limit has been reached","resets_in_seconds":600}}}"#,
     ] {
-        let upstream = serve(axum::Router::new().fallback(move |ws: WebSocketUpgrade| async move {
-            ws.on_upgrade(move |mut socket: AxSocket| async move {
-                while let Some(Ok(message)) = socket.recv().await {
-                    if !matches!(message, AxMessage::Text(_)) {
-                        continue;
+        let mut servers = Servers::default();
+        let upstream = servers
+            .serve(axum::Router::new().fallback(move |ws: WebSocketUpgrade| async move {
+                ws.on_upgrade(move |mut socket: AxSocket| async move {
+                    while let Some(Ok(message)) = socket.recv().await {
+                        if !matches!(message, AxMessage::Text(_)) {
+                            continue;
+                        }
+                        for event in [CREATED, DELTA, failure] {
+                            let _ = socket.send(AxMessage::Text(event.into())).await;
+                        }
                     }
-                    for event in [CREATED, DELTA, failure] {
-                        let _ = socket.send(AxMessage::Text(event.into())).await;
-                    }
-                }
-            })
-        }))
-        .await;
+                })
+            }))
+            .await;
         let dir = std::env::temp_dir().join(format!("cpa-ws-6503-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = Config::parse(&format!(
@@ -1172,7 +1365,7 @@ async fn an_upstream_error_that_loses_the_socket_still_cools_the_credential() {
             google: Default::default(),
         };
         let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
-        let proxy = serve(router(rt.clone())).await;
+        let proxy = servers.serve(router(rt.clone())).await;
         let mut socket = wreq::Client::new()
             .websocket(format!("ws://{proxy}/v1/responses"))
             .send()
@@ -1204,7 +1397,144 @@ async fn an_upstream_error_that_loses_the_socket_still_cools_the_credential() {
             .find(|c| c.provider == "codex")
             .unwrap();
         assert!(rt.store().blocked(&credential, "gpt-fixture"), "{failure}: not cooling");
+        drop(socket);
+        servers.shutdown().await;
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// An uncommitted rejection or disconnect switches credentials without closing the
+/// downstream socket or leaking the rejected attempt's handshake frames.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn early_upstream_failures_switch_before_downstream_output() {
+    use axum::response::IntoResponse;
+    use futures_util::StreamExt;
+    use wreq::ws::message::Message as WsMessage;
+
+    const CREATED: &str = r#"{"type":"response.created","response":{"id":"rejected","output":[]}}"#;
+    const FAILED: &str =
+        r#"{"type":"response.failed","response":{"error":{"type":"server_error","message":"upstream unavailable"}}}"#;
+    const ERROR: &str =
+        r#"{"type":"error","status":429,"error":{"type":"rate_limit_error","message":"try another credential"}}"#;
+    const HEALTHY: &str = r#"{"type":"response.created","response":{"id":"healthy","output":[]}}"#;
+    const COMPLETED: &str = r#"{"type":"response.completed","response":{"id":"healthy","output":[]}}"#;
+
+    for (websocket, fallback_websocket, buffering, failure) in [
+        (true, true, true, "close"),
+        (true, true, true, "failed"),
+        (true, true, false, "error"),
+        (false, false, true, "close"),
+        (false, false, true, "failed"),
+        (true, false, true, "close"),
+    ] {
+        let mut servers = Servers::default();
+        let attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = attempts.clone();
+        let upstream = servers.serve(axum::Router::new().fallback(
+            move |headers: axum::http::HeaderMap,
+                  ws: Result<WebSocketUpgrade, axum::extract::ws::rejection::WebSocketUpgradeRejection>| {
+                let attempts = captured.clone();
+                async move {
+                    let key = headers["authorization"]
+                        .to_str()
+                        .unwrap()
+                        .trim_start_matches("Bearer ")
+                        .to_owned();
+                    let events = if key == "bad" {
+                        match failure {
+                            "close" => vec![CREATED],
+                            "failed" => vec![CREATED, FAILED],
+                            _ => vec![ERROR],
+                        }
+                    } else {
+                        vec![HEALTHY, COMPLETED]
+                    };
+                    if let Ok(ws) = ws {
+                        return ws
+                            .on_upgrade(move |mut socket: AxSocket| async move {
+                                while let Some(Ok(AxMessage::Text(_))) = socket.recv().await {
+                                    attempts.lock().unwrap().push(key.clone());
+                                    for event in &events {
+                                        if socket.send(AxMessage::Text((*event).into())).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                    if key == "bad" && failure == "close" {
+                                        let _ = socket.send(AxMessage::Close(None)).await;
+                                        return;
+                                    }
+                                }
+                            })
+                            .into_response();
+                    }
+                    attempts.lock().unwrap().push(key);
+                    let sse = events
+                        .iter()
+                        .map(|event| format!("data: {event}\n\n"))
+                        .collect::<String>();
+                    ([("content-type", "text/event-stream")], sse).into_response()
+                }
+            },
+        ))
+        .await;
+        let entry = |key: &str, priority: u8, websocket: bool| {
+            format!(
+                "  - api-key: {key}\n    base-url: http://{upstream}\n    priority: {priority}\n    websockets: {websocket}\n    models:\n      - name: gpt-fixture\n"
+            )
+        };
+        let cfg = Config::parse(&format!(
+            "codex:\n  stream-bootstrap-buffering: {buffering}\ncodex-api-key:\n{}{}",
+            entry("bad", 2, websocket),
+            entry("good", 1, fallback_websocket),
+        ))
+        .unwrap();
+        let credentials = cpa_core::config::credentials::from_config(&cfg);
+        let executors = Executors {
+            claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+            codex: cpa_exec::codex::CodexExecutor::new().unwrap(),
+            devices: Default::default(),
+            openai: Default::default(),
+            google: Default::default(),
+        };
+        let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
+        let proxy = servers.serve(router(rt)).await;
+        let mut socket = wreq::Client::new()
+            .websocket(format!("ws://{proxy}/v1/responses"))
+            .send()
+            .await
+            .unwrap()
+            .into_websocket()
+            .await
+            .unwrap();
+        for turn in 0..2 {
+            socket
+                .send(WsMessage::text(
+                    r#"{"type":"response.create","model":"gpt-fixture","input":[]}"#,
+                ))
+                .await
+                .unwrap();
+            for expected in ["response.created", "response.completed"] {
+                let frame = tokio::time::timeout(Duration::from_secs(5), socket.next())
+                    .await
+                    .expect("failover stalled")
+                    .expect("downstream closed before failover")
+                    .unwrap();
+                let WsMessage::Text(text) = frame else {
+                    panic!("upstream ws={websocket}, fallback ws={fallback_websocket}, {failure}: {frame:?}");
+                };
+                let payload: Value = serde_json::from_str(text.as_str()).unwrap();
+                assert_eq!(payload["type"], expected, "{failure}: {payload}");
+                assert_eq!(
+                    payload["response"]["id"], "healthy",
+                    "{failure}: rejected attempt escaped bootstrap"
+                );
+            }
+            if turn == 0 {
+                assert_eq!(*attempts.lock().unwrap(), ["bad", "good"], "{failure}");
+            }
+        }
+        drop(socket);
+        servers.shutdown().await;
     }
 }
 
@@ -1221,38 +1551,37 @@ async fn removing_a_credential_closes_only_its_upstream_sockets() {
 async fn removal_closes_only_its_sockets(section: &str) {
     use futures_util::StreamExt;
     use wreq::ws::message::Message as WsMessage;
+    let mut servers = Servers::default();
     type Log = Arc<std::sync::Mutex<Vec<String>>>;
     let (dials, ended): (Log, Log) = Default::default();
     let upstream = {
         let (dials, ended) = (dials.clone(), ended.clone());
-        serve(
-            axum::Router::new().fallback(move |headers: axum::http::HeaderMap, ws: WebSocketUpgrade| {
-                let (dials, ended) = (dials.clone(), ended.clone());
-                async move {
-                    let key = headers
-                        .get("authorization")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or_default()
-                        .trim_start_matches("Bearer ")
-                        .to_owned();
-                    dials.lock().unwrap().push(key.clone());
-                    ws.on_upgrade(move |mut socket| async move {
-                        while let Some(Ok(message)) = socket.recv().await {
-                            if !matches!(message, AxMessage::Text(_)) {
-                                continue;
-                            }
-                            let completed = format!(
-                                r#"{{"type":"response.completed","response":{{"id":"resp-{key}","output":[],"usage":{{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}}}}"#
-                            );
-                            if socket.send(AxMessage::Text(completed.into())).await.is_err() {
-                                break;
-                            }
+        servers.serve(axum::Router::new().fallback(move |headers: axum::http::HeaderMap, ws: WebSocketUpgrade| {
+            let (dials, ended) = (dials.clone(), ended.clone());
+            async move {
+                let key = headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .trim_start_matches("Bearer ")
+                    .to_owned();
+                dials.lock().unwrap().push(key.clone());
+                ws.on_upgrade(move |mut socket| async move {
+                    while let Some(Ok(message)) = socket.recv().await {
+                        if !matches!(message, AxMessage::Text(_)) {
+                            continue;
                         }
-                        ended.lock().unwrap().push(key);
-                    })
-                }
-            }),
-        )
+                        let completed = format!(
+                            r#"{{"type":"response.completed","response":{{"id":"resp-{key}","output":[],"usage":{{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}}}}"#
+                        );
+                        if socket.send(AxMessage::Text(completed.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    ended.lock().unwrap().push(key);
+                })
+            }
+        }))
         .await
     };
     let dir = std::env::temp_dir().join(format!("cpa-ws-remove-{}", uuid::Uuid::new_v4()));
@@ -1283,7 +1612,7 @@ async fn removal_closes_only_its_sockets(section: &str) {
         google: Default::default(),
     };
     let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
-    let proxy = serve(router(rt.clone())).await;
+    let proxy = servers.serve(router(rt.clone())).await;
     let connect = || async {
         wreq::Client::new()
             .websocket(format!("ws://{proxy}/v1/responses"))
@@ -1335,5 +1664,6 @@ async fn removal_closes_only_its_sockets(section: &str) {
     );
     assert_eq!(*ended.lock().unwrap(), ["drop"]);
     drop((kept, dropped));
+    servers.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
 }
