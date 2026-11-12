@@ -8,9 +8,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::{Context as _, bail};
-use rusqlite::{OptionalExtension, TransactionBehavior, params};
 
-use crate::config_store::{ConfigStore, checkpoint_truncate};
+use crate::config_store::{ConfigStore, State};
 use crate::cooldown_store::{Backend, Record};
 
 pub struct CredentialDb {
@@ -102,59 +101,148 @@ impl CredentialDb {
     }
 
     fn import_legacy(&self, dir: &Path) -> anyhow::Result<()> {
-        let mut conn = self.store.conn();
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let imported: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM credential_meta WHERE name = 'legacy_auth_imported')",
-            [],
-            |r| r.get(0),
-        )?;
-        if imported {
+        let mut pending = self.store.writer()?;
+        let current = self.store.current();
+        if current.metadata.contains_key("legacy_auth_imported") {
             return Ok(());
         }
+        let mut candidate = current.as_ref().clone();
         for path in json_files(dir, false)? {
             let relative = path.strip_prefix(dir)?;
-            let target = self.dir.join(relative);
-            let bytes = std::fs::read(&path).with_context(|| format!("read legacy credential {}", path.display()))?;
-            // Import source bytes, including plugin-only/unknown documents, verbatim.
-            tx.execute(
-                "INSERT INTO credential_document(name, bytes) VALUES (?1, ?2) ON CONFLICT(name) DO NOTHING",
-                params![self.name(&target)?, bytes],
-            )?;
+            let name = self.name(&self.dir.join(relative))?;
+            if !candidate.documents.contains_key(&name) {
+                let bytes =
+                    std::fs::read(&path).with_context(|| format!("read legacy credential {}", path.display()))?;
+                candidate.put_document(name, Some(bytes));
+            }
         }
         let records = crate::cooldown_store::load(dir).map_err(anyhow::Error::msg)?;
-        write_cooldowns(&tx, records, SystemTime::now())?;
-        tx.execute(
-            "INSERT INTO credential_meta(name, value) VALUES ('legacy_auth_imported', '1')",
-            [],
-        )?;
-        tx.commit()?;
-        checkpoint_truncate(&conn);
+        candidate.cooldowns = cooldowns(records, SystemTime::now())?;
+        candidate.metadata.insert("legacy_auth_imported".into(), "1".into());
+        self.store.accept(candidate, &mut pending)
+    }
+
+    pub(crate) fn retain_login(
+        &self,
+        documents: Vec<(PathBuf, Option<Vec<u8>>)>,
+        pending: &mut Option<crate::config_store::Pending>,
+    ) -> anyhow::Result<()> {
+        let mut candidate = pending
+            .as_ref()
+            .map_or_else(|| self.store.current(), |p| p.state.clone())
+            .as_ref()
+            .clone();
+        let mut names = Vec::new();
+        for (path, bytes) in documents {
+            let name = self.name(&path)?;
+            candidate.put_document(name.clone(), bytes);
+            names.push(name);
+        }
+        self.store.retain_grants(candidate, &names, pending)
+    }
+
+    pub(crate) fn login_sources(
+        &self,
+        current: &State,
+    ) -> anyhow::Result<std::collections::BTreeMap<PathBuf, Option<[u8; 32]>>> {
+        current
+            .documents
+            .iter()
+            .map(|(name, doc)| Ok((self.path(name)?, Some(crate::runtime::sha256(&doc.bytes)))))
+            .collect()
+    }
+
+    pub(crate) fn hydrate_login_render(&self, current: &State, root: &Path) -> anyhow::Result<()> {
+        for (name, document) in &current.documents {
+            let path = self.path(name)?;
+            if path.parent() == Some(self.dir.as_path()) {
+                materialize(
+                    &root.join(path.file_name().context("invalid login source")?),
+                    &document.bytes,
+                )?;
+            }
+        }
         Ok(())
     }
 
-    /// The original source bytes, read from SQLite even if the working file is gone.
+    pub(crate) fn render_login(
+        &self,
+        current: &State,
+        paths: &[PathBuf],
+        expected: &mut Option<std::collections::BTreeMap<PathBuf, Option<[u8; 32]>>>,
+        resolved: &mut std::collections::BTreeMap<String, [u8; 32]>,
+        write: &mut dyn FnMut() -> Result<(), String>,
+    ) -> anyhow::Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
+        let destinations = paths
+            .iter()
+            .map(|path| {
+                Ok(self
+                    .dir
+                    .join(path.file_name().context(crate::management::LoginRejected)?))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let sources = destinations
+            .iter()
+            .map(|path| {
+                let hash = current
+                    .documents
+                    .get(&self.name(path)?)
+                    .map(|doc| crate::runtime::sha256(&doc.bytes));
+                Ok((path.clone(), hash))
+            })
+            .collect::<anyhow::Result<std::collections::BTreeMap<_, _>>>()?;
+        if let Some(expected) = expected {
+            for path in &destinations {
+                if let Some(Some(hash)) = expected.get(path) {
+                    resolved.insert(self.name(path)?, *hash);
+                }
+            }
+            anyhow::ensure!(
+                sources
+                    .iter()
+                    .all(|(path, hash)| expected.get(path).copied().flatten() == *hash),
+                crate::management::LoginRejected
+            );
+        } else {
+            *expected = Some(sources);
+        }
+        for (path, destination) in paths.iter().zip(&destinations) {
+            self.store.block_grant_source(self.name(destination)?);
+            if let Some(document) = current.documents.get(&self.name(destination)?) {
+                materialize(path, &document.bytes)?;
+            }
+        }
+        write().map_err(crate::management::login_render_error)?;
+        paths
+            .iter()
+            .zip(destinations)
+            .map(|(path, destination)| {
+                let bytes = match std::fs::read(path) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => return Err(error.into()),
+                };
+                Ok((destination, bytes))
+            })
+            .collect()
+    }
+
+    /// Original source bytes from the owner's authorized immutable view.
     pub fn read(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
-        Ok(self
-            .store
-            .conn()
-            .query_row(
-                "SELECT bytes FROM credential_document WHERE name = ?1",
-                [self.name(path)?],
-                |r| r.get(0),
-            )
-            .optional()?)
+        let state = self.store.current();
+        Ok(state
+            .documents
+            .get(&self.name(path)?)
+            .map(|document| document.bytes.as_ref().clone()))
     }
 
     pub fn documents(&self) -> anyhow::Result<Vec<(PathBuf, Vec<u8>)>> {
-        let conn = self.store.conn();
-        let mut query = conn.prepare("SELECT name, bytes FROM credential_document ORDER BY name")?;
-        let rows = query.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
-        rows.map(|r| {
-            let (name, bytes) = r?;
-            Ok((self.path(&name)?, bytes))
-        })
-        .collect()
+        let state = self.store.current();
+        state
+            .documents
+            .iter()
+            .map(|(name, document)| Ok((self.path(name)?, document.bytes.as_ref().clone())))
+            .collect()
     }
 
     /// Synthesizes all canonical documents, including plugin paths outside the
@@ -170,74 +258,63 @@ impl CredentialDb {
         Ok(())
     }
 
-    /// Commits before any caller may publish the new credential. The SQLite write
-    /// lock covers materialization too, so another process cannot restore old bytes
-    /// between the provider write and its durable acknowledgement.
+    /// Commits before any caller may publish the new credential. The owner gate
+    /// covers candidate derivation and materialization through durable publication.
     pub fn save(&self, path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         self.save_checked(path, bytes, None).map(|_| ())
     }
 
-    /// Checks the source-byte hash inside the same transaction as the write.
+    /// Checks the accepted source-byte hash under the owner gate before writing.
     /// `None` expects an absent document; `false` leaves SQL and memory untouched.
     pub fn save_if_current(&self, path: &Path, bytes: &[u8], expected: Option<[u8; 32]>) -> anyhow::Result<bool> {
         self.save_checked(path, bytes, Some(expected))
     }
 
     fn save_checked(&self, path: &Path, bytes: &[u8], expected: Option<Option<[u8; 32]>>) -> anyhow::Result<bool> {
-        let result = (|| {
-            let mut conn = self.store.conn();
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let name = self.name(path)?;
-            if let Some(expected) = expected {
-                let held: Option<Vec<u8>> = tx
-                    .query_row("SELECT bytes FROM credential_document WHERE name = ?1", [&name], |r| {
-                        r.get(0)
-                    })
-                    .optional()?;
-                let held = held
-                    .as_deref()
-                    .map(|b| <sha2::Sha256 as sha2::Digest>::digest(b).into());
-                if held != expected {
-                    return Ok(false);
-                }
-            }
-            put(&tx, &name, Some(bytes))?;
-            materialize(path, bytes)?;
-            tx.commit()?;
-            checkpoint_truncate(&conn);
-            Ok(true)
-        })();
-        if result.is_err() {
-            let _ = self.restore(path);
+        self.command()?.save_checked(path, bytes, expected)
+    }
+
+    /// Admission precedes runtime reload/per-ID guards. Internal persistence reuses
+    /// this context instead of recursively entering the owner (including recovery).
+    pub(crate) fn command(&self) -> anyhow::Result<CredentialCommand<'_>> {
+        Ok(CredentialCommand {
+            db: self,
+            pending: self.store.writer()?,
+            grant: false,
+            deferred: false,
+            preservation_source: None,
+        })
+    }
+
+    /// Preservation only: callers have already consumed a non-repeatable grant.
+    pub(crate) fn granted_command(&self) -> anyhow::Result<CredentialCommand<'_>> {
+        Ok(CredentialCommand {
+            db: self,
+            pending: self.store.grant_writer()?,
+            grant: true,
+            deferred: false,
+            preservation_source: None,
+        })
+    }
+
+    pub(crate) fn required_source(&self, path: &Path) -> Option<Option<[u8; 32]>> {
+        if !self.store.any_grant_source() {
+            return None;
         }
-        result
+        self.name(path).ok().and_then(|name| self.store.grant_source(&name))
+    }
+
+    /// Recovery admission for new work, without holding the owner over network I/O.
+    pub(crate) fn admit_work(&self) -> anyhow::Result<()> {
+        drop(self.store.writer()?);
+        Ok(())
     }
 
     /// Hydrates canonical documents, runs provider/plugin writers, then commits
-    /// their final source documents together under the SQLite write lock. A failed
+    /// their final source documents together under the owner gate. A failed
     /// write or transaction restores the unchanged canonical working documents.
     pub fn write_files<T>(&self, paths: &[PathBuf], write: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
-        let result = (|| {
-            let mut conn = self.store.conn();
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            for path in paths {
-                self.restore_in(&tx, path)?;
-            }
-            let value = write()?;
-            for path in paths {
-                persist_file(self, &tx, path)?;
-            }
-            tx.commit()?;
-            checkpoint_truncate(&conn);
-            Ok(value)
-        })();
-        if result.is_err() {
-            for path in paths {
-                // Preserve the original error; a broken cache is rebuilt at the next load.
-                let _ = self.restore(path);
-            }
-        }
-        result
+        self.command()?.write_files(paths, write)
     }
 
     /// A missing cache file does not prevent deletion and cannot resurrect the
@@ -247,31 +324,34 @@ impl CredentialDb {
     }
 
     /// Refresh callers invoke this under the stable document lock before spending
-    /// a refresh token, so another process's committed grant is adopted first.
+    /// a refresh token, restoring the owner's latest accepted source bytes first.
     pub fn restore(&self, path: &Path) -> anyhow::Result<()> {
-        let mut conn = self.store.conn();
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        self.restore_in(&tx, path)?;
-        tx.commit()?;
-        Ok(())
+        let _writer = self.store.writer()?;
+        self.restore_from(&self.store.current(), path)
     }
 
-    fn restore_in(&self, conn: &rusqlite::Connection, path: &Path) -> anyhow::Result<()> {
-        let bytes: Option<Vec<u8>> = conn
-            .query_row(
-                "SELECT bytes FROM credential_document WHERE name = ?1",
-                [self.name(path)?],
-                |r| r.get(0),
-            )
-            .optional()?;
+    fn restore_from(&self, state: &State, path: &Path) -> anyhow::Result<()> {
+        let bytes = state
+            .documents
+            .get(&self.name(path)?)
+            .map(|document| document.bytes.as_slice());
         match bytes {
-            Some(bytes) => materialize(path, &bytes),
+            Some(bytes) => materialize(path, bytes),
             None => remove(path),
         }
     }
 
+    pub(crate) fn repair_cache(&self) -> anyhow::Result<()> {
+        let _writer = self.store.grant_writer()?;
+        let current = self.store.current();
+        for name in current.documents.keys() {
+            self.restore_from(&current, &self.path(name)?)?;
+        }
+        Ok(())
+    }
+
     /// Recreates documents and clears abandoned cache files. Each restoration
-    /// holds SQLite's write lock through the copy; it cannot overwrite a newer save.
+    /// holds the owner gate through the copy; it cannot overwrite a newer save.
     pub fn materialize(&self) -> anyhow::Result<()> {
         private_dir(&self.dir)?;
         let mut paths: BTreeSet<PathBuf> = json_files(&self.dir, true)?.into_iter().collect();
@@ -283,67 +363,250 @@ impl CredentialDb {
     }
 }
 
+/// One admitted credential operation; not a second owner or an ambient context.
+pub(crate) struct CredentialCommand<'a> {
+    db: &'a CredentialDb,
+    pending: crate::config_store::Writer<'a>,
+    grant: bool,
+    deferred: bool,
+    preservation_source: Option<PathBuf>,
+}
+
+impl CredentialCommand<'_> {
+    pub(crate) fn authorize_completed_source(&mut self, path: &Path, expected: [u8; 32]) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.grant
+                && self
+                    .read(path)?
+                    .is_some_and(|bytes| crate::runtime::sha256(&bytes) == expected),
+            "completed grant source changed"
+        );
+        self.preservation_source = Some(path.to_owned());
+        Ok(())
+    }
+
+    pub(crate) fn preserves_source(&self, path: &Path) -> bool {
+        self.grant && self.preservation_source.as_deref() == Some(path)
+    }
+
+    pub(crate) fn is_grant(&self) -> bool {
+        self.grant
+    }
+
+    pub(crate) fn defer_grant_publication(&mut self) {
+        self.deferred = self.grant;
+    }
+
+    pub(crate) fn resolve_grant_publication(&mut self) -> anyhow::Result<()> {
+        if std::mem::take(&mut self.deferred) {
+            self.db.store.resolve_grants(&mut self.pending)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore(&self, path: &Path) -> anyhow::Result<()> {
+        self.db.restore_from(&self.current(), path)
+    }
+
+    /// A provider's completed initial result enters through this explicit context;
+    /// ordinary uploads and host saves still obtain command(), never grant_writer.
+    pub(crate) fn write_files<T>(
+        &mut self,
+        paths: &[PathBuf],
+        write: impl FnOnce() -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        let result = (|| {
+            let current = self.current();
+            for path in paths {
+                self.db.restore_from(&current, path)?;
+            }
+            let value = write()?;
+            let mut candidate = current.as_ref().clone();
+            let mut names = Vec::with_capacity(paths.len());
+            for path in paths {
+                let bytes = match std::fs::read(path) {
+                    Ok(bytes) => Some(bytes),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(e) => return Err(e).with_context(|| format!("read credential {}", path.display())),
+                };
+                let name = self.db.name(path)?;
+                candidate.put_document(name.clone(), bytes);
+                names.push(name);
+            }
+            if self.grant {
+                self.db.store.accept_grants(candidate, &names, &mut self.pending)?;
+            } else {
+                self.db.store.accept(candidate, &mut self.pending)?;
+            }
+            Ok(value)
+        })();
+        if result.is_err() {
+            for path in paths {
+                let _ = self.db.restore_from(&self.db.store.current(), path);
+            }
+        }
+        result
+    }
+
+    /// An already-rendered provider batch is retained before touching cache files.
+    pub(crate) fn save_documents(&mut self, documents: &[(PathBuf, Vec<u8>)]) -> anyhow::Result<()> {
+        let changes: Vec<_> = documents
+            .iter()
+            .map(|(path, bytes)| (path.clone(), Some(bytes.as_slice())))
+            .collect();
+        self.apply_documents(&changes)
+    }
+
+    /// One owner commit includes raw replacements and explicit source-fenced removals.
+    pub(crate) fn apply_documents(&mut self, documents: &[(PathBuf, Option<&[u8]>)]) -> anyhow::Result<()> {
+        let result = (|| {
+            let mut candidate = self.current().as_ref().clone();
+            let mut names = Vec::with_capacity(documents.len());
+            for (path, bytes) in documents {
+                let name = self.db.name(path)?;
+                candidate.put_document(name.clone(), bytes.map(<[u8]>::to_vec));
+                names.push(name);
+            }
+            let materialize_documents = || -> anyhow::Result<()> {
+                for (path, bytes) in documents {
+                    match bytes {
+                        Some(bytes) => materialize(path, bytes)?,
+                        None => match std::fs::remove_file(path) {
+                            Ok(()) => {}
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(error) => return Err(error).context("remove credential cache"),
+                        },
+                    }
+                }
+                Ok(())
+            };
+            if self.grant {
+                self.db.store.accept_grants(candidate, &names, &mut self.pending)?;
+                materialize_documents()?;
+            } else {
+                materialize_documents()?;
+                self.db.store.accept(candidate, &mut self.pending)?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            for (path, _) in documents {
+                let _ = self.db.restore_from(&self.db.store.current(), path);
+            }
+        }
+        result
+    }
+
+    pub(crate) fn hold_virtual(&self, grant: crate::runtime::HeldVirtualGrant) -> bool {
+        if self.pending.is_none() {
+            return false;
+        }
+        self.retain_virtual(grant);
+        true
+    }
+
+    pub(crate) fn retain_virtual(&self, grant: crate::runtime::HeldVirtualGrant) {
+        if let Some((path, hash)) = grant.source_fence()
+            && let Ok(name) = self.db.name(path)
+        {
+            self.db.store.fence_virtual_source(name, hash);
+        }
+        self.db.store.hold_virtual(grant);
+    }
+
+    fn current(&self) -> Arc<State> {
+        self.pending
+            .as_ref()
+            .map_or_else(|| self.db.store.current(), |pending| pending.state.clone())
+    }
+
+    pub(crate) fn read(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
+        Ok(self
+            .current()
+            .documents
+            .get(&self.db.name(path)?)
+            .map(|document| document.bytes.as_ref().clone()))
+    }
+
+    pub(crate) fn save(&mut self, path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+        self.save_checked(path, bytes, None).map(|_| ())
+    }
+
+    pub(crate) fn save_checked(
+        &mut self,
+        path: &Path,
+        bytes: &[u8],
+        expected: Option<Option<[u8; 32]>>,
+    ) -> anyhow::Result<bool> {
+        let result = (|| {
+            let current = self.current();
+            let name = self.db.name(path)?;
+            if let Some(expected) = expected {
+                let held = current
+                    .documents
+                    .get(&name)
+                    .map(|document| <sha2::Sha256 as sha2::Digest>::digest(document.bytes.as_slice()).into());
+                if held != expected {
+                    return Ok(false);
+                }
+            }
+            let mut candidate = current.as_ref().clone();
+            candidate.put_document(name.clone(), Some(bytes.to_vec()));
+            if self.grant {
+                if self.deferred {
+                    self.db.store.retain_grants(candidate, &[name], &mut self.pending)?;
+                } else {
+                    self.db.store.accept_grant(candidate, name, &mut self.pending)?;
+                    materialize(path, bytes)?;
+                }
+            } else {
+                materialize(path, bytes)?;
+                self.db.store.accept(candidate, &mut self.pending)?;
+            }
+            Ok(true)
+        })();
+        if result.is_err() {
+            // Keep admission during repair; recursively calling restore would wait
+            // on our own owner gate and could replay a required projection here.
+            let _ = self.db.restore_from(&self.db.store.current(), path);
+        }
+        result
+    }
+}
+
 impl Backend for CredentialDb {
     fn load(&self) -> Result<Vec<Record>, String> {
-        let load = || -> anyhow::Result<Vec<Record>> {
-            let conn = self.store.conn();
-            let mut query = conn.prepare("SELECT record FROM credential_cooldown ORDER BY id")?;
-            let rows = query.query_map([], |r| r.get::<_, String>(0))?;
-            rows.map(|r| Ok(serde_json::from_str(&r?)?)).collect()
-        };
-        load().map_err(|e| e.to_string())
+        self.store
+            .current()
+            .cooldowns
+            .values()
+            .map(|record| serde_json::from_str(record).map_err(|e| e.to_string()))
+            .collect()
     }
 
     fn save(&self, records: Vec<Record>, now: SystemTime) -> Result<(), String> {
         let save = || -> anyhow::Result<()> {
-            let mut conn = self.store.conn();
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            write_cooldowns(&tx, records, now)?;
-            tx.commit()?;
-            checkpoint_truncate(&conn);
-            Ok(())
+            let mut pending = self.store.writer()?;
+            let current = self.store.current();
+            let mut candidate = current.as_ref().clone();
+            candidate.cooldowns = cooldowns(records, now)?;
+            self.store.accept(candidate, &mut pending)
         };
         save().map_err(|e| e.to_string())
     }
 }
 
-fn write_cooldowns(conn: &rusqlite::Connection, records: Vec<Record>, now: SystemTime) -> anyhow::Result<()> {
-    conn.execute("DELETE FROM credential_cooldown", [])?;
-    for mut record in records {
-        record.updated_at = Some(now);
-        let id = serde_json::to_string(&(&record.auth_id, &record.model))?;
-        conn.execute(
-            "INSERT OR REPLACE INTO credential_cooldown(id, record) VALUES (?1, ?2)",
-            params![id, serde_json::to_string(&record)?],
-        )?;
-    }
-    Ok(())
-}
-
-fn persist_file(db: &CredentialDb, conn: &rusqlite::Connection, path: &Path) -> anyhow::Result<()> {
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => Some(bytes),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e).with_context(|| format!("read credential {}", path.display())),
-    };
-    put(conn, &db.name(path)?, bytes.as_deref())
-}
-
-fn put(conn: &rusqlite::Connection, name: &str, bytes: Option<&[u8]>) -> anyhow::Result<()> {
-    match bytes {
-        Some(bytes) => {
-            conn.execute(
-                "INSERT INTO credential_document(name, bytes) VALUES (?1, ?2)
-                 ON CONFLICT(name) DO UPDATE SET bytes = excluded.bytes, rev = credential_document.rev + 1
-                 WHERE credential_document.bytes != excluded.bytes",
-                params![name, bytes],
-            )?;
-        }
-        None => {
-            conn.execute("DELETE FROM credential_document WHERE name = ?1", [name])?;
-        }
-    }
-    Ok(())
+fn cooldowns(records: Vec<Record>, now: SystemTime) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+    records
+        .into_iter()
+        .map(|mut record| {
+            record.updated_at = Some(now);
+            Ok((
+                serde_json::to_string(&(&record.auth_id, &record.model))?,
+                serde_json::to_string(&record)?,
+            ))
+        })
+        .collect()
 }
 
 fn create_dir(dir: &Path) -> anyhow::Result<()> {
@@ -435,10 +698,240 @@ mod tests {
     }
 
     #[test]
+    fn retrying_a_failed_legacy_import_republishes_with_the_same_store() {
+        let root = directory();
+        let path = root.join("cook.db");
+        let store = Arc::new(crate::testing::config_store(&path).unwrap());
+        let legacy = root.join("legacy");
+        std::fs::create_dir(&legacy).unwrap();
+        let bytes = br#"{"type":"private","access_token":"test-only"}"#;
+        std::fs::write(legacy.join("login.json"), bytes).unwrap();
+        let mut working = path.as_os_str().to_owned();
+        working.push(".credentials");
+        std::fs::create_dir_all(Path::new(&working)).unwrap();
+        let blocked = crate::testing::block_publication(&path);
+        assert!(CredentialDb::initialize(store.clone(), &legacy).is_err());
+        drop(blocked);
+        let retried = CredentialDb::initialize(store.clone(), &legacy).unwrap();
+        let published = rusqlite::Connection::open(&path).unwrap();
+        let count: i64 = published
+            .query_row("SELECT count(*) FROM credential_document", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "successful initialization must publish the previously committed import"
+        );
+        assert_eq!(
+            retried.read(&retried.auth_dir().join("login.json")).unwrap().as_deref(),
+            Some(bytes.as_slice())
+        );
+        drop(published);
+        drop(retried);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rendered_grant_batch_is_durable_before_cache_materialization() {
+        let root = directory();
+        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
+        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let documents = vec![
+            (
+                db.auth_dir().join("a.json"),
+                br#"{"type":"private","token":"opaque-a"}"#.to_vec(),
+            ),
+            (
+                db.auth_dir().join("b.json"),
+                br#"{"type":"private","token":"opaque-b"}"#.to_vec(),
+            ),
+        ];
+        // A real cache failure must not drop the completed batch before retention.
+        std::fs::remove_dir_all(db.auth_dir()).unwrap();
+        std::fs::write(db.auth_dir(), b"private materialization fault").unwrap();
+        assert!(db.granted_command().unwrap().save_documents(&documents).is_err());
+        assert_eq!(db.documents().unwrap(), documents);
+        let backup = root.join("backup.db");
+        std::fs::copy(store.path().unwrap(), &backup).unwrap();
+        let cold = Arc::new(crate::testing::config_store(&backup).unwrap());
+        let recovered = CredentialDb::initialize(cold.clone(), &root.join("missing")).unwrap();
+        for ((path, bytes), (recovered_path, recovered_bytes)) in documents.iter().zip(recovered.documents().unwrap()) {
+            assert_eq!(path.file_name(), recovered_path.file_name());
+            assert_eq!(bytes, &recovered_bytes);
+        }
+        std::fs::remove_file(db.auth_dir()).unwrap();
+        db.materialize().unwrap();
+        for (path, bytes) in &documents {
+            assert_eq!(&std::fs::read(path).unwrap(), bytes);
+        }
+        drop((recovered, cold, db, store));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn consumed_grant_survives_a_checkpoint_error_and_merges_the_next_result() {
+        use crate::testing::installation_effects::{self, Stage};
+        let root = directory();
+        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
+        store.import_yaml("server: {port: 8317}\n", "test", "initial").unwrap();
+        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let a = db.auth_dir().join("a.json");
+        let b = db.auth_dir().join("b.json");
+        db.save(&a, br#"{"refresh_token":"R0","opaque":[1,2]}"#).unwrap();
+        db.save(&b, br#"{"refresh_token":"S0"}"#).unwrap();
+        let live = PathBuf::from(crate::testing::database_connection(&store).path().unwrap());
+        let failed = installation_effects::once(&live, Stage::BeforeReplace, || {
+            Err(std::io::Error::other("checkpoint fault"))
+        });
+        let r1 = br#"{"refresh_token":"R1","opaque":[1,2]}"#;
+        assert!(db.granted_command().unwrap().save(&a, r1).is_err());
+        drop(failed);
+        let blocked = crate::testing::block_publication(store.path().unwrap());
+        assert!(
+            store
+                .import_yaml("server: {port: 8318}\n", "test", "unrelated")
+                .is_err()
+        );
+        assert!(
+            db.granted_command()
+                .unwrap()
+                .save(&b, br#"{"refresh_token":"S1"}"#)
+                .is_err()
+        );
+        assert_eq!(
+            db.read(&a).unwrap().unwrap(),
+            br#"{"refresh_token":"R0","opaque":[1,2]}"#
+        );
+        drop(blocked);
+        db.admit_work().unwrap();
+        assert_eq!(db.read(&a).unwrap().unwrap(), r1);
+        assert_eq!(db.read(&b).unwrap().unwrap(), br#"{"refresh_token":"S1"}"#);
+        assert_eq!(
+            store.load().unwrap().config.port,
+            8317,
+            "uninstalled ordinary mutation must not revive"
+        );
+        drop((db, store));
+        assert!(!live.exists(), "settled owner cleans its own workspace");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unresolved_grant_checkpoint_survives_drop_and_another_database_initialization() {
+        let root = directory();
+        let path = root.join("cook.db");
+        let store = Arc::new(crate::testing::config_store(&path).unwrap());
+        store.import_yaml("server: {port: 8317}\n", "test", "history").unwrap();
+        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let auth = db.auth_dir().join("a.json");
+        db.save(&auth, br#"{"refresh_token":"R0"}"#).unwrap();
+        let live = PathBuf::from(crate::testing::database_connection(&store).path().unwrap());
+        std::fs::create_dir(root.join("other")).unwrap();
+        let blocked = crate::testing::block_publication(&path);
+        assert!(
+            db.granted_command()
+                .unwrap()
+                .save(&auth, br#"{"refresh_token":"R1"}"#)
+                .is_err()
+        );
+        drop((db, store));
+        assert!(
+            live.exists(),
+            "normal last-owner drop must retain unresolved recovery data"
+        );
+        let other = crate::testing::config_store(&root.join("other/another.db")).unwrap();
+        assert!(live.exists(), "initialization must not sweep another namespace's grant");
+        drop(other);
+        drop(blocked);
+        let resumed = Arc::new(crate::testing::config_store(&path).unwrap());
+        let db = CredentialDb::initialize(resumed.clone(), &root.join("missing")).unwrap();
+        assert_eq!(
+            db.read(&db.auth_dir().join("a.json")).unwrap().unwrap(),
+            br#"{"refresh_token":"R1"}"#
+        );
+        assert_eq!(resumed.load().unwrap().config.port, 8317);
+        assert_eq!(resumed.revisions(10, None).unwrap().len(), 1);
+        drop((db, resumed));
+        assert!(
+            !live.exists(),
+            "successful resume returns to ordinary own-workspace cleanup"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_publication_keeps_the_newer_grant_until_an_owner_retry() {
+        let root = directory();
+        let path = root.join("cook.db");
+        let store = Arc::new(crate::testing::config_store(&path).unwrap());
+        store.import_yaml("server: {port: 8317}\n", "test", "").unwrap();
+        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let auth = db.auth_dir().join("auth.json");
+        let old = br#"{"type":"private","access_token":"test-R0"}"#;
+        let grant = br#"{"type":"private","access_token":"test-R1"}"#;
+        db.save(&auth, old).unwrap();
+        let accepted_revision = store.load().unwrap().rev;
+        let published = std::fs::read(&path).unwrap();
+
+        let blocked = crate::testing::block_publication(&path);
+        assert!(db.save(&auth, grant).is_err());
+        assert_eq!(db.read(&auth).unwrap().as_deref(), Some(old.as_slice()));
+        {
+            let checkpoint = crate::testing::database_connection(&store);
+            let retained: Vec<u8> = checkpoint
+                .query_row(
+                    "SELECT bytes FROM credential_document WHERE name = 'local:auth.json'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained, grant);
+            assert_eq!(
+                checkpoint
+                    .pragma_query_value(None, "integrity_check", |row| row.get::<_, String>(0))
+                    .unwrap(),
+                "ok"
+            );
+        }
+        assert!(
+            store
+                .import_yaml("server: {port: 8318}\n", "test", "unrelated")
+                .is_err()
+        );
+        assert_eq!(store.load().unwrap().rev, accepted_revision);
+        assert_eq!(store.load().unwrap().config.port, 8317);
+        assert_eq!(std::fs::read(&path).unwrap(), published);
+        drop(blocked);
+
+        // An owner retry first publishes the retained checkpoint, then derives
+        // the unrelated change from that state rather than resurrecting R0.
+        store.import_yaml("server: {port: 8318}\n", "test", "retry").unwrap();
+        assert_eq!(db.read(&auth).unwrap().as_deref(), Some(grant.as_slice()));
+        let copy = root.join("standalone.db");
+        std::fs::copy(&path, &copy).unwrap();
+        let recovered_store = Arc::new(crate::testing::config_store(&copy).unwrap());
+        let recovered = CredentialDb::initialize(recovered_store.clone(), &root.join("missing")).unwrap();
+        assert_eq!(recovered_store.load().unwrap().config.port, 8318);
+        assert_eq!(
+            recovered
+                .read(&recovered.auth_dir().join("auth.json"))
+                .unwrap()
+                .as_deref(),
+            Some(grant.as_slice())
+        );
+        drop((recovered, recovered_store, db, store));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn initialize_save_reopen_documents_round_trip() {
         let root = directory();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let local = db.auth_dir().join("auth.json");
         let nested = db.auth_dir().join("nested/auth.json");
         let external = root.join("external.json");
@@ -451,7 +944,11 @@ mod tests {
         assert!(db.name(&external).unwrap().starts_with("external:"));
         let before = db.documents().unwrap();
         drop(db);
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         assert_eq!(db.documents().unwrap(), before);
         drop(db);
         std::fs::remove_dir_all(root).unwrap();
@@ -464,7 +961,7 @@ mod tests {
 
         let root = directory();
         let db = CredentialDb::initialize(
-            Arc::new(ConfigStore::open(&root.join("cook.db")).unwrap()),
+            Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap()),
             &root.join("missing"),
         )
         .unwrap();
@@ -510,8 +1007,11 @@ mod tests {
             symlink("..2024_mount/nested.json", legacy.join("linked.json")).unwrap();
             std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
         }
-        let db =
-            CredentialDb::initialize(Arc::new(ConfigStore::open(&root.join("cook.db")).unwrap()), &legacy).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap()),
+            &legacy,
+        )
+        .unwrap();
         let names: Vec<_> = db
             .documents()
             .unwrap()
@@ -587,7 +1087,7 @@ mod tests {
         let original = b"{\n  \"type\":\"plugin-private\",\"opaque\":{\"secret\":\"first\"}\n}\n";
         std::fs::write(legacy.join("auth.json"), original).unwrap();
         let path = root.join("cook.db");
-        let store = Arc::new(ConfigStore::open(&path).unwrap());
+        let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store
             .import_yaml("server: {port: 8317}\n", "test", "preinitialized config")
             .unwrap();
@@ -603,13 +1103,13 @@ mod tests {
         drop(db);
         drop(store);
         std::fs::remove_dir_all(&dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &legacy).unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap()), &legacy).unwrap();
         assert_eq!(std::fs::read(&auth).unwrap(), updated);
         std::fs::remove_file(&auth).unwrap();
         db.delete(&auth).unwrap();
         drop(db);
         std::fs::remove_dir_all(&dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &legacy).unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap()), &legacy).unwrap();
         assert!(db.read(&auth).unwrap().is_none());
         assert!(!auth.exists());
         assert!(legacy.join("auth.json").exists());
@@ -621,7 +1121,7 @@ mod tests {
     fn canonical_scan_preserves_external_documents_and_auth_indexes_across_restart() {
         let root = directory();
         let path = root.join("cook.db");
-        let store = Arc::new(ConfigStore::open(&path).unwrap());
+        let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store.import_yaml("oauth: {}\n", "test", "").unwrap();
         let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
         let nested = db.auth_dir().join("nested/auth.json");
@@ -646,7 +1146,11 @@ mod tests {
         drop(store);
         std::fs::remove_dir_all(dir).unwrap();
         std::fs::remove_file(&external).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         assert_eq!(identities(&db), before);
         assert_eq!(db.read(&nested).unwrap().unwrap(), bytes);
         assert_eq!(std::fs::read(&external).unwrap(), bytes);
@@ -657,12 +1161,12 @@ mod tests {
     #[test]
     fn failed_batch_is_atomic_and_restores_working_documents() {
         let root = directory();
-        let store = Arc::new(ConfigStore::open(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
         let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
         let first = db.auth_dir().join("first.json");
         let second = db.auth_dir().join("second.json");
         db.save(&first, b"{\"old\":true}").unwrap();
-        store.conn().execute_batch("CREATE TRIGGER fail_second BEFORE INSERT ON credential_document WHEN NEW.name = 'local:second.json' BEGIN SELECT RAISE(ABORT, 'injected durable failure'); END;").unwrap();
+        let blocked = crate::testing::block_checkpoint_install(&store);
         assert!(
             db.write_files(&[first.clone(), second.clone()], || {
                 std::fs::write(&first, b"{\"new\":true}")?;
@@ -675,6 +1179,7 @@ mod tests {
         assert_eq!(std::fs::read(&first).unwrap(), b"{\"old\":true}");
         assert!(db.read(&second).unwrap().is_none());
         assert!(!second.exists());
+        drop(blocked);
         drop(db);
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
@@ -684,7 +1189,11 @@ mod tests {
     fn cooldown_records_survive_removal_of_working_directory() {
         let root = directory();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let records = vec![Record {
             auth_id: "auth.json".into(),
             model: "model".into(),
@@ -695,7 +1204,11 @@ mod tests {
         let dir = db.auth_dir();
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let saved = Backend::load(&*db).unwrap();
         assert_eq!(saved.len(), 1);
         assert_eq!(

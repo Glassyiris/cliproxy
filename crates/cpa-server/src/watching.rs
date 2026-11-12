@@ -1,28 +1,45 @@
-//! Reloads committed SQLite configuration and credentials, plus plugin auth changes.
+//! Reconciles canonical credentials after explicit owner/plugin notifications.
 //!
-//! One task checks the config store's `data_version` every second. Management writes
-//! publish configuration when they commit; commits from another connection wake the
-//! credential reload through `Management::reload_config`. Plugin auth changes and
-//! credential notifications wake the same task without polling working files.
+//! Configuration views arrive directly from accepted service commands. This task
+//! has no timer, filesystem watcher or published-snapshot discovery path.
 //!
 //! Credential working files are caches for provider/plugin APIs that require paths.
 //! They are restored and written under the database's write lock; hand edits are not
 //! supported or observed. Scans read SQLite source documents. Plugin parsing runs
 //! outside management/runtime locks, then publication under `Management::disk` keeps
 //! incomplete documents and rejects scans made stale by a concurrent credential save.
+use cpa_core::config::credentials;
+use cpa_core::credential::{Credential, Source};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError};
-use std::time::Duration;
-
-use cpa_core::config::credentials;
-use cpa_core::credential::{Credential, Source};
 
 use crate::management::Management;
 
-const CONFIG_POLL: Duration = Duration::from_secs(1);
+/// Owns notification admission and its current blocking reconciliation.
+pub struct Notifications {
+    stop: tokio_util::sync::CancellationToken,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+impl Notifications {
+    pub fn cancellation_token(&self) -> tokio_util::sync::CancellationToken {
+        self.stop.clone()
+    }
+    pub fn stop(&self) {
+        self.stop.cancel();
+    }
+    pub async fn shutdown(mut self) -> Result<(), tokio::task::JoinError> {
+        self.stop.cancel();
+        self.task.take().expect("notification task already joined").await
+    }
+}
+impl Drop for Notifications {
+    fn drop(&mut self) {
+        self.stop.cancel();
+    }
+}
 
-pub fn start(state: &Arc<Management>) -> tokio::task::JoinHandle<()> {
+pub fn start(state: &Arc<Management>) -> Notifications {
     let plugin_auth = Arc::new(tokio::sync::Notify::new());
     credentials::on_plugin_auth_change(Some(Arc::new({
         let plugin_auth = plugin_auth.clone();
@@ -32,21 +49,23 @@ pub fn start(state: &Arc<Management>) -> tokio::task::JoinHandle<()> {
     let state = Arc::downgrade(state);
     // Load once at startup, including any plugin providers installed before the hook.
     plugin_auth.notify_one();
-    tokio::spawn(async move {
-        let mut poll = tokio::time::interval_at(tokio::time::Instant::now() + CONFIG_POLL, CONFIG_POLL);
-        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let stop = tokio_util::sync::CancellationToken::new();
+    let cancelled = stop.clone();
+    let task = tokio::spawn(async move {
         loop {
-            let poll_config = tokio::select! {
-                _ = poll.tick() => true,
-                () = plugin_auth.notified() => false,
-                () = credential_changes.notified() => false,
+            tokio::select! {
+                biased;
+                () = cancelled.cancelled() => return,
+                () = plugin_auth.notified() => {},
+                () = credential_changes.notified() => {},
             };
+            if cancelled.is_cancelled() {
+                return;
+            }
             let Some(state) = state.upgrade() else { return };
             let plugin_auth = plugin_auth.clone();
             let reloaded = tokio::task::spawn_blocking(move || {
-                if poll_config {
-                    state.reload_config();
-                } else if let Err(error) = reload_with_notify(&state, Some(&plugin_auth)) {
+                if let Err(error) = reload_with_notify(&state, Some(&plugin_auth)) {
                     tracing::error!("failed to reload config: {error}");
                 }
             })
@@ -55,7 +74,8 @@ pub fn start(state: &Arc<Management>) -> tokio::task::JoinHandle<()> {
                 tracing::error!("config watcher: reload failed unexpectedly: {error}");
             }
         }
-    })
+    });
+    Notifications { stop, task: Some(task) }
 }
 
 /// Why [`reload`] kept the last good config: the stored one does not compile.
@@ -122,11 +142,12 @@ fn keep_incomplete(state: &Management, files: &mut Vec<Credential>, incomplete: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn state() -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>, PathBuf) {
         let root = std::env::temp_dir().join(format!("cpa-watch-outcome-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        let store = Arc::new(crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
         store.import_yaml("oauth: {}\n", "test", "").unwrap();
         let db = crate::credential_store::CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
         let mut config = store.load().unwrap().config;
@@ -144,6 +165,66 @@ mod tests {
             db.clone(),
         ));
         (Management::new(rt, store), db, root)
+    }
+
+    #[tokio::test]
+    async fn shutdown_settles_in_flight_reload_before_workspace_cleanup() {
+        use std::future::Future as _;
+        use std::task::Poll;
+        for _ in 0..20 {
+            let (state, db, root) = state();
+            let (entered, started) = tokio::sync::oneshot::channel();
+            let (release, held) = std::sync::mpsc::channel();
+            let (completed, finished) = tokio::sync::oneshot::channel();
+            let settled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let observed = settled.clone();
+            let workspace = state.config.working_directory().unwrap().to_owned();
+            assert!(workspace.is_dir());
+            let marker = workspace.join("settled-reload");
+            let written = marker.clone();
+            crate::management::BEFORE_RECONCILE.lock().unwrap().push((
+                state.rt.config().auth_dir.clone(),
+                Box::new(move || {
+                    entered.send(()).unwrap();
+                    held.recv().unwrap();
+                    std::fs::write(marker, b"completed before cleanup").unwrap();
+                    observed.store(true, std::sync::atomic::Ordering::SeqCst);
+                    completed.send(()).unwrap();
+                }),
+            ));
+            let task = start(&state);
+            started.await.unwrap();
+            let mut shutdown = Box::pin(task.shutdown());
+            let early = std::future::poll_fn(|cx| {
+                Poll::Ready(match shutdown.as_mut().poll(cx) {
+                    Poll::Ready(result) => {
+                        result.unwrap();
+                        true
+                    }
+                    Poll::Pending => false,
+                })
+            })
+            .await;
+            release.send(()).unwrap();
+            finished.await.unwrap();
+            if !early {
+                shutdown.await.unwrap();
+            }
+            assert!(
+                !early,
+                "notification shutdown returned while its blocking reload still owned the workspace"
+            );
+            assert!(settled.load(std::sync::atomic::Ordering::SeqCst));
+            assert_eq!(std::fs::read(written).unwrap(), b"completed before cleanup");
+            drop(state);
+            drop(db);
+            assert!(
+                !workspace.exists(),
+                "the owner workspace is cleaned only after the reload settles"
+            );
+            std::fs::remove_dir_all(&root).unwrap();
+            assert!(!root.exists());
+        }
     }
 
     #[tokio::test]
@@ -165,65 +246,131 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn database_watcher_parks_and_polls_credential_commits() {
+    async fn database_watcher_keeps_owner_state_after_external_snapshot_replacement() {
         let (state, db, root) = state();
+        // Go `authIDForPath`: the credential ID uses the platform separator.
+        let nested = std::path::Path::new("sub").join("nested.json");
+        let nested = nested.to_string_lossy();
+        let hash = bcrypt::hash("watcher-test-key", 4).unwrap();
+        state
+            .commit_with(|store| {
+                store.import_yaml(
+                    &format!("management: {{secret-key: '{hash}'}}\noauth: {{}}\n"),
+                    "test",
+                    "enable private management fixture",
+                )
+            })
+            .unwrap();
         let canonical = br#"{"type":"codex","email":"canonical@example.invalid"}"#;
         db.save(&db.auth_dir().join("a.json"), canonical).unwrap();
         db.save(&db.auth_dir().join("sub/nested.json"), canonical).unwrap();
         db.save(&root.join("external.json"), canonical).unwrap();
         let watcher = start(&state);
         tokio::time::timeout(Duration::from_secs(3), async {
-            while state.rt.store().get("sub/nested.json").is_none() {
+            while state.rt.store().get(&nested).is_none() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
         .await
         .expect("nested database document was not loaded");
-        let parked = state.rt.config();
-        tokio::time::sleep(CONFIG_POLL * 2).await;
-        assert!(
-            Arc::ptr_eq(&parked, &state.rt.config()),
-            "an idle database republished config"
-        );
-        let external = crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap();
-        let head = external.snapshot().unwrap().0;
-        external
-            .conn()
-            .execute(
-                "UPDATE credential_document SET bytes = ?1 WHERE name = 'local:sub/nested.json'",
-                [br#"{"type":"codex","email":"external@example.invalid"}"#.as_slice()],
+        let mut config_changes = state.rt.subscribe_config();
+        let head = state.config_store().snapshot().unwrap().0;
+
+        // Construct an independent artifact; replacing the published file is not
+        // an online command and cannot import either changed or additional rows.
+        let external = Arc::new(crate::testing::config_store(&root.join("incoming.db")).unwrap());
+        let external_db =
+            crate::credential_store::CredentialDb::initialize(external.clone(), &root.join("missing")).unwrap();
+        external_db
+            .save(
+                &external_db.auth_dir().join("sub/nested.json"),
+                br#"{"type":"codex","email":"out-of-band@example.invalid"}"#,
             )
             .unwrap();
+        external_db
+            .save(&external_db.auth_dir().join("unadmitted.json"), canonical)
+            .unwrap();
+        std::fs::copy(external.path().unwrap(), root.join("replacement.db")).unwrap();
+        std::fs::rename(root.join("replacement.db"), root.join("cook.db")).unwrap();
+        reload(&state).unwrap();
         assert_eq!(
-            external.snapshot().unwrap().0,
+            state.rt.store().get(&nested).unwrap().str("email"),
+            Some("canonical@example.invalid")
+        );
+        assert!(state.rt.store().get("unadmitted.json").is_none());
+        assert_eq!(
+            db.read(&db.auth_dir().join("sub/nested.json")).unwrap().as_deref(),
+            Some(canonical.as_slice())
+        );
+
+        // A supported authenticated command still updates the running owner.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let app = crate::management::router(state.clone());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let client = wreq::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+        let response = client
+            .post(format!("{base}/v8/management/credentials?name=a.json"))
+            .bearer_auth("watcher-test-key")
+            .json(&serde_json::json!({"type": "claude", "email": "owner@example.invalid"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            state.rt.store().get("a.json").unwrap().str("email"),
+            Some("owner@example.invalid")
+        );
+        assert_eq!(
+            state.rt.store().get(&nested).unwrap().str("email"),
+            Some("canonical@example.invalid")
+        );
+        assert!(state.rt.store().get("unadmitted.json").is_none());
+        assert_eq!(
+            state.config_store().snapshot().unwrap().0,
             head,
             "credentials do not create config revisions"
         );
-        tokio::time::timeout(Duration::from_secs(4), async {
-            while state
-                .rt
-                .store()
-                .get("sub/nested.json")
-                .is_none_or(|c| c.str("email") != Some("external@example.invalid"))
-            {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("credential-only commit was not picked up by the database poll");
+        assert!(
+            config_changes.try_next().is_none(),
+            "credential changes must not notify config subscribers"
+        );
+
+        // The subsequent legitimate command must not smuggle bypass rows into
+        // the portable artifact. Cold-load only its ordinary single-file copy.
+        let copy = root.join("cold.db");
+        std::fs::copy(root.join("cook.db"), &copy).unwrap();
+        let recovered_store = Arc::new(crate::testing::config_store(&copy).unwrap());
+        let recovered =
+            crate::credential_store::CredentialDb::initialize(recovered_store.clone(), &root.join("missing")).unwrap();
         assert_eq!(
-            state.rt.store().get("a.json").unwrap().str("email"),
-            Some("canonical@example.invalid")
+            recovered
+                .read(&recovered.auth_dir().join("sub/nested.json"))
+                .unwrap()
+                .as_deref(),
+            Some(canonical.as_slice())
         );
         assert!(
-            Arc::ptr_eq(&parked, &state.rt.config()),
-            "a credential commit republished config"
+            recovered
+                .read(&recovered.auth_dir().join("unadmitted.json"))
+                .unwrap()
+                .is_none()
         );
-        watcher.abort();
-        let _ = watcher.await;
-        drop(external);
-        drop(state);
-        drop(db);
+        watcher.shutdown().await.unwrap();
+        server.abort();
+        let _ = server.await;
+        drop((recovered, recovered_store, external_db, external, state, db));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -231,7 +378,7 @@ mod tests {
     async fn credential_notification_reloads_same_connection_saves() {
         let (state, db, root) = state();
         let config = state.rt.config();
-        let config_changes = state.rt.subscribe_config();
+        let mut config_changes = state.rt.subscribe_config();
         let watcher = start(&state);
         db.save(
             &db.auth_dir().join("a.json"),
@@ -251,11 +398,10 @@ mod tests {
             "a credential notification republished config"
         );
         assert!(
-            !config_changes.has_changed().unwrap(),
+            config_changes.try_next().is_none(),
             "a credential notification woke config subscribers"
         );
-        watcher.abort();
-        let _ = watcher.await;
+        watcher.shutdown().await.unwrap();
         drop(state);
         drop(db);
         std::fs::remove_dir_all(root).unwrap();
@@ -282,18 +428,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_second_store_connection_publishes_on_reload() {
+    async fn a_replaced_snapshot_does_not_publish_on_reload() {
         let (state, db, root) = state();
-        let external = crate::config_store::ConfigStore::open(&root.join("cook.db")).unwrap();
+        let hash = bcrypt::hash("reload-test-key", 4).unwrap();
+        state
+            .commit_with(|store| {
+                store.import_yaml(
+                    &format!("management: {{secret-key: '{hash}'}}\noauth: {{}}\n"),
+                    "test",
+                    "enable private management fixture",
+                )
+            })
+            .unwrap();
+        let original = state.rt.config().port;
+        let external = crate::testing::config_store(&root.join("incoming.db")).unwrap();
         external
             .import_yaml("server: {port: 9002}\noauth: {}\n", "test", "")
             .unwrap();
-        assert_ne!(state.rt.config().port, 9002);
-        state.reload_config();
-        assert_eq!(state.rt.config().port, 9002);
-        drop(external);
-        drop(state);
-        drop(db);
+        std::fs::copy(external.path().unwrap(), root.join("replacement.db")).unwrap();
+        std::fs::rename(root.join("replacement.db"), root.join("cook.db")).unwrap();
+        reload(&state).unwrap();
+        assert_eq!(state.rt.config().port, original);
+        assert_eq!(state.config_store().load().unwrap().config.port, original);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let app = crate::management::router(state.clone());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let response = wreq::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap()
+            .put(format!("{base}/admin/v1/r/setting/server"))
+            .bearer_auth("reload-test-key")
+            .json(&serde_json::json!({"spec": {"port": 9003}}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(state.rt.config().port, 9003);
+        assert_eq!(state.config_store().load().unwrap().config.port, 9003);
+        server.abort();
+        let _ = server.await;
+        drop((external, state, db));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -554,6 +739,9 @@ mod tests {
             left.iter().map(|c| (c.model.as_str(), c.status)).collect::<Vec<_>>(),
             [("q", 429)]
         );
+        // Settle owned outcome persistence and cooldown writes before releasing
+        // the runtime/store and deleting their private fixture directory.
+        state.rt.shutdown_codex_refreshes().await;
         drop(state);
         drop(db);
         std::fs::remove_dir_all(root).unwrap();

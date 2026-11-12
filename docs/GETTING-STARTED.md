@@ -49,11 +49,13 @@ On a new server, the Overview shows a short Get started card with three steps: c
 
 In the dashboard, choose Connect account and pick a provider. Claude and ChatGPT (Codex) open the provider's own sign-in page; Kimi, Meta, xAI and Devin show a device code to enter on their site. The proxy stores sign-in and refresh tokens in SQLite, not `auth-dir`. It never sees your password.
 
-You can also sign in from a terminal, which helps on a server without a browser:
+You can also sign in from a terminal, which helps on a server without a browser. The running proxy owns its database, so the terminal sign-in goes through it:
 
 ```sh
-cook-router --db ~/.cook-router/cook.db --claude-login --no-browser
+cook-router --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
 ```
+
+Use your port if the script picked another. When asked, type `COOK_ROUTER_MANAGEMENT_KEY` from `keys.env`; it is not shown as you type.
 
 The other sign-in flags are `--codex-login`, `--codex-device-login`, `--kimi-login`, `--meta-login`, `--xai-login` and `--devin-login`. API keys for Claude, Codex, Gemini, Vertex AI, xAI and OpenAI-compatible services go on the dashboard's Provider keys page.
 
@@ -84,7 +86,7 @@ claude
 - Behind a tunnel or reverse proxy on the same machine (cloudflared, `tailscale serve`, Caddy, nginx), every request arrives from `127.0.0.1`, so the server treats every internet client as local. Then `allow-remote: false` no longer keeps them out, a local-only `--password` is accepted from the internet, and five wrong keys from anyone block the tunnel for everyone. Set `server.trusted-proxies` to the proxy's address, for example `[127.0.0.1, "::1"]` for a local cloudflared, and restart. The server then takes the client address from `X-Forwarded-For` from that proxy only. CLIProxyAPI behaves the same way.
 - Do not send keys over plain HTTP across a network. Use a tunnel or reverse proxy with HTTPS, or serve HTTPS directly with `server.tls`.
 - The dashboard is built into the binary, and cook-router never downloads code to run. (CLIProxyAPI downloads its dashboard from GitHub every three hours by default.) cook-router does fetch model lists from the CLIProxyAPI project's mirrors at start and every three hours, as CLIProxyAPI does; they are JSON data, checked before use, and `--local-model` turns the fetch off.
-- SQLite holds configuration secrets, client keys and OAuth tokens. Keep its directory private and the database, WAL/SHM sidecars and backups private. Use `config backup` for a consistent live backup, not a raw copy while WAL is open. Config revisions do not contain credential state and never restore a revoked token. Logical deletion does not guarantee physical disk erasure. See [database safety](CONFIGURATION.md#database-safety-and-backup).
+- SQLite holds configuration secrets, client keys and OAuth tokens. Keep its directory, published snapshot, temporary working databases and backups private. Copy the `--db` snapshot directly while the service runs for a complete backup, or use `config backup`. Config revisions do not contain credential state and never restore a revoked token. Logical deletion does not guarantee physical disk erasure. See [database safety](CONFIGURATION.md#database-safety-and-backup).
 
 ## Next
 

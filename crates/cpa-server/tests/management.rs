@@ -3,7 +3,6 @@ use cpa_core::config::Config;
 use cpa_core::gostr::GoStr;
 use cpa_exec::Executors;
 use cpa_exec::claude::ClaudeExecutor;
-use cpa_server::config_store::ConfigStore;
 use cpa_server::credential_store::CredentialDb;
 use cpa_server::management::Management;
 use cpa_server::{Runtime, management, watching};
@@ -132,7 +131,7 @@ impl Fixture {
         let dir = std::env::temp_dir().join(format!("manage-{name}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join("auth")).unwrap();
         let hash = bcrypt::hash("fake-management-only", 4).unwrap();
-        let store = Arc::new(ConfigStore::open(&dir.join("config.db")).unwrap());
+        let store = Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap());
         store.import_yaml(&yaml(&dir.join("auth"), &hash), "test", "").unwrap();
         let mut cfg = store.load().unwrap().config;
         let db = CredentialDb::initialize(store.clone(), &cfg.auth_dir).unwrap();
@@ -160,19 +159,12 @@ impl Fixture {
     fn auth(&self) -> PathBuf {
         self.rt.store().credential_backend().auth_dir()
     }
-    /// A separate connection makes writes visible to the watcher's data_version.
+    /// A fixture command adapter sharing the live owner's canonical state.
     fn writer(&self) -> Arc<CredentialDb> {
-        CredentialDb::initialize(
-            Arc::new(ConfigStore::open(&self.dir.join("config.db")).unwrap()),
-            &self.dir.join("auth"),
-        )
-        .unwrap()
+        self.rt.store().credential_backend()
     }
-    fn reject_saves(&self) {
-        rusqlite::Connection::open(self.dir.join("config.db"))
-            .unwrap()
-            .execute_batch("CREATE TRIGGER reject_insert BEFORE INSERT ON credential_document BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END; CREATE TRIGGER reject_update BEFORE UPDATE ON credential_document BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END;")
-            .unwrap();
+    fn reject_saves(&self) -> cpa_server::testing::BlockedCheckpoint {
+        cpa_server::testing::block_checkpoint_install(self.state.config_store())
     }
     async fn server(&self) -> (String, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -193,6 +185,74 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+#[tokio::test]
+async fn authorized_credential_reads_and_cooldown_views_need_no_storage() {
+    use cpa_server::cooldown_store::{Backend, Record};
+    let raw = b"{ \"type\": \"claude\", \"access_token\": \"test-only\", \"opaque\": [1,2] }\n";
+    let f = Fixture::from_yaml("credential-memory", |auth, hash| {
+        std::fs::write(auth.join("raw.json"), raw).unwrap();
+        format!(
+            "config-version: 8\nmanagement: {{secret-key: '{hash}'}}\noauth: {{auth-dir: {}}}\n",
+            auth.display()
+        )
+    });
+    let db = f.rt.store().credential_backend();
+    let name = f.auth().join("raw.json");
+    let revision = f.state.config_store().snapshot().unwrap().0;
+    let now = std::time::SystemTime::now();
+    Backend::save(
+        db.as_ref(),
+        vec![Record {
+            auth_id: "raw.json".into(),
+            reason: "test cooldown".into(),
+            ..Default::default()
+        }],
+        now,
+    )
+    .unwrap();
+    let cooldown = Backend::load(db.as_ref()).unwrap();
+    assert_eq!(cooldown[0].reason, "test cooldown");
+    assert_eq!(cooldown[0].updated_at, Some(now));
+    let (base, server) = f.server().await;
+    let client = wreq::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let storage = cpa_server::testing::database_connection(f.state.config_store());
+    storage.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let response = client
+        .get(format!("{base}/v8/management/credentials/download?name=raw.json"))
+        .bearer_auth("fake-management-only")
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.bytes().await.unwrap();
+    let documents = db.documents();
+    let checkpoint = Backend::load(db.as_ref());
+    let canonical_bytes = db.read(&name);
+    storage.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(body.as_ref(), raw);
+    assert_eq!(canonical_bytes.unwrap().as_deref(), Some(raw.as_slice()));
+    assert_eq!(documents.unwrap(), vec![(name.clone(), raw.to_vec())]);
+    assert_eq!(checkpoint.unwrap(), cooldown);
+    assert_eq!(
+        f.state.config_store().snapshot().unwrap().0,
+        revision,
+        "credential domains do not advance configuration history"
+    );
+    let replacement = b"{\"type\":\"claude\",\"access_token\":\"replacement-test-only\"}\n";
+    db.save(&name, replacement).unwrap();
+    assert_eq!(db.read(&name).unwrap().unwrap(), replacement);
+    db.delete(&name).unwrap();
+    assert!(db.read(&name).unwrap().is_none());
+    assert!(db.documents().unwrap().is_empty());
+    server.abort();
+    let _ = server.await;
 }
 
 #[tokio::test]
@@ -515,16 +575,36 @@ async fn eventually(done: impl Fn() -> bool) {
 async fn watcher_reconciles_auth_independently_of_config_writes() {
     let f = Fixture::new("missing-config");
     let watcher = watching::start(&f.state);
-    let auth = |name: &str| f.auth().join(name);
-    f.writer()
-        .save(&auth("a.json"), br#"{"type":"claude","access_token":"fake-a"}"#)
+    let (base, server) = f.server().await;
+    let client = wreq::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
         .unwrap();
+    // Online changes enter the owner through its authenticated command adapter,
+    // not a second store whose files the watcher would have to hot-adopt.
+    let upload = |name: &str, token: &str| {
+        client
+            .post(format!("{base}/v8/management/credentials?name={name}"))
+            .bearer_auth("fake-management-only")
+            .json(&json!({"type": "claude", "access_token": token}))
+    };
+    let config_revision = f.state.config_store().snapshot().unwrap().0;
+    assert_eq!(upload("a.json", "fake-a").send().await.unwrap().status(), 200);
     eventually(|| f.rt.store().get("a.json").is_some()).await;
-    f.writer()
-        .save(&auth("b.json"), br#"{"type":"claude","access_token":"fake-b"}"#)
-        .unwrap();
-    f.writer().delete(&auth("a.json")).unwrap();
+    assert_eq!(upload("b.json", "fake-b").send().await.unwrap().status(), 200);
+    assert_eq!(
+        client
+            .delete(format!("{base}/v8/management/credentials?name=a.json"))
+            .bearer_auth("fake-management-only")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
     eventually(|| f.rt.store().get("b.json").is_some() && f.rt.store().get("a.json").is_none()).await;
+    assert_eq!(f.state.config_store().snapshot().unwrap().0, config_revision);
     assert_eq!(f.rt.config().api_keys, ["fake-client"], "last good config kept");
     let text = f
         .state
@@ -537,17 +617,15 @@ async fn watcher_reconciles_auth_independently_of_config_writes() {
     watching::reload(&f.state).unwrap();
     eventually(|| f.rt.config().api_keys == ["fake-next"]).await;
     let revision = f.rt.store().get("b.json").unwrap().revision;
-    f.writer()
-        .save(&auth("b.json"), br#"{"type":"claude","access_token":"fake-b"}"#)
-        .unwrap();
+    assert_eq!(upload("b.json", "fake-b").send().await.unwrap().status(), 200);
     watching::reload(&f.state).unwrap();
     assert_eq!(f.rt.store().get("b.json").unwrap().revision, revision);
-    // Another process's committed grant is noticed even when its byte length is unchanged.
-    f.writer()
-        .save(&auth("b.json"), br#"{"type":"claude","access_token":"fake-c"}"#)
-        .unwrap();
+    // The owner's changed grant is admitted even when its byte length is unchanged.
+    assert_eq!(upload("b.json", "fake-c").send().await.unwrap().status(), 200);
     eventually(|| f.rt.store().get("b.json").unwrap().revision != revision).await;
-    watcher.abort();
+    watcher.shutdown().await.unwrap();
+    server.abort();
+    let _ = server.await;
 }
 
 #[tokio::test]
@@ -585,7 +663,7 @@ async fn polling_reconciles_auth_and_ignores_non_auth_directories() {
     assert_eq!(f.rt.config().api_keys, ["owner-fake-client"]);
     assert!(!f.rt.config().management.allow_remote);
     assert!(f.rt.store().get("fake.json").unwrap().disabled);
-    watcher.abort();
+    watcher.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -630,9 +708,13 @@ async fn nonlocal_socket_requires_allow_remote_even_with_a_valid_key() {
             .status(),
         200
     );
-    let mut config = (*f.rt.config()).clone();
-    config.management.allow_remote = true;
-    f.rt.publish_config(config);
+    f.state
+        .config_store()
+        .edit("test", "allow remote management", |document| {
+            document["management"]["allow-remote"] = serde_json::json!(true);
+            Ok(())
+        })
+        .unwrap();
     assert_eq!(
         client
             .get(&url)
@@ -2932,9 +3014,9 @@ async fn antigravity_management_login_flows() {
         2
     );
     server.abort();
-    // A rejected SQLite commit fails the login without publishing a credential.
+    // A rejected checkpoint install fails the login without publishing a credential.
     let down = Fixture::new("antigravitystore");
-    down.reject_saves();
+    let _down_blocked = down.reject_saves();
     let options = management::Options {
         login_base: Some(fake.clone()),
         ..Default::default()
@@ -3129,9 +3211,9 @@ async fn vertex_service_account_import() {
     }
     server.abort();
 
-    // A rejected SQLite commit fails the import without publishing a credential.
+    // A rejected checkpoint install fails the import without publishing a credential.
     let down = Fixture::new("vertexstore");
-    down.reject_saves();
+    let _down_blocked = down.reject_saves();
     let (base, server) = down.server().await;
     let response = wreq::Client::new()
         .post(format!("{base}{v8}"))
@@ -3148,14 +3230,14 @@ async fn vertex_service_account_import() {
         body["message"]
             .as_str()
             .unwrap()
-            .contains("injected credential failure"),
+            .contains("publish config database snapshot"),
         "{body}"
     );
     assert!(down.rt.store().credential_backend().documents().unwrap().is_empty());
     assert!(down.rt.store().get("vertex-proj-1.json").is_none(), "not published");
     server.abort();
 
-    // A writer that succeeds before SQL rejects its new document restores the
+    // A writer that succeeds before storage rejects its new document restores the
     // exact prior bytes and leaves the published credential untouched.
     let failed = Fixture::new("vertexrollback");
     let path = failed.auth().join("vertex-proj-1.json");
@@ -3164,7 +3246,7 @@ async fn vertex_service_account_import() {
     watching::reload(&failed.state).unwrap();
     let before = failed.rt.store().get("vertex-proj-1.json").unwrap();
     std::fs::write(&path, br#"{"type":"vertex","prefix":"cache-edit","disabled":false}"#).unwrap();
-    failed.reject_saves();
+    let _failed_blocked = failed.reject_saves();
     let (base, server) = failed.server().await;
     let response = wreq::Client::new()
         .post(format!("{base}{v8}"))
@@ -3183,6 +3265,227 @@ async fn vertex_service_account_import() {
     let after = failed.rt.store().get("vertex-proj-1.json").unwrap();
     assert_eq!((after.revision, after.disabled), (before.revision, true));
     server.abort();
+}
+
+/// Actual initial provider grants can finish behind a failed publication, but
+/// their file preservation does not report successful login/runtime publication.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn initial_codex_and_claude_grants_merge_while_new_login_starts_are_paused() {
+    use base64::Engine as _;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (arrived_tx, mut arrived_rx) = tokio::sync::mpsc::unbounded_channel();
+    let codex_gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let claude_gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let requests = Arc::new(AtomicUsize::new(0));
+    let id = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        json!({"email":"pending@example.invalid",
+        "https://api.openai.com/auth":{"chatgpt_plan_type":"plus","chatgpt_account_id":"pending-account"}})
+        .to_string(),
+    );
+    let token = format!("e30.{id}.sig");
+    let app=axum::Router::new().fallback({
+        let (codex_gate,claude_gate,requests)=(codex_gate.clone(),claude_gate.clone(),requests.clone());
+        move |uri:axum::http::Uri| {
+            let (codex_gate,claude_gate,requests,arrived_tx,token)=(codex_gate.clone(),claude_gate.clone(),requests.clone(),arrived_tx.clone(),token.clone());
+            async move {
+                requests.fetch_add(1,Ordering::SeqCst);
+                let value=match uri.path() {
+                    "/oauth/token"=>{
+                        arrived_tx.send("codex").unwrap();
+                        codex_gate.acquire().await.unwrap().forget();
+                        json!({"id_token":token,"access_token":"pending-codex-access","refresh_token":"pending-codex-refresh","expires_in":3600})
+                    }
+                    "/v1/oauth/token"=>{
+                        arrived_tx.send("claude").unwrap();
+                        claude_gate.acquire().await.unwrap().forget();
+                        json!({"access_token":"sk-ant-oat-pending","refresh_token":"pending-claude-refresh","expires_in":3600,
+                            "account":{"uuid":"pending-claude-account","email_address":"pending@example.invalid"},"organization":{"uuid":"pending-org","name":"Private fixture"}})
+                    }
+                    "/api/oauth/profile"=>json!({"account":{"uuid":"pending-claude-account","email":"pending@example.invalid"},"organization":{"uuid":"pending-org","name":"Private fixture"}}),
+                    _=>json!({})
+                };
+                axum::Json(value)
+            }
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fake = format!("http://{}", listener.local_addr().unwrap());
+    let fake_server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let f = Fixture::new("initial-pending");
+    let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (base, state, server) = serve_with(
+        &f,
+        management::Options {
+            login_base: Some(fake),
+            login_settled: Some(settled_tx),
+            ..Default::default()
+        },
+    )
+    .await;
+    struct Jobs {
+        handles: Vec<tokio::task::JoinHandle<()>>,
+        gates: [Arc<tokio::sync::Semaphore>; 2],
+    }
+    impl Drop for Jobs {
+        fn drop(&mut self) {
+            for gate in &self.gates {
+                gate.add_permits(2);
+            }
+            for handle in &self.handles {
+                handle.abort();
+            }
+        }
+    }
+    let mut jobs = Jobs {
+        handles: vec![server, fake_server],
+        gates: [codex_gate.clone(), claude_gate.clone()],
+    };
+    let mut sessions = std::collections::BTreeMap::new();
+    for provider in ["codex", "claude"] {
+        let start = oauth_get(&base, &format!("/oauth/auth-url?provider={provider}")).await;
+        let sid = start["state"].as_str().unwrap().to_owned();
+        let response = wreq::Client::new()
+            .post(format!("{base}/v8/management/oauth/callback"))
+            .json(&json!({"provider":provider,"state":sid,"code":"private-fixture-code"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        sessions.insert(provider, sid);
+    }
+    for _ in 0..2 {
+        tokio::time::timeout(std::time::Duration::from_secs(10), arrived_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    struct Blocked(PathBuf, std::fs::Permissions);
+    impl Drop for Blocked {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+    let publication = f.state.config_store().path().unwrap();
+    #[cfg(unix)]
+    let publication = publication.parent().unwrap();
+    let permissions = std::fs::metadata(publication).unwrap().permissions();
+    let mut blocked_permissions = permissions.clone();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        blocked_permissions.set_mode(0o500);
+    }
+    #[cfg(not(unix))]
+    blocked_permissions.set_readonly(true);
+    std::fs::set_permissions(publication, blocked_permissions).unwrap();
+    let blocked = Blocked(publication.to_owned(), permissions);
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    // Subscribe before the fault only reads the accepted view; this fixture has no
+    // pending candidate until the import below.
+    let _events = f
+        .state
+        .config_store()
+        .subscribe_configuration({
+            let events = events.clone();
+            move |view| {
+                events.lock().unwrap().push((view.revision, view.digest.clone()));
+                Ok(())
+            }
+        })
+        .unwrap();
+    let mut config = f.state.config_store().load().unwrap().config.document;
+    config["server"]["port"] = 8318.into();
+    assert!(
+        f.state
+            .config_store()
+            .import_yaml(&serde_yaml_ng::to_string(&config).unwrap(), "test", "pending-login")
+            .is_err()
+    );
+    for (provider, gate) in [("codex", codex_gate), ("claude", claude_gate)] {
+        gate.add_permits(1);
+        let settled = tokio::time::timeout(std::time::Duration::from_secs(10), settled_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(settled, sessions[provider]);
+        assert_eq!(
+            oauth_get(&base, &format!("/oauth/status?state={settled}")).await["status"],
+            "error",
+            "no false login success"
+        );
+    }
+    assert!(f.writer().documents().unwrap().is_empty());
+    assert!(f.rt.store().snapshot().is_empty(), "no activation while pending");
+    let before = requests.load(Ordering::SeqCst);
+    for provider in [
+        "codex",
+        "claude",
+        "antigravity",
+        "kimi",
+        "kimi-ai",
+        "meta",
+        "xai",
+        "devin",
+    ] {
+        let response = wreq::Client::new()
+            .get(format!("{base}/v8/management/oauth/auth-url?provider={provider}"))
+            .bearer_auth("fake-management-only")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 503, "new {provider} login is paused");
+    }
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        before,
+        "new upstream grant starts are zero"
+    );
+    assert!(
+        f.writer()
+            .save(
+                &f.auth().join("manual.json"),
+                br#"{"type":"codex","access_token":"manual"}"#
+            )
+            .is_err()
+    );
+    assert_eq!(events.lock().unwrap().len(), 1);
+    drop(blocked);
+    f.writer().restore(&f.auth().join("absent.json")).unwrap();
+    let documents = f.writer().documents().unwrap();
+    assert_eq!(
+        documents.len(),
+        2,
+        "both completed results survive latest-pending merges"
+    );
+    let refreshes: std::collections::BTreeSet<_> = documents
+        .iter()
+        .map(|(_, bytes)| {
+            serde_json::from_slice::<Value>(bytes).unwrap()["refresh_token"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        refreshes,
+        std::collections::BTreeSet::from(["pending-codex-refresh".to_owned(), "pending-claude-refresh".to_owned()])
+    );
+    assert_eq!(
+        events.lock().unwrap().len(),
+        2,
+        "the original configuration event is retained once"
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        before,
+        "recovery must not repeat grants"
+    );
+    // All finite login workers have sent settled. Stop and join the owned listeners.
+    for handle in jobs.handles.drain(..) {
+        handle.abort();
+        assert!(handle.await.unwrap_err().is_cancelled());
+    }
+    drop(state);
 }
 
 /// Claude: a pasted callback URL posted to `/oauth/callback` finishes the login.
@@ -3225,9 +3528,7 @@ async fn claude_login_removes_the_legacy_file_only_after_the_store_has_the_new_o
         let legacy = f.auth().join("claude-a@example.invalid.json");
         let original = br#"{"type":"claude","email":"a@example.invalid","organization_uuid":"org-1"}"#;
         f.writer().save(&legacy, original).unwrap();
-        if down {
-            f.reject_saves();
-        }
+        let _blocked = down.then(|| f.reject_saves());
         let options = management::Options {
             login_base: Some(fake.clone()),
             ..Default::default()
@@ -3365,6 +3666,154 @@ async fn kimi_channel_selects_kimi_ai_and_codex_exchange_errors_read_like_go() {
     server.abort();
     bad_server.abort();
     fake_server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_inflight_siwc_binding_is_preserved_while_new_bindings_are_paused() {
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let grants = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fake = format!("http://{}", listener.local_addr().unwrap());
+    let app=axum::Router::new().route("/api/accounts/oauth/token",axum::routing::post({
+        let(arrived,gate,grants)=(arrived.clone(),gate.clone(),grants.clone());move||{
+            let(arrived,gate,grants)=(arrived.clone(),gate.clone(),grants.clone());async move{
+                grants.fetch_add(1,std::sync::atomic::Ordering::SeqCst);arrived.notify_one();gate.acquire().await.unwrap().forget();
+                axum::Json(json!({"access_token":"bound-access","refresh_token":"bound-refresh","id_token":"bound-id","scope":"openid chatgpt.tokens.use.direct","expires_in":3600}))
+            }
+        }
+    }));
+    let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let f = Fixture::from_yaml("siwc-pending", |auth, hash| {
+        std::fs::write(auth.join("codex.json"),r#"{"type":"codex","email":"private@example.invalid","account_id":"account","access_token":"outer-access","refresh_token":"outer-refresh","opaque":{"keep":true}}"#).unwrap();
+        format!(
+            "management: {{secret-key: '{hash}'}}\noauth: {{auth-dir: {}}}\n",
+            auth.display()
+        )
+    });
+    let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (base, state, server) = serve_with(
+        &f,
+        management::Options {
+            login_base: Some(fake),
+            login_settled: Some(settled_tx),
+            ..Default::default()
+        },
+    )
+    .await;
+    struct Jobs {
+        handles: Vec<tokio::task::JoinHandle<()>>,
+        gate: Arc<tokio::sync::Semaphore>,
+    }
+    impl Drop for Jobs {
+        fn drop(&mut self) {
+            self.gate.add_permits(2);
+            for handle in &self.handles {
+                handle.abort();
+            }
+        }
+    }
+    let mut jobs = Jobs {
+        handles: vec![server, upstream],
+        gate: gate.clone(),
+    };
+    let client = wreq::Client::new();
+    let start: Value = client
+        .post(format!("{base}/v8/management/oauth/siwc/bind"))
+        .bearer_auth("fake-management-only")
+        .json(&json!({"name":"codex.json"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let sid = start["state"].as_str().unwrap().to_owned();
+    assert_eq!(
+        client
+            .post(format!("{base}/v8/management/oauth/callback"))
+            .json(&json!({"state":sid,"code":"private-code","client_id":"oaiapp_issued"}))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        200
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), arrived.notified())
+        .await
+        .unwrap();
+    struct Blocked(PathBuf, std::fs::Permissions);
+    impl Drop for Blocked {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+    let publication = f.state.config_store().path().unwrap();
+    #[cfg(unix)]
+    let publication = publication.parent().unwrap();
+    let permissions = std::fs::metadata(publication).unwrap().permissions();
+    let mut blocked_permissions = permissions.clone();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        blocked_permissions.set_mode(0o500);
+    }
+    #[cfg(not(unix))]
+    blocked_permissions.set_readonly(true);
+    std::fs::set_permissions(publication, blocked_permissions).unwrap();
+    let blocked = Blocked(publication.to_owned(), permissions);
+    let mut config = f.state.config_store().load().unwrap().config.document;
+    config["server"]["port"] = 8318.into();
+    assert!(
+        f.state
+            .config_store()
+            .import_yaml(&serde_yaml_ng::to_string(&config).unwrap(), "test", "pending-binding")
+            .is_err()
+    );
+    gate.add_permits(1);
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(10), settled_rx.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        sid
+    );
+    assert_eq!(
+        oauth_get(&base, &format!("/oauth/status?state={sid}")).await["status"],
+        "error"
+    );
+    let file = f.auth().join("codex.json");
+    assert!(
+        serde_json::from_slice::<Value>(&f.writer().read(&file).unwrap().unwrap())
+            .unwrap()
+            .get("siwc")
+            .is_none()
+    );
+    let paused = client
+        .post(format!("{base}/v8/management/oauth/siwc/bind"))
+        .bearer_auth("fake-management-only")
+        .json(&json!({"name":"codex.json"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(paused.status().as_u16(), 503);
+    drop(blocked);
+    f.writer().restore(&file).unwrap();
+    let bound: Value = serde_json::from_slice(&f.writer().read(&file).unwrap().unwrap()).unwrap();
+    assert_eq!(bound["siwc"]["refresh_token"], "bound-refresh");
+    assert_eq!(bound["refresh_token"], "outer-refresh");
+    assert_eq!(bound["opaque"], json!({"keep":true}));
+    assert_eq!(
+        grants.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "recovery/new-start refusal must not spend another grant"
+    );
+    for handle in jobs.handles.drain(..) {
+        handle.abort();
+        assert!(handle.await.unwrap_err().is_cancelled());
+    }
+    drop(state);
 }
 
 /// Go v8.0.35 Sign in with ChatGPT binding (`d50a1995`, `ae3ee3be`) against a local
@@ -4054,7 +4503,7 @@ async fn auth_files_list_v8_quota_plugin_id_and_no_quota_probe() {
         std::fs::write(auth.join(name), body).unwrap();
     }
     let hash = bcrypt::hash("fake-management-only", 4).unwrap();
-    let store = Arc::new(ConfigStore::open(&auth.join("config.db")).unwrap());
+    let store = Arc::new(cpa_server::testing::config_store(&auth.join("config.db")).unwrap());
     store
         .import_yaml(
             &format!(
@@ -4350,6 +4799,33 @@ async fn siwc_only_codex_credentials_refresh_by_name_and_in_bulk() {
     upstream.abort();
 }
 
+#[test]
+fn integration_fixtures_never_sweep_the_production_temporary_namespace() {
+    let dir = std::env::temp_dir().join(format!("management-sweep-isolation-{}", uuid::Uuid::new_v4()));
+    let sentinel = dir.join("cook-router").join("a".repeat(64));
+    std::fs::create_dir_all(sentinel.join("refs")).unwrap();
+    std::fs::write(sentinel.join("refs/0"), b"").unwrap();
+    std::fs::write(sentinel.join("live.db"), b"unrelated simulated production database").unwrap();
+    // Only the child gets this private simulated OS tmp; do not mutate the
+    // parallel test process's environment or create files in a real runtime root.
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents",
+        ])
+        .env("TMPDIR", &dir)
+        .env("TMP", &dir)
+        .env("TEMP", &dir)
+        .output()
+        .unwrap();
+    assert!(child.status.success(), "{}", String::from_utf8_lossy(&child.stderr));
+    assert_eq!(
+        std::fs::read(sentinel.join("live.db")).unwrap(),
+        b"unrelated simulated production database"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[tokio::test]
 async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
     for all in [false, true] {
@@ -4360,7 +4836,7 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         for name in ["a.json", "b.json"] {
             std::fs::write(legacy.join(name), original).unwrap();
         }
-        let store = Arc::new(ConfigStore::open(&dir.join("config.db")).unwrap());
+        let store = Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap());
         let hash = bcrypt::hash("fake-management-only", 4).unwrap();
         store
             .import_yaml(
@@ -4398,8 +4874,7 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         let query = if all { "all=true" } else { "name=a.json" };
         let url = format!("{base}/v8/management/credentials?{query}");
         let client = wreq::Client::new();
-        let sql = rusqlite::Connection::open(dir.join("config.db")).unwrap();
-        sql.execute_batch("CREATE TRIGGER reject_delete BEFORE DELETE ON credential_document BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END;").unwrap();
+        let blocked = f.reject_saves();
         let response = client
             .delete(&url)
             .bearer_auth("fake-management-only")
@@ -4413,11 +4888,16 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
             assert_eq!(std::fs::read(path).unwrap(), original);
             assert!(f.rt.store().get(name).is_some());
         }
-        let reopened =
-            CredentialDb::initialize(Arc::new(ConfigStore::open(&dir.join("config.db")).unwrap()), &legacy).unwrap();
+        drop(blocked);
+        let failed_copy = dir.join("failed-delete-copy.db");
+        std::fs::copy(store.path().unwrap(), &failed_copy).unwrap();
+        let reopened = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&failed_copy).unwrap()),
+            &legacy,
+        )
+        .unwrap();
         assert_eq!(reopened.documents().unwrap().len(), 2);
         drop(reopened);
-        sql.execute_batch("DROP TRIGGER reject_delete").unwrap();
         let response = client
             .delete(&url)
             .bearer_auth("fake-management-only")
@@ -4428,19 +4908,20 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         assert!(f.rt.store().get("a.json").is_none());
         assert_eq!(f.rt.store().get("b.json").is_none(), all);
         server.abort();
-        drop(sql);
-        let cache = db.auth_dir();
-        drop(db);
-        drop(store);
-        // Rebuild the working cache on reopen: deleted documents cannot resurrect.
-        let _ = std::fs::remove_dir_all(&cache);
-        let reopened =
-            CredentialDb::initialize(Arc::new(ConfigStore::open(&dir.join("config.db")).unwrap()), &legacy).unwrap();
+        let _ = server.await;
+        // Restore only the published file with a new cache; the live owner stays exclusive.
+        let deleted_copy = dir.join("deleted-copy.db");
+        std::fs::copy(store.path().unwrap(), &deleted_copy).unwrap();
+        let reopened = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&deleted_copy).unwrap()),
+            &legacy,
+        )
+        .unwrap();
+        let cache = reopened.auth_dir();
         assert!(reopened.read(&cache.join("a.json")).unwrap().is_none());
         assert!(!cache.join("a.json").exists());
         assert_eq!(reopened.read(&cache.join("b.json")).unwrap().is_none(), all);
-        drop(reopened);
-        drop(f);
+        drop((reopened, f, db, store));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

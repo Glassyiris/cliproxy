@@ -19,7 +19,6 @@ export default {
     "keys.add.field": "Key",
     "keys.add.generate": "Generate",
     "keys.add.required": "Enter a key.",
-    "keys.add.duplicate": "That key is already in the list.",
     "keys.add.submit": "Add key",
     "keys.add.added": "Key added.",
 

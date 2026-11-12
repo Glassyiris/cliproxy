@@ -19,7 +19,6 @@ export default {
     "keys.add.field": "密钥",
     "keys.add.generate": "生成",
     "keys.add.required": "请输入密钥。",
-    "keys.add.duplicate": "列表中已有此密钥。",
     "keys.add.submit": "添加密钥",
     "keys.add.added": "已添加密钥",
 

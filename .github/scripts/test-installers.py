@@ -8,6 +8,7 @@ import platform
 import re
 import shlex
 import shutil
+import signal
 import ssl
 import subprocess
 import sys
@@ -188,14 +189,41 @@ def main():
         def pid():
             return int((home / "cook-router.pid").read_text().strip())
 
+        def stop_owner():
+            """A running server owns cook.db and refuses offline writes, so stop the one
+            this test started; the next install() starts it again."""
+            pidfile = home / "cook-router.pid"
+            try:
+                running = int(pidfile.read_text().strip())
+            except (FileNotFoundError, ValueError):
+                return
+            if running <= 0:
+                return
+            if windows:
+                ps(f"Stop-Process -Id {running} -ErrorAction SilentlyContinue; Wait-Process -Id {running} -ErrorAction SilentlyContinue", check=False)
+                return
+            try:
+                os.kill(running, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+            for _ in range(80):
+                try:
+                    os.kill(running, 0)
+                except ProcessLookupError:
+                    return
+                time.sleep(0.25)
+            raise AssertionError(f"server {running} did not stop")
+
         def commit_config(text):
-            """Write committed settings through the supported import, retaining stale YAML backup."""
+            """Write committed settings through the supported offline import, retaining
+            stale YAML backup."""
             with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", dir=root, delete=False) as source:
                 source.write(text)
                 path = Path(source.name)
             try:
+                stop_owner()
                 result = capture([binary, "--db", home / "cook.db", "config", "import", path], env=env)
-                assert result.returncode == 0, "fixture config import failed"
+                assert result.returncode == 0, f"fixture config import failed: {result.stdout}"
             finally:
                 path.unlink()
 

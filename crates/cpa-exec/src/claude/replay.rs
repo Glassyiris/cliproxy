@@ -12,6 +12,7 @@
 //! crate::home_replay) as Go writes it; cache failures only skip replay.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -337,6 +338,8 @@ enum Backend {
 pub(crate) struct Scope {
     backend: Backend,
     pub(crate) applied: bool,
+    /// A rejected replay was cleared; this attempt must not append to its old snapshot.
+    recovered: AtomicBool,
     /// Home writes the response waits for.
     pub(crate) writes: crate::home_replay::Writes,
 }
@@ -354,6 +357,12 @@ impl Scope {
     /// `clearClaudeThinkingReplayContent`.
     pub(crate) fn clear(&self) {
         self.write(None);
+    }
+
+    /// Clears rejected history and prevents this response from writing to the old snapshot.
+    pub(crate) fn recover(&self) {
+        self.recovered.store(true, Ordering::Relaxed);
+        self.clear();
     }
 
     /// Appends (`Some`) or deletes (`None`) only if the state read is still current.
@@ -387,6 +396,9 @@ impl Scope {
     /// `cacheClaudeThinkingReplayResponse`: the `content` array of a buffered message,
     /// else the content a buffered SSE body completes.
     pub(crate) fn store_response(&self, response: &[u8]) {
+        if self.recovered.load(Ordering::Relaxed) {
+            return;
+        }
         let content = gj::get(response, "content");
         if content.is_array() {
             self.store(content.raw());
@@ -401,6 +413,9 @@ impl Scope {
 
     /// `wrapClaudeThinkingReplayStream`.
     pub(crate) fn wrap(self, stream: ExecStream) -> ExecStream {
+        if self.recovered.load(Ordering::Relaxed) {
+            return stream;
+        }
         crate::replay::wrap_stream(stream, self)
     }
 }
@@ -510,6 +525,7 @@ pub(crate) async fn prepare(cache: &Arc<ReplayCache>, gate: &Gate<'_>, req: &mut
     Some(Scope {
         backend,
         applied,
+        recovered: AtomicBool::new(false),
         writes: Default::default(),
     })
 }
@@ -544,6 +560,7 @@ mod tests {
                 snapshot,
             },
             applied: false,
+            recovered: AtomicBool::new(false),
             writes: Default::default(),
         }
     }

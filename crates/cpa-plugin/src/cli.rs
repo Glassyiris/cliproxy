@@ -39,6 +39,9 @@ pub enum Output {
     Stderr(Bytes),
 }
 
+/// One owned persistence effect, invoked on an awaited blocking worker.
+pub type CommandAuthSave = std::sync::Arc<dyn Fn(Vec<PluginAuth>) -> Result<Vec<String>, String> + Send + Sync>;
+
 /// Go `validCommandLineFlagName`.
 pub fn valid_flag_name(name: &str) -> bool {
     !name.is_empty()
@@ -320,7 +323,7 @@ impl Host {
         args: &[String],
         config_path: &str,
         builtin: &[(String, String)],
-        persist: &dyn Fn(Vec<PluginAuth>) -> Result<Vec<String>, String>,
+        persist: CommandAuthSave,
     ) -> (i32, bool, Vec<Output>) {
         let mut all: BTreeMap<String, CommandLineFlagValue> = builtin
             .iter()
@@ -394,7 +397,13 @@ impl Host {
                     }
                 };
             if resp.exit_code == 0 && !resp.auths.is_empty() {
-                let saved = match persist_command_auths(std::mem::take(&mut resp.auths), &auth_dir, persist) {
+                let data = std::mem::take(&mut resp.auths);
+                let (auth_dir, persist) = (auth_dir.clone(), persist.clone());
+                let persisted =
+                    tokio::task::spawn_blocking(move || persist_command_auths(data, &auth_dir, persist.as_ref()))
+                        .await
+                        .unwrap_or_else(|_| Err("pluginhost: save command-line auths failed".into()));
+                let saved = match persisted {
                     Ok(saved) => saved,
                     Err(message) => {
                         push_output(&mut output, Output::Stdout(resp.stdout));

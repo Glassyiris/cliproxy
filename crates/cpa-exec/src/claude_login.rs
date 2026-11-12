@@ -48,10 +48,10 @@ impl Default for LoginOptions {
 }
 
 /// One line of user input, read when the manual prompt opens.
-pub(crate) type Prompt = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = std::io::Result<String>> + Send>> + Send>;
+pub type Prompt = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = std::io::Result<String>> + Send>> + Send>;
 
 /// How the login reaches the user; tests replace every part.
-pub(crate) struct Interaction {
+pub struct Interaction {
     pub manual_delay: Duration,
     pub prompt: Option<Prompt>,
     /// Receives the authorization URL (printing, opening a browser).
@@ -201,7 +201,7 @@ fn login_error(message: impl Into<String>) -> ExecError {
 
 /// `ClaudeAuthenticator.Login` + `Manager.Login` persistence, serving the callback on
 /// `listener` (from [`bind`]).
-pub(crate) async fn login_with(
+pub async fn login_with(
     auth_dir: &Path,
     listener: tokio::net::TcpListener,
     oauth: OAuth,

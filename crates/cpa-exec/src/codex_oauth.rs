@@ -1061,6 +1061,16 @@ pub async fn device_login(
     save: Option<crate::login_store::LoginSave>,
 ) -> Result<PathBuf, ExecError> {
     let oauth = CodexOAuth::new(plain_client()?);
+    device_login_with(auth_dir, options, save, oauth).await
+}
+
+/// Device login through an explicit OAuth client; local mocks use its endpoint port.
+pub async fn device_login_with(
+    auth_dir: &Path,
+    options: &LoginOptions,
+    save: Option<crate::login_store::LoginSave>,
+    oauth: CodexOAuth,
+) -> Result<PathBuf, ExecError> {
     let code = oauth.device_code().await?;
     println!("Starting Codex device authentication...");
     println!("Codex device URL: {DEVICE_VERIFICATION_URL}");

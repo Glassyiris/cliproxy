@@ -118,10 +118,35 @@ pub fn tls_acceptor(cfg: &Config) -> anyhow::Result<Option<Arc<SslAcceptor>>> {
     Ok(Some(Arc::new(builder.build())))
 }
 
-/// Serves `app` on `listener` with the peer address as connect info, over TLS when
-/// `tls` is set. Returns only if accepting fails for good; drop the future to stop.
-/// RESP connections are closed, as Go does while management is disabled; see
-/// [`serve_with_resp`].
+/// Listener lifetime propagated explicitly through HTTP and upgraded sessions.
+#[derive(Clone)]
+pub(crate) struct ConnectionWork {
+    stop: tokio_util::sync::CancellationToken,
+    pub(crate) work: tokio_util::task::TaskTracker,
+}
+
+pub(crate) fn websocket<F, Fut>(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    owner: Option<axum::Extension<ConnectionWork>>,
+    run: F,
+) -> axum::response::Response
+where
+    F: FnOnce(axum::extract::ws::WebSocket) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let Some(axum::Extension(owner)) = owner else {
+        return ws.on_upgrade(run);
+    };
+    let operation = owner.work.token();
+    ws.on_upgrade(move |socket| async move {
+        let _operation = operation;
+        owner.stop.run_until_cancelled(run(socket)).await;
+    })
+}
+
+/// Serves `app` with peer connect info, over TLS when configured. Dropping the
+/// future stops accepted transports; managed upgrade routes share that lifetime.
+/// RESP connections close without a Management owner; see [`serve_with_resp`].
 pub async fn serve(listener: TcpListener, app: Router, tls: Option<Arc<SslAcceptor>>) -> std::io::Result<()> {
     serve_with_resp(listener, app, tls, None).await
 }
@@ -139,8 +164,21 @@ pub async fn serve_with_resp(
     tls: Option<Arc<SslAcceptor>>,
     management: Option<Arc<crate::management::Management>>,
 ) -> std::io::Result<()> {
+    let work = management.as_ref().map(|state| state.work.clone()).unwrap_or_default();
+    let transport_stop = management
+        .as_ref()
+        .map(|state| state.transport_stop.clone())
+        .unwrap_or_default();
+    let _producer = work.token();
+    let stopping = tokio_util::sync::CancellationToken::new();
+    let _close_connections = stopping.clone().drop_guard();
     loop {
-        let (stream, peer) = match listener.accept().await {
+        let accepted = tokio::select! {
+            biased;
+            () = transport_stop.cancelled() => return Ok(()),
+            accepted = listener.accept() => accepted,
+        };
+        let (stream, peer) = match accepted {
             Ok(conn) => conn,
             // As axum's serve loop: connection errors are the peer's problem; anything
             // else (EMFILE) backs off.
@@ -152,9 +190,21 @@ pub async fn serve_with_resp(
             }
         };
         go_socket_defaults(&stream);
-        let (app, management, tls) = (app.clone(), management.clone(), tls.clone());
+        let (app, management, tls) = (
+            app.clone().layer(axum::Extension(ConnectionWork {
+                stop: stopping.clone(),
+                work: work.clone(),
+            })),
+            management.clone(),
+            tls.clone(),
+        );
         let deadline = tokio::time::Instant::now() + HANDSHAKE_DEADLINE;
-        tokio::spawn(async move {
+        let closed = stopping.clone();
+        work.spawn(async move {
+            tokio::select! {
+                biased;
+                () = closed.cancelled() => {},
+                () = async move {
             let Some(acceptor) = tls else {
                 let mut first = [0u8; 1];
                 match tokio::time::timeout_at(deadline, stream.peek(&mut first)).await {
@@ -192,6 +242,8 @@ pub async fn serve_with_resp(
                 return;
             }
             serve_connection(io, peer, app, false).await;
+                } => {},
+            }
         });
     }
 }
@@ -538,16 +590,22 @@ mod tests {
     #[tokio::test]
     async fn websocket_upgrades_over_http1() {
         let echo = Router::new().route(
-            "/ws",
-            axum::routing::get(|ws: axum::extract::ws::WebSocketUpgrade| async move {
-                ws.on_upgrade(|mut socket| async move {
-                    while let Some(Ok(message)) = socket.recv().await {
-                        if socket.send(message).await.is_err() {
-                            break;
+            "/v1/responses",
+            axum::routing::get(
+                |ws: axum::extract::ws::WebSocketUpgrade,
+                 owner: Option<axum::Extension<ConnectionWork>>,
+                 log: Option<axum::Extension<crate::request_logging::RequestLog>>| async move {
+                    let timeline = log.and_then(|axum::Extension(log)| log.detach_websocket());
+                    websocket(ws, owner, move |mut socket| async move {
+                        let _timeline = timeline;
+                        while let Some(Ok(message)) = socket.recv().await {
+                            if socket.send(message).await.is_err() {
+                                break;
+                            }
                         }
-                    }
-                })
-            }),
+                    })
+                },
+            ),
         );
         let dir = std::env::temp_dir().join(format!("cpa-tls-ws-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -560,14 +618,52 @@ mod tests {
         for (scheme, tls) in [("ws", None), ("wss", Some(acceptor))] {
             let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = tcp.local_addr().unwrap();
-            tokio::spawn(serve(tcp, echo.clone(), tls));
+            let store = Arc::new(crate::testing::config_store(&dir.join(format!("{scheme}.db"))).unwrap());
+            store
+                .import_yaml(
+                    &format!(
+                        "oauth: {{auth-dir: '{}'}}\nobservability: {{logs: {{request-log: true}}}}\n",
+                        dir.join("legacy").display()
+                    ),
+                    "test",
+                    "owned websocket",
+                )
+                .unwrap();
+            let db = crate::credential_store::CredentialDb::initialize(store.clone(), &dir.join("legacy")).unwrap();
+            let mut config = store.load().unwrap().config;
+            config.auth_dir = db.auth_dir();
+            let rt = Arc::new(crate::testing::runtime_with_db(
+                config,
+                Vec::new(),
+                cpa_exec::Executors {
+                    claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
+                    codex: Default::default(),
+                    devices: Default::default(),
+                    openai: Default::default(),
+                    google: Default::default(),
+                },
+                db,
+            ));
+            let logs = dir.join(format!("{scheme}-logs"));
+            let workspace = store.working_directory().unwrap().to_owned();
+            let management = crate::management::Management::with_options(
+                rt,
+                store,
+                crate::management::Options {
+                    log_dir: Some(logs.clone()),
+                    update_check_disabled: Some(true),
+                    ..Default::default()
+                },
+            );
+            let app = crate::request_logging::router(&management, echo.clone());
+            let server = tokio::spawn(serve_with_resp(tcp, app, tls, Some(management.clone())));
             let client = wreq::Client::builder()
                 .tls_cert_verification(false)
                 .http1_only()
                 .build()
                 .unwrap();
             let mut socket = client
-                .websocket(format!("{scheme}://{addr}/ws"))
+                .websocket(format!("{scheme}://{addr}/v1/responses"))
                 .send()
                 .await
                 .unwrap()
@@ -577,6 +673,31 @@ mod tests {
             socket.send(wreq::ws::message::Message::text("ping")).await.unwrap();
             let reply = socket.recv().await.unwrap().unwrap().into_text().unwrap();
             assert_eq!(reply.as_str(), "ping", "{scheme}");
+            server.abort();
+            assert!(server.await.unwrap_err().is_cancelled());
+            tokio::time::timeout(std::time::Duration::from_secs(5), management.shutdown())
+                .await
+                .expect("upgraded session or log writer outlived shutdown");
+            let closed = tokio::time::timeout(std::time::Duration::from_secs(5), socket.recv())
+                .await
+                .expect("listener stop left an upgraded WebSocket alive");
+            assert!(match closed {
+                None | Some(Err(_)) => true,
+                Some(Ok(message)) => matches!(message, wreq::ws::message::Message::Close(_)),
+            });
+            let files = std::fs::read_dir(logs)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.extension().is_some_and(|extension| extension == "log"))
+                .collect::<Vec<_>>();
+            assert_eq!(files.len(), 1);
+            assert!(std::fs::read_to_string(&files[0]).unwrap().contains("Status: 101\n"));
+            drop(management);
+            assert!(
+                !workspace.exists(),
+                "websocket/log work retained the configuration workspace"
+            );
         }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

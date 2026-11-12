@@ -578,7 +578,9 @@ pub(crate) async fn get_logs(State(state): State<Arc<Management>>, RawQuery(raw)
         q.first("limit").trim().to_owned(),
     );
     let (dir, zone) = (state.log_dir.clone(), state.log_zone);
-    tokio::task::spawn_blocking(move || get_logs_sync(&dir, &cursor, &after, &limit, zone))
+    state
+        .work
+        .spawn_blocking(move || get_logs_sync(&dir, &cursor, &after, &limit, zone))
         .await
         .unwrap_or_else(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
 }
@@ -868,9 +870,18 @@ fn content_type(name: &str, data: &[u8]) -> String {
     .to_owned()
 }
 
-/// Go `mime.TypeByExtension(".log")` on Unix (no built-in entry): the first
+/// Linux: `text/x-log`, the type the freedesktop database gives `.log`, without
+/// reading the host's database, so the header does not depend on the image.
+#[cfg(target_os = "linux")]
+fn system_log_type() -> Option<&'static String> {
+    static TYPE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| "text/x-log; charset=utf-8".to_owned());
+    Some(&TYPE)
+}
+
+/// Go `mime.TypeByExtension(".log")` elsewhere on Unix (no built-in entry): the first
 /// freedesktop `globs2` database that exists (first entry wins), else the
 /// `mime.types` files (last entry wins). `text/*` types gain `charset=utf-8`.
+#[cfg(not(target_os = "linux"))]
 fn system_log_type() -> Option<&'static String> {
     static TYPE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     TYPE.get_or_init(|| {

@@ -19,7 +19,6 @@ export default {
     "keys.add.field": "金鑰",
     "keys.add.generate": "產生",
     "keys.add.required": "請輸入金鑰。",
-    "keys.add.duplicate": "清單中已有此金鑰。",
     "keys.add.submit": "新增金鑰",
     "keys.add.added": "已新增金鑰",
 

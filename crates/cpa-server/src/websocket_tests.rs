@@ -378,7 +378,9 @@ async fn request_log_records_the_websocket_timeline_and_each_turn() {
     let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
     let management = crate::management::Management::with_options(
         rt.clone(),
-        Arc::new(crate::config_store::ConfigStore::memory()),
+        Arc::new(crate::config_store::ConfigStore::memory_with(
+            &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
+        )),
         crate::management::Options {
             log_dir: Some(dir.clone()),
             management_password: Some(String::new()),
@@ -616,7 +618,9 @@ async fn the_socket_closes_before_the_request_log_is_delivered() {
     rt.set_remote_dispatch(Some(Arc::new(GatedHome(gate.clone()))));
     let management = crate::management::Management::with_options(
         rt.clone(),
-        Arc::new(crate::config_store::ConfigStore::memory()),
+        Arc::new(crate::config_store::ConfigStore::memory_with(
+            &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
+        )),
         crate::management::Options {
             log_dir: Some(dir.clone()),
             management_password: Some(String::new()),
@@ -689,7 +693,9 @@ async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String
     let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
     let management = crate::management::Management::with_options(
         rt.clone(),
-        Arc::new(crate::config_store::ConfigStore::memory()),
+        Arc::new(crate::config_store::ConfigStore::memory_with(
+            &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
+        )),
         crate::management::Options {
             log_dir: Some(dir.clone()),
             management_password: Some(String::new()),
@@ -834,7 +840,9 @@ async fn interrupt_diagnostics_are_sanitized() {
     let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
     let management = crate::management::Management::with_options(
         rt.clone(),
-        Arc::new(crate::config_store::ConfigStore::memory()),
+        Arc::new(crate::config_store::ConfigStore::memory_with(
+            &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
+        )),
         crate::management::Options {
             log_dir: Some(dir.clone()),
             management_password: Some(String::new()),

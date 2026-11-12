@@ -109,6 +109,7 @@ fn scope(trace: &Trace, headers: Header, metadata: &Metadata, caller: Option<&Ca
     let value = |key: &str| metadata.get(key).and_then(Value::as_str).map(str::to_owned);
     let (api_key, access_provider) = super::model_callbacks::usage_identity(caller, &inherited);
     RequestScope {
+        auth_save_grant: None,
         request_id: trace.request_id(),
         capture: trace.capture(),
         headers,

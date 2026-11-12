@@ -159,22 +159,17 @@ pub struct Advertiser {
 }
 
 impl Advertiser {
-    /// Starts advertising for whatever `config` publishes; `tls` says whether the
-    /// listener serves TLS (Go passes `cfg.TLS.Enable`, which its listener honours).
-    /// `published` resolves after each config publish.
-    pub fn spawn(
-        config: impl Fn() -> Arc<Config> + Send + 'static,
-        mut published: tokio::sync::watch::Receiver<()>,
-        tls: bool,
-    ) -> Self {
+    /// Starts advertising for the subscribed configuration and each later
+    /// publication, in order; `tls` says whether the listener serves TLS (Go passes
+    /// `cfg.TLS.Enable`, which its listener honours).
+    pub fn spawn(mut published: cpa_server::runtime::ConfigChanges, tls: bool) -> Self {
         let (stop, mut stopped) = oneshot::channel();
         let task = tokio::spawn(async move {
             let mut state = State {
                 tls,
                 ..State::default()
             };
-            published.borrow_and_update();
-            let mut current = config();
+            let mut current = published.current().config.clone();
             let mut refreshing = state.apply(&current, true).await;
             let mut next_refresh = tokio::time::Instant::now() + REFRESH;
             loop {
@@ -188,18 +183,16 @@ impl Advertiser {
                 };
                 tokio::select! {
                     _ = &mut stopped => break,
-                    changed = published.changed() => {
-                        if changed.is_err() {
+                    changed = published.next() => {
+                        let Some(change) = changed else {
                             // The runtime is gone; wait for shutdown without spinning.
                             let _ = (&mut stopped).await;
                             break;
-                        }
-                        published.borrow_and_update();
-                        let latest = config();
-                        if Arc::ptr_eq(&latest, &current) {
+                        };
+                        if Arc::ptr_eq(&change.config, &current) {
                             continue;
                         }
-                        current = latest;
+                        current = change.config.clone();
                         refreshing = state.apply(&current, true).await;
                     }
                     () = refresh => refreshing = state.apply(&current, false).await,
