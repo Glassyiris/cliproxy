@@ -1255,12 +1255,21 @@ mod tests {
         #[cfg(target_os = "linux")]
         {
             // Every replaced or disabled cleaner was joined, not left asleep.
+            // A joined thread's /proc entry can outlive the join for a moment, so allow
+            // the kernel up to two seconds; an unjoined cleaner sleeps for a minute.
             let cleaners = || {
-                std::fs::read_dir("/proc/self/task")
-                    .unwrap()
-                    .filter_map(|task| std::fs::read_to_string(task.ok()?.path().join("comm")).ok())
-                    .filter(|name| name.trim() == "log-dir-cleaner")
-                    .count()
+                let count = || {
+                    std::fs::read_dir("/proc/self/task")
+                        .unwrap()
+                        .filter_map(|task| std::fs::read_to_string(task.ok()?.path().join("comm")).ok())
+                        .filter(|name| name.trim() == "log-dir-cleaner")
+                        .count()
+                };
+                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                while count() > 0 && std::time::Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                count()
             };
             assert_eq!(cleaners(), 0, "replaced cleaners must be joined");
             configure_output(&logs, on).unwrap();
