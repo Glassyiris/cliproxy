@@ -69,6 +69,10 @@ impl ConfigChanges {
 
 /// Lossless, ordered fan-out: one unbounded queue per subscriber, pruned when its
 /// receiver is dropped. Registration and delivery share this lock.
+// ponytail: no hard bound. A queue holds the publications made while its consumer is
+// busy; consumers keep receiving during slow work, and each commit takes a full image
+// save. Upgrade path: per-subscriber capacity with commit admission waiting, outside
+// the owner's locks, for a full subscriber.
 struct ConfigFanout {
     latest: Arc<ConfigChange>,
     /// The view a service install placed, announced by the owner's notification.
@@ -9199,6 +9203,41 @@ pub(crate) mod tests {
             assert_eq!(route(), proxy.unwrap_or(""), "version {version}");
         }
         assert_eq!(f.grants(), []);
+        std::fs::remove_dir_all(&f.dir).unwrap();
+    }
+
+    /// An in-flight refresh computes from the configuration it was dispatched with: a
+    /// global proxy published while it waits does not reroute it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_in_flight_refresh_keeps_the_configuration_it_was_given() {
+        let (days, minute) = (chrono::Duration::days(5), chrono::Duration::minutes(1));
+        let f = CodexDisk::new(&[("codex.json", &codex_file(("keep", days), ("A", "oaiapp_x", minute)))]).await;
+        let given = f.rt.config();
+        // Holding the credential's preparation lock keeps the dispatched job in flight.
+        let held = f.rt.store.prepare_lock("codex.json").lock_owned().await;
+        let before = reached("prepare", "codex.json");
+        let refresh = tokio::spawn({
+            let (rt, given) = (f.rt.clone(), given.clone());
+            async move { rt.prepare_credential("codex.json", &given, None).await }
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while reached("prepare", "codex.json") == before {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the refresh is dispatched");
+        // Meanwhile every new request would go through a closed proxy.
+        let mut ambient = Config::parse("requests:\n  proxy-url: http://127.0.0.1:9/\n").unwrap();
+        ambient.auth_dir = given.auth_dir.clone();
+        assert!(f.rt.publish_config(ambient));
+        drop(held);
+        let refreshed = tokio::time::timeout(Duration::from_secs(10), refresh)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(refreshed.is_ok(), "{refreshed:?}");
+        assert!(!f.grants().is_empty(), "the token endpoint was reached directly");
         std::fs::remove_dir_all(&f.dir).unwrap();
     }
 

@@ -2091,6 +2091,11 @@ async fn serve(
         None => Ok(()),
     };
     let persistence = rt.finish_shutdown().await;
+    // Settlement can retry a pending configuration, which reconfigures logging; the
+    // process-wide log directory cleaner is stopped and joined only after it.
+    if let Err(error) = tokio::task::spawn_blocking(cpa_server::logging::stop_cleaner).await {
+        tracing::error!("log directory cleaner did not stop: {error}");
+    }
     rt.plugins().shutdown_all(None).await;
     notifications?;
     persistence?;

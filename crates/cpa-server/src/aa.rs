@@ -254,6 +254,9 @@ pub fn start(rt: &Arc<Runtime>) {
     tokio::spawn(async move {
         let mut loaded_file = None;
         loop {
+            // Set when a publication arrived during a fetch: the next pass then runs at
+            // once with the newest view instead of waiting for the next publication.
+            let mut changed_during_fetch = false;
             let wait = {
                 let Some(rt) = weak.upgrade() else { return };
                 let settings = crate::model_router::settings(&changes.current().config).aa.clone();
@@ -273,7 +276,21 @@ pub fn start(rt: &Arc<Runtime>) {
                     Some(age) if age < TTL => Some(TTL - age),
                     _ => {
                         drop(rt);
-                        let fetched = fetch(&settings.url, &settings.key).await;
+                        // Keep taking publications while the fetch runs, so a slow or
+                        // failing upstream never lets this subscriber's queue grow.
+                        let fetch = fetch(&settings.url, &settings.key);
+                        tokio::pin!(fetch);
+                        let fetched = loop {
+                            tokio::select! {
+                                fetched = &mut fetch => break fetched,
+                                change = changes.next() => {
+                                    if change.is_none() {
+                                        return;
+                                    }
+                                    changed_during_fetch = true;
+                                }
+                            }
+                        };
                         let Some(rt) = weak.upgrade() else { return };
                         match fetched {
                             Ok(data) => {
@@ -298,6 +315,9 @@ pub fn start(rt: &Arc<Runtime>) {
                     }
                 }
             };
+            if changed_during_fetch {
+                continue;
+            }
             // Each publication is handled in order with its own view.
             let changed = match wait {
                 Some(wait) => tokio::select! {

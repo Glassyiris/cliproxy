@@ -1264,8 +1264,10 @@ mod tests {
             };
             assert_eq!(cleaners(), 0, "replaced cleaners must be joined");
             configure_output(&logs, on).unwrap();
-            assert_eq!(cleaners(), 1);
+            // The thread names itself as it starts, so check the owned handle here.
+            assert!(CLEANER.lock().unwrap().is_some(), "a positive limit starts a cleaner");
             stop_cleaner();
+            assert!(CLEANER.lock().unwrap().is_none());
             assert_eq!(cleaners(), 0, "stop_cleaner joins the cleaner");
             configure_output(&logs, Applied { max_total_mb: 0, ..on }).unwrap();
         }

@@ -430,6 +430,8 @@ fn initial_binding_wins_over_a_racing_volatile_publication() {
             vec![],
             executors(),
         ));
+        let mut before = rt.subscribe_config();
+        assert_eq!(before.current().config.routing.strategy, "round-robin");
         let race = rt.clone();
         let start = Arc::new(std::sync::Barrier::new(2));
         let publishing = start.clone();
@@ -441,6 +443,14 @@ fn initial_binding_wins_over_a_racing_volatile_publication() {
         let management = crate::management::Management::new(rt.clone(), store.clone());
         publisher.join().unwrap();
         assert_eq!(rt.config().routing.strategy, "fill-first");
+        // Subscribers follow the bound view, whether the racing publication landed
+        // before binding or was refused after it.
+        let mut last = None;
+        while let Some(change) = before.try_next() {
+            last = Some(change.config.routing.strategy.clone());
+        }
+        assert_eq!(last.as_deref(), Some("fill-first"));
+        assert_eq!(rt.subscribe_config().current().config.routing.strategy, "fill-first");
         assert_eq!(
             rt.policy().strategy,
             crate::management::policy(&store.load().unwrap().config).strategy

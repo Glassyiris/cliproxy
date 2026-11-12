@@ -147,16 +147,13 @@ impl Management {
         self.stopping.cancel();
     }
 
-    /// Join accepted requests, login workers, callback connections, blocking saves,
-    /// the hourly attempt purge and the log directory cleaner this state configures.
+    /// Join accepted requests, login workers, callback connections, blocking saves and
+    /// the hourly attempt purge.
     pub async fn shutdown(&self) {
         self.begin_shutdown();
         self.transport_stop.cancel();
         self.work.close();
         self.work.wait().await;
-        if let Err(error) = tokio::task::spawn_blocking(crate::logging::stop_cleaner).await {
-            tracing::error!("log directory cleaner did not stop: {error}");
-        }
     }
 
     /// Go `managementRoutesEnabled`, for the RESP protocol on the main listener.
@@ -297,10 +294,16 @@ impl Management {
                         Ok(())
                     },
                     move |view| {
-                        if view.change == crate::config_store::ConfigurationChange::Committed
-                            && notify.swap(false, std::sync::atomic::Ordering::AcqRel)
-                            && let Some(state) = notify_owner.upgrade()
-                        {
+                        // The initial view is announced once its installation succeeded
+                        // (registration fails otherwise), so subscribers leave the
+                        // pre-binding configuration.
+                        let announce = match view.change {
+                            crate::config_store::ConfigurationChange::Initial => true,
+                            crate::config_store::ConfigurationChange::Committed => {
+                                notify.swap(false, std::sync::atomic::Ordering::AcqRel)
+                            }
+                        };
+                        if announce && let Some(state) = notify_owner.upgrade() {
                             // Runtime observers are ordinary success notifications too:
                             // never announce success while another required adapter failed.
                             state.config.pin_configuration_owner(state.clone());
