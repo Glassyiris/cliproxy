@@ -273,7 +273,7 @@ mod tests {
         })
         .await
         .expect("nested database document was not loaded");
-        let config_changes = state.rt.subscribe_config();
+        let mut config_changes = state.rt.subscribe_config();
         let head = state.config_store().snapshot().unwrap().0;
 
         // Construct an independent artifact; replacing the published file is not
@@ -343,7 +343,7 @@ mod tests {
             "credentials do not create config revisions"
         );
         assert!(
-            !config_changes.has_changed().unwrap(),
+            config_changes.try_next().is_none(),
             "credential changes must not notify config subscribers"
         );
 
@@ -378,7 +378,7 @@ mod tests {
     async fn credential_notification_reloads_same_connection_saves() {
         let (state, db, root) = state();
         let config = state.rt.config();
-        let config_changes = state.rt.subscribe_config();
+        let mut config_changes = state.rt.subscribe_config();
         let watcher = start(&state);
         db.save(
             &db.auth_dir().join("a.json"),
@@ -398,7 +398,7 @@ mod tests {
             "a credential notification republished config"
         );
         assert!(
-            !config_changes.has_changed().unwrap(),
+            config_changes.try_next().is_none(),
             "a credential notification woke config subscribers"
         );
         watcher.shutdown().await.unwrap();

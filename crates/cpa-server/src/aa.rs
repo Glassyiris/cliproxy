@@ -256,7 +256,7 @@ pub fn start(rt: &Arc<Runtime>) {
         loop {
             let wait = {
                 let Some(rt) = weak.upgrade() else { return };
-                let settings = crate::model_router::settings(&rt.config()).aa.clone();
+                let settings = crate::model_router::settings(&changes.current().config).aa.clone();
                 if settings.cache_file != loaded_file {
                     loaded_file.clone_from(&settings.cache_file);
                     if let Some(file) = settings.cache_file.as_deref().and_then(read_file) {
@@ -298,14 +298,15 @@ pub fn start(rt: &Arc<Runtime>) {
                     }
                 }
             };
+            // Each publication is handled in order with its own view.
             let changed = match wait {
                 Some(wait) => tokio::select! {
-                    () = tokio::time::sleep(wait) => Ok(()),
-                    changed = changes.changed() => changed,
+                    () = tokio::time::sleep(wait) => true,
+                    changed = changes.next() => changed.is_some(),
                 },
-                None => changes.changed().await,
+                None => changes.next().await.is_some(),
             };
-            if changed.is_err() {
+            if !changed {
                 return;
             }
         }

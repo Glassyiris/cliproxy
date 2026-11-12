@@ -364,7 +364,7 @@ async fn credential_batch_rejects_a_later_invalid_or_conflicting_document_withou
     }
     let before = std::fs::read(f.state.config_store().path().unwrap()).unwrap();
     let revision = f.state.config_store().load().unwrap().rev;
-    let config_watch = f.rt.subscribe_config();
+    let mut config_watch = f.rt.subscribe_config();
     let runtime_tokens = || {
         let mut tokens: Vec<_> =
             f.rt.store()
@@ -401,7 +401,7 @@ async fn credential_batch_rejects_a_later_invalid_or_conflicting_document_withou
         // Rejection publishes no runtime credential and no configuration revision.
         assert_eq!(runtime_tokens(), runtime_before);
         assert_eq!(f.state.config_store().load().unwrap().rev, revision);
-        assert!(!config_watch.has_changed().unwrap());
+        assert!(config_watch.try_next().is_none());
     }
     // The same observation sees an admitted batch, so the checks above are not vacuous.
     let response = f
@@ -1431,7 +1431,6 @@ async fn committed_configuration_reaches_access_and_runtime_and_credential_commi
     assert_eq!(f.rt.config().routing.retry.request_retry, 7);
     let before = f.rt.config();
     let mut watch = f.rt.subscribe_config();
-    watch.mark_unchanged();
     // A credential commit is a different domain: no configuration view is reinstalled.
     let response = f
         .request(wreq::Method::POST, "/admin/v1/credentials/batch")
@@ -1441,7 +1440,7 @@ async fn committed_configuration_reaches_access_and_runtime_and_credential_commi
         .unwrap();
     assert_eq!(response.status(), 200);
     assert!(Arc::ptr_eq(&before, &f.rt.config()));
-    assert!(!watch.has_changed().unwrap());
+    assert!(watch.try_next().is_none());
     assert_eq!(f.head(), revision);
 }
 

@@ -31,6 +31,61 @@ use crate::scheduler::{Policy, Scheduler};
 /// The config snapshot and credential epoch a registry was built from.
 type RegistryCache = (Arc<Config>, (u64, u64, u64), Arc<Registry>);
 
+/// One runtime configuration publication: the installed view and its place in
+/// publication order.
+pub struct ConfigChange {
+    pub sequence: u64,
+    pub config: Arc<Config>,
+}
+
+/// A runtime consumer's subscription: the view current at registration, then every
+/// later publication in order, each with its own view. Consumers act on these views,
+/// never on [`Runtime::config`].
+pub struct ConfigChanges {
+    current: Arc<ConfigChange>,
+    receiver: tokio::sync::mpsc::UnboundedReceiver<Arc<ConfigChange>>,
+}
+
+impl ConfigChanges {
+    /// The last view delivered to this subscriber (initially the registration view).
+    pub fn current(&self) -> &Arc<ConfigChange> {
+        &self.current
+    }
+
+    /// The next publication, in order; `None` once the runtime is gone.
+    pub async fn next(&mut self) -> Option<Arc<ConfigChange>> {
+        let change = self.receiver.recv().await?;
+        self.current = change.clone();
+        Some(change)
+    }
+
+    /// The next publication if one is already delivered, in order.
+    pub fn try_next(&mut self) -> Option<Arc<ConfigChange>> {
+        let change = self.receiver.try_recv().ok()?;
+        self.current = change.clone();
+        Some(change)
+    }
+}
+
+/// Lossless, ordered fan-out: one unbounded queue per subscriber, pruned when its
+/// receiver is dropped. Registration and delivery share this lock.
+struct ConfigFanout {
+    latest: Arc<ConfigChange>,
+    /// The view a service install placed, announced by the owner's notification.
+    installed: Option<Arc<Config>>,
+    subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Arc<ConfigChange>>>,
+}
+
+impl ConfigFanout {
+    fn new(config: Arc<Config>) -> Self {
+        Self {
+            latest: Arc::new(ConfigChange { sequence: 0, config }),
+            installed: None,
+            subscribers: Vec::new(),
+        }
+    }
+}
+
 /// Durable ownership of credentials: local SQLite or the remote Home service.
 #[derive(Clone)]
 pub enum CredentialAuthority {
@@ -60,8 +115,8 @@ pub struct Runtime {
     /// Set by test runtime fixtures: executor calls get credentials that
     /// cannot leave the machine.
     pub(crate) deny_external: std::sync::atomic::AtomicBool,
-    /// Marked on every config publish, so background loops sleep until it changes.
-    config_changed: tokio::sync::watch::Sender<()>,
+    /// Every config publication, in order, for runtime consumers ([`Runtime::subscribe_config`]).
+    config_changes: Mutex<ConfigFanout>,
     /// Marked whenever a background refresh job ends, so the refresh loop looks again
     /// (a job may end after the loop stopped waiting for it).
     refresh_done: tokio::sync::watch::Sender<()>,
@@ -164,8 +219,10 @@ impl Runtime {
         let cooldown_dir = cooldown_dir(&config, &policy);
         let (enabled, strict) = signature_cache_config(&config);
         cpa_translate::set_antigravity_signature_cache_config(enabled, strict);
+        let config = Arc::new(config);
         let rt = Self {
-            config: RwLock::new(Arc::new(config)),
+            config_changes: Mutex::new(ConfigFanout::new(config.clone())),
+            config: RwLock::new(config),
             store: CredentialStore::new(credentials, authority),
             executors,
             refresh_task: Mutex::default(),
@@ -178,7 +235,6 @@ impl Runtime {
             plugins: Default::default(),
             remote: RwLock::default(),
             deny_external: Default::default(),
-            config_changed: tokio::sync::watch::Sender::new(()),
             refresh_done: tokio::sync::watch::Sender::new(()),
             codex_refreshes: CodexRefreshes::default(),
             catalogs: Mutex::default(),
@@ -272,9 +328,28 @@ impl Runtime {
         }
     }
 
-    /// Resolves after the next config publish.
-    pub fn subscribe_config(&self) -> tokio::sync::watch::Receiver<()> {
-        self.config_changed.subscribe()
+    /// The current configuration view and, in order, every later publication with
+    /// its own view. Registration and publication share one lock, so no change falls
+    /// between the initial view and the first delivery.
+    pub fn subscribe_config(&self) -> ConfigChanges {
+        let mut fanout = self.config_changes.lock().unwrap_or_else(PoisonError::into_inner);
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        fanout.subscribers.push(sender);
+        ConfigChanges {
+            current: fanout.latest.clone(),
+            receiver,
+        }
+    }
+
+    /// Delivers one publication to every live subscriber, in publication order.
+    fn notify_config(&self, config: Arc<Config>) {
+        let mut fanout = self.config_changes.lock().unwrap_or_else(PoisonError::into_inner);
+        let change = Arc::new(ConfigChange {
+            sequence: fanout.latest.sequence + 1,
+            config,
+        });
+        fanout.latest = change.clone();
+        fanout.subscribers.retain(|sender| sender.send(change.clone()).is_ok());
     }
 
     /// Replaces standalone/Home configuration and its derived scheduler policy.
@@ -381,15 +456,32 @@ impl Runtime {
             self.executors.google.aistudio.relay.stop();
         }
         self.store.configure_cooldown_store(dir);
-        if !service {
-            self.config_changed.send_replace(());
+        if service {
+            // Announced only by the owner's ordinary notification, after every
+            // required adapter installed this commit.
+            self.config_changes
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .installed = Some(config);
+        } else {
+            self.notify_config(config);
         }
         drop(commit);
         true
     }
 
+    /// The owner's ordinary notification for a committed view: delivers the view
+    /// that commit's service install placed.
     pub(crate) fn service_configuration_installed(&self) {
-        self.config_changed.send_replace(());
+        let installed = self
+            .config_changes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .installed
+            .take();
+        if let Some(config) = installed {
+            self.notify_config(config);
+        }
     }
 
     /// A coherent config/policy pair for the entire route attempt loop.
@@ -1100,12 +1192,13 @@ async fn refresh_loop(weak: std::sync::Weak<Runtime>) {
             break;
         };
         // Everything published so far is in this scan, including the commits of
-        // the previous batch.
+        // the previous batch. Configuration views already delivered are taken in
+        // order; the scan uses the newest of them.
         store_changes.borrow_and_update();
-        config_changes.borrow_and_update();
+        while config_changes.try_next().is_some() {}
         unauthorized.borrow_and_update();
         jobs_ended.borrow_and_update();
-        let cfg = rt.config();
+        let cfg = config_changes.current().config.clone();
         // A soft bound while the setting changes: jobs holding the old semaphore's
         // permits run beside the new one's.
         if workers.0 != refresh_workers(&cfg) {
@@ -1242,8 +1335,8 @@ async fn refresh_loop(weak: std::sync::Weak<Runtime>) {
                 }
                 tokio::time::sleep(COALESCE).await;
             }
-            changed = config_changes.changed() => {
-                if changed.is_err() {
+            changed = config_changes.next() => {
+                if changed.is_none() {
                     break;
                 }
                 tokio::time::sleep(COALESCE).await;
@@ -6437,6 +6530,36 @@ pub(crate) mod tests {
         assert_eq!(policy.session_affinity_ttl, Duration::from_secs(3600));
     }
 
+    /// Standalone and Home publications reach runtime consumers one by one, in
+    /// order, each with its own view; a dropped subscriber is pruned.
+    #[test]
+    fn runtime_consumers_receive_every_publication_in_order() {
+        let executors = Executors {
+            claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+            codex: Default::default(),
+            devices: Default::default(),
+            openai: Default::default(),
+            google: Default::default(),
+        };
+        let rt = test_runtime(Config::parse("port: 8501\n").unwrap(), Vec::new(), executors);
+        let mut kept = rt.subscribe_config();
+        let dropped = rt.subscribe_config();
+        assert_eq!(kept.current().config.port, 8501);
+        let start = kept.current().sequence;
+        drop(dropped);
+        assert!(rt.publish_config(Config::parse("port: 8502\n").unwrap()));
+        assert!(rt.publish_config(Config::parse("port: 8503\n").unwrap()));
+        let first = kept.try_next().expect("the first publication");
+        let second = kept.try_next().expect("the second publication");
+        assert_eq!((first.sequence, first.config.port), (start + 1, 8502));
+        assert_eq!((second.sequence, second.config.port), (start + 2, 8503));
+        assert!(kept.try_next().is_none());
+        // The view a consumer holds is its input, whatever was published later.
+        assert_eq!(first.config.port, 8502);
+        assert_eq!(rt.config().port, 8503);
+        assert_eq!(rt.config_changes.lock().unwrap().subscribers.len(), 1);
+    }
+
     /// Go `nextModelPoolOffset` (conductor_models.go): per-key cursor, no advance for
     /// single-entry pools or blank keys, reset to zero at the int32 guard.
     #[test]
@@ -9566,7 +9689,7 @@ pub(crate) mod tests {
         let expire = |rt: &Runtime| {
             let c = rt.store.get("claude-backoff.json").unwrap();
             rt.refresh_state.lock().unwrap().expire(&c);
-            rt.config_changed.send_replace(());
+            rt.notify_config(rt.config());
         };
         rt.start_auto_refresh();
         logs.wait_for(failed, 1).await;
@@ -9971,7 +10094,7 @@ pub(crate) mod tests {
         rt.start_auto_refresh();
         logs.wait_for(skipped, 1).await;
         for _ in 0..2 {
-            rt.config_changed.send_replace(());
+            rt.notify_config(rt.config());
             tokio::time::sleep(Duration::from_millis(1500)).await;
         }
         assert_eq!(logs.text().matches(skipped).count(), 1, "{}", logs.text());
@@ -10160,7 +10283,7 @@ pub(crate) mod tests {
         for _ in 0..2 {
             let scans = tests::reached("scan", slow);
             rt.refresh_state.lock().unwrap().expire(&c);
-            rt.config_changed.send_replace(());
+            rt.notify_config(rt.config());
             tokio::time::timeout(Duration::from_secs(10), async {
                 while tests::reached("scan", slow) == scans {
                     tokio::time::sleep(Duration::from_millis(20)).await;

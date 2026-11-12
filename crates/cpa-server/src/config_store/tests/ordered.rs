@@ -74,7 +74,7 @@ impl Fixture {
 #[test]
 fn service_commit_updates_bound_runtime_before_returning() {
     let f = Fixture::new();
-    let changes = f.rt.subscribe_config();
+    let mut changes = f.rt.subscribe_config();
     let rt = Arc::downgrade(&f.rt);
     let store = Arc::downgrade(&f.store);
     let (tx, rx) = mpsc::channel();
@@ -101,8 +101,50 @@ fn service_commit_updates_bound_runtime_before_returning() {
     assert_eq!(receive(&rx), (committed.rev, "fill-first".into()));
     assert!(committed.rev > initial.0);
     assert_eq!(f.management.published_rev(), committed.rev);
-    assert!(changes.has_changed().unwrap());
+    let delivered = changes.try_next().expect("the commit reaches runtime consumers");
+    assert_eq!(delivered.config.routing.strategy, "fill-first");
+    assert!(changes.try_next().is_none(), "one commit is one runtime delivery");
     drop(subscription);
+    f.finish();
+}
+
+#[test]
+fn runtime_consumers_receive_each_owner_commit_in_order_with_its_view() {
+    let f = Fixture::new();
+    let mut changes = f.rt.subscribe_config();
+    let start = changes.current().sequence;
+    // Two commits land before the consumer looks: neither is folded into the other.
+    let first = f
+        .store
+        .import_yaml("routing: {strategy: fill-first}\n", "test", "")
+        .unwrap();
+    let second = f
+        .store
+        .import_yaml("routing: {strategy: round-robin}\n", "test", "")
+        .unwrap();
+    assert!(second.rev > first.rev);
+    let a = changes.try_next().expect("the first commit");
+    let b = changes.try_next().expect("the second commit");
+    assert_eq!(
+        (a.sequence, a.config.routing.strategy.as_str()),
+        (start + 1, "fill-first")
+    );
+    assert_eq!(
+        (b.sequence, b.config.routing.strategy.as_str()),
+        (start + 2, "round-robin")
+    );
+    assert!(changes.try_next().is_none());
+    // A consumer computing from the view it holds is unaffected by a later commit.
+    let held = a.clone();
+    f.store
+        .import_yaml("routing: {strategy: fill-first}\n", "test", "")
+        .unwrap();
+    assert_eq!(held.config.routing.strategy, "fill-first");
+    assert_eq!(b.config.routing.strategy, "round-robin");
+    assert_eq!(changes.try_next().unwrap().config.routing.strategy, "fill-first");
+    // Credential commits are another domain: no runtime configuration delivery.
+    f.db.save(&f.db.auth_dir().join("ordered.json"), b"{}").unwrap();
+    assert!(changes.try_next().is_none());
     f.finish();
 }
 
@@ -184,7 +226,7 @@ fn storage_faults_do_not_publish_and_retained_configuration_retries_once() {
             })
             .unwrap();
         let initial = receive(&rx);
-        let watch = f.rt.subscribe_config();
+        let mut watch = f.rt.subscribe_config();
         let destination = if checkpoint {
             f.checkpoint()
         } else {
@@ -201,7 +243,7 @@ fn storage_faults_do_not_publish_and_retained_configuration_retries_once() {
         assert_eq!(f.store.load().unwrap().rev, initial.0);
         assert_eq!(f.rt.config().routing.strategy, "round-robin");
         assert_eq!(f.management.published_rev(), initial.0);
-        assert!(!watch.has_changed().unwrap());
+        assert!(watch.try_next().is_none());
         assert!(rx.try_recv().is_err());
         drop(fault);
         let retry = f
@@ -354,7 +396,7 @@ fn binding_refuses_volatile_ports_without_effects_but_preserves_standalone_ports
     let snapshot = f.rt.config();
     let policy = f.rt.policy();
     let generation = f.rt.store().snapshot();
-    let changes = f.rt.subscribe_config();
+    let mut changes = f.rt.subscribe_config();
     let next = Config::parse("routing: {strategy: fill-first}\n").unwrap();
     assert!(!f.rt.publish_config(next.clone()));
     assert!(
@@ -367,7 +409,7 @@ fn binding_refuses_volatile_ports_without_effects_but_preserves_standalone_ports
         generation.iter().map(|c| &c.id).collect::<Vec<_>>(),
         f.rt.store().snapshot().iter().map(|c| &c.id).collect::<Vec<_>>()
     );
-    assert!(!changes.has_changed().unwrap());
+    assert!(changes.try_next().is_none());
     let standalone = crate::testing::runtime(
         Config::parse("routing: {strategy: round-robin}\n").unwrap(),
         vec![],
@@ -477,7 +519,7 @@ fn management_wrapper_does_not_bind_homes_remote_configuration_authority() {
         executors(),
     ));
     home.deny_external.store(true, std::sync::atomic::Ordering::Relaxed);
-    let changes = home.subscribe_config();
+    let mut changes = home.subscribe_config();
     let management = crate::management::Management::with_options(
         home.clone(),
         local.clone(),
@@ -495,15 +537,15 @@ fn management_wrapper_does_not_bind_homes_remote_configuration_authority() {
         !management.routes_enabled(),
         "a local store's secret cannot enable Home management"
     );
-    assert!(!changes.has_changed().unwrap());
+    assert!(changes.try_next().is_none());
     assert!(home.publish_config(Config::parse("routing: {strategy: wrr}\n").unwrap()));
     assert_eq!(home.config().routing.strategy, "wrr");
     assert_eq!(
         home.policy().strategy,
         crate::management::policy(&home.config()).strategy
     );
-    assert!(changes.has_changed().unwrap());
-    let changes = home.subscribe_config();
+    assert!(changes.try_next().is_some());
+    let mut changes = home.subscribe_config();
     local
         .import_yaml(
             "routing: {strategy: fill-first}\nserver: {port: 8119}\n",
@@ -512,7 +554,7 @@ fn management_wrapper_does_not_bind_homes_remote_configuration_authority() {
         )
         .unwrap();
     assert_eq!(home.config().routing.strategy, "wrr");
-    assert!(!changes.has_changed().unwrap());
+    assert!(changes.try_next().is_none());
     assert!(!management.routes_enabled());
 }
 
@@ -693,7 +735,7 @@ fn grant_merge_preserves_the_original_incomplete_configuration_event_once() {
         })
         .unwrap();
     let initial = receive(&rx);
-    let changes = f.rt.subscribe_config();
+    let mut changes = f.rt.subscribe_config();
     assert!(
         f.store
             .import_yaml("routing: {strategy: fill-first}\n", "test", "original")
@@ -710,12 +752,12 @@ fn grant_merge_preserves_the_original_incomplete_configuration_event_once() {
             .is_err()
     );
     assert!(rx.try_recv().is_err());
-    assert!(!changes.has_changed().unwrap());
+    assert!(changes.try_next().is_none());
     fail.store(false, Ordering::Release);
     f.db.admit_work().unwrap();
     assert_eq!(receive(&rx), (advanced.rev, advanced.digest, "fill-first".into()));
     assert!(rx.try_recv().is_err());
-    assert!(changes.has_changed().unwrap());
+    assert!(changes.try_next().is_some());
     assert_eq!(
         f.db.read(&auth).unwrap().unwrap(),
         br#"{"refresh_token":"R1","opaque":[1,2]}"#
@@ -766,7 +808,7 @@ fn required_projection_failure_retains_recovery_and_withholds_ordinary_success()
             })
             .unwrap();
         let initial = receive(&rx);
-        let runtime_changes = f.rt.subscribe_config();
+        let mut runtime_changes = f.rt.subscribe_config();
         assert!(
             f.store
                 .import_yaml("routing: {strategy: fill-first}\n", "test", "")
@@ -775,7 +817,7 @@ fn required_projection_failure_retains_recovery_and_withholds_ordinary_success()
         );
         assert!(rx.try_recv().is_err());
         assert!(
-            !runtime_changes.has_changed().unwrap(),
+            runtime_changes.try_next().is_none(),
             "runtime success notification must also wait"
         );
         assert!(f.db.save(&f.db.auth_dir().join("blocked.json"), b"{}").is_err());
@@ -792,7 +834,7 @@ fn required_projection_failure_retains_recovery_and_withholds_ordinary_success()
             .unwrap();
         assert!(!retried.written);
         assert_eq!(receive(&rx), initial + 1);
-        assert!(runtime_changes.has_changed().unwrap());
+        assert!(runtime_changes.try_next().is_some());
         assert!(rx.try_recv().is_err());
         assert!(attempts.load(Ordering::SeqCst) >= 3);
         let leaked = Arc::new(AtomicUsize::new(0));
@@ -896,7 +938,7 @@ fn management_retries_an_interrupted_projection_before_success_notifications() {
         let yaml = "routing: {strategy: fill-first}\napi-keys: {claude: [{keys: [{api-key: private-fixture-key}]}]}\n";
         assert!(f.store.import_yaml(yaml, "test", "").is_err());
         assert_eq!(f.rt.config().routing.strategy, "fill-first");
-        assert!(!changes.has_changed().unwrap());
+        assert!(changes.try_next().is_none());
         assert!(rx.try_recv().is_err());
         f.db.save(&f.db.auth_dir().join("recovery.json"), b"{}").unwrap();
         let retried = f.store.load().unwrap();
@@ -906,11 +948,10 @@ fn management_retries_an_interrupted_projection_before_success_notifications() {
             f.rt.policy().strategy
         );
         assert!(!f.rt.store().snapshot().is_empty(), "credential projection must finish");
-        assert!(changes.has_changed().unwrap());
-        changes.borrow_and_update();
+        assert!(changes.try_next().is_some());
         assert_eq!(receive(&rx), initial + 1);
         f.db.save(&f.db.auth_dir().join("recovery.json"), b"{}").unwrap();
-        assert!(!changes.has_changed().unwrap());
+        assert!(changes.try_next().is_none());
         assert!(rx.try_recv().is_err());
         drop(subscriber);
         f.finish();

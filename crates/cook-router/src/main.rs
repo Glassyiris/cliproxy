@@ -2019,12 +2019,8 @@ async fn serve(
     // Home mode: the config comes from Home, and management answers 404 (Go
     // `managementAvailable`).
     let credential_notifications = home.is_none().then(|| cpa_server::watching::start(&management));
-    let advertiser = {
-        let rt = rt.clone();
-        // The served transport decides `tls=`: HTTPS exactly when server.tls loaded.
-        let published = rt.subscribe_config();
-        discovery::advertise::Advertiser::spawn(move || rt.config(), published, tls.is_some())
-    };
+    // The served transport decides `tls=`: HTTPS exactly when server.tls loaded.
+    let advertiser = discovery::advertise::Advertiser::spawn(rt.subscribe_config(), tls.is_some());
     let app = app(&rt, &management, home.is_some());
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     let app = heap_trim::layer(app);
