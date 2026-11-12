@@ -19,7 +19,7 @@
 - [x] 3.1 Reuse or minimally extract the existing cross-platform file-lock primitive for exclusive service/offline ownership, with a stable guard identity outside the disposable workspace; verify two owners and an opener racing shutdown cannot write different live inodes or bypass ownership after a network failure.
 - [x] 3.2 Implement cold initialization and resume as service-owned transitions; verify valid newer live state wins and republishes before readiness, missing/tmpfs-lost work cold-loads, initialized empty state remains valid, corrupt/schema-empty unowned work falls back, and unsupported newer schemas fail without erasure.
 - [x] 3.3 Preserve explicit legacy YAML/credential/schema import and retained-WAL recovery at bootstrap; verify committed legacy WAL content and opaque/raw data survive and an active conflicting legacy connection fails without sidecar deletion.
-- [ ] 3.4 Implement shutdown admission stop, critical-operation settlement, task/thread/process joining and workspace cleanup; verify in-flight writers finish before deletion, unresolved publication checkpoints are retained with incomplete-cleanup reporting rather than erased, and the existing `DirectoryNotEmpty` regression is exercised repeatedly rather than masked by sleeps or ignored cleanup errors.
+- [x] 3.4 Implement shutdown admission stop, critical-operation settlement, task/thread/process joining and workspace cleanup; verify in-flight writers finish before deletion, unresolved publication checkpoints are retained with incomplete-cleanup reporting rather than erased, and the existing `DirectoryNotEmpty` regression is exercised repeatedly rather than masked by sleeps or ignored cleanup errors.
 
 ## 4. Server-side mutation adapters
 
@@ -39,19 +39,19 @@
 ## 6. Callbacks and managed execution
 
 - [x] 6.1 Implement owned function-callback registration with an atomic initial view and version-ordered delivery outside state/list locks; verify registration/publication races, read reentrancy, self-unsubscription, subscriber failure isolation and later-command scheduling without deadlock.
-- [ ] 6.2 Migrate existing access/logging/usage/plugin/catalog/policy/credential consumers to the supplied authorized views; verify they observe the committed version, receive only relevant domain changes and do not reload ambient globals or obtain secret-bearing canonical exports unnecessarily.
-- [ ] 6.3 Apply the existing cancellation/task tracking and join primitives to the component's async, blocking and child-process work; verify stop-and-wait ownership, bounded admission and no workspace use after cleanup without imposing a deadlocking global blocking-pool limit.
-- [ ] 6.4 Make isolated job inputs/results explicit with relevant version/registration fences; verify ambient configuration/CWD/environment changes do not alter the supplied computation and stale results cannot overwrite current state while unrelated changes do not spuriously reject valid output.
+- [x] 6.2 Migrate existing access/logging/usage/plugin/catalog/policy/credential consumers to the supplied authorized views; verify they observe the committed version, receive only relevant domain changes and do not reload ambient globals or obtain secret-bearing canonical exports unnecessarily.
+- [x] 6.3 Apply the existing cancellation/task tracking and join primitives to the component's async, blocking and child-process work; verify stop-and-wait ownership, bounded admission and no workspace use after cleanup without imposing a deadlocking global blocking-pool limit.
+- [x] 6.4 Make isolated job inputs/results explicit with relevant version/registration fences; verify ambient configuration/CWD/environment changes do not alter the supplied computation and stale results cannot overwrite current state while unrelated changes do not spuriously reject valid output.
 
 ## 7. Retire bypasses and update operational guidance
 
 - [x] 7.1 Remove the configuration interval, hash/metadata/data-version polling and external-snapshot adoption once all online writers are routed; verify out-of-band replacement is not hot-adopted, internal notifications still work, and no startup/read path accidentally starts another watcher.
 - [x] 7.2 Restrict mutable ConfigStore/CredentialDb/connection escape hatches and retire online multiwriter coordinator/ref-marker machinery; verify a whole-repository caller audit includes harness and test wiring, permitted private SQL remains behind the service, and test fixtures cannot sweep a production workspace.
-- [ ] 7.3 Update CLI/setup/container/restore guidance to match the implemented boundary and link the accepted design contract; verify examples distinguish current behavior from target design, keep the single-file copy promise, and explain deliberate cold restore plus temporary-storage loss without promising tmpfs survives reboot.
+- [x] 7.3 Update CLI/setup/container/restore guidance to match the implemented boundary and link the accepted design contract; verify examples distinguish current behavior from target design, keep the single-file copy promise, and explain deliberate cold restore plus temporary-storage loss without promising tmpfs survives reboot.
 
 ## 8. Final-tree verification and handoff
 
 - [ ] 8.1 Run affected configuration, credential, management/admin, refresh/plugin, CLI and lifecycle suites on private mock state; verify both previously recorded failing tests are resolved or demonstrated as separately tracked baseline failures, with no test skipped or weakened merely to turn the PR green.
 - [ ] 8.2 Run final-tree format, workspace locked clippy/tests or nextest, actual harness `--locked` check, third-party notices and the repository-required UI checks; verify all generated manifests/lock/notices agree and report every unrun or failed check rather than substituting an equivalent temporary-manifest build.
-- [ ] 8.3 Measure unchanged idle gates for one and 2,000 credentials, supported-platform atomic publication, memory-only query behavior and representative complete-state export cost; verify existing budgets remain unchanged and record measured peak memory/latency without inventing savings.
+- [x] 8.3 Measure unchanged idle gates for one and 2,000 credentials, supported-platform atomic publication, memory-only query behavior and representative complete-state export cost; verify existing budgets remain unchanged and record measured peak memory/latency without inventing savings.
 - [ ] 8.4 Obtain independent source-and-evidence review against the three specs and `docs/STATE-AND-CONCURRENCY.md`; verify every production mutation family and the single-file recovery regressions are accounted for, then present evidence for human acceptance without automatically merging, publishing or deploying.
