@@ -1727,3 +1727,85 @@ Named historical tests, rerun this pass:
 | Ambient configuration, CWD and environment do not alter the supplied computation | `readers_keep_the_previous_complete_view_during_a_slow_mutation` (a read keeps its complete view while a mutation is in flight). `online_import_uses_the_owner_without_local_fallback` now also runs an online import with `COOK_DB`, a working-directory `config.yaml` and a `.env` naming another database: the owner commits the supplied file and neither ambient database is created (additive, passed first run, `key-env/ambient.log`); the same test keeps an explicit local `--db` byte-identical. Online logins never read the local `--db` or `--config` and render into a private scratch directory (`online_builtin_flows_wait_for_durable_save_and_preserve_source_fences`). Source: owner paths are canonical absolute paths fixed at open. The one environment/CWD read on a configuration change is the Go-parity log directory probe recorded under 6.2. |
 | Stale results cannot overwrite current state | `a_codex_refresh_is_discarded_when_the_credential_version_moved_meanwhile`, `stale_result_does_not_overwrite_a_refreshed_credential`, `an_in_flight_refresh_does_not_overwrite_newer_credentials`, `stale_lease_cannot_poison_deleted_and_recreated_credential`, `a_stale_scan_cannot_undo_a_later_write` (runtime); `a_refresh_from_an_earlier_registration_leaves_the_new_ones_schedule` (plugin_owned); `held_virtual_grants_recheck_registration_version_and_source_at_recovery`; `config_reloads_never_publish_a_value_older_than_a_save` (management); online login save returns 412 for a replaced or deleted source and never resurrects it (`online_builtin_flows_...`). |
 | Unrelated changes do not spuriously reject valid output | `pending_publication_preserves_two_inflight_codex_grants` (two distinct grants both survive); `consumed_grant_survives_a_checkpoint_error_and_merges_the_next_result` (a retained grant whose checkpoint failed survives an intervening unrelated configuration command and a second grant; after recovery both grants land and the unrelated, uninstalled mutation does not revive); `terminal_builtin_login_withholds_only_its_unchanged_valid_destination` (management/oauth): an unrelated configuration commit cannot settle the exact-source fence and the valid replacement is still adopted; `credential_like_resource_ids_survive_effective_reads_and_unrelated_sets`. |
+
+### Final gates (tasks 8.1 and 8.2)
+
+Final tree `35679aa6`. Local gate: `/var/tmp/cook-router-parent-batch/gate6/` (`steps.jsonl`, per-step logs, `start-hashes.json`; all 546 `.rs`/`.toml`/`.lock` hashes unchanged at the end).
+
+| Gate | Result |
+| --- | --- |
+| `cargo fmt --all --check` | pass |
+| no-feature `clippy -p cpa-server --lib` and `-p cook-router --bins`; shipped build has no `testing` feature | pass |
+| harness `cargo check --locked` | pass |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | pass |
+| `cargo test --workspace --locked --no-fail-fast` | **2157 passed / 0 failed / 2 ignored** (the two pre-existing ignores) |
+| `alloc_budget` | pass |
+| `tools/third-party-notices.py --check` (cargo-about 0.9.3) | up to date |
+| `tools/changelog.py check`, `npm run check` (ui), `openspec validate --strict` | pass |
+
+The previous gate (`gate5/`, `83b18ff2`) failed one test, `exclusive_owner_cannot_be_bypassed_by_another_workspace`: an immediate in-process reopen after an owner closed found the database still owned. Cause: the flock guard belongs to the open file description, which a child spawned by a parallel test shares until it execs. The owner tests failed 1 in 15 runs with the spawning test and 0 in 30 without it. `767c4f90` releases the lock explicitly after workspace cleanup; RED `a_duplicated_guard_descriptor_cannot_keep_a_released_owner_locked` (`owner-flake/red.log`), then 30 of 30 runs passed with the spawning test (`owner-flake/fixed-*.log`).
+
+CI on `35679aa6` (run 43178538248 and siblings): fmt/clippy/harness, both nextest shards, Windows clippy, dashboard, notices, docker, Changes (title and fragment), installers on Linux, macOS and Windows, and the 2,000-credential idle gate pass. `ci-ok` fails only on `idle.linux.1.rss_kb` (28804 > 28050), reported under 8.3. Not run locally: nextest (unavailable), Windows and macOS builds (CI only).
+
+Task 8.1, previously recorded failing tests: `usage_record::tests::redirects_start_the_upload_measurements_over` passes after a test-only change (1.1 table); `watching::tests::incomplete_documents_keep_the_credential_until_valid_json` passes. No `#[ignore]` was added. Test functions removed relative to `master` and their replacements:
+
+| Removed | Replacement or retired behavior |
+| --- | --- |
+| `another_connection_s_commit_is_noticed`, `a_second_store_connection_publishes_on_reload`, `unsupported_database_kinds_fail_closed_on_reads_and_writes` | mapped under "Approved old-to-new oracle mapping"; competing owners are now refused (5.4, 7.2) |
+| `snapshot_revision_and_rows_never_cross_external_commits` | external writers no longer exist; snapshot coherence: `readers_keep_the_previous_complete_view_during_a_slow_mutation` |
+| `opening_tightens_existing_database_and_sidecar_permissions` | `opening_tightens_snapshot_and_temporary_database_permissions` (no sidecars remain) |
+| `busy_checkpoints_do_not_wait_and_restore_the_store_timeout` | retired with WAL; no WAL checkpoint exists |
+| `a_stalled_credential_write_blocks_only_its_reload` | `a_stalled_credential_write_blocks_commands_but_not_reads`: under one commit authority other commands wait for the stalled commit; reads and selection continue |
+| `sqlite_codex_refresh_restores_newer_sql_under_the_document_lock`, `sqlite_refresh_waits_for_non_codex_document_lock_and_adopts_newer_sql_tokens` | renamed to `..._newer_accepted_tokens_...`, adopting accepted memory instead of re-read SQL |
+| `database_watcher_parks_and_polls_credential_commits` | `database_watcher_keeps_owner_state_after_external_snapshot_replacement` |
+
+Other test changes made to keep tests passing, each tied to the behavior change: the installer fixture stops its own server before an offline import (`733bbc81`); the Windows watcher test looks credentials up by platform ID (`1e8b8f36`); `manage_go`'s echo listener rebinds to a five-digit port to match the Go golden's Referer length.
+
+### Upgrade while a `master` build serves the database
+
+`/var/tmp/cook-router-parent-batch/upgrade/upgrade-run1.log`, `master` `4ed271f7` debug build against this branch's binary, in `install.sh`'s order (new binary's `config listener` before the old server stops). The probe exited 1 with `close old WAL users before importing this database` (`database is locked`): `master`'s store keeps a resident WAL connection, so the new binary cannot switch the journal mode. `cook.db` kept its inode and size, the old server stayed healthy and accepted a later write, and after it stopped the new server started with both the original and the later client key. `install.sh` runs `read_probe` before `swap_binary`, so such an upgrade aborts with `could not read committed listener settings` and leaves the old binary running; stopping the service and rerunning the installer upgrades. No release contains the WAL design.
+
+### Measurements (task 8.3)
+
+`bench/budgets.txt` is unchanged relative to `master`.
+
+Idle, one credential (KB; CI single samples unless noted; ceiling = budget +10%):
+
+| Platform | pre-SQLite `master` (#32) | SQLite `master` (+#43 fixes) | this branch | ceiling |
+| --- | --- | --- | --- | --- |
+| Linux x86_64 | — | 27988 (pass), 28592 (fail) on `master` CI | 28576, 28816, 28952, 28804 | 28050 |
+| macOS arm64 | 17168 | 18608 | 19520, 18992 | 18251 |
+| macOS x86_64 | 12204 | 13388 | 13748, 13544 | 12469 |
+| Windows | 17504 | not measured (watcher tests failed first) | 18576 | 17930 |
+
+Linux wakeups in the 30 s window: `master` 152–157, this branch 0, on every platform. Same-machine paired Linux run (`rss-ab/runs.jsonl`, release builds, 3 each): `master` 16784/17128/17144, branch 16968/17484/17428, mean +274 KB (+1.6%). 2,000 credentials: CI 81092 ≤ 85241 with 0 wakeups; local 81428. The macOS overage already exists on SQLite `master`; this branch's further share there is a few hundred KB in single samples whose noise is unknown. The Linux 1-credential lane keeps `ci-ok` red.
+
+Atomic publication and memory-only queries: the full suite on Linux (encoding, published, database and admin memory-only tests); on macOS and Windows the watcher subset (13/13) and the installer job, which imports, publishes, restarts and upgrades through the real binary.
+
+Complete-state commit and backup cost (`export-cost/`, release builds of `35679aa6` and `master` `5b0c02df`, 2,000 Claude credentials, loopback in a network namespace; `cost.jsonl`, `growth.jsonl`):
+
+| Measure | `master` (WAL, row writes) | this branch (fresh image per commit) |
+| --- | --- | --- |
+| Client-key commit, 20 sequential (median / max ms) | 129 / 374 and 170 / 397 | 112 / 528 and 115 / 143 |
+| Setting commit, 1,000 sequential: first 20 / last 20 (median ms) | 88 / 91 | 139 / 156 |
+| Credential upload, 20 sequential (median / max ms) | 89 / 114 | 126 / 149 |
+| 50 concurrent credential uploads (median / max / wall) | 1.15 s / 1.97 s / 2.09 s | 2.26 s / 4.33 s / 4.48 s |
+| `config backup` (seconds, child max RSS) | 0.013–0.219 s, 10.4 MB | 0.053–0.059 s, 11.3–11.6 MB |
+| Published file after 1,000 revisions | 847872 B | 847872 B |
+| Server RSS after the 1,000-revision run | 313608 KB | 330328 KB |
+
+Every commit re-encodes the complete image. In the 1,000-revision and credential runs a commit cost 1.4–1.6× `master`'s at 2,000 credentials (the shorter client-key runs, taken soon after startup, were noisier and did not show it), and concurrent commits queue behind the single commit authority (about 90 ms each here, versus about 42 ms on `master`). Setting commits slowed by about 12% over 1,000 revisions; configuration history has no retention limit. Both builds grow from about 75 MB to over 300 MB RSS across these commit runs, so that growth predates this change. These are measurements, not savings claims.
+
+### Independent review (task 8.4) and repairs
+
+Reviewer: `reviewer-final` with `openai-codex/gpt-6-astra` (model chosen by the user after the configured model was unavailable), fresh context, source and evidence only, on `35679aa6`. Report: `/var/tmp/cook-router-parent-batch/review84/report.md` (also the subagent artifact `ecdff457-..._reviewer-final_output.md`). It agreed with 1.1, 1.2, 1.3, 1.4, 2.1–2.5, 3.1–3.3, 4.1–4.5, 5.1–5.4, 6.1, 7.1 and 7.2, and disagreed with 3.4, 6.2, 6.3, 6.4 and 7.3. User decisions on its blocking findings: upgrades from earlier builds are out of scope (the software is integrated from zero); downstream consumers get ordered per-version delivery; the two unowned background producers are fixed in this PR; the Linux idle RSS lane is left as is, and the user removed it as a merge blocker.
+
+| Finding | Repair and evidence (`/var/tmp/cook-router-parent-batch/ordered/`, `lifecycle/`) |
+| --- | --- |
+| 2. Unversioned `watch<()>` wakeups; consumers reread `rt.config()` | `Runtime::subscribe_config` now returns `ConfigChanges`: the registration view, then every publication in order on a per-subscriber unbounded queue, each with its sequence and `Arc<Config>`; registration and delivery share one lock, dropped receivers are pruned. It is fed only by the standalone/Home install and by the owner's ordinary notification, which announces the exact view its service install placed. Artificial Analysis, pprof, discovery and the refresh loop compute from the delivered view. Tests: `runtime_consumers_receive_each_owner_commit_in_order_with_its_view` (two owner commits before the consumer looks arrive as two ordered views; a held view keeps its value after a later commit; a credential commit delivers nothing), `runtime_consumers_receive_every_publication_in_order` (standalone path, pruning), and `service_commit_updates_bound_runtime_before_returning` now asserts exactly one delivery carrying the committed value. Focused suites 90/0. The old `watch<()>` could not express these tests: it folds two sends into one wakeup. |
+| 3. Unowned access purge and log cleaner | The hourly purge runs on Management's `TaskTracker` and stops on its cancellation token, so `shutdown` joins it. RED with the old spawn: `shutdown_stops_and_joins_the_hourly_purge` failed (`red-purge.log`); GREEN after. The log cleaner waits on a condvar; reconfiguration stops and joins the previous cleaner, and `Management::shutdown` calls `logging::stop_cleaner` on the blocking pool. RED with the old generation-polling thread: `log_file_replaces_only_stdout` found 3 live `log-dir-cleaner` threads after they were replaced (`red-cleaner.log`); GREEN after. |
+| 5. Stale polling text; no Go-difference entry | `CONFIGURATION.md` no longer describes content-hash polling; `INSTALL.md` says the owning process removes its workspace; `DIFFERENCES-FROM-GO.md` records the single owner, the online key sources and the per-resource secret read. Old-binary coexistence guidance was not added (out of scope by user decision). |
+| 6. Full-image cost not stated | `STATE-AND-CONCURRENCY.md` ("Commit cost") and `design.md` state that every commit re-encodes all credentials and the unbounded history and queues at one authority, with the measured numbers above. The 1,000-revision rerun counted 1,000 successful (HTTP 200) setting commits; the first attempt (all 404) was discarded. A 5,000-revision run (`growth.jsonl`, `head-5000`) ran while other builds competed for the CPU and is not used as evidence. |
+| 7. 6.4 ambient evidence narrower than claimed | The held-view assertions above test an in-flight computation directly: a consumer holding view N computes from N while N+1 commits. Environment and working-directory independence of jobs remains source-verified, apart from the ambient-selector CLI test; tests do not mutate the process environment. |
+| 1. Upgrade probe against a running WAL build | Out of scope by user decision; the safe failure recorded above stands. |
+| 4. Linux idle RSS | Unchanged and still over the ceiling; the user removed it as a merge blocker. Budgets are untouched. |
