@@ -8,7 +8,7 @@ Thanks for helping. Bug reports, fixes and new tests are all welcome.
 
 ## Building and testing
 
-You need Rust (stable), `cmake`, `clang` and `perl` for BoringSSL. Go 1.26 and PostgreSQL let the plugin and storage tests run instead of skipping; with `CPA_TEST_NO_SKIP=1`, as in CI, those tests fail instead.
+You need Rust (stable), `cmake`, `clang` and `perl` for BoringSSL. Go 1.26 lets the plugin tests run instead of skipping; with `CPA_TEST_NO_SKIP=1`, as in CI, they fail instead.
 
 ```sh
 cargo fmt --all --check
@@ -16,7 +16,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-CI runs the same tests with [cargo-nextest](https://nexte.st), which runs test binaries in parallel (`cargo nextest run --workspace --locked`; its settings are in `.config/nextest.toml`), then the doc tests, and cpa-server's unit tests with the optional relay: `cargo test -p cpa-server --features media-relay --lib`.
+CI runs the same tests with [cargo-nextest](https://nexte.st), which runs test binaries in parallel (`cargo nextest run --workspace --locked`; its settings are in `.config/nextest.toml`), then the doc tests, and cpa-server's unit tests with the optional relay and profiler: `cargo nextest run -p cpa-server --features media-relay,pprof --lib`.
 
 Tests use local mock upstreams only. Never point a test at a real provider or use a real account or key, and run the tests with external network access blocked if you can; CI runs them in a network namespace with only a loopback interface. The BoringSSL build and the release link use a lot of memory, so on a small machine set `CARGO_BUILD_JOBS=2`.
 
