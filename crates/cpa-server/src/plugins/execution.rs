@@ -59,6 +59,7 @@ impl Scope {
         let inherited = super::model_callbacks::context().map(|c| c.scope).unwrap_or_default();
         let (api_key, access_provider) = super::model_callbacks::usage_identity(Some(&call.caller), &inherited);
         Self(RequestScope {
+            auth_save_grant: None,
             request_id: trace.request_id(),
             capture: trace.capture(),
             cancel: inherited.cancel.child_token(),
@@ -404,6 +405,7 @@ pub(crate) async fn execute_credential(
     let inherited = super::model_callbacks::context().map(|c| c.scope).unwrap_or_default();
     let (api_key, access_provider) = super::model_callbacks::usage_identity(Some(&call.caller), &inherited);
     let scope = Scope(RequestScope {
+        auth_save_grant: None,
         request_id: crate::observability::current_request_id().unwrap_or_default(),
         capture: req.capture().clone(),
         cancel: inherited.cancel.child_token(),

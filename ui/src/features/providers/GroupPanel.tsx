@@ -136,7 +136,7 @@ function KeyRow({
       if (mounted.current)
         notify(
           ok ? "success" : "error",
-          t(ok ? "providers.key.copied" : "providers.key.copyFailed"),
+          ok ? t("providers.key.copied") : t("providers.key.copyFailed"),
         );
     });
   };

@@ -1249,7 +1249,15 @@ mod echo {
     use std::collections::BTreeMap;
 
     pub(super) async fn serve() -> (String, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        // Echoed Referer values keep the raw URL, so the proxied Content-Length depends
+        // on its width. The Go recording used a five-digit ephemeral port; hosts whose
+        // ephemeral range starts below 10000 can otherwise hand out a four-digit one.
+        let listener = loop {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            if listener.local_addr().unwrap().port() >= 10_000 {
+                break listener;
+            }
+        };
         let addr = listener.local_addr().unwrap().to_string();
         let own = addr.clone();
         let app = axum::Router::new().fallback(move |method: Method, uri: Uri, headers: HeaderMap, body: Bytes| {

@@ -49,11 +49,10 @@ impl Server {
         #[cfg(test)]
         let (accept_errors, mut injected_errors) =
             tokio::sync::mpsc::unbounded_channel::<(std::io::Error, tokio::sync::oneshot::Sender<()>)>();
-        // Subscribe before taking the first snapshot, so startup cannot miss a reload.
-        let changed = rt.subscribe_config();
-        let weak = Arc::downgrade(rt);
+        // The registration view comes with the subscription, so startup cannot miss
+        // a reload; every later publication is applied in order with its own view.
+        let mut changes = rt.subscribe_config();
         let task = tokio::spawn(async move {
-            let mut changed = changed;
             let mut stopped = stopped;
             let mut listener: Option<TcpListener> = None;
             let mut current = (false, String::new());
@@ -68,12 +67,9 @@ impl Server {
                 }
                 if apply {
                     apply = false;
-                    // Mark this publication before draining. A newer publication
-                    // remains eligible even when this apply times out.
-                    changed.borrow_and_update();
-                    let Some(rt) = weak.upgrade() else { break };
-                    let desired = settings(&rt.config());
-                    drop(rt);
+                    // A newer publication stays queued, so it is applied next even
+                    // when this apply times out.
+                    let desired = settings(&changes.current().config);
                     if desired != current || (desired.0 && listener.is_none()) {
                         // Stop the physical listener before draining; later binds cannot
                         // accidentally retain connections from the previous generation.
@@ -92,14 +88,10 @@ impl Server {
                             // a replacement. Only a later publication can retry.
                             continue;
                         }
-                        // A newer configuration may have arrived while old requests drained.
                         if *stopped.borrow() {
                             break;
                         }
-                        changed.borrow_and_update();
-                        let Some(rt) = weak.upgrade() else { break };
-                        current = settings(&rt.config());
-                        drop(rt);
+                        current = desired;
                         if current.0 {
                             let binding = async {
                                 if let Some(port) = current.1.strip_prefix(':') {
@@ -113,8 +105,8 @@ impl Server {
                             let bound = tokio::select! {
                                 biased;
                                 _ = stopped.changed() => break,
-                                result = changed.changed() => {
-                                    if result.is_err() { break; }
+                                change = changes.next() => {
+                                    if change.is_none() { break; }
                                     apply = true;
                                     continue;
                                 },
@@ -138,8 +130,8 @@ impl Server {
                 tokio::select! {
                     biased;
                     _ = stopped.changed() => break,
-                    result = changed.changed() => {
-                        if result.is_err() { break; }
+                    change = changes.next() => {
+                        if change.is_none() { break; }
                         apply = true;
                     },
                     _ = connections.join_next(), if !connections.is_empty() => {},

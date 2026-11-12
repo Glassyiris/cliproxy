@@ -24,6 +24,7 @@ pkg-fmt = "zip"
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+base64 = "0.22"
 clap.workspace = true
 cpa-common.workspace = true
 cpa-core.workspace = true
@@ -36,12 +37,14 @@ libc.workspace = true
 # The -tui management client: the crossterm backend only.
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 serde_json.workspace = true
+sha2 = "0.10"
 serde_yaml_ng.workspace = true
 # `all` for SO_REUSEPORT, which Go sets on mDNS sockets outside Linux.
 socket2 = { workspace = true, features = ["all"] }
+tempfile = "3"
 tokio.workspace = true
 tracing.workspace = true
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["rt"] }
 futures-util.workspace = true
 # Already in the tree through axum and cpa-server; the heap-trim response hook.
 http-body = "1"
@@ -53,4 +56,5 @@ wreq.workspace = true
 
 [dev-dependencies]
 cpa-plugin = { workspace = true, features = ["test-support"] }
+cpa-server = { workspace = true, features = ["testing"] }
 cpa-home = { workspace = true, features = ["fake"] }

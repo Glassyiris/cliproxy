@@ -34,6 +34,9 @@ pub(crate) mod legacy;
 mod logs;
 pub(crate) mod multipart;
 mod oauth;
+pub(crate) use oauth::{
+    HeldLogin, LoginRejected, login_render_error, normalize_callback_provider as oauth_provider_key,
+};
 pub mod observability;
 mod plugin_auth;
 mod plugin_oauth;
@@ -91,6 +94,11 @@ pub struct Management {
     /// Plugin store test seams and release cache (Go `Handler.pluginStore*`).
     pub(crate) plugin_store: plugin_store::StoreState,
     access: access::Access,
+    configuration_subscription: Mutex<Vec<crate::config_store::ConfigurationSubscription>>,
+    admission_closed: Mutex<bool>,
+    pub(crate) work: tokio_util::task::TaskTracker,
+    pub(crate) stopping: tokio_util::sync::CancellationToken,
+    pub(crate) transport_stop: tokio_util::sync::CancellationToken,
 }
 
 #[derive(Default)]
@@ -128,6 +136,26 @@ pub struct Options {
 }
 
 impl Management {
+    pub(crate) fn enter(&self) -> Option<tokio_util::task::task_tracker::TaskTrackerToken> {
+        let closed = self.admission_closed.lock().unwrap_or_else(PoisonError::into_inner);
+        if *closed { None } else { Some(self.work.token()) }
+    }
+
+    pub fn begin_shutdown(&self) {
+        let mut closed = self.admission_closed.lock().unwrap_or_else(PoisonError::into_inner);
+        *closed = true;
+        self.stopping.cancel();
+    }
+
+    /// Join accepted requests, login workers, callback connections, blocking saves and
+    /// the hourly attempt purge.
+    pub async fn shutdown(&self) {
+        self.begin_shutdown();
+        self.transport_stop.cancel();
+        self.work.close();
+        self.work.wait().await;
+    }
+
     /// Go `managementRoutesEnabled`, for the RESP protocol on the main listener.
     pub(crate) fn routes_enabled(&self) -> bool {
         self.access.available()
@@ -140,7 +168,13 @@ impl Management {
         local: bool,
         provided: &[u8],
     ) -> Result<(), (StatusCode, String)> {
-        self.access.authenticate(&self.rt.config(), ip, local, provided).await
+        let _operation = self.enter().ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "configuration service is shutting down".into(),
+        ))?;
+        self.access
+            .authenticate(&self.rt.config(), ip, local, provided, &self.work)
+            .await
     }
 
     pub fn new(rt: Arc<Runtime>, config: Arc<ConfigStore>) -> Arc<Self> {
@@ -187,6 +221,11 @@ impl Management {
             .unwrap_or_default();
         let state = Arc::new(Self {
             access,
+            configuration_subscription: Mutex::new(Vec::new()),
+            admission_closed: Mutex::new(false),
+            work: tokio_util::task::TaskTracker::new(),
+            stopping: tokio_util::sync::CancellationToken::new(),
+            transport_stop: tokio_util::sync::CancellationToken::new(),
             rt,
             config,
             published: Mutex::new(published),
@@ -209,6 +248,77 @@ impl Management {
             log_zone,
             plugin_store,
         });
+        // Home has a mutually exclusive remote authority even though it wraps a
+        // Management handler. Only local persistent runtimes bind this owner.
+        if !state.rt.store().is_home() {
+            let weak = Arc::downgrade(&state);
+            let notify_owner = weak.clone();
+            let notify = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let installed = notify.clone();
+            // Retain the original transition input until this whole adapter completes.
+            // Runtime.config can advance before a fallible derived-install tail.
+            let progress = Mutex::new(None::<(u64, String, Arc<Config>, bool)>);
+            let (installation, notification) = state
+                .config
+                .install_configuration_and_notify(
+                    move |view| {
+                        if let Some(state) = weak.upgrade() {
+                            state.config.pin_configuration_owner(state.clone());
+                            let previous = {
+                                let mut progress = progress.lock().unwrap_or_else(PoisonError::into_inner);
+                                if !progress
+                                    .as_ref()
+                                    .is_some_and(|(rev, digest, _, _)| *rev == view.revision && *digest == view.digest)
+                                {
+                                    *progress = Some((view.revision, view.digest.clone(), state.rt.config(), false));
+                                }
+                                let (_, _, previous, completed) = progress.as_ref().unwrap();
+                                if *completed {
+                                    return Ok(());
+                                }
+                                previous.clone()
+                            };
+                            state
+                                .rt
+                                .bind_configuration(|| state.accept_configuration(&view, previous));
+                            progress
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .as_mut()
+                                .unwrap()
+                                .3 = true;
+                            if view.change == crate::config_store::ConfigurationChange::Committed {
+                                installed.store(true, std::sync::atomic::Ordering::Release);
+                            }
+                        }
+                        Ok(())
+                    },
+                    move |view| {
+                        // The initial view is announced once its installation succeeded
+                        // (registration fails otherwise), so subscribers leave the
+                        // pre-binding configuration.
+                        let announce = match view.change {
+                            crate::config_store::ConfigurationChange::Initial => true,
+                            crate::config_store::ConfigurationChange::Committed => {
+                                notify.swap(false, std::sync::atomic::Ordering::AcqRel)
+                            }
+                        };
+                        if announce && let Some(state) = notify_owner.upgrade() {
+                            // Runtime observers are ordinary success notifications too:
+                            // never announce success while another required adapter failed.
+                            state.config.pin_configuration_owner(state.clone());
+                            state.rt.service_configuration_installed();
+                        }
+                        Ok(())
+                    },
+                )
+                .expect("validated configuration initial view");
+            state
+                .configuration_subscription
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend([installation, notification]);
+        }
         oauth::install_callback_sink(&state);
         access::start_purge(&state);
         plugin_auth::attach(&state);
@@ -236,13 +346,16 @@ impl Management {
         Ok(())
     }
 
-    /// Runs one store write under `disk`, then publishes what it committed, so a
-    /// publication never goes back to an older revision. With the result, whether a
-    /// setting read only at startup (listener, TLS, trusted proxies) changed.
+    /// Serializes Management's adapter work under `disk`. The service command
+    /// itself owns persistence, runtime-view installation and ordered dispatch.
+    /// Also reports whether a startup-only listener/TLS/proxy setting changed.
     pub(crate) fn commit_with(
         &self,
         write: impl FnOnce(&ConfigStore) -> Result<Committed, CommitError>,
     ) -> Result<(Committed, bool), CommitError> {
+        self.config
+            .check_reentry()
+            .map_err(|error| CommitError::invalid(error.to_string()))?;
         let disk = self.disk.lock().unwrap_or_else(PoisonError::into_inner);
         self.commit_locked(&disk, write)
     }
@@ -255,10 +368,6 @@ impl Management {
     ) -> Result<(Committed, bool), CommitError> {
         let done = write(&self.config)?;
         let restart = startup_changed(&self.startup, &done.config);
-        if done.written {
-            *self.published.lock().unwrap_or_else(PoisonError::into_inner) = (done.rev, done.digest.clone());
-            self.publish(done.config.clone(), None);
-        }
         Ok((done, restart))
     }
 
@@ -294,35 +403,29 @@ impl Management {
         }
     }
 
-    /// Publishes the stored config and wakes the credential watcher when another
-    /// connection committed. An invalid config keeps the running one.
-    pub fn reload_config(&self) {
-        let _guard = self.disk.lock().unwrap_or_else(PoisonError::into_inner);
-        match self.config.changed_elsewhere() {
-            Ok(true) => {}
-            Ok(false) => return,
-            Err(e) => {
-                tracing::error!("config store: {e:#}");
-                return;
-            }
+    /// Required projection adapter invoked by the service before change dispatch.
+    /// Never takes Management.disk or submits a command to the active owner gate.
+    fn accept_configuration(&self, view: &crate::config_store::ConfigurationView, previous: Arc<Config>) {
+        let mut cfg = (*view.config).clone();
+        self.lock_auth_dir(&mut cfg);
+        if cfg != *previous {
+            crate::config_diff::log(&previous, &cfg);
+            self.access.config_published(&cfg);
+            crate::logging::configure(&cfg);
+            self.rt.usage_queue().configure(self.access.available(), &cfg);
         }
-        self.credential_changes.notify_one();
-        let loaded = match self.config.load() {
-            Ok(loaded) => loaded,
-            Err(fault) => {
-                tracing::error!("config store: the stored config does not compile, keeping the running one: {fault}");
-                return;
-            }
-        };
-        let mut published = self.published.lock().unwrap_or_else(PoisonError::into_inner);
-        if loaded.rev < published.0 || (loaded.rev, &loaded.digest) == (published.0, &published.1) {
-            return;
+        // Repeat incomplete derived effects even if Runtime.config already advanced.
+        // Comparing the original transition input above also preserves unchanged
+        // initial binding's existing access/logging/usage behavior.
+        let policy = policy(&cfg);
+        assert!(
+            self.rt.install_service_configuration(cfg, policy, previous),
+            "validated service configuration must install before acknowledgement"
+        );
+        if view.change == crate::config_store::ConfigurationChange::Committed {
+            self.publish((*self.rt.config()).clone(), None);
         }
-        crate::config_diff::log(&self.rt.config(), &loaded.config);
-        tracing::info!("config revision {} changed elsewhere, reloading", loaded.rev);
-        *published = (loaded.rev, loaded.digest);
-        drop(published);
-        self.publish(loaded.config, None);
+        *self.published.lock().unwrap_or_else(PoisonError::into_inner) = (view.revision, view.digest.clone());
     }
 
     /// The config database this server reads and writes.
@@ -335,28 +438,26 @@ impl Management {
         self.published.lock().unwrap_or_else(PoisonError::into_inner).0
     }
 
-    /// The stored config, recorded as the published revision; the caller holds `disk`
-    /// and publishes it.
+    /// Checks canonical configuration validity for the legacy reload adapter and
+    /// supplies the already accepted runtime view. The caller holds `disk`.
     pub(crate) fn stored_config(&self) -> Result<Config, crate::config_store::Fault> {
         let loaded = self.config.load()?;
-        let mut published = self.published.lock().unwrap_or_else(PoisonError::into_inner);
+        let published = self.published.lock().unwrap_or_else(PoisonError::into_inner);
         if loaded.rev < published.0 {
             return Err(crate::config_store::Fault::new(
                 None,
                 "stored revision is older than the running revision",
             ));
         }
-        *published = (loaded.rev, loaded.digest);
-        drop(published);
-        Ok(loaded.config)
+        // Credential reconciliation is not a configuration publication owner.
+        Ok((*self.rt.config()).clone())
     }
 
-    /// Publishes a config and everything Go derives from it on reload: scheduler
-    /// policy, management availability, and the credential set (auth-dir files plus
-    /// config API keys). `files` replaces the auth-dir scan when the caller already
-    /// has one; its file hashes keep a stale scan from undoing a later write (Go
-    /// c4c1d43e). Callers hold `disk`. Infallible on purpose: access settings of a
-    /// valid config (a rotated or removed secret) always take effect.
+    /// Reconciles credential documents and config-derived credentials using the
+    /// accepted runtime config. This compatibility adapter cannot publish config.
+    /// `files` replaces a scan; its hashes prevent stale credential replacement.
+    /// Management callers hold `disk`; the service's required projection adapter
+    /// invokes it under its own admission gate, without acquiring `disk`.
     pub(crate) fn publish(&self, cfg: Config, files: Option<credentials::AuthScan>) {
         self.publish_upload(cfg, files, None);
     }
@@ -396,11 +497,23 @@ impl Management {
         files: Option<credentials::AuthScan>,
         upload: Option<(Credential, [u8; 32])>,
     ) {
+        self.publish_uploads(cfg, files, upload.into_iter().collect());
+    }
+
+    /// Reconciles one accepted document batch in a single runtime transition.
+    pub(crate) fn publish_uploads(
+        &self,
+        cfg: Config,
+        files: Option<credentials::AuthScan>,
+        uploads: Vec<(Credential, [u8; 32])>,
+    ) {
         // Nothing below is applied for a config the runtime would refuse to publish.
         if !Runtime::accepts_config(&cfg) {
             return;
         }
-        let mut cfg = cfg;
+        // Only the service's configuration adapter may change runtime config.
+        // Legacy callers pass a scan-time config; use the accepted runtime view.
+        let mut cfg = (*self.rt.config()).clone();
         self.lock_auth_dir(&mut cfg);
         use sha2::{Digest, Sha256};
         let scan = files.unwrap_or_else(|| self.scan_credentials(&cfg));
@@ -411,15 +524,19 @@ impl Management {
         // Fallbacks follow their file: gone with it, replaced once a synthesizer
         // claims it, otherwise rebuilt from its current content.
         let mut claimed = Vec::new();
+        let mut claimed_paths: std::collections::HashSet<_> = all
+            .iter()
+            .filter_map(|c| match &c.source {
+                Source::File(path) => Some(absolute(path)),
+                _ => None,
+            })
+            .collect();
         let mut fallbacks = self.fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
         fallbacks.retain(|path| {
             let Ok(data) = auth_files::read_file(self, path) else {
                 return false;
             };
-            if all
-                .iter()
-                .any(|c| matches!(&c.source, Source::File(p) if absolute(p) == absolute(path)))
-            {
+            if claimed_paths.contains(&absolute(path)) {
                 claimed.push(path.clone());
                 return false;
             }
@@ -429,6 +546,7 @@ impl Management {
                     // freshness check compares this read, not the scan's.
                     if let Source::File(p) = &c.source {
                         read.insert(p.clone(), Sha256::digest(&data).into());
+                        claimed_paths.insert(absolute(p));
                     }
                     all.push(c);
                     true
@@ -450,38 +568,28 @@ impl Management {
             }
         }
         all.extend(credentials::from_config(&cfg));
-        if cfg != *self.rt.config() {
-            self.access.config_published(&cfg);
-            crate::logging::configure(&cfg);
-            self.rt.usage_queue().configure(self.access.available(), &cfg);
-            let policy = policy(&cfg);
-            self.rt.publish_config_and_policy(cfg, policy);
+        let deferred: std::collections::HashSet<_> = scan.deferred.iter().map(absolute).collect();
+        let uploads: Vec<_> = uploads
+            .into_iter()
+            .filter(|(c, _)| matches!(&c.source, Source::File(path) if deferred.contains(&absolute(path))))
+            .collect();
+        for (upload, written) in &uploads {
+            if let Source::File(path) = &upload.source {
+                read.insert(path.clone(), *written);
+            }
         }
-        let upload = upload.filter(|(c, _)| {
-            matches!(&c.source, Source::File(path) if scan.deferred.iter().any(|p| absolute(p) == absolute(path)))
-        });
-        if let Some((
-            Credential {
-                source: Source::File(path),
-                ..
-            },
-            written,
-        )) = &upload
-        {
-            read.insert(path.clone(), *written);
-        }
+        let upload_ids: std::collections::HashSet<_> = uploads.iter().map(|(c, _)| c.id.clone()).collect();
         let rejected = self.rt.store().reconcile_scanned_with(all, &read, |current, all| {
             crate::plugins::keep_deferred(current, all, &scan.deferred);
-            if let Some((upload, _)) = upload {
-                all.retain(|c| c.id != upload.id);
-                all.push(upload);
-            }
+            all.retain(|c| !upload_ids.contains(&c.id));
+            all.extend(uploads.into_iter().map(|(credential, _)| credential));
         });
         // A synthesizer claimed the file but its credential was rejected as stale, so the
         // fallback stays live: keep tracking it, or the next reload would drop it.
+        let rejected: std::collections::HashSet<_> = rejected.iter().map(absolute).collect();
         let kept: Vec<PathBuf> = claimed
             .into_iter()
-            .filter(|path| rejected.iter().any(|r| absolute(r) == absolute(path)))
+            .filter(|path| rejected.contains(&absolute(path)))
             .collect();
         if !kept.is_empty() {
             self.fallbacks
@@ -700,7 +808,15 @@ pub fn router(state: Arc<Management>) -> Router {
             methods().post(guarded!(s, admin::restore)),
         )
         .route(&format!("{admin}/export"), methods().get(guarded!(s, admin::export)))
-        .route(&format!("{admin}/import"), methods().post(guarded!(s, admin::import)));
+        .route(&format!("{admin}/import"), methods().post(guarded!(s, admin::import)))
+        .route(
+            &format!("{admin}/credentials"),
+            methods().get(guarded!(s, admin::credential_sources)),
+        )
+        .route(
+            &format!("{admin}/credentials/batch"),
+            methods().post(guarded!(s, admin::credential_batch)),
+        );
     // v8 and its deprecated v0 spellings share Go's handlers.
     for (base, files, definitions) in [
         (v8, "credentials", "routing/model-definitions"),
@@ -904,6 +1020,7 @@ pub fn router(state: Arc<Management>) -> Router {
         // gin reads management bodies without a size limit (uploads, config writes);
         // they are only read after authentication.
         .layer(DefaultBodyLimit::disable())
+        .layer(middleware::from_fn_with_state(state.clone(), access::owned))
         .layer(middleware::from_fn(cors))
         .with_state(state)
 }

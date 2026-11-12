@@ -225,6 +225,8 @@ struct WriteState {
     pending: Option<(Vec<Record>, SystemTime)>,
     writing: bool,
     stopping: bool,
+    /// The latest attempt's failure; a later successful checkpoint clears it.
+    failed: Option<String>,
 }
 
 impl Writer {
@@ -243,10 +245,12 @@ impl Writer {
                 };
                 state.writing = true;
                 drop(state);
-                if let Err(error) = backend.save(records, now) {
+                let result = backend.save(records, now);
+                if let Err(error) = &result {
                     tracing::warn!(%error, "failed to persist cooldown state");
                 }
                 let mut state = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                state.failed = result.err();
                 state.writing = false;
                 ready.notify_all();
             }
@@ -263,6 +267,7 @@ impl Writer {
         ready.notify_all();
     }
 
+    #[cfg(test)]
     pub(crate) fn flush(&self) {
         let (lock, ready) = &*self.state;
         let mut state = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -272,14 +277,36 @@ impl Writer {
     }
 }
 
-impl Drop for Writer {
-    fn drop(&mut self) {
+impl Writer {
+    /// Drains the queued snapshot, joins the thread and reports whether the last
+    /// checkpoint attempt failed, so a lost final checkpoint is not a clean stop.
+    pub(crate) fn stop(mut self) -> Result<(), String> {
+        self.join();
+        let (lock, _) = &*self.state;
+        match lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .failed
+            .take()
+        {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    fn join(&mut self) {
         let (lock, ready) = &*self.state;
         lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner).stopping = true;
         ready.notify_all();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+impl Drop for Writer {
+    fn drop(&mut self) {
+        self.join();
     }
 }
 

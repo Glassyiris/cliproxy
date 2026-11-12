@@ -46,6 +46,8 @@ pub struct RequestScope {
     pub pinned_auth_id: Option<String>,
     pub execution_session: Option<String>,
     pub request_path: String,
+    /// Service-issued job authority; never decoded from plugin/client JSON.
+    pub auth_save_grant: Option<Arc<crate::hostauth::AuthSaveGrant>>,
     /// The client's usage identity (Go's parent callback context: `userApiKey` and
     /// `accessProvider`), for the usage records of nested `host.model.*` calls.
     pub api_key: String,

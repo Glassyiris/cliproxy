@@ -281,9 +281,22 @@ async fn media_routes_match_go() {
     );
 }
 
+/// A loopback listener on a five-digit port. Responses carry raw loopback URLs, so
+/// their Content-Length depends on the port's width, and the Go recording used
+/// five-digit ephemeral ports; hosts whose ephemeral range starts below 10000 can
+/// otherwise hand out a four-digit one.
+async fn wide_listener() -> tokio::net::TcpListener {
+    loop {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        if listener.local_addr().unwrap().port() >= 10_000 {
+            return listener;
+        }
+    }
+}
+
 /// Replays `fixture` on a fresh runtime; `expected` is the response a scenario must give.
 async fn replay(tag: &str, fixture: &Fixture, expected: impl Fn(&Scenario) -> String) -> Vec<String> {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = wide_listener().await;
     let addr = listener.local_addr().unwrap().to_string();
     let upstream = Arc::new(Capture::default());
     tokio::spawn(capture(listener, upstream.clone(), addr.clone()));
@@ -310,7 +323,7 @@ async fn replay(tag: &str, fixture: &Fixture, expected: impl Fn(&Scenario) -> St
     };
     let rt = Arc::new(cpa_server::testing::runtime(config, credentials, executors));
     cpa_server::install_registry(&rt);
-    let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server = wide_listener().await;
     let base = format!("http://{}", server.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(server, router(rt)).await.unwrap() });
 

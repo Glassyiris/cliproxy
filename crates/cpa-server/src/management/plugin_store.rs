@@ -943,18 +943,21 @@ async fn install_inner(state: Arc<Management>, raw: &str, query: &[(String, Stri
     // Go `enablePluginConfigLocked`, then the save.
     let store_node = manifest.to_yaml();
     let id_for_edit = id.clone();
-    let saved = tokio::task::spawn_blocking({
-        let state = state.clone();
-        move || {
-            save(&state, move |doc| {
-                let mut node = current_node(doc, &id_for_edit);
-                set_key(&mut node, "enabled", true.into());
-                set_key(&mut node, "store", store_node);
-                set_node(doc, &id_for_edit, node)
-            })
-        }
-    })
-    .await;
+    let saved = state
+        .work
+        .clone()
+        .spawn_blocking({
+            let state = state.clone();
+            move || {
+                save(&state, move |doc| {
+                    let mut node = current_node(doc, &id_for_edit);
+                    set_key(&mut node, "enabled", true.into());
+                    set_key(&mut node, "store", store_node);
+                    set_node(doc, &id_for_edit, node)
+                })
+            }
+        })
+        .await;
     let failed = |code: &str, what: &str, e: &str| {
         map_json(
             StatusCode::INTERNAL_SERVER_ERROR,

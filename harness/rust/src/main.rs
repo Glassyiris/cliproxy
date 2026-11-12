@@ -11,7 +11,6 @@ use std::sync::Arc;
 use cpa_exec::Executors;
 use cpa_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL, Hooks};
 use cpa_server::Runtime;
-use cpa_server::config_store::ConfigStore;
 use wreq::tls::trust::CertStore;
 
 #[tokio::main]
@@ -19,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     anyhow::ensure!(args.len() == 3, "usage: driver CONFIG TEST_CA");
     let config_path = Path::new(&args[1]);
-    let store = Arc::new(ConfigStore::open(&config_path.with_extension("db"))?);
+    let store = Arc::new(cpa_server::testing::config_store(&config_path.with_extension("db"))?);
     store.import_yaml(&std::fs::read_to_string(config_path)?, "harness", "fixture")?;
     let mut config = store.load().map_err(|e| anyhow::anyhow!("{e}"))?.config;
     let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &config.auth_dir)?;
@@ -47,11 +46,14 @@ async fn main() -> anyhow::Result<()> {
     rt.start_auto_refresh();
     let management =
         cpa_server::management::Management::with_options(rt.clone(), store, cpa_server::management::Options::default());
-    let _watcher = cpa_server::watching::start(&management);
+    let watcher = cpa_server::watching::start(&management);
     let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()))
         .layer(axum::middleware::from_fn(cpa_server::management::cors));
     let app = cpa_server::observability::router(&rt, app);
     // The production listener (crates/cook-router uses the same call), plain HTTP.
-    cpa_server::listener::serve_with_resp(listener, app, None, Some(management)).await?;
+    let served = cpa_server::listener::serve_with_resp(listener, app, None, Some(management)).await;
+    watcher.shutdown().await?;
+    rt.shutdown_codex_refreshes().await;
+    served?;
     Ok(())
 }

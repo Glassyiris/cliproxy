@@ -3,38 +3,90 @@
 //! numbered revision. The runtime reads the [`Config`] the rows compile to
 //! ([`resources::config`]).
 //!
-//! One connection per process, behind a mutex. Writes take SQLite's write lock first
-//! (`BEGIN IMMEDIATE`), so a second process (the CLI) serializes with this one.
-//! History keeps every revision's changes with secrets replaced by
-//! [`resources::SECRET`]; deleted rows are zeroed (`secure_delete`) and the WAL is
-//! truncated after each commit, so a removed key does not stay in the files.
+//! Disk connections exist only for storage operations; accepted business state
+//! lives in immutable memory snapshots. One owner gate serializes domain mutations.
+//! A fresh complete image replaces the private checkpoint and published file;
+//! neither destination is an input to normal encoding.
+//! Each completed write publishes an immutable, standalone snapshot at `--db`.
+//! The private recovery checkpoint lives in OS tmp storage. History redacts secrets;
+//! logical deletion does not promise physical disk erasure.
 
 mod commit;
 mod db;
+mod encode;
 mod history;
+mod notifications;
+mod published;
 pub mod resources;
+mod state;
 
-pub(crate) use db::checkpoint_truncate;
-use db::{all, head, stored_kind};
+#[cfg(test)]
+use db::head;
+use db::{all, stored_kind};
 use history::shown_change;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
+
+pub(crate) use state::{Pending, State, Writer};
 
 use cpa_core::config::Config;
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
 
+pub use notifications::{ConfigurationChange, ConfigurationSubscription, ConfigurationView};
+pub use published::AlreadyOwned;
 pub use resources::{Fault, Kind, Resource};
 
 pub struct ConfigStore {
-    conn: Mutex<Connection>,
+    state: RwLock<Arc<State>>,
+    writer: Mutex<Option<state::Pending>>,
+    // Owner-derived dispatch fence: a consumed grant requires these source bytes.
+    grant_sources: RwLock<BTreeMap<String, Option<[u8; 32]>>>,
+    // Volatile plugin-child results are execution state, never snapshot documents.
+    virtual_grants: Mutex<Vec<crate::runtime::HeldVirtualGrant>>,
+    held_logins: Mutex<Vec<crate::management::HeldLogin>>,
+    held_login_sources: RwLock<std::collections::BTreeSet<String>>,
+    rejected_login_sources: RwLock<BTreeMap<String, [u8; 32]>>,
+    // Transient dispatch upgrades are released by Writer, after admission unlocks.
+    admission_pins: Mutex<Vec<Arc<dyn std::any::Any + Send + Sync>>>,
+    subscriptions: Arc<Mutex<notifications::Subscriptions>>,
+    // Only in-memory stores retain a connection: closing it would discard their state.
+    conn: Option<Mutex<Connection>>,
     path: Option<PathBuf>,
-    /// `PRAGMA data_version` when it was last read: it moves when another connection
-    /// commits.
-    seen: Mutex<i64>,
+    disk: Option<published::Disk>,
+}
+
+pub(crate) enum StoreConnection<'a> {
+    Memory(std::sync::MutexGuard<'a, Connection>),
+    Disk {
+        conn: Connection,
+        // The live connection closes before the checkpoint may be replaced.
+        _storage: std::sync::MutexGuard<'a, ()>,
+    },
+}
+
+impl std::ops::Deref for StoreConnection<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        match self {
+            Self::Memory(conn) => conn,
+            Self::Disk { conn, .. } => conn,
+        }
+    }
+}
+
+impl std::ops::DerefMut for StoreConnection<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        match self {
+            Self::Memory(conn) => conn,
+            Self::Disk { conn, .. } => conn,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -210,33 +262,32 @@ impl ConfigStore {
         self.path.as_deref()
     }
 
-    pub(crate) fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(PoisonError::into_inner)
+    pub(crate) fn conn(&self) -> anyhow::Result<StoreConnection<'_>> {
+        self.connect(false)
+    }
+
+    fn connect(&self, writing: bool) -> anyhow::Result<StoreConnection<'_>> {
+        match &self.conn {
+            Some(conn) => Ok(StoreConnection::Memory(
+                conn.lock().unwrap_or_else(PoisonError::into_inner),
+            )),
+            None => self
+                .disk
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("missing working database"))?
+                .connection(self, writing),
+        }
     }
 
     /// Whether nothing was ever stored: a first start imports `config.yaml` then.
     pub fn is_empty(&self) -> anyhow::Result<bool> {
-        let n: i64 = self
-            .conn()
-            .query_row("SELECT count(*) FROM revision", [], |r| r.get(0))?;
-        Ok(n == 0)
+        Ok(self.current().revisions.is_empty())
     }
 
-    /// Whether another connection committed since the last call.
-    pub fn changed_elsewhere(&self) -> anyhow::Result<bool> {
-        let now: i64 = self.conn().pragma_query_value(None, "data_version", |r| r.get(0))?;
-        let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
-        Ok(std::mem::replace(&mut *seen, now) != now)
-    }
-
-    /// Revision and rows read under one SQLite snapshot, including external writers.
+    /// A coherent immutable accepted version, independent of storage availability.
     pub fn snapshot(&self) -> anyhow::Result<(u64, Vec<Resource>)> {
-        let mut conn = self.conn();
-        let tx = conn.transaction()?;
-        let rev = head(&tx)?;
-        let resources = all(&tx)?;
-        tx.commit()?;
-        Ok((rev, resources))
+        let state = self.current();
+        Ok((state.rev(), state.resources.as_ref().clone()))
     }
 
     /// The config the stored resources compile to.

@@ -989,13 +989,20 @@ pub async fn login(
             .and_then(Value::as_str)
             .unwrap_or("antigravity")
             .to_owned();
-        let path = auth_dir.join(&file_name);
-        let path =
-            crate::login_store::save_login(save.as_ref(), &[path], || write_login(auth_dir, &file_name, &metadata))?;
+        let directory = auth_dir.to_owned();
+        let path = tokio::task::spawn_blocking(move || {
+            let path = directory.join(&file_name);
+            crate::login_store::save_login(save.as_ref(), &[path], || {
+                write_login(&directory, &file_name, &metadata)
+            })
+        })
+        .await
+        .map_err(|_| "antigravity: credential publication failed".to_owned())??;
         Ok((path, label))
     }
     .await;
     server.abort();
+    let _ = server.await;
     result
 }
 

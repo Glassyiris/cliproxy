@@ -100,6 +100,7 @@ fn bad_handshake() -> Response {
 /// Everything a WebSocket route receives.
 pub(super) struct Inbound {
     rt: Arc<Runtime>,
+    owner: Option<Extension<crate::listener::ConnectionWork>>,
     live: Arc<Live>,
     principal: Principal,
     headers: HeaderMap,
@@ -109,6 +110,7 @@ pub(super) struct Inbound {
 /// `GET /v1/live/{call_id}`.
 pub(super) async fn live_sideband(
     State(rt): State<Arc<Runtime>>,
+    owner: Option<Extension<crate::listener::ConnectionWork>>,
     Extension(live): Extension<Arc<Live>>,
     Extension(principal): Extension<Principal>,
     path: Result<Path<String>, PathRejection>,
@@ -121,6 +123,7 @@ pub(super) async fn live_sideband(
         principal,
         headers,
         ws,
+        owner,
     };
     sideband(inbound, false, Sideband::Frameless, path_param(path)).await
 }
@@ -128,6 +131,7 @@ pub(super) async fn live_sideband(
 /// `GET /v1/realtime/calls/{call_id}`.
 pub(super) async fn calls_sideband(
     State(rt): State<Arc<Runtime>>,
+    owner: Option<Extension<crate::listener::ConnectionWork>>,
     Extension(live): Extension<Arc<Live>>,
     Extension(principal): Extension<Principal>,
     path: Result<Path<String>, PathRejection>,
@@ -140,6 +144,7 @@ pub(super) async fn calls_sideband(
         principal,
         headers,
         ws,
+        owner,
     };
     sideband(inbound, true, Sideband::Calls, path_param(path)).await
 }
@@ -148,6 +153,7 @@ pub(super) async fn calls_sideband(
 /// else a standard Realtime session.
 pub(super) async fn realtime(
     State(rt): State<Arc<Runtime>>,
+    owner: Option<Extension<crate::listener::ConnectionWork>>,
     Extension(live): Extension<Arc<Live>>,
     Extension(principal): Extension<Principal>,
     OriginalUri(uri): OriginalUri,
@@ -165,6 +171,7 @@ pub(super) async fn realtime(
         principal,
         headers,
         ws,
+        owner,
     };
     let call_id = query("call_id");
     if !call_id.is_empty() {
@@ -185,6 +192,7 @@ async fn sideband(inbound: Inbound, realtime: bool, style: Sideband, call_id: St
         principal,
         headers,
         ws,
+        owner,
     } = inbound;
     let fail = |status, message: &str| live_error(realtime, status, message);
     if !is_upgrade(&headers) {
@@ -296,7 +304,7 @@ async fn sideband(inbound: Inbound, realtime: bool, style: Sideband, call_id: St
     let Some(ws) = ws.ok().filter(|_| acceptable_handshake(&headers)) else {
         return with_trace(bad_handshake(), &trace);
     };
-    upgrade(ws, upstream, move |relay| {
+    upgrade(ws, upstream, owner, move |relay| {
         let mut guard = guard;
         guard.consume = true;
         guard.call.resources.add(relay.abort_handle());
@@ -342,11 +350,12 @@ async fn until_drained(
     relay: tokio::task::JoinHandle<()>,
     drained: futures_util::future::BoxFuture<'static, ()>,
 ) -> Result<(), tokio::task::JoinError> {
-    let abort = relay.abort_handle();
+    let mut relay = tokio_util::task::AbortOnDropHandle::new(relay);
     tokio::select! {
-        result = relay => result,
+        result = &mut relay => result,
         _ = drained => {
-            abort.abort();
+            relay.abort();
+            let _ = relay.await;
             Ok(())
         }
     }
@@ -381,6 +390,7 @@ async fn direct(inbound: Inbound, model: String) -> Response {
         principal,
         headers,
         ws,
+        owner,
         ..
     } = inbound;
     if !is_upgrade(&headers) {
@@ -511,7 +521,7 @@ async fn direct(inbound: Inbound, model: String) -> Response {
     };
     // Go `selection.Retain()` until the session closes; Home draining the pick closes
     // the sockets bound to it.
-    upgrade(ws, upstream, move |relay| {
+    upgrade(ws, upstream, owner, move |relay| {
         let drained = super::drained(Some(&lease));
         async move {
             let _ = until_drained(relay, drained).await;
@@ -543,7 +553,12 @@ fn dial_failed(error: DialError, other: impl FnOnce(u16) -> Response) -> Respons
 
 /// Completes the downstream upgrade with the upstream's subprotocol, then runs the
 /// relay as its own task (so a hangup can abort it) inside `run`.
-fn upgrade<F, Fut>(ws: WebSocketUpgrade, upstream: LiveSocket, run: F) -> Response
+fn upgrade<F, Fut>(
+    ws: WebSocketUpgrade,
+    upstream: LiveSocket,
+    owner: Option<Extension<crate::listener::ConnectionWork>>,
+    run: F,
+) -> Response
 where
     F: FnOnce(tokio::task::JoinHandle<()>) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = ()> + Send + 'static,
@@ -555,8 +570,14 @@ where
         ws.set_selected_protocol(protocol);
     }
     let upstream = upstream.socket;
-    ws.on_upgrade(move |downstream| async move {
-        run(tokio::spawn(relay(downstream, upstream))).await;
+    let work = owner.as_ref().map(|Extension(owner)| owner.work.clone());
+    crate::listener::websocket(ws, owner, move |downstream| async move {
+        let relay = relay(downstream, upstream);
+        let task = match work {
+            Some(work) => work.spawn(relay),
+            None => tokio::spawn(relay),
+        };
+        run(task).await;
     })
 }
 

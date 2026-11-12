@@ -39,7 +39,7 @@ fn banner() -> String {
 }
 
 /// Flags mirror CLIProxyAPI. Go's single-dash long flags (`-config`) are accepted.
-#[derive(Parser)]
+#[derive(Clone, Parser)]
 #[command(
     version,
     about,
@@ -134,7 +134,7 @@ struct Args {
     /// In TUI mode, start an embedded local server
     #[arg(long)]
     standalone: bool,
-    /// Base URL of remote management API for TUI client mode (e.g. https://proxy.example.com)
+    /// Base URL of remote management API for TUI/config clients (e.g. https://proxy.example.com)
     #[arg(long, default_value = "")]
     management_base_url: String,
     /// Use embedded models.json and codex_client_models.json only, skip remote model catalog fetching
@@ -365,6 +365,86 @@ fn argv_enables_bool_flag(args: &[String], name: &str) -> bool {
         i += 1;
     }
     enabled
+}
+
+/// The environment variable an online command reads its management key from; the
+/// install script's `keys.env` uses the same name.
+const MANAGEMENT_KEY_ENV: &str = "COOK_ROUTER_MANAGEMENT_KEY";
+
+/// The management key for an online command: `--password` when given, else
+/// `COOK_ROUTER_MANAGEMENT_KEY`, else a prompt that does not echo on an interactive
+/// terminal. Non-interactive callers without either send no key, as before.
+pub(crate) fn management_key(explicit: &str) -> anyhow::Result<String> {
+    use std::io::IsTerminal as _;
+    resolve_management_key(
+        explicit,
+        std::env::var_os(MANAGEMENT_KEY_ENV),
+        io::stdin().is_terminal() && io::stderr().is_terminal(),
+        prompt_management_key,
+    )
+}
+
+fn resolve_management_key(
+    explicit: &str,
+    env: Option<std::ffi::OsString>,
+    interactive: bool,
+    prompt: impl FnOnce() -> anyhow::Result<String>,
+) -> anyhow::Result<String> {
+    if !explicit.is_empty() {
+        return Ok(explicit.to_owned());
+    }
+    if let Some(env) = env.filter(|value| !value.is_empty()) {
+        return env
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("{MANAGEMENT_KEY_ENV} is not valid UTF-8"));
+    }
+    if interactive { prompt() } else { Ok(String::new()) }
+}
+
+async fn online_management_key(explicit: String) -> anyhow::Result<String> {
+    tokio::task::spawn_blocking(move || management_key(&explicit))
+        .await
+        .context("read the management key")?
+}
+
+/// Reads one line from the terminal in raw mode, so the key is never echoed.
+fn prompt_management_key() -> anyhow::Result<String> {
+    use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+    use ratatui::crossterm::terminal;
+    use std::io::Write as _;
+    struct Raw;
+    impl Drop for Raw {
+        fn drop(&mut self) {
+            let _ = terminal::disable_raw_mode();
+        }
+    }
+    let mut stderr = io::stderr();
+    write!(stderr, "Management key: ")?;
+    stderr.flush()?;
+    terminal::enable_raw_mode().context("read the management key")?;
+    let raw = Raw;
+    let mut key = String::new();
+    let result = loop {
+        let Event::Key(press) = event::read()? else { continue };
+        if press.kind == KeyEventKind::Release {
+            continue;
+        }
+        match press.code {
+            KeyCode::Enter => break Ok(key),
+            KeyCode::Esc => break Err(anyhow::anyhow!("management key prompt cancelled")),
+            KeyCode::Char('c' | 'd') if press.modifiers.contains(KeyModifiers::CONTROL) => {
+                break Err(anyhow::anyhow!("management key prompt cancelled"));
+            }
+            KeyCode::Backspace => {
+                key.pop();
+            }
+            KeyCode::Char(c) => key.push(c),
+            _ => {}
+        }
+    };
+    drop(raw);
+    writeln!(stderr)?;
+    result.map(|key| key.trim().to_owned())
 }
 
 /// The value of the built-in flag `wanted` (`-flag V`, `--flag V`, `-flag=V`,
@@ -716,6 +796,25 @@ fn main() -> anyhow::Result<()> {
             error.exit();
         }
     }
+    // An explicit online command must be selected before opening any local store.
+    if !discover_mode && prescan_value(&raw[1..], "management-base-url").is_some_and(|url| !url.trim().is_empty()) {
+        let parsed = go_flags(&Args::command(), raw.clone(), &())
+            .ok()
+            .and_then(|flags| Args::try_parse_from(flags).ok());
+        let Some(args) = parsed else {
+            let code = runtime(None)?.block_on(online_plugin_command(&raw))?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+            return Ok(());
+        };
+        if command_mode(&args) {
+            if !online_command_supported(&args) {
+                anyhow::bail!("this online provider login is not yet supported");
+            }
+            return runtime(None)?.block_on(online_command(&args));
+        }
+    }
     let config_flag = prescan_value(&raw[1..], "config").unwrap_or_default();
     let db_flag = prescan_value(&raw[1..], "db").unwrap_or_default();
     let config_file = if config_flag.is_empty() {
@@ -1039,19 +1138,56 @@ fn free_console() {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BuiltinCommand {
+    Vertex,
+    Siwc,
+    Antigravity,
+    Codex,
+    Claude,
+    Kimi,
+    Xai,
+    Devin,
+    Meta,
+}
+
+/// Go's command priority also controls online eligibility, even with mixed flags.
+fn selected_command(args: &Args) -> Option<BuiltinCommand> {
+    [
+        (!args.vertex_import.is_empty(), BuiltinCommand::Vertex),
+        (!args.siwc_bind.is_empty(), BuiltinCommand::Siwc),
+        (args.antigravity_login, BuiltinCommand::Antigravity),
+        (args.codex_login || args.codex_device_login, BuiltinCommand::Codex),
+        (args.claude_login, BuiltinCommand::Claude),
+        (args.kimi_login || args.kimi_ai_login, BuiltinCommand::Kimi),
+        (args.xai_login, BuiltinCommand::Xai),
+        (args.devin_login, BuiltinCommand::Devin),
+        (args.meta_login, BuiltinCommand::Meta),
+    ]
+    .into_iter()
+    .find_map(|(enabled, command)| enabled.then_some(command))
+}
+
+fn online_command_supported(args: &Args) -> bool {
+    matches!(
+        selected_command(args),
+        Some(
+            BuiltinCommand::Vertex
+                | BuiltinCommand::Codex
+                | BuiltinCommand::Siwc
+                | BuiltinCommand::Kimi
+                | BuiltinCommand::Xai
+                | BuiltinCommand::Meta
+                | BuiltinCommand::Devin
+                | BuiltinCommand::Antigravity
+                | BuiltinCommand::Claude
+        )
+    )
+}
+
 /// Go's `commandMode`: a login or import flag is set.
 fn command_mode(args: &Args) -> bool {
-    !args.vertex_import.is_empty()
-        || !args.siwc_bind.is_empty()
-        || args.antigravity_login
-        || args.codex_login
-        || args.codex_device_login
-        || args.claude_login
-        || args.kimi_login
-        || args.kimi_ai_login
-        || args.xai_login
-        || args.devin_login
-        || args.meta_login
+    selected_command(args).is_some()
 }
 
 /// Go's TUI client mode: a pure management client; the server runs elsewhere.
@@ -1260,37 +1396,371 @@ async fn command(args: &Args, config: &Config, backend: Arc<CredentialDb>) -> an
     if let Some(error) = failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
         anyhow::bail!(error);
     }
-    match &result {
-        Ok(Ran::Login(path, provider)) => {
+    let result = result?;
+    report_command(&result);
+    Ok(result)
+}
+
+fn report_command(result: &Ran) {
+    match result {
+        Ran::Login(path, provider) => {
             println!("Authentication saved to {}", path.display());
             println!("{provider} authentication successful!");
         }
-        Ok(Ran::Imported(path)) => println!("Vertex credentials imported: {}", path.display()),
-        Ok(Ran::Bound(path)) => {
+        Ran::Imported(path) => println!("Vertex credentials imported: {}", path.display()),
+        Ran::Bound(path) => {
             println!("SIWC credentials bound and saved to {}", path.display());
             println!("Sign in with ChatGPT authentication successful!");
         }
         _ => {}
     }
+}
+
+fn hydrate_login_source(root: &Path, path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write as _;
+    if path.parent() != Some(root) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "staged target is outside private scratch",
+        ));
+    }
+    let mut file = tempfile::NamedTempFile::new_in(root)?;
+    file.write_all(bytes)?;
+    file.persist(path).map(|_| ()).map_err(|error| error.error)
+}
+
+fn hydrate_claude_sources(
+    root: &Path,
+    sources: &std::collections::BTreeMap<String, tui::CredentialSource>,
+) -> io::Result<()> {
+    use cpa_core::gostr::GoStr as _;
+    // Every canonical/legacy name from credential_file_name has this namespace.
+    // Enumeration for case-folded aliases happens before the final save callback.
+    for (name, source) in sources
+        .iter()
+        .filter(|(name, _)| name.go_lower().starts_with("claude-"))
+    {
+        hydrate_login_source(root, &root.join(name), &source.bytes)?;
+    }
+    Ok(())
+}
+
+/// Resolve a caller's logical destination without consulting client filesystem state.
+fn online_siwc_target(target: &str, sources: &tui::CredentialSources) -> anyhow::Result<String> {
+    let raw = target.trim();
+    let supplied = Path::new(raw);
+    let name = if supplied.is_absolute() {
+        anyhow::ensure!(
+            sources.auth_dir.is_absolute(),
+            "use a managed filename on this client platform"
+        );
+        let path = cpa_server::credential_store::credential_path_key(supplied)?;
+        let root = cpa_server::credential_store::credential_path_key(&sources.auth_dir)?;
+        anyhow::ensure!(
+            path.parent() == Some(root.as_path()),
+            "SIWC target must belong to the running owner's managed directory"
+        );
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .context("invalid SIWC target name")?
+            .to_owned()
+    } else {
+        anyhow::ensure!(
+            !raw.is_empty() && !raw.contains(['/', '\\', ':']),
+            "SIWC needs a managed filename or an absolute owner target"
+        );
+        raw.to_owned()
+    };
+    anyhow::ensure!(
+        sources.documents.contains_key(&name),
+        "SIWC target is not an existing managed credential"
+    );
+    Ok(name)
+}
+
+/// Inspected built-in providers call this on their owned blocking writer.
+fn online_login_save(
+    scratch: Arc<tempfile::TempDir>,
+    client: Arc<tui::Client>,
+    sources: std::collections::BTreeMap<String, tui::CredentialSource>,
+    runtime: tokio::runtime::Handle,
+) -> (cpa_exec::login_store::LoginSave, Arc<std::sync::Mutex<Option<String>>>) {
+    let failure = Arc::new(std::sync::Mutex::new(None));
+    let failed = failure.clone();
+    let source_cursor = std::sync::Mutex::new(sources);
+    let operation = std::sync::Mutex::new(());
+    let save: cpa_exec::login_store::LoginSave = Arc::new(move |paths, write| {
+        let result: Result<(), String> = (|| {
+            // Own the scratch render/read/ack transaction, separately from its cursor.
+            // Reject overlap/reentry rather than blocking a callback on itself.
+            let _operation = match operation.try_lock() {
+                Ok(permit) => permit,
+                Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    return Err("online credential writer is already running".into());
+                }
+            };
+            let paths: Vec<_> = paths
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let mut names = Vec::with_capacity(paths.len());
+            for path in &paths {
+                if path.parent() != Some(scratch.path()) {
+                    return Err("online credential writer escaped its private staging directory".into());
+                }
+                names.push(
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .ok_or("invalid staged credential name")?
+                        .to_owned(),
+                );
+            }
+            let sources: std::collections::BTreeMap<_, _> = {
+                let cursor = source_cursor.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                names
+                    .iter()
+                    .filter_map(|name| cursor.get(name).map(|source| (name.clone(), source.clone())))
+                    .collect()
+            };
+            // Hydrate only declared inputs before the provider's final merge/write.
+            for (path, name) in paths.iter().zip(&names) {
+                if let Some(source) = sources.get(name) {
+                    hydrate_login_source(scratch.path(), path, &source.bytes).map_err(|e| e.to_string())?;
+                }
+            }
+            write()?;
+            let mut documents = Vec::new();
+            let mut deletions = Vec::new();
+            for (path, name) in paths.iter().zip(names) {
+                match std::fs::read(path) {
+                    Ok(bytes) => documents.push((name, bytes)),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        // A declared, captured destination removed by a successful writer.
+                        if sources.contains_key(&name) {
+                            deletions.push(name);
+                        }
+                    }
+                    Err(_) => return Err("read rendered credential failed".to_owned()),
+                }
+            }
+            // FileTokenStore can deliberately skip a disabled, absent auth. There
+            // is no durable effect to acknowledge when every declared path is such a no-op.
+            if documents.is_empty() && deletions.is_empty() {
+                return Ok(());
+            }
+            // The callback returns Ok only after one durable mixed-batch acknowledgement.
+            runtime.block_on(async {
+                if deletions.is_empty() {
+                    client.save_credentials(&documents, Some(&sources)).await
+                } else {
+                    client
+                        .apply_credential_changes(&documents, &deletions, Some(&sources))
+                        .await
+                }
+            })?;
+            // Advance only to our acknowledged bytes, never to a fresh remote read.
+            // No cursor/state lock is held during rendering, HTTP or callback destruction.
+            use sha2::Digest as _;
+            let updates = documents
+                .into_iter()
+                .map(|(name, bytes)| {
+                    let sha256 = format!("{:x}", sha2::Sha256::digest(&bytes));
+                    (name, tui::CredentialSource { bytes, sha256 })
+                })
+                .collect::<Vec<_>>();
+            let mut cursor = source_cursor.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            cursor.extend(updates);
+            for name in deletions {
+                cursor.remove(&name);
+            }
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            *failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.clone());
+        }
+        result
+    });
+    (save, failure)
+}
+
+async fn online_command(args: &Args) -> anyhow::Result<()> {
+    let password = online_management_key(args.password.clone()).await?;
+    let client = Arc::new(tui::Client::new(&args.management_base_url, &password));
+    client.credential_admission().await.map_err(anyhow::Error::msg)?;
+    let mut config = if matches!(
+        selected_command(args),
+        Some(BuiltinCommand::Vertex | BuiltinCommand::Codex | BuiltinCommand::Claude)
+    ) {
+        Config::parse("")?
+    } else {
+        client.login_config().await.map_err(anyhow::Error::msg)?
+    };
+    let sources = client.credential_sources().await.map_err(anyhow::Error::msg)?;
+    let scratch = Arc::new(tempfile::Builder::new().prefix("cook-router-login-").tempdir()?);
+    let mut args = args.clone();
+    let siwc_report = if selected_command(&args) == Some(BuiltinCommand::Siwc) {
+        let name = online_siwc_target(&args.siwc_bind, &sources)?;
+        let report = PathBuf::from(args.siwc_bind.trim());
+        let bytes = sources.documents.get(&name).expect("validated source").bytes.clone();
+        let owner = scratch.clone();
+        let path = scratch.path().join(&name);
+        tokio::task::spawn_blocking(move || hydrate_login_source(owner.path(), &path, &bytes))
+            .await
+            .context("prepare private SIWC input")??;
+        args.siwc_bind = name;
+        Some(report)
+    } else {
+        None
+    };
+    let sources = if selected_command(&args) == Some(BuiltinCommand::Claude) {
+        let owner = scratch.clone();
+        tokio::task::spawn_blocking(move || {
+            hydrate_claude_sources(owner.path(), &sources.documents)?;
+            Ok::<_, io::Error>(sources)
+        })
+        .await
+        .context("prepare private Claude alias inputs")??
+    } else {
+        sources
+    };
+    let (save, failure) = online_login_save(
+        scratch.clone(),
+        client,
+        sources.documents,
+        tokio::runtime::Handle::current(),
+    );
+    config.auth_dir = scratch.path().to_owned();
+    let result = if selected_command(&args) == Some(BuiltinCommand::Vertex) {
+        let key = args.vertex_import.clone();
+        let prefix = args.vertex_import_prefix.clone();
+        let owner = scratch.clone();
+        tokio::task::spawn_blocking(move || Ok(import_vertex(owner.path(), &key, &prefix, &save)))
+            .await
+            .context("render online Vertex credentials")?
+    } else {
+        command_inner(&args, &config, save).await
+    };
+    if let Some(error) = failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+        anyhow::bail!(error);
+    }
+    let result = match result? {
+        Ran::Imported(path) => Ran::Imported(path.file_name().context("missing rendered name")?.into()),
+        Ran::Login(path, provider) => Ran::Login(path.file_name().context("missing rendered name")?.into(), provider),
+        Ran::Bound(_) => Ran::Bound(siwc_report.context("missing SIWC destination")?),
+        other => other,
+    };
+    Arc::try_unwrap(scratch)
+        .map_err(|_| anyhow::anyhow!("credential writer has not settled"))?
+        .close()
+        .context("remove private client credential staging")?;
+    report_command(&result);
+    Ok(())
+}
+
+async fn online_plugin_command(raw: &[String]) -> anyhow::Result<i32> {
+    let base = prescan_value(&raw[1..], "management-base-url").context("online management URL is required")?;
+    let password = online_management_key(prescan_value(&raw[1..], "password").unwrap_or_default()).await?;
+    let client = Arc::new(tui::Client::new(&base, &password));
+    client.credential_admission().await.map_err(anyhow::Error::msg)?;
+    let mut config = client.plugin_config().await.map_err(anyhow::Error::msg)?;
+    let sources = client.credential_sources().await.map_err(anyhow::Error::msg)?;
+    let scratch = Arc::new(tempfile::Builder::new().prefix("cook-router-login-").tempdir()?);
+    let owner = scratch.clone();
+    let sources = tokio::task::spawn_blocking(move || {
+        for (name, source) in &sources.documents {
+            hydrate_login_source(owner.path(), &owner.path().join(name), &source.bytes)?;
+        }
+        Ok::<_, io::Error>(sources)
+    })
+    .await
+    .context("prepare private plugin inputs")??;
+    config.auth_dir = scratch.path().to_owned();
+    // Plugins can read the raw configuration as well as the typed host summary.
+    let document = config
+        .document
+        .as_mapping_mut()
+        .context("owner configuration is not a mapping")?;
+    let oauth = document
+        .entry(serde_yaml_ng::Value::String("oauth".into()))
+        .or_insert_with(|| serde_yaml_ng::Value::Mapping(Default::default()));
+    if oauth.is_null() {
+        *oauth = serde_yaml_ng::Value::Mapping(Default::default());
+    }
+    oauth
+        .as_mapping_mut()
+        .context("owner OAuth options are not a mapping")?
+        .insert(
+            serde_yaml_ng::Value::String("auth-dir".into()),
+            serde_yaml_ng::Value::String(scratch.path().to_string_lossy().into_owned()),
+        );
+    let (save, failure) = online_login_save(
+        scratch.clone(),
+        client,
+        sources.documents,
+        tokio::runtime::Handle::current(),
+    );
+    let host = cpa_plugin::Host::new();
+    // Install the persistence port before native initialization can call auth.save.
+    plugin_cli::attach_online_credentials(&host, scratch.path().to_owned(), save.clone());
+    let result = async {
+        host.apply_config(Arc::new(config)).await;
+        let flags = host
+            .register_command_line_flags(&|name| {
+                Args::command().get_arguments().any(|arg| arg.get_long() == Some(name))
+            })
+            .await;
+        let command = plugin_cli::with_flags(Args::command(), &flags);
+        let rewritten = go_flags(&command, raw.to_vec(), &host).map_err(anyhow::Error::msg)?;
+        let matches = command
+            .clone()
+            .try_get_matches_from(rewritten)
+            .map_err(anyhow::Error::msg)?;
+        let _args = <Args as clap::FromArgMatches>::from_arg_matches(&matches).map_err(anyhow::Error::msg)?;
+        let builtin = plugin_cli::builtin_values(&command, &matches);
+        plugin_cli::execute_online(&host, &builtin, raw, save.clone())
+            .await
+            .context("no online plugin command handled these flags")
+    }
+    .await;
+    host.shutdown_all(None).await;
+    host.set_auth_manager(None);
+    drop(save);
+    let cleanup = Arc::try_unwrap(scratch)
+        .map_err(|_| anyhow::anyhow!("plugin credential work has not settled"))?
+        .close()
+        .context("remove private plugin staging");
+    cleanup?;
+    if let Some(error) = failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+        anyhow::bail!(error);
+    }
     result
+}
+
+fn import_vertex(auth_dir: &Path, key: &str, prefix: &str, save: &cpa_exec::login_store::LoginSave) -> Ran {
+    match cpa_exec::vertex_auth::import(auth_dir, key, prefix, Some(save)) {
+        Ok(path) => Ran::Imported(path),
+        Err(error) => {
+            tracing::error!("{error}");
+            Ran::Handled
+        }
+    }
 }
 
 /// Go's command modes, in Go's order.
 async fn command_inner(args: &Args, config: &Config, save: cpa_exec::login_store::LoginSave) -> anyhow::Result<Ran> {
+    let command = selected_command(args);
     // Go DoVertexImport: failures are logged and the command still exits normally.
-    if !args.vertex_import.is_empty() {
-        match cpa_exec::vertex_auth::import(
+    if command == Some(BuiltinCommand::Vertex) {
+        return Ok(import_vertex(
             &config.auth_dir,
             &args.vertex_import,
             &args.vertex_import_prefix,
-            Some(&save),
-        ) {
-            Ok(path) => return Ok(Ran::Imported(path)),
-            Err(error) => tracing::error!("{error}"),
-        }
-        return Ok(Ran::Handled);
+            &save,
+        ));
     }
-    if !args.siwc_bind.is_empty() {
+    if command == Some(BuiltinCommand::Siwc) {
         // Go DoSIWCBind: failures are reported and the command still exits normally,
         // except a busy callback port (ErrPortInUse's code 13).
         let options = cpa_exec::codex_oauth::LoginOptions {
@@ -1310,7 +1780,7 @@ async fn command_inner(args: &Args, config: &Config, save: cpa_exec::login_store
         }
         return Ok(Ran::Handled);
     }
-    if args.antigravity_login {
+    if command == Some(BuiltinCommand::Antigravity) {
         // Go DoAntigravityLogin: a failure is logged and the command still exits normally.
         let options = cpa_exec::antigravity_auth::LoginOptions {
             no_browser: args.no_browser,
@@ -1322,7 +1792,7 @@ async fn command_inner(args: &Args, config: &Config, save: cpa_exec::login_store
         }
         return Ok(Ran::Handled);
     }
-    if args.codex_login || args.codex_device_login {
+    if command == Some(BuiltinCommand::Codex) {
         let options = cpa_exec::codex_oauth::LoginOptions {
             no_browser: args.no_browser,
             callback_port: match args.oauth_callback_port {
@@ -1337,7 +1807,7 @@ async fn command_inner(args: &Args, config: &Config, save: cpa_exec::login_store
         };
         return Ok(Ran::Login(path, "Codex"));
     }
-    if args.claude_login {
+    if command == Some(BuiltinCommand::Claude) {
         let options = cpa_exec::claude_login::LoginOptions {
             no_browser: args.no_browser,
             callback_port: match args.oauth_callback_port {
@@ -1360,12 +1830,12 @@ async fn command_inner(args: &Args, config: &Config, save: cpa_exec::login_store
         println!("Claude authentication failed: {message}");
         return Ok(Ran::Handled);
     }
-    if args.kimi_login || args.kimi_ai_login {
+    if command == Some(BuiltinCommand::Kimi) {
         let provider = if args.kimi_login { "kimi" } else { "kimi-ai" };
         let path = cpa_exec::kimi_auth::login(provider, config, args.no_browser, Some(save)).await?;
         return Ok(Ran::Login(path, if args.kimi_login { "Kimi" } else { "Kimi.ai" }));
     }
-    if args.xai_login {
+    if command == Some(BuiltinCommand::Xai) {
         // Go DoXAILogin: a failure is logged and the command still exits normally.
         match cpa_exec::xai_auth::login(config, args.no_browser, Some(save)).await {
             Ok(path) => return Ok(Ran::Login(path, "xAI")),
@@ -1373,7 +1843,7 @@ async fn command_inner(args: &Args, config: &Config, save: cpa_exec::login_store
         }
         return Ok(Ran::Handled);
     }
-    if args.devin_login {
+    if command == Some(BuiltinCommand::Devin) {
         // Go DoDevinLogin: a failure is logged and the command still exits normally.
         return Ok(
             match cpa_exec::devin_auth::login(config, args.no_browser, args.oauth_callback_port, Some(save)).await {
@@ -1382,7 +1852,7 @@ async fn command_inner(args: &Args, config: &Config, save: cpa_exec::login_store
             },
         );
     }
-    if args.meta_login {
+    if command == Some(BuiltinCommand::Meta) {
         let path = cpa_exec::meta_auth::login(config, args.no_browser, Some(save)).await?;
         return Ok(Ran::Login(path, "Meta"));
     }
@@ -1500,7 +1970,13 @@ async fn serve(
     };
     let rt = match backend {
         CredentialAuthority::Home => Runtime::home(config, credentials, executors),
-        CredentialAuthority::Local(db) => Runtime::new(config, credentials, executors, db),
+        CredentialAuthority::Local(db) => {
+            #[cfg(test)]
+            let runtime = cpa_server::testing::runtime_with_db(config, credentials, executors, db);
+            #[cfg(not(test))]
+            let runtime = Runtime::new(config, credentials, executors, db);
+            runtime
+        }
     };
     let rt = Arc::new(rt.with_plugin_host(plugins));
     // What each file credential was loaded from, for Go-exact management saves.
@@ -1542,13 +2018,9 @@ async fn serve(
     let pprof = cpa_server::pprof::Server::start(&rt);
     // Home mode: the config comes from Home, and management answers 404 (Go
     // `managementAvailable`).
-    let _watcher = home.is_none().then(|| cpa_server::watching::start(&management));
-    let advertiser = {
-        let rt = rt.clone();
-        // The served transport decides `tls=`: HTTPS exactly when server.tls loaded.
-        let published = rt.subscribe_config();
-        discovery::advertise::Advertiser::spawn(move || rt.config(), published, tls.is_some())
-    };
+    let credential_notifications = home.is_none().then(|| cpa_server::watching::start(&management));
+    // The served transport decides `tls=`: HTTPS exactly when server.tls loaded.
+    let advertiser = discovery::advertise::Advertiser::spawn(rt.subscribe_config(), tls.is_some());
     let app = app(&rt, &management, home.is_some());
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     let app = heap_trim::layer(app);
@@ -1558,7 +2030,7 @@ async fn serve(
         listener,
         app,
         tls,
-        Some(management),
+        Some(management.clone()),
     ));
     let mut home = home;
     // Go `cancelServiceRun`: a Home subscriber that stops on its own (an unsafe drain or
@@ -1585,8 +2057,13 @@ async fn serve(
             Err(anyhow::anyhow!("home subscriber stopped; shutting down"))
         }
     };
-    // Go v8.0.35 stops Home, pprof, discovery, then the API server. Keep serving
-    // API requests while Home drains and flushes releases and pprof drains.
+    management.begin_shutdown();
+    rt.begin_shutdown();
+    if let Some(task) = &credential_notifications {
+        task.stop();
+    }
+    // Keep Go's Home/pprof/discovery drain order, but stop configuration and grant
+    // admission before producers can race the final persistence drain.
     let cleanup = async {
         if let Some((shutdown, task)) = home
             && !home_failed
@@ -1596,8 +2073,6 @@ async fn serve(
         }
         pprof.shutdown().await;
         advertiser.shutdown().await;
-        // A Codex refresh holding a credential file's lock writes its tokens first.
-        rt.shutdown_codex_refreshes().await;
     };
     tokio::pin!(cleanup);
     if server_done {
@@ -1610,12 +2085,48 @@ async fn serve(
     }
     // Server.Stop closes the HTTP server without draining (http.Server.Close).
     drop(server);
+    management.shutdown().await;
+    let notifications = match credential_notifications {
+        Some(task) => task.shutdown().await.context("settle credential notification work"),
+        None => Ok(()),
+    };
+    let persistence = rt.finish_shutdown().await;
+    // Settlement can retry a pending configuration, which reconfigures logging; the
+    // process-wide log directory cleaner is stopped and joined only after it.
+    if let Err(error) = tokio::task::spawn_blocking(cpa_server::logging::stop_cleaner).await {
+        tracing::error!("log directory cleaner did not stop: {error}");
+    }
+    rt.plugins().shutdown_all(None).await;
+    notifications?;
+    persistence?;
     served
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn online_management_key_prefers_flag_then_environment_then_terminal_prompt() {
+        let never = || -> anyhow::Result<String> { panic!("must not prompt") };
+        let env = |v: &str| Some(std::ffi::OsString::from(v));
+        assert_eq!(resolve_management_key("flag", env("env"), true, never).unwrap(), "flag");
+        assert_eq!(resolve_management_key("", env("env"), true, never).unwrap(), "env");
+        assert_eq!(resolve_management_key("", env(""), false, never).unwrap(), "");
+        assert_eq!(resolve_management_key("", None, false, never).unwrap(), "");
+        assert_eq!(
+            resolve_management_key("", env(""), true, || Ok("typed".into())).unwrap(),
+            "typed"
+        );
+        let cancelled = resolve_management_key("", None, true, || anyhow::bail!("management key prompt cancelled"));
+        assert!(cancelled.unwrap_err().to_string().contains("cancelled"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt as _;
+            let invalid = Some(std::ffi::OsString::from_vec(vec![0xff]));
+            assert!(resolve_management_key("", invalid, true, never).is_err());
+        }
+    }
 
     fn credential_test_dir() -> PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -1624,6 +2135,790 @@ mod tests {
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ))
+    }
+
+    #[tokio::test]
+    async fn online_builtin_flows_wait_for_durable_save_and_preserve_source_fences() {
+        use axum::middleware::Next;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let root = credential_test_dir();
+        std::fs::create_dir_all(root.join("legacy")).unwrap();
+        let store = Arc::new(cpa_server::testing::config_store(&root.join("service.db")).unwrap());
+        store.import_yaml("oauth: {}\n", "test", "device flow").unwrap();
+        let db = CredentialDb::initialize(store.clone(), &root.join("legacy")).unwrap();
+        let mut config = store.load().unwrap().config;
+        config.auth_dir = db.auth_dir();
+        let rt = Arc::new(cpa_server::testing::runtime_with_db(
+            config,
+            Vec::new(),
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            db.clone(),
+        ));
+        let state = cpa_server::management::Management::with_options(
+            rt.clone(),
+            store.clone(),
+            cpa_server::management::Options {
+                management_password: Some("device-fixture-key".into()),
+                ..Default::default()
+            },
+        );
+        let go: serde_json::Value =
+            serde_json::from_str(include_str!("../../cpa-exec/tests/fixtures/codex_go.json")).unwrap();
+        let name = go["oauth"]["exchanges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"] == "device")
+            .unwrap()["result"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let token = serde_json::json!({"access_token":"at-FAKE", "refresh_token":"rt-FAKE",
+            "id_token":go["oauth"]["id_token"], "token_type":"Bearer", "expires_in":3600,
+            "scope":"openid chatgpt.tokens.use.direct"});
+        let grants = Arc::new(AtomicUsize::new(0));
+        let observed = grants.clone();
+        let kimi_grants = Arc::new(AtomicUsize::new(0));
+        let kimi_observed = kimi_grants.clone();
+        let claude_grants = Arc::new(AtomicUsize::new(0));
+        let claude_observed = claude_grants.clone();
+        let reply_ready = Arc::new(tokio::sync::Notify::new());
+        let reply_release = Arc::new(tokio::sync::Notify::new());
+        let first = Arc::new(AtomicBool::new(true));
+        let ready = reply_ready.clone();
+        let release = reply_release.clone();
+        let app = cpa_server::management::router(state.clone())
+            .route("/mock/usercode", axum::routing::post(|| async { axum::Json(serde_json::json!({
+                "device_auth_id":"loopback", "usercode":"FAKE-CODE", "interval":"1"})) }))
+            .route("/mock/device", axum::routing::post(|| async { axum::Json(serde_json::json!({
+                "authorization_code":"loopback-code", "code_verifier":"loopback-verifier", "code_challenge":"loopback-challenge"})) }))
+            .route("/mock/token", axum::routing::post(move || {
+                let token = token.clone(); let observed = observed.clone();
+                async move { observed.fetch_add(1, Ordering::SeqCst); axum::Json(token) }
+            }))
+            .route("/mock/claude/token", axum::routing::post(move || {
+                let observed = claude_observed.clone();
+                async move { observed.fetch_add(1, Ordering::SeqCst); axum::Json(serde_json::json!({
+                    "access_token":"sk-ant-oat-login-fake", "refresh_token":"fake-r", "expires_in":3600,
+                    "account":{"uuid":"acct-1","email_address":"a@example.invalid"}, "organization":{"uuid":"org-1","name":"Org"}})) }
+            }))
+            .route("/mock/claude/profile", axum::routing::get(|| async { axum::Json(serde_json::json!({
+                "account":{"uuid":"acct-1","email":"a@example.invalid"}, "organization":{"uuid":"org-1","name":"Org"}})) }))
+            .route("/mock/claude/roles", axum::routing::get(|| async { axum::Json(serde_json::json!({})) }))
+            .route("/api/oauth/device_authorization", axum::routing::post(|| async { axum::Json(serde_json::json!({
+                "device_code":"loopback", "user_code":"FAKE-KIMI", "verification_uri":"http://127.0.0.1:9/never-opened",
+                "expires_in":60, "interval":5})) }))
+            .route("/api/oauth/token", axum::routing::post(move || {
+                let observed = kimi_observed.clone();
+                async move { observed.fetch_add(1, Ordering::SeqCst); axum::Json(serde_json::json!({
+                    "access_token":"kimi-FAKE", "refresh_token":"kimi-FAKE-REFRESH", "token_type":"Bearer", "expires_in":3600})) }
+            }))
+            .layer(axum::middleware::from_fn(move |request: axum::extract::Request, next: Next| {
+                let (ready, release, first) = (ready.clone(), release.clone(), first.clone());
+                async move {
+                    let batch = request.uri().path() == "/admin/v1/credentials/batch";
+                    let response = next.run(request).await;
+                    if batch && first.swap(false, Ordering::SeqCst) {
+                        ready.notify_one(); release.notified().await;
+                    }
+                    response
+                }
+            }));
+        let xai_fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../cpa-exec/tests/fixtures/xai_auth_go.json")).unwrap();
+        let xai_case = xai_fixture["login"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"] == "subject_only_merges_existing_file")
+            .unwrap();
+        let xai_grants = Arc::new(AtomicUsize::new(0));
+        let mut app = app;
+        for reply in xai_case["script"].as_array().unwrap() {
+            let body = reply["body"].as_str().unwrap().to_owned();
+            let token = reply["path"] == "/oauth2/token";
+            let observed = xai_grants.clone();
+            app = app.route(
+                reply["path"].as_str().unwrap(),
+                axum::routing::any(move || {
+                    let (body, observed) = (body.clone(), observed.clone());
+                    async move {
+                        if token {
+                            observed.fetch_add(1, Ordering::SeqCst);
+                        }
+                        ([(axum::http::header::CONTENT_TYPE, "application/json")], body)
+                    }
+                }),
+            );
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap()
+        });
+        let client = Arc::new(tui::Client::new(&base, "device-fixture-key"));
+        let target = db.auth_dir().join(&name);
+        let seed = br#"{"type":"codex","disabled":false,"access_token":"old-fixture","opaque":{"keep":[1,true]}}"#;
+        for case in ["success", "storage", "replaced", "deleted"] {
+            db.save(&target, seed).unwrap();
+            client.credential_admission().await.unwrap();
+            let sources = client.credential_sources().await.unwrap();
+            let replacement = br#"{"type":"codex","replacement":"never overwrite"}"#;
+            if case == "replaced" {
+                db.save(&target, replacement).unwrap();
+            }
+            if case == "deleted" {
+                db.delete(&target).unwrap();
+            }
+            let blocked = (case == "storage").then(|| cpa_server::testing::block_checkpoint_install(&store));
+            let scratch = Arc::new(
+                tempfile::Builder::new()
+                    .prefix("cook-router-login-")
+                    .tempdir_in(&root)
+                    .unwrap(),
+            );
+            let (save, failure) = online_login_save(
+                scratch.clone(),
+                client.clone(),
+                sources.documents,
+                tokio::runtime::Handle::current(),
+            );
+            let oauth = cpa_exec::codex_oauth::CodexOAuth::with_endpoints(
+                wreq::Client::builder().no_proxy().build().unwrap(),
+                &format!("{base}/mock/token"),
+                &format!("{base}/mock/usercode"),
+                &format!("{base}/mock/device"),
+            );
+            let dir = scratch.path().to_owned();
+            let provider = tokio::spawn(async move {
+                cpa_exec::codex_oauth::device_login_with(
+                    &dir,
+                    &cpa_exec::codex_oauth::LoginOptions {
+                        callback_port: 0,
+                        no_browser: true,
+                    },
+                    Some(save),
+                    oauth,
+                )
+                .await
+            });
+            if case == "success" {
+                tokio::time::timeout(std::time::Duration::from_secs(8), reply_ready.notified())
+                    .await
+                    .unwrap();
+                assert!(
+                    !provider.is_finished(),
+                    "a provider save must not return Ok before its API acknowledgement"
+                );
+                reply_release.notify_one();
+            }
+            let result = provider.await.unwrap();
+            let error = failure.lock().unwrap().take();
+            match case {
+                "success" => {
+                    result.unwrap();
+                    assert!(error.is_none());
+                    let bytes = db.read(&target).unwrap().unwrap();
+                    let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    assert_eq!(doc["access_token"], "at-FAKE");
+                    assert_eq!(doc["opaque"]["keep"], serde_json::json!([1, true]));
+                    let copy = root.join("portable.db");
+                    std::fs::copy(store.path().unwrap(), &copy).unwrap();
+                    let cold = Arc::new(cpa_server::testing::config_store(&copy).unwrap());
+                    let restored = CredentialDb::initialize(cold.clone(), &root.join("absent")).unwrap();
+                    assert_eq!(restored.read(&restored.auth_dir().join(&name)).unwrap().unwrap(), bytes);
+                    drop((restored, cold));
+                }
+                "storage" => {
+                    assert!(result.is_err());
+                    assert!(error.unwrap().contains("HTTP 500"));
+                    assert_eq!(db.read(&target).unwrap().unwrap(), seed);
+                }
+                "replaced" => {
+                    assert!(result.is_err());
+                    assert!(error.unwrap().contains("HTTP 412"));
+                    assert_eq!(db.read(&target).unwrap().unwrap(), replacement);
+                }
+                _ => {
+                    assert!(result.is_err());
+                    assert!(error.unwrap().contains("HTTP 412"));
+                    assert!(
+                        db.read(&target).unwrap().is_none(),
+                        "a returned grant cannot resurrect a deleted source"
+                    );
+                }
+            }
+            drop(blocked);
+            Arc::try_unwrap(scratch).unwrap().close().unwrap();
+        }
+        assert_eq!(
+            grants.load(Ordering::SeqCst),
+            4,
+            "one local grant per invocation, no provider retries"
+        );
+        store
+            .edit("test", "SIWC options", |document| {
+                document["oauth"]["providers"]["codex"]["signin-with-chatgpt-identifier"] =
+                    serde_json::json!("owned-fixture");
+                document["requests"]["proxy-url"] =
+                    serde_json::json!("http://fixture-user:fixture-password@127.0.0.1:9");
+                document["server"]["github-token"] = serde_json::json!("unneeded-server-secret");
+                Ok(())
+            })
+            .unwrap();
+        // A built-in login reads only the proxy and the SIWC identifier, never the
+        // complete secret-bearing configuration (the compiler adds `config-version`).
+        let minimal = client.login_config().await.unwrap();
+        let sections: Vec<_> = minimal.document.as_mapping().unwrap().keys().cloned().collect();
+        assert!(
+            sections
+                .iter()
+                .all(|key| key == "requests" || key == "oauth" || key == "config-version"),
+            "{sections:?}"
+        );
+        assert!(
+            !serde_json::to_string(&minimal.document)
+                .unwrap()
+                .contains("unneeded-server-secret")
+        );
+        let siwc_seed = br#"{"type":"codex","access_token":"outer-at","refresh_token":"outer-rt","opaque":{"keep":true},"siwc":{"device_id":"E61BBE28-07EF-466D-8E5D-A344F94AB305"}}"#;
+        for case in ["success", "storage", "deleted"] {
+            db.save(&target, siwc_seed).unwrap();
+            client.credential_admission().await.unwrap();
+            let mut config = client.login_config().await.unwrap();
+            assert_eq!(cpa_exec::codex_siwc::identifier(&config), "owned-fixture");
+            assert_eq!(
+                config.document["requests"]["proxy-url"].as_str().unwrap(),
+                "http://fixture-user:fixture-password@127.0.0.1:9"
+            );
+            let sources = client.credential_sources().await.unwrap();
+            let selected = online_siwc_target(target.to_str().unwrap(), &sources).unwrap();
+            let scratch = Arc::new(
+                tempfile::Builder::new()
+                    .prefix("cook-router-login-")
+                    .tempdir_in(&root)
+                    .unwrap(),
+            );
+            hydrate_login_source(
+                scratch.path(),
+                &scratch.path().join(&selected),
+                &sources.documents[&selected].bytes,
+            )
+            .unwrap();
+            config.auth_dir = scratch.path().to_owned();
+            let (save, failure) = online_login_save(
+                scratch.clone(),
+                client.clone(),
+                sources.documents,
+                tokio::runtime::Handle::current(),
+            );
+            let port = std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            let (show, shown) = tokio::sync::oneshot::channel::<String>();
+            let interaction = cpa_exec::claude_login::Interaction {
+                manual_delay: std::time::Duration::from_secs(3600),
+                prompt: None,
+                show_url: Box::new(move |url| {
+                    let _ = show.send(url.to_owned());
+                }),
+            };
+            let oauth = cpa_exec::codex_oauth::CodexOAuth::with_endpoints(
+                wreq::Client::builder().no_proxy().build().unwrap(),
+                &format!("{base}/mock/token"),
+                &format!("{base}/mock/usercode"),
+                &format!("{base}/mock/device"),
+            )
+            .with_siwc_token_url(&format!("{base}/mock/token"));
+            let provider = tokio::spawn(async move {
+                cpa_exec::codex_siwc_bind::bind_with(&config, &selected, port, oauth, interaction, Some(save)).await
+            });
+            let auth = url::Url::parse(&shown.await.unwrap()).unwrap();
+            let query = |key: &str| auth.query_pairs().find(|(name, _)| name == key).unwrap().1.into_owned();
+            assert_eq!(query("agent_name_hint"), "owned-fixture");
+            assert_eq!(
+                query("ext_agent_host_id"),
+                "urn:uuid:e61bbe28-07ef-466d-8e5d-a344f94ab305",
+                "the captured device ID must exist in scratch before upstream work"
+            );
+            let blocked = (case == "storage").then(|| cpa_server::testing::block_checkpoint_install(&store));
+            if case == "deleted" {
+                db.delete(&target).unwrap();
+            }
+            wreq::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap()
+                .get(format!(
+                    "http://127.0.0.1:{port}/auth/callback?code=local-code&state={}&client_id=oaiapp_fixture",
+                    query("state")
+                ))
+                .send()
+                .await
+                .unwrap();
+            let result = provider.await.unwrap();
+            let error = failure.lock().unwrap().take();
+            if case == "success" {
+                result.unwrap();
+                assert!(error.is_none());
+                let bytes = db.read(&target).unwrap().unwrap();
+                let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(doc["access_token"], "outer-at");
+                assert_eq!(doc["refresh_token"], "outer-rt");
+                assert_eq!(doc["opaque"]["keep"], true);
+                assert_eq!(doc["use_siwc"], true);
+                assert_eq!(doc["siwc"]["client_id"], "oaiapp_fixture");
+                assert_eq!(doc["siwc"]["device_id"], "e61bbe28-07ef-466d-8e5d-a344f94ab305");
+            } else {
+                assert!(result.is_err());
+                assert!(
+                    error
+                        .unwrap()
+                        .contains(if case == "storage" { "HTTP 500" } else { "HTTP 412" })
+                );
+                if case == "storage" {
+                    assert_eq!(db.read(&target).unwrap().unwrap(), siwc_seed);
+                } else {
+                    assert!(db.read(&target).unwrap().is_none());
+                }
+            }
+            drop(blocked);
+            Arc::try_unwrap(scratch).unwrap().close().unwrap();
+        }
+        assert_eq!(
+            grants.load(Ordering::SeqCst),
+            7,
+            "SIWC also consumes only one local grant per invocation"
+        );
+        for provider in ["kimi", "kimi-ai"] {
+            for case in ["success", "storage"] {
+                client.credential_admission().await.unwrap();
+                let sources = client.credential_sources().await.unwrap();
+                let scratch = Arc::new(
+                    tempfile::Builder::new()
+                        .prefix("cook-router-login-")
+                        .tempdir_in(&root)
+                        .unwrap(),
+                );
+                let (save, failure) = online_login_save(
+                    scratch.clone(),
+                    client.clone(),
+                    sources.documents,
+                    tokio::runtime::Handle::current(),
+                );
+                let before = db.documents().unwrap();
+                let blocked = (case == "storage").then(|| cpa_server::testing::block_checkpoint_install(&store));
+                let flow = cpa_exec::kimi_auth::DeviceFlow::new(
+                    wreq::Client::builder().no_proxy().build().unwrap(),
+                    "kimi.com",
+                    "e61bbe28-07ef-466d-8e5d-a344f94ab305",
+                )
+                .with_oauth_host(&base);
+                let result = cpa_exec::kimi_auth::login_with(flow, provider, scratch.path(), true, Some(save)).await;
+                let error = failure.lock().unwrap().take();
+                if case == "success" {
+                    let path = result.unwrap();
+                    assert!(error.is_none());
+                    let bytes = db
+                        .read(&db.auth_dir().join(path.file_name().unwrap()))
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        bytes,
+                        std::fs::read(path).unwrap(),
+                        "commit exact provider-rendered bytes"
+                    );
+                    let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    assert_eq!(doc["type"], provider);
+                    assert_eq!(doc["access_token"], "kimi-FAKE");
+                    assert_eq!(doc["refresh_token"], "kimi-FAKE-REFRESH");
+                    assert_eq!(db.documents().unwrap().len(), before.len() + 1);
+                } else {
+                    assert!(result.is_err());
+                    assert!(error.unwrap().contains("HTTP 500"));
+                    assert_eq!(
+                        db.documents().unwrap(),
+                        before,
+                        "failed new login must not alter earlier credentials"
+                    );
+                }
+                drop(blocked);
+                Arc::try_unwrap(scratch).unwrap().close().unwrap();
+            }
+        }
+        assert_eq!(
+            kimi_grants.load(Ordering::SeqCst),
+            4,
+            "one local token exchange per Kimi/Kimi.ai invocation"
+        );
+        let xai_target = db.auth_dir().join(xai_case["existing_name"].as_str().unwrap());
+        let xai_seed = xai_case["existing"].as_str().unwrap().as_bytes();
+        for case in ["success", "storage", "replaced"] {
+            db.save(&xai_target, xai_seed).unwrap();
+            client.credential_admission().await.unwrap();
+            let sources = client.credential_sources().await.unwrap();
+            let scratch = Arc::new(
+                tempfile::Builder::new()
+                    .prefix("cook-router-login-")
+                    .tempdir_in(&root)
+                    .unwrap(),
+            );
+            let (save, failure) = online_login_save(
+                scratch.clone(),
+                client.clone(),
+                sources.documents,
+                tokio::runtime::Handle::current(),
+            );
+            let replacement = br#"{"type":"xai","access_token":"replacement","opaque":"never overwrite"}"#;
+            if case == "replaced" {
+                db.save(&xai_target, replacement).unwrap();
+            }
+            let blocked = (case == "storage").then(|| cpa_server::testing::block_checkpoint_install(&store));
+            let auth = cpa_exec::xai_auth::XaiAuth::new(wreq::Client::builder().no_proxy().build().unwrap())
+                .with_issuer_origin(&base);
+            let result = cpa_exec::xai_auth::login_with(auth, scratch.path(), true, Some(save)).await;
+            let error = failure.lock().unwrap().take();
+            if case == "success" {
+                let path = result.unwrap();
+                assert!(error.is_none());
+                assert_eq!(path.file_name(), xai_target.file_name());
+                let bytes = db.read(&xai_target).unwrap().unwrap();
+                assert_eq!(bytes, std::fs::read(path).unwrap());
+                let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(doc["access_token"], "at-2");
+                assert_eq!(doc["note"], "<kept>");
+                assert_eq!(doc["prefix"], "team");
+                assert_eq!(doc["disabled"], true);
+            } else {
+                assert!(result.is_err());
+                assert!(
+                    error
+                        .unwrap()
+                        .contains(if case == "storage" { "HTTP 500" } else { "HTTP 412" })
+                );
+                assert_eq!(
+                    db.read(&xai_target).unwrap().unwrap(),
+                    if case == "storage" { xai_seed } else { replacement }
+                );
+            }
+            drop(blocked);
+            Arc::try_unwrap(scratch).unwrap().close().unwrap();
+        }
+        assert_eq!(xai_grants.load(Ordering::SeqCst), 3);
+        let legacy = db.auth_dir().join("CLAUDE-a@example.invalid.json");
+        let claude_seed = br#"{"type":"claude","email":"a@example.invalid","organization_uuid":"org-1","access_token":"old","note":"<kept>","proxy_url":"socks5://keep:1"}"#;
+        let mut canonical: Option<PathBuf> = None;
+        for case in ["success", "storage", "replaced"] {
+            if let Some(path) = canonical.take() {
+                db.delete(&path).unwrap();
+            }
+            db.save(&legacy, claude_seed).unwrap();
+            client.credential_admission().await.unwrap();
+            let sources = client.credential_sources().await.unwrap();
+            let scratch = Arc::new(
+                tempfile::Builder::new()
+                    .prefix("cook-router-login-")
+                    .tempdir_in(&root)
+                    .unwrap(),
+            );
+            hydrate_claude_sources(scratch.path(), &sources.documents).unwrap();
+            let (save, failure) = online_login_save(
+                scratch.clone(),
+                client.clone(),
+                sources.documents,
+                tokio::runtime::Handle::current(),
+            );
+            if case == "replaced" {
+                db.save(
+                    &legacy,
+                    br#"{"type":"claude","access_token":"replacement","note":"never delete"}"#,
+                )
+                .unwrap();
+            }
+            let before = db.documents().unwrap();
+            let blocked = (case == "storage").then(|| cpa_server::testing::block_checkpoint_install(&store));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let (shown, url) = tokio::sync::oneshot::channel::<String>();
+            let interaction = cpa_exec::claude_login::Interaction {
+                manual_delay: std::time::Duration::from_secs(3600),
+                prompt: None,
+                show_url: Box::new(move |url| {
+                    let _ = shown.send(url.to_owned());
+                }),
+            };
+            let oauth = cpa_exec::oauth::OAuth::with_endpoints(
+                wreq::Client::builder().no_proxy().build().unwrap(),
+                &format!("{base}/mock/claude/token"),
+                &format!("{base}/mock/claude/profile"),
+                &format!("{base}/mock/claude/roles"),
+            );
+            let owner = scratch.clone();
+            let provider = tokio::spawn(async move {
+                cpa_exec::claude_login::login_with(owner.path(), listener, oauth, interaction, Some(save)).await
+            });
+            let auth = url::Url::parse(&url.await.unwrap()).unwrap();
+            let state = auth
+                .query_pairs()
+                .find(|(key, _)| key == "state")
+                .unwrap()
+                .1
+                .into_owned();
+            wreq::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap()
+                .get(format!("http://127.0.0.1:{port}/callback?code=fake-code&state={state}"))
+                .send()
+                .await
+                .unwrap();
+            let result = provider.await.unwrap();
+            let error = failure.lock().unwrap().take();
+            if case == "success" {
+                let path = result.unwrap();
+                assert!(error.is_none());
+                let target = db.auth_dir().join(path.file_name().unwrap());
+                assert_ne!(target, legacy);
+                let bytes = db.read(&target).unwrap().unwrap();
+                assert_eq!(bytes, std::fs::read(path).unwrap());
+                let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(doc["access_token"], "sk-ant-oat-login-fake");
+                assert_eq!(doc["note"], "<kept>");
+                assert_eq!(doc["proxy_url"], "socks5://keep:1");
+                assert!(
+                    db.read(&legacy).unwrap().is_none(),
+                    "case-folded legacy alias is part of the same commit"
+                );
+                canonical = Some(target);
+            } else {
+                assert!(result.is_err());
+                assert!(
+                    error
+                        .unwrap()
+                        .contains(if case == "storage" { "HTTP 500" } else { "HTTP 412" })
+                );
+                assert_eq!(
+                    db.documents().unwrap(),
+                    before,
+                    "neither new canonical file nor legacy deletion may partially commit"
+                );
+            }
+            drop(blocked);
+            Arc::try_unwrap(scratch).unwrap().close().unwrap();
+        }
+        assert_eq!(claude_grants.load(Ordering::SeqCst), 3);
+        let guarded = db.auth_dir().join("guarded.json");
+        db.save(&guarded, claude_seed).unwrap();
+        let sources = client.credential_sources().await.unwrap();
+        let scratch = Arc::new(
+            tempfile::Builder::new()
+                .prefix("cook-router-login-")
+                .tempdir_in(&root)
+                .unwrap(),
+        );
+        let (save, failure) = online_login_save(
+            scratch.clone(),
+            client.clone(),
+            sources.documents,
+            tokio::runtime::Handle::current(),
+        );
+        let target = scratch.path().join("guarded.json");
+        let failed_read = tokio::task::spawn_blocking(move || {
+            cpa_exec::login_store::save_login(Some(&save), std::slice::from_ref(&target), || {
+                std::fs::remove_file(&target).map_err(|error| error.to_string())?;
+                std::fs::create_dir(&target).map_err(|error| error.to_string())
+            })
+        })
+        .await
+        .unwrap();
+        assert!(failed_read.is_err(), "a rendered read error is not deletion intent");
+        assert!(failure.lock().unwrap().take().is_some());
+        assert_eq!(db.read(&guarded).unwrap().unwrap(), claude_seed);
+        Arc::try_unwrap(scratch).unwrap().close().unwrap();
+        let sources = client.credential_sources().await.unwrap();
+        let scratch = Arc::new(
+            tempfile::Builder::new()
+                .prefix("cook-router-login-")
+                .tempdir_in(&root)
+                .unwrap(),
+        );
+        let (save, failure) = online_login_save(
+            scratch.clone(),
+            client.clone(),
+            sources.documents,
+            tokio::runtime::Handle::current(),
+        );
+        let repeat = db.auth_dir().join("repeat-plugin.json");
+        for value in [1, 2, 3] {
+            if value == 3 {
+                db.save(&repeat, br#"{"type":"custom-plugin","opaque":"external replacement"}"#)
+                    .unwrap();
+            }
+            let path = scratch.path().join("repeat-plugin.json");
+            let callback = save.clone();
+            let bytes = serde_json::to_vec(&serde_json::json!({"type":"custom-plugin","opaque":value})).unwrap();
+            let rendered = bytes.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                cpa_exec::login_store::save_login(Some(&callback), std::slice::from_ref(&path), || {
+                    std::fs::write(&path, rendered).map_err(|error| error.to_string())
+                })
+            })
+            .await
+            .unwrap();
+            if value < 3 {
+                result.unwrap();
+                assert_eq!(
+                    db.read(&repeat).unwrap().unwrap(),
+                    bytes,
+                    "a later host save may build only on its own acknowledged result"
+                );
+            } else {
+                assert!(result.is_err());
+                assert!(failure.lock().unwrap().take().unwrap().contains("HTTP 412"));
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&db.read(&repeat).unwrap().unwrap()).unwrap()["opaque"],
+                    "external replacement"
+                );
+            }
+        }
+        drop(save);
+        Arc::try_unwrap(scratch).unwrap().close().unwrap();
+        let sources = client.credential_sources().await.unwrap();
+        let scratch = Arc::new(
+            tempfile::Builder::new()
+                .prefix("cook-router-login-")
+                .tempdir_in(&root)
+                .unwrap(),
+        );
+        let (save, failure) = online_login_save(
+            scratch.clone(),
+            client.clone(),
+            sources.documents,
+            tokio::runtime::Handle::current(),
+        );
+        let a_entered = Arc::new(tokio::sync::Notify::new());
+        let b_entered = Arc::new(tokio::sync::Notify::new());
+        let (release_a, wait_a) = std::sync::mpsc::channel::<()>();
+        let (release_b, wait_b) = std::sync::mpsc::channel::<()>();
+        let path = scratch.path().join("parallel-plugin.json");
+        let a_bytes = br#"{"type":"custom-plugin","invocation":"A"}"#.to_vec();
+        let b_bytes = br#"{"type":"custom-plugin","invocation":"B"}"#.to_vec();
+        let (callback, target, started, rendered) = (save.clone(), path.clone(), a_entered.clone(), a_bytes.clone());
+        let a = tokio::task::spawn_blocking(move || {
+            cpa_exec::login_store::save_login(Some(&callback), std::slice::from_ref(&target), || {
+                std::fs::write(&target, rendered).map_err(|error| error.to_string())?;
+                started.notify_one();
+                wait_a.recv().map_err(|error| error.to_string())
+            })
+        });
+        a_entered.notified().await;
+        let (callback, target, started, rendered) = (save.clone(), path, b_entered.clone(), b_bytes);
+        let mut b = tokio::task::spawn_blocking(move || {
+            cpa_exec::login_store::save_login(Some(&callback), std::slice::from_ref(&target), || {
+                std::fs::write(&target, rendered).map_err(|error| error.to_string())?;
+                started.notify_one();
+                wait_b.recv().map_err(|error| error.to_string())
+            })
+        });
+        let early_b = tokio::select! {
+            _ = b_entered.notified() => None,
+            result = &mut b => Some(result.unwrap()),
+        };
+        release_a.send(()).unwrap();
+        let a_result = a.await.unwrap();
+        let b_result = match early_b {
+            Some(result) => result,
+            None => {
+                release_b.send(()).unwrap();
+                b.await.unwrap()
+            }
+        };
+        a_result.unwrap();
+        assert_eq!(
+            db.read(&db.auth_dir().join("parallel-plugin.json")).unwrap().unwrap(),
+            a_bytes,
+            "a successful callback must acknowledge its own rendered output, never an overlapping writer's bytes"
+        );
+        assert!(
+            b_result.is_err(),
+            "overlap must conflict or serialize, not replace an in-flight renderer"
+        );
+        assert!(failure.lock().unwrap().take().is_some());
+        drop(save);
+        Arc::try_unwrap(scratch).unwrap().close().unwrap();
+        server.abort();
+        let _ = server.await;
+        drop((client, state, rt, db, store));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mixed_command_flags_use_the_same_priority_for_online_admission_and_execution() {
+        for (flags, selected, online) in [
+            (
+                vec!["--vertex-import", "key.json", "--siwc-bind", "target.json"],
+                BuiltinCommand::Vertex,
+                true,
+            ),
+            (
+                vec!["--codex-login", "--siwc-bind", "target.json"],
+                BuiltinCommand::Siwc,
+                true,
+            ),
+            (
+                vec!["--codex-device-login", "--antigravity-login"],
+                BuiltinCommand::Antigravity,
+                true,
+            ),
+            (vec!["--codex-login", "--claude-login"], BuiltinCommand::Codex, true),
+            (vec!["--claude-login", "--kimi-login"], BuiltinCommand::Claude, true),
+        ] {
+            let args = Args::try_parse_from(std::iter::once("cook-router").chain(flags.iter().copied())).unwrap();
+            assert_eq!(selected_command(&args), Some(selected), "{flags:?}");
+            assert_eq!(online_command_supported(&args), online, "{flags:?}");
+        }
+    }
+
+    #[test]
+    fn online_siwc_destinations_keep_owner_identity_without_client_filesystem_access() {
+        let root = credential_test_dir().join("owner-cache");
+        assert!(!root.exists());
+        let sources = tui::CredentialSources {
+            auth_dir: root.clone(),
+            documents: std::collections::BTreeMap::from([(
+                "c.json".into(),
+                tui::CredentialSource {
+                    bytes: Vec::new(),
+                    sha256: "00".repeat(32),
+                },
+            )]),
+        };
+        assert_eq!(online_siwc_target(" c.json ", &sources).unwrap(), "c.json");
+        assert_eq!(
+            online_siwc_target(root.join("c.json").to_str().unwrap(), &sources).unwrap(),
+            "c.json"
+        );
+        for target in ["../c.json", "nested/c.json", "missing.json", "."] {
+            assert!(online_siwc_target(target, &sources).is_err(), "{target}");
+        }
+        assert!(online_siwc_target(root.parent().unwrap().join("outside.json").to_str().unwrap(), &sources).is_err());
+        assert!(
+            !root.exists(),
+            "resolving a remote destination must not create or inspect a client cache"
+        );
     }
 
     #[test]
@@ -1651,9 +2946,12 @@ mod tests {
         let path = root.join("cook.db");
         let mut config = Config::parse("").unwrap();
         config.auth_dir = legacy.clone();
-        let CredentialAuthority::Local(db) =
-            initialize_credentials(Arc::new(ConfigStore::open(&path).unwrap()), &mut config, false).unwrap()
-        else {
+        let CredentialAuthority::Local(db) = initialize_credentials(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &mut config,
+            false,
+        )
+        .unwrap() else {
             panic!("local credentials expected");
         };
         assert_eq!(config.auth_dir, db.auth_dir());
@@ -1673,7 +2971,8 @@ mod tests {
         drop(save);
         drop(db);
         std::fs::remove_dir_all(&config.auth_dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &legacy).unwrap();
+        let db =
+            CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&path).unwrap()), &legacy).unwrap();
         assert_eq!(std::fs::read(&canonical).unwrap(), bytes);
         assert!(db.read(&config.auth_dir.join("claude-old.json")).unwrap().is_none());
         assert!(!config.auth_dir.join("claude-old.json").exists());
@@ -1685,37 +2984,27 @@ mod tests {
     fn cli_durable_failure_is_returned_and_restores_working_bytes() {
         let root = credential_test_dir();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let owner = Arc::new(cpa_server::testing::config_store(&path).unwrap());
+        let db = CredentialDb::initialize(owner.clone(), &root.join("missing")).unwrap();
         let auth = db.auth_dir().join("login.json");
         db.save(&auth, b"{\"old\":true}").unwrap();
         let (save, failure) = login_save(db.clone());
-        let blocker = ConfigStore::open(&path).unwrap();
-        let (locked, acquired) = std::sync::mpsc::channel();
-        let (release, released) = std::sync::mpsc::channel();
-        let writer = std::thread::spawn(move || {
-            blocker
-                .edit("test", "hold write transaction", |_| {
-                    locked.send(()).unwrap();
-                    released.recv().unwrap();
-                    Ok(())
-                })
-                .unwrap()
-        });
-        acquired.recv().unwrap();
+        let blocker = cpa_server::testing::block_checkpoint_install(&owner);
         let mut called = false;
         let result = cpa_exec::login_store::save_login(Some(&save), std::slice::from_ref(&auth), || {
             called = true;
             std::fs::write(&auth, b"{\"new\":true}").map_err(|error| error.to_string())
         });
-        release.send(()).unwrap();
-        writer.join().unwrap();
+        drop(blocker);
         assert!(result.unwrap_err().contains("commit CLI credentials to SQLite"));
         assert!(failure.lock().unwrap().is_some());
-        assert!(!called, "SQLite failure must precede the working-file mutation");
+        assert!(
+            called,
+            "a real writer mutation must be rolled back after failed checkpoint installation"
+        );
         assert_eq!(std::fs::read(&auth).unwrap(), b"{\"old\":true}");
         assert_eq!(db.read(&auth).unwrap().unwrap(), b"{\"old\":true}");
-        drop(save);
-        drop(db);
+        drop((save, db, owner));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1723,11 +3012,14 @@ mod tests {
     fn cli_writer_cannot_be_reverted_by_concurrent_materialization() {
         let root = credential_test_dir();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
+            &root.join("missing"),
+        )
+        .unwrap();
         let auth = db.auth_dir().join("login.json");
         db.save(&auth, b"{\"old\":true}").unwrap();
-        let watcher =
-            CredentialDb::initialize(Arc::new(ConfigStore::open(&path).unwrap()), &root.join("missing")).unwrap();
+        let watcher = db.clone();
         let (save, _) = login_save(db.clone());
         let (written, changed) = std::sync::mpsc::channel();
         let (release, released) = std::sync::mpsc::channel();
@@ -2051,11 +3343,187 @@ mod tests {
     /// `-tui -standalone` with no management key anywhere and `port: 0`: the TUI finds
     /// the ephemeral port and signs in with the generated password.
     #[tokio::test]
+    async fn service_shutdown_closes_keep_alive_and_settles_its_writer_before_cleanup() {
+        shutdown_driver(false).await;
+    }
+
+    #[tokio::test]
+    async fn service_shutdown_reports_unpublished_checkpoint_and_resumes_it() {
+        shutdown_driver(true).await;
+    }
+
+    async fn shutdown_driver(publication_unavailable: bool) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        struct Release(Option<std::sync::mpsc::Sender<()>>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                if let Some(send) = self.0.take() {
+                    let _ = send.send(());
+                }
+            }
+        }
+        async fn response(stream: &mut tokio::net::TcpStream) -> u16 {
+            let mut head = Vec::new();
+            while !head.ends_with(b"\r\n\r\n") {
+                head.push(stream.read_u8().await.unwrap());
+                assert!(head.len() < 16384);
+            }
+            let head = std::str::from_utf8(&head).unwrap();
+            let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+            let length: usize = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse().unwrap())
+                })
+                .unwrap();
+            let mut body = vec![0; length];
+            stream.read_exact(&mut body).await.unwrap();
+            status
+        }
+        let root = credential_test_dir();
+        std::fs::create_dir_all(root.join("legacy")).unwrap();
+        let store = Arc::new(cpa_server::testing::config_store(&root.join("service.db")).unwrap());
+        store
+            .import_yaml(
+                &format!(
+                    "host: 127.0.0.1\nport: 0\nauth-dir: '{}'\n",
+                    root.join("legacy").display()
+                ),
+                "test",
+                "shutdown driver",
+            )
+            .unwrap();
+        let mut config = store.load().unwrap().config;
+        let backend = initialize_credentials(store.clone(), &mut config, false).unwrap();
+        let workspace = cpa_server::testing::working_directory(&store).unwrap();
+        let armed = Arc::new(AtomicBool::new(false));
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let entered = std::sync::Mutex::new(Some(entered));
+        let (send, held) = std::sync::mpsc::channel();
+        let mut release = Some(Release(Some(send)));
+        let held = std::sync::Mutex::new(held);
+        let marker = workspace.join("settled-driver-writer");
+        let observer = store
+            .subscribe_configuration({
+                let armed = armed.clone();
+                move |_| {
+                    if armed.swap(false, Ordering::SeqCst) {
+                        entered.lock().unwrap().take().unwrap().send(()).unwrap();
+                        held.lock().unwrap().recv().unwrap();
+                        std::fs::write(&marker, b"writer finished before cleanup")?;
+                    }
+                    Ok(())
+                }
+            })
+            .unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let (listening, listener) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(serve(
+            config,
+            store.clone(),
+            backend,
+            "fake-driver-password".into(),
+            true,
+            None,
+            cpa_plugin::Host::default(),
+            async {
+                let _ = stopped.await;
+            },
+            Some(listening),
+        ));
+        let (address, tls) = listener.await.unwrap();
+        assert!(!tls);
+        let mut keep_alive = tokio::net::TcpStream::connect(address).await.unwrap();
+        keep_alive
+            .write_all(b"GET /v1/models HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n")
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(10), response(&mut keep_alive))
+                .await
+                .unwrap(),
+            200
+        );
+        armed.store(true, Ordering::SeqCst);
+        let mut writing = tokio::spawn(async move {
+            wreq::Client::builder().no_proxy().build().unwrap()
+                .post(format!("http://{address}/admin/v1/apply"))
+                .bearer_auth("fake-driver-password").json(&serde_json::json!({"ops":[{"op":"put","kind":"setting","id":"routing","spec":{"retry":{"request-retry":9}}}]}))
+                .send().await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            tokio::select! {
+                result = started => result.unwrap(),
+                result = &mut writing => {
+                    let response = result.unwrap().unwrap();
+                    panic!("writer returned before the admission barrier: {} {}", response.status(), response.text().await.unwrap());
+                },
+            }
+        }).await.unwrap();
+        drop(store);
+        if publication_unavailable {
+            drop(release.take());
+            assert!((&mut writing).await.unwrap().unwrap().status().is_success());
+            std::fs::rename(root.join("service.db"), root.join("old.db")).unwrap();
+            std::fs::create_dir(root.join("service.db")).unwrap();
+            let failed = wreq::Client::builder().no_proxy().build().unwrap()
+                .post(format!("http://{address}/admin/v1/apply")).bearer_auth("fake-driver-password")
+                .json(&serde_json::json!({"ops":[{"op":"put","kind":"setting","id":"routing","spec":{"retry":{"request-retry":11}}}]}))
+                .send().await.unwrap();
+            assert_eq!(failed.status().as_u16(), 500);
+        }
+        stop.send(()).unwrap();
+        let mut byte = [0];
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(10), keep_alive.read(&mut byte))
+            .await
+            .expect("shutdown must close an established inference keep-alive connection");
+        assert!(
+            matches!(closed, Ok(0)) || closed.is_err(),
+            "stopped transport still served the connection"
+        );
+        if !publication_unavailable {
+            assert!(
+                !server.is_finished(),
+                "driver returned before its admitted writer settled"
+            );
+            assert!(workspace.is_dir());
+        }
+        drop(release.take());
+        let stopped = tokio::time::timeout(std::time::Duration::from_secs(10), server)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(observer);
+        let restored = if publication_unavailable {
+            assert!(stopped.unwrap_err().to_string().contains("incomplete"));
+            assert!(workspace.is_dir(), "failed driver erased the only newer checkpoint");
+            std::fs::remove_dir(root.join("service.db")).unwrap();
+            std::fs::rename(root.join("old.db"), root.join("service.db")).unwrap();
+            cpa_server::testing::config_store(&root.join("service.db")).unwrap()
+        } else {
+            stopped.unwrap();
+            let _ = writing.await.unwrap();
+            assert!(!workspace.exists(), "driver left owned work alive after return");
+            std::fs::copy(root.join("service.db"), root.join("restored.db")).unwrap();
+            cpa_server::testing::config_store(&root.join("restored.db")).unwrap()
+        };
+        assert_eq!(
+            restored.load().unwrap().config.routing.retry.request_retry,
+            if publication_unavailable { 11 } else { 9 }
+        );
+        drop(restored);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn standalone_server_starts_without_any_secret() {
         let dir = std::env::temp_dir().join(format!("cpa-standalone-{}", std::process::id()));
         let auth = dir.join("auth");
         std::fs::create_dir_all(&auth).unwrap();
-        let store = Arc::new(ConfigStore::open(&dir.join("cook.db")).unwrap());
+        let store = Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap());
         store
             .import_yaml(
                 &format!("host: 127.0.0.1\nport: 0\nauth-dir: '{}'\n", auth.display()),
@@ -2171,6 +3639,7 @@ mod tests {
         assert!(!store.is_empty().unwrap(), "even an empty initial import is durable");
         assert!(!cloud_config_present(&store, &cfg));
         std::fs::write(&missing, "port: 9000\n").unwrap();
+        drop(store);
         assert_eq!(load_config(&db, &missing, false).unwrap().1.port, 0);
         for (i, text) in ["port: [\n", "port: wrong\n", "- a\n- b\n"].iter().enumerate() {
             let broken = dir.join("broken.yaml");
@@ -2187,7 +3656,6 @@ mod tests {
             load_config(&invalid_db, &missing, true).is_err(),
             "a valid YAML file cannot mask a bad DB"
         );
-        drop(store);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

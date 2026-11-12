@@ -84,18 +84,23 @@ fn env_bytes(key: &str) -> Vec<u8> {
     return value.to_string_lossy().into_owned().into_bytes();
 }
 
-/// Go `startAttemptCleanup`: an hourly purge for as long as the management state
-/// lives. Without a Tokio runtime (synchronous callers) there is no timer.
+/// Go `startAttemptCleanup`: an hourly purge owned by the management state. Shutdown
+/// stops it and joins it with the rest of its work. Without a Tokio runtime
+/// (synchronous callers) there is no timer.
 pub(super) fn start_purge(state: &std::sync::Arc<Management>) {
-    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+    if tokio::runtime::Handle::try_current().is_err() {
         return;
-    };
-    let state = std::sync::Arc::downgrade(state);
-    runtime.spawn(async move {
+    }
+    let stopping = state.stopping.clone();
+    let state_ref = std::sync::Arc::downgrade(state);
+    state.work.spawn(async move {
         let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + PURGE_EVERY, PURGE_EVERY);
         loop {
-            ticks.tick().await;
-            let Some(state) = state.upgrade() else { return };
+            tokio::select! {
+                () = stopping.cancelled() => return,
+                _ = ticks.tick() => {}
+            }
+            let Some(state) = state_ref.upgrade() else { return };
             state.access.purge_stale(Instant::now());
         }
     });
@@ -199,6 +204,7 @@ impl Access {
         ip: &str,
         local: bool,
         provided: &[u8],
+        work: &tokio_util::task::TaskTracker,
     ) -> Result<(), (StatusCode, String)> {
         {
             let now = Instant::now();
@@ -236,7 +242,8 @@ impl Access {
         }
         let candidate = provided.to_vec();
         let valid = !secret.is_empty()
-            && tokio::task::spawn_blocking(move || bcrypt::verify(candidate, &secret).unwrap_or(false))
+            && work
+                .spawn_blocking(move || bcrypt::verify(candidate, &secret).unwrap_or(false))
                 .await
                 .unwrap_or(false);
         if !valid {
@@ -297,6 +304,20 @@ pub(crate) fn not_found() -> Response {
     StatusCode::NOT_FOUND.into_response()
 }
 
+pub(crate) async fn owned(State(state): State<Arc<Management>>, req: Request, next: Next) -> Response {
+    let Some(_operation) = state.enter() else {
+        return if req.uri().path().starts_with("/admin/v1/") {
+            super::admin::error(&state, 503, "shutting_down", "configuration service is shutting down")
+        } else {
+            json_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "configuration service is shutting down",
+            )
+        };
+    };
+    next.run(req).await
+}
+
 /// Go `managementAvailabilityMiddleware` alone (the OAuth callback routes).
 pub(crate) async fn available(State(state): State<Arc<Management>>, req: Request, next: Next) -> Response {
     if !state.access.available() {
@@ -316,7 +337,11 @@ pub(crate) async fn guard(State(state): State<Arc<Management>>, req: Request, ne
     let provided = provided_key(req.headers()).to_vec();
     let cfg = state.rt.config();
     let admin = req.uri().path().starts_with("/admin/v1/");
-    let mut response = match state.access.authenticate(&cfg, &ip, local, &provided).await {
+    let mut response = match state
+        .access
+        .authenticate(&cfg, &ip, local, &provided, &state.work)
+        .await
+    {
         Ok(()) => next.run(req).await,
         Err((status, message)) if admin => super::admin::error(
             &state,
@@ -378,6 +403,42 @@ pub(crate) fn cors_headers(response: &mut Response) {
 mod tests {
     use super::*;
 
+    /// The hourly purge belongs to the management state: shutdown stops it and joins
+    /// it, rather than leaving it asleep for up to an hour.
+    #[tokio::test]
+    async fn shutdown_stops_and_joins_the_hourly_purge() {
+        let root = std::env::temp_dir().join(format!("access-purge-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let config = std::sync::Arc::new(crate::testing::config_store(&root.join("config.db")).unwrap());
+        let db = crate::credential_store::CredentialDb::initialize(config.clone(), &root.join("legacy")).unwrap();
+        let mut cfg = config.load().unwrap().config;
+        cfg.auth_dir = db.auth_dir();
+        let rt = std::sync::Arc::new(crate::testing::runtime_with_db(
+            cfg,
+            Vec::new(),
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            db.clone(),
+        ));
+        let state = Management::new(rt, config);
+        // The purge task holds the only extra weak reference that ends with it.
+        let running = std::sync::Arc::weak_count(&state);
+        tokio::time::timeout(Duration::from_secs(5), state.shutdown())
+            .await
+            .expect("shutdown joins its work");
+        assert!(
+            std::sync::Arc::weak_count(&state) < running,
+            "the purge task ended with shutdown"
+        );
+        drop((state, db));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn failures_only_expire_through_the_hourly_purge() {
         let cfg = Config::parse(
@@ -416,6 +477,7 @@ mod tests {
     /// TUI's password is accepted from loopback only, and keeps routes on after reloads.
     #[tokio::test]
     async fn standalone_local_password_works_without_a_secret() {
+        let work = tokio_util::task::TaskTracker::new();
         let cfg = Config::parse("management:\n  allow-remote: true\n").unwrap();
         let options = |standalone| super::super::Options {
             local_password: "fake-local".into(),
@@ -424,7 +486,7 @@ mod tests {
             ..Default::default()
         };
         let plain = Access::new(&cfg, options(false));
-        let refused = plain.authenticate(&cfg, "127.0.0.1", true, b"fake-local").await;
+        let refused = plain.authenticate(&cfg, "127.0.0.1", true, b"fake-local", &work).await;
         assert_eq!(refused.unwrap_err().1, "remote management key not set");
         plain.config_published(&cfg);
         assert!(!plain.available());
@@ -432,13 +494,15 @@ mod tests {
         let access = Access::new(&cfg, options(true));
         assert!(
             access
-                .authenticate(&cfg, "127.0.0.1", true, b"fake-local")
+                .authenticate(&cfg, "127.0.0.1", true, b"fake-local", &work)
                 .await
                 .is_ok()
         );
-        let wrong = access.authenticate(&cfg, "127.0.0.1", true, b"wrong").await;
+        let wrong = access.authenticate(&cfg, "127.0.0.1", true, b"wrong", &work).await;
         assert_eq!(wrong.unwrap_err().1, "invalid management key");
-        let remote = access.authenticate(&cfg, "203.0.113.9", false, b"fake-local").await;
+        let remote = access
+            .authenticate(&cfg, "203.0.113.9", false, b"fake-local", &work)
+            .await;
         assert_eq!(remote.unwrap_err().1, "remote management key not set");
         access.config_published(&cfg);
         assert!(access.available());

@@ -3512,7 +3512,8 @@ mod tests {
     }
 
     /// The published record of one timed POST of `body` to `url` through the shared
-    /// HTTP client, as the Claude executor sends it, within `timeout` if any.
+    /// HTTP redirect path, within `timeout` if any. Bound socket buffering so the
+    /// partial-upload case does not depend on the host's TCP autotuning limits.
     async fn timed_exchange(
         rt: &std::sync::Arc<crate::Runtime>,
         url: &str,
@@ -3531,11 +3532,15 @@ mod tests {
         ));
         let tracker = Tracker::start(rt, &facts, &credential_for("claude"), "m");
         let sink = tracker.sink();
-        let clients = cpa_exec::proxy::GoClients::new(Default::default()).timed();
+        let client = wreq::Client::builder()
+            .no_proxy()
+            .tcp_send_buffer_size(Some(64 << 10))
+            .build()
+            .unwrap();
         let sent = cpa_exec::proxy::send_routed(
             &|_| {
                 Ok(cpa_exec::proxy::Route {
-                    client: clients.get(&cpa_exec::proxy::Proxy::Direct),
+                    client: client.clone(),
                     order: None,
                 })
             },

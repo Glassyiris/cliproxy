@@ -1,5 +1,6 @@
 //! Management API client with authenticated requests, URL redaction and bounded redirects.
 use cpa_core::gostr::GoStr;
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -12,6 +13,18 @@ pub type Object = Map<String, Value>;
 pub struct ClientKey {
     pub id: String,
     pub rev: u64,
+}
+
+/// An authorized original document and its content precondition; never debug-print it.
+#[derive(Clone)]
+pub struct CredentialSource {
+    pub bytes: Vec<u8>,
+    pub sha256: String,
+}
+
+pub struct CredentialSources {
+    pub auth_dir: std::path::PathBuf,
+    pub documents: BTreeMap<String, CredentialSource>,
 }
 
 /// Go `NewClientWithBaseURL`'s base URL rules.
@@ -82,11 +95,34 @@ impl Client {
     /// most ten requests across redirects, 301-303 turn into a body-less GET, the
     /// Bearer key follows only to the same host or a subdomain, and the ten-second
     /// timeout covers the whole exchange. Errors read like Go's `url.Error`, with a
-    /// password in the URL shown as `***`.
+    /// password in the URL shown as `***`. Atomic owner writes and privileged
+    /// snapshot reads instead require the final management URL without redirects.
     // ponytail: the transport cause is the OS error text ("Connection refused (os error
     // 111)") where Go prints its dialer's ("dial tcp ...: connect: connection refused").
     async fn request(&self, method: wreq::Method, path: &str, body: Option<String>) -> Result<(u16, Vec<u8>), String> {
+        self.request_at_revision(method, path, body, None).await
+    }
+
+    async fn request_at_revision(
+        &self,
+        method: wreq::Method,
+        path: &str,
+        body: Option<String>,
+        revision: Option<u64>,
+    ) -> Result<(u16, Vec<u8>), String> {
         let url = format!("{}{path}", self.base_url);
+        let strict_owner_request =
+            (path.starts_with("/admin/v1/") && method != wreq::Method::GET && method != wreq::Method::HEAD)
+                || revision.is_some()
+                || matches!(
+                    path,
+                    "/admin/v1/credentials/batch"
+                        | "/admin/v1/apply?dry_run=true"
+                        | "/admin/v1/credentials"
+                        | "/admin/v1/export?include_secrets=true"
+                        | "/admin/v1/r/setting/requests?include_secrets=true"
+                        | "/admin/v1/r/setting/oauth"
+                );
         let mut op = method.as_str().go_lower();
         op[..1].make_ascii_uppercase();
         // Go's url.Error names the request that failed (its password shown as ***).
@@ -119,6 +155,9 @@ impl Client {
                 if with_auth {
                     req = req.header("Authorization", format!("Bearer {secret}"));
                 }
+                if let Some(revision) = revision {
+                    req = req.header("If-Match", format!("\"{revision}\""));
+                }
                 if let Some(body) = &body {
                     req = req.header("Content-Type", "application/json").body(body.clone());
                 }
@@ -136,6 +175,12 @@ impl Client {
                     .unwrap_or_default()
                     .to_owned();
                 let status = res.status().as_u16();
+                if strict_owner_request && (300..400).contains(&status) {
+                    return Err(
+                        "owner snapshot reads and atomic writes must use the final management URL without redirects"
+                            .into(),
+                    );
+                }
                 if !matches!(status, 301 | 302 | 303 | 307 | 308) || location.is_empty() {
                     break res;
                 }
@@ -204,11 +249,20 @@ impl Client {
     }
 
     /// Go `get`/`put`/`patch`: a status of 400 or more is `HTTP <code>: <body>`.
+    /// Atomic owner applies additionally require a completed revision receipt.
     async fn checked(&self, method: wreq::Method, path: &str, body: Option<String>) -> Result<Vec<u8>, String> {
+        let owner_commit = method == wreq::Method::POST && path == "/admin/v1/apply";
         let (code, data) = self.request(method, path, body).await?;
-        if code >= 400 {
+        if code >= 400 || (owner_commit && code != 200) {
             let text = String::from_utf8_lossy(cpa_common::gostr::trim_space(&data)).into_owned();
             return Err(format!("HTTP {code}: {text}"));
+        }
+        if owner_commit {
+            let receipt: Value =
+                serde_json::from_slice(&data).map_err(|_| "invalid configuration commit response".to_owned())?;
+            if receipt.get("revision").and_then(Value::as_u64).is_none() {
+                return Err("configuration commit response has no revision".into());
+            }
         }
         Ok(data)
     }
@@ -239,6 +293,218 @@ impl Client {
             return Err(failure.replace("{code}", &code.to_string()));
         }
         Ok(())
+    }
+
+    /// Submit a versioned configuration to the owner's atomic import endpoint.
+    pub async fn import_config(&self, document: String) -> Result<u64, String> {
+        let head = self.get_json("/admin/v1/revisions?limit=1").await?;
+        let revisions = head
+            .get("revisions")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "invalid configuration revision response".to_owned())?;
+        let revision = match revisions.first() {
+            Some(latest) => latest
+                .get("rev")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| "invalid configuration revision response".to_owned())?,
+            None => 0,
+        };
+        let (status, data) = self
+            .request_at_revision(wreq::Method::POST, "/admin/v1/import", Some(document), Some(revision))
+            .await?;
+        if status >= 400 {
+            return Err(format!("HTTP {status}"));
+        }
+        let response: Value =
+            serde_json::from_slice(&data).map_err(|_| "invalid configuration import response".to_owned())?;
+        response
+            .get("revision")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "configuration import response has no revision".to_owned())
+    }
+
+    /// Original provider-rendered bytes, committed together by the running owner.
+    pub async fn save_credentials(
+        &self,
+        documents: &[(String, Vec<u8>)],
+        sources: Option<&BTreeMap<String, CredentialSource>>,
+    ) -> Result<(), String> {
+        self.apply_credential_changes(documents, &[], sources).await
+    }
+
+    pub async fn apply_credential_changes(
+        &self,
+        documents: &[(String, Vec<u8>)],
+        deletions: &[String],
+        sources: Option<&BTreeMap<String, CredentialSource>>,
+    ) -> Result<(), String> {
+        use base64::Engine as _;
+        let deleted: Vec<_> = deletions
+            .iter()
+            .map(|name| {
+                let source = sources
+                    .and_then(|sources| sources.get(name))
+                    .ok_or("credential deletion has no captured source")?;
+                Ok(serde_json::json!({"name": name,"if_match":source.sha256}))
+            })
+            .collect::<Result<_, String>>()?;
+        let mut body = serde_json::json!({"documents": documents.iter().map(|(name, bytes)| {
+            let mut document = serde_json::json!({"name": name, "data": base64::engine::general_purpose::STANDARD.encode(bytes)});
+            if let Some(sources) = sources {
+                if let Some(source) = sources.get(name) {
+                    document["if_match"] = source.sha256.clone().into();
+                } else {
+                    document["if_none_match"] = true.into();
+                }
+            }
+            document
+        }).collect::<Vec<_>>()});
+        if !deletions.is_empty() {
+            body["deletions"] = deleted.into();
+        }
+        let (status, bytes) = self
+            .request(
+                wreq::Method::POST,
+                "/admin/v1/credentials/batch",
+                Some(body.to_string()),
+            )
+            .await?;
+        if status != 200 {
+            return Err(format!("HTTP {status}"));
+        }
+        let response: Value =
+            serde_json::from_slice(&bytes).map_err(|_| "invalid credential batch response".to_owned())?;
+        if response.get("status").and_then(Value::as_str) != Some("ok")
+            || response.get("saved").and_then(Value::as_u64) != Some(documents.len() as u64)
+            || (!deletions.is_empty()
+                && response.get("deleted").and_then(Value::as_u64) != Some(deletions.len() as u64))
+        {
+            return Err("credential batch was not acknowledged".into());
+        }
+        Ok(())
+    }
+
+    /// A normal dry-run command checks admission before any provider grant work.
+    pub async fn credential_admission(&self) -> Result<(), String> {
+        let (status, bytes) = self
+            .request(
+                wreq::Method::POST,
+                "/admin/v1/apply?dry_run=true",
+                Some(serde_json::json!({"ops": []}).to_string()),
+            )
+            .await?;
+        if status != 200 {
+            return Err(format!("HTTP {status}"));
+        }
+        let response: Value =
+            serde_json::from_slice(&bytes).map_err(|_| "invalid owner admission response".to_owned())?;
+        if response["dry_run"] != true || response["written"] != false {
+            return Err("owner admission was not acknowledged".into());
+        }
+        Ok(())
+    }
+
+    pub async fn credential_sources(&self) -> Result<CredentialSources, String> {
+        use base64::Engine as _;
+        let response = self.get_json("/admin/v1/credentials").await?;
+        let invalid = || "invalid credential source response".to_owned();
+        let documents = response
+            .get("documents")
+            .and_then(Value::as_array)
+            .ok_or_else(invalid)?;
+        let mut sources = BTreeMap::new();
+        for document in documents {
+            let name = document.get("name").and_then(Value::as_str).ok_or_else(invalid)?;
+            let hash = document.get("sha256").and_then(Value::as_str).ok_or_else(invalid)?;
+            if name.is_empty()
+                || name.contains(['/', '\\', ':'])
+                || name.chars().any(char::is_control)
+                || !name.go_lower().ends_with(".json")
+                || hash.len() != 64
+                || !hash.bytes().all(|b| b.is_ascii_hexdigit())
+            {
+                return Err(invalid());
+            }
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(document.get("data").and_then(Value::as_str).ok_or_else(invalid)?)
+                .map_err(|_| invalid())?;
+            if sources
+                .insert(
+                    name.to_owned(),
+                    CredentialSource {
+                        bytes,
+                        sha256: hash.into(),
+                    },
+                )
+                .is_some()
+            {
+                return Err(invalid());
+            }
+        }
+        let auth_dir = response
+            .get("auth_dir")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .ok_or_else(invalid)?;
+        Ok(CredentialSources {
+            auth_dir: auth_dir.into(),
+            documents: sources,
+        })
+    }
+
+    /// Reuse the SQL-free resource importer/compiler; never open a local store.
+    /// The configuration a built-in login reads: the outbound proxy, whose URL can
+    /// carry credentials, and the SIWC client identifier. Never the full export.
+    pub async fn login_config(&self) -> Result<cpa_core::config::Config, String> {
+        let requests = self
+            .setting("/admin/v1/r/setting/requests?include_secrets=true")
+            .await?;
+        let identifier = self.setting("/admin/v1/r/setting/oauth").await?.and_then(|oauth| {
+            oauth
+                .pointer("/providers/codex/signin-with-chatgpt-identifier")
+                .cloned()
+        });
+        let mut document = cpa_server::config_store::resources::export_json(0, &[], false);
+        let resources = document["resources"].as_array_mut().expect("export envelope");
+        if let Some(spec) = requests {
+            resources.push(serde_json::json!({"kind": "setting", "id": "requests", "spec": spec}));
+        }
+        if let Some(identifier) = identifier {
+            let spec = serde_json::json!({"providers": {"codex": {"signin-with-chatgpt-identifier": identifier}}});
+            resources.push(serde_json::json!({"kind": "setting", "id": "oauth", "spec": spec}));
+        }
+        Self::compile(document)
+    }
+
+    /// The complete configuration, secrets included, that plugin commands receive as
+    /// raw configuration.
+    pub async fn plugin_config(&self) -> Result<cpa_core::config::Config, String> {
+        let document = self.get_json("/admin/v1/export?include_secrets=true").await?;
+        Self::compile(Value::Object(document))
+    }
+
+    fn compile(document: Value) -> Result<cpa_core::config::Config, String> {
+        let resources = cpa_server::config_store::resources::import_json(&document.to_string())
+            .map_err(|_| "invalid owner configuration export".to_owned())?;
+        cpa_server::config_store::resources::config(&resources)
+            .map(|(config, _)| config)
+            .map_err(|_| "invalid owner configuration".to_owned())
+    }
+
+    /// One setting's spec; `None` only for the owner's structured `not_found`.
+    async fn setting(&self, path: &str) -> Result<Option<Value>, String> {
+        let (code, data) = self.request(wreq::Method::GET, path, None).await?;
+        let body: Option<Value> = serde_json::from_slice(&data).ok();
+        if code == 404 && body.as_ref().and_then(|b| b.get("error")) == Some(&Value::from("not_found")) {
+            return Ok(None);
+        }
+        if code >= 400 {
+            let text = String::from_utf8_lossy(cpa_common::gostr::trim_space(&data)).into_owned();
+            return Err(format!("HTTP {code}: {text}"));
+        }
+        body.and_then(|mut b| b.get_mut("spec").map(Value::take))
+            .ok_or_else(|| "invalid owner setting response".to_owned())
+            .map(Some)
     }
 
     pub async fn get_config(&self) -> Result<Object, String> {
@@ -631,6 +897,195 @@ mod tests {
         assert!(!err.contains("fake-url-password"));
     }
 
+    #[tokio::test]
+    async fn config_import_preserves_its_condition_and_never_turns_a_redirect_into_success() {
+        let followed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = followed.clone();
+        let app = axum::Router::new()
+            .route(
+                "/admin/v1/revisions",
+                axum::routing::get(|| async { axum::Json(serde_json::json!({"revisions": [{"rev": 7}]})) }),
+            )
+            .route(
+                "/admin/v1/import",
+                axum::routing::post(|headers: axum::http::HeaderMap| async move {
+                    assert_eq!(headers.get("if-match").unwrap(), "\"7\"");
+                    axum::response::Redirect::to("/not-an-import")
+                }),
+            )
+            .route(
+                "/not-an-import",
+                axum::routing::get(move || {
+                    let observed = observed.clone();
+                    async move {
+                        observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        axum::Json(serde_json::json!({"revision": 7}))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let error = Client::new(&base, "fake-management-key")
+            .import_config("{}".into())
+            .await
+            .unwrap_err();
+        assert!(error.contains("without redirects"), "{error}");
+        assert_eq!(followed.load(std::sync::atomic::Ordering::SeqCst), 0);
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn login_config_reads_only_two_settings_and_tolerates_only_structured_absence() {
+        let seen = std::sync::Arc::new(Mutex::new(Vec::<String>::new()));
+        let record = seen.clone();
+        let app = axum::Router::new()
+            .route(
+                "/admin/v1/r/setting/requests",
+                axum::routing::get(|| async {
+                    (
+                        axum::http::StatusCode::NOT_FOUND,
+                        axum::Json(serde_json::json!({"error": "not_found", "message": "no such resource"})),
+                    )
+                }),
+            )
+            .route(
+                "/admin/v1/r/setting/oauth",
+                axum::routing::get(|| async {
+                    axum::Json(serde_json::json!({"kind": "setting", "id": "oauth", "spec": {"providers": {"codex": {"signin-with-chatgpt-identifier": "fixture-id"}}}}))
+                }),
+            )
+            .layer(axum::middleware::from_fn(
+                move |request: axum::extract::Request, next: axum::middleware::Next| {
+                    let record = record.clone();
+                    async move {
+                        record.lock().unwrap().push(request.uri().to_string());
+                        next.run(request).await
+                    }
+                },
+            ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let config = Client::new(&base, "fake-management-key").login_config().await.unwrap();
+        assert_eq!(cpa_exec::codex_siwc::identifier(&config), "fixture-id");
+        assert!(config.document.get("requests").is_none());
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "/admin/v1/r/setting/requests?include_secrets=true",
+                "/admin/v1/r/setting/oauth"
+            ]
+        );
+        // A plain 404 (a wrong base URL) is an error, not an absent proxy.
+        let error = Client::new(&format!("{base}/wrong"), "fake-management-key")
+            .login_config()
+            .await
+            .unwrap_err();
+        assert!(error.contains("HTTP 404"), "{error}");
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn credential_batches_reject_redirects_and_incomplete_acknowledgements() {
+        let followed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = followed.clone();
+        let app = axum::Router::new()
+            .route(
+                "/admin/v1/credentials/batch",
+                axum::routing::post(|| async { axum::response::Redirect::to("/forged-receipt") }),
+            )
+            .route(
+                "/admin/v1/apply",
+                axum::routing::post(|| async { axum::response::Redirect::to("/forged-receipt") }),
+            )
+            .route(
+                "/admin/v1/credentials",
+                axum::routing::get(|| async { axum::response::Redirect::to("/forged-receipt") }),
+            )
+            .route(
+                "/admin/v1/export",
+                axum::routing::get(|| async { axum::response::Redirect::to("/forged-receipt") }),
+            )
+            .route(
+                "/admin/v1/r/setting/{id}",
+                axum::routing::get(|| async { axum::response::Redirect::to("/forged-receipt") }),
+            )
+            .route(
+                "/forged-receipt",
+                axum::routing::get(move || {
+                    let observed = observed.clone();
+                    async move {
+                        observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        axum::Json(serde_json::json!({"status": "ok", "saved": 1}))
+                    }
+                }),
+            )
+            .route(
+                "/wrong/admin/v1/credentials/batch",
+                axum::routing::post(|| async { axum::Json(serde_json::json!({"status": "ok", "saved": 0})) }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let documents = vec![("test.json".into(), b"{}".to_vec())];
+        let error = Client::new(&base, "fake-management-key")
+            .save_credentials(&documents, None)
+            .await
+            .unwrap_err();
+        assert!(error.contains("without redirects"), "{error}");
+        assert_eq!(followed.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let error = Client::new(&base, "fake-management-key")
+            .credential_admission()
+            .await
+            .unwrap_err();
+        assert!(error.contains("without redirects"), "{error}");
+        assert_eq!(followed.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let client = Client::new(&base, "fake-management-key");
+        assert!(
+            client
+                .credential_sources()
+                .await
+                .err()
+                .unwrap()
+                .contains("without redirects")
+        );
+        assert!(client.login_config().await.err().unwrap().contains("without redirects"));
+        assert!(
+            client
+                .plugin_config()
+                .await
+                .err()
+                .unwrap()
+                .contains("without redirects")
+        );
+        assert_eq!(followed.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let error = Client::new(&format!("{base}/wrong"), "fake-management-key")
+            .save_credentials(&documents, None)
+            .await
+            .unwrap_err();
+        assert!(error.contains("not acknowledged"), "{error}");
+        let sources = BTreeMap::from([(
+            "test.json".into(),
+            CredentialSource {
+                bytes: b"{}".to_vec(),
+                sha256: "00".repeat(32),
+            },
+        )]);
+        let error = Client::new(&format!("{base}/wrong"), "fake-management-key")
+            .apply_credential_changes(&[], &["test.json".into()], Some(&sources))
+            .await
+            .unwrap_err();
+        assert!(
+            error.contains("not acknowledged"),
+            "a save receipt cannot acknowledge a deletion: {error}"
+        );
+        server.abort();
+        let _ = server.await;
+    }
+
     /// A one-shot HTTP server answering every request with `reply`; returns its port
     /// and the requests it saw.
     async fn record(reply: String) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
@@ -711,7 +1166,12 @@ mod tests {
 
     #[tokio::test]
     async fn client_keys_patch_by_identity_and_revision() {
-        let (port, seen) = record("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".into()).await;
+        let receipt = serde_json::json!({"revision":8}).to_string();
+        let (port, seen) = record(format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{receipt}",
+            receipt.len()
+        ))
+        .await;
         let client = Client::new(&format!("http://127.0.0.1:{port}"), "key");
         client
             .edit_client_key(
@@ -804,6 +1264,140 @@ mod tests {
         assert_eq!(seen.lock().unwrap().len(), 10);
     }
 
+    #[tokio::test]
+    async fn owner_setting_writes_require_a_direct_committed_receipt() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "owner-setting-receipt-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Arc::new(cpa_server::testing::config_store(&root.join("owner.db")).unwrap());
+        store
+            .import_yaml(
+                "observability: {logs: {debug: false}}\n",
+                "test",
+                "direct owner receipt",
+            )
+            .unwrap();
+        let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &root.join("legacy")).unwrap();
+        let mut config = store.load().unwrap().config;
+        config.auth_dir = db.auth_dir();
+        let rt = Arc::new(cpa_server::testing::runtime_with_db(
+            config,
+            Vec::new(),
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            db,
+        ));
+        let state = cpa_server::management::Management::with_options(
+            rt.clone(),
+            store.clone(),
+            cpa_server::management::Options {
+                local_password: "fake-owner-key".into(),
+                standalone: true,
+                update_check_disabled: Some(true),
+                ..Default::default()
+            },
+        );
+        let seen = Arc::new(AtomicUsize::new(0));
+        let app = cpa_server::management::router(state.clone()).layer(axum::middleware::from_fn({
+            let seen = seen.clone();
+            move |request: axum::extract::Request, next: axum::middleware::Next| {
+                seen.fetch_add(1, Ordering::SeqCst);
+                async move { next.run(request).await }
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let owner = tokio::spawn(cpa_server::listener::serve_with_resp(
+            listener,
+            app,
+            None,
+            Some(state.clone()),
+        ));
+        let revision = store.load().unwrap().rev;
+        for (status, moved) in [
+            (301, true),
+            (302, true),
+            (303, true),
+            (307, true),
+            (308, true),
+            (301, false),
+            (302, false),
+            (303, false),
+            (307, false),
+            (308, false),
+            (200, false),
+            (202, false),
+        ] {
+            let location = moved.then(|| format!("{base}/admin/v1/effective/config"));
+            let body = if status == 200 {
+                "{}".to_owned()
+            } else {
+                serde_json::json!({"revision":revision}).to_string()
+            };
+            let entry = axum::Router::new().fallback(move || {
+                let (location, body) = (location.clone(), body.clone());
+                async move {
+                    let mut reply = axum::response::Response::builder()
+                        .status(status)
+                        .header("content-type", "application/json");
+                    if let Some(location) = location {
+                        reply = reply.header("location", location);
+                    }
+                    reply.body(axum::body::Body::from(body)).unwrap()
+                }
+            });
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let at = format!("http://{}", listener.local_addr().unwrap());
+            let redirect = tokio::spawn(async move { axum::serve(listener, entry).await.unwrap() });
+            let client = Client::new(&at, "fake-owner-key");
+            let result = client.put_field("observability/logs/debug", Value::Bool(true)).await;
+            drop(client);
+            redirect.abort();
+            assert!(redirect.await.unwrap_err().is_cancelled());
+            assert!(
+                result.is_err(),
+                "uncommitted response {status} (Location={moved}) was acknowledged"
+            );
+            assert_eq!(seen.load(Ordering::SeqCst), 0, "owner write followed a redirect");
+            assert_eq!(store.load().unwrap().rev, revision);
+            assert_eq!(
+                store.load().unwrap().config.document["observability"]["logs"]["debug"].as_bool(),
+                Some(false)
+            );
+        }
+        let client = Client::new(&base, "fake-owner-key");
+        client
+            .put_field("observability/logs/debug", Value::Bool(true))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.load().unwrap().config.document["observability"]["logs"]["debug"].as_bool(),
+            Some(true)
+        );
+        assert!(store.load().unwrap().rev > revision);
+        drop(client);
+        state.shutdown().await;
+        owner.await.unwrap().unwrap();
+        rt.finish_shutdown().await.unwrap();
+        drop(state);
+        drop(rt);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// Go's redirect rules: a PUT that meets a 302 becomes a body-less GET, and the
     /// Bearer key follows to the same host on another port but not to another host.
     #[tokio::test]
@@ -840,13 +1434,23 @@ mod tests {
         })
         .await;
         let client = Client::new(&format!("http://127.0.0.1:{start}"), "fake-bearer");
+        // The generic transport keeps Go's behavior; owner writes are tested separately.
         client
-            .put_field("observability/logs/debug", Value::Bool(true))
+            .checked(
+                wreq::Method::PUT,
+                "/legacy-setting",
+                Some(
+                    serde_json::json!({
+                        "ops":[{"op":"set","path":"observability/logs/debug","value":true}]
+                    })
+                    .to_string(),
+                ),
+            )
             .await
             .unwrap();
         let seen = seen.lock().unwrap().clone();
         assert!(
-            seen[0].starts_with("POST /admin/v1/apply ")
+            seen[0].starts_with("PUT /legacy-setting ")
                 && seen[0].contains("\"path\":\"observability/logs/debug\"")
                 && seen[0].contains("\"value\":true"),
             "{}",
@@ -861,7 +1465,7 @@ mod tests {
         assert!(
             seen[1]
                 .go_lower()
-                .contains(&format!("referer: http://127.0.0.1:{start}/admin/v1/apply"))
+                .contains(&format!("referer: http://127.0.0.1:{start}/legacy-setting"))
         );
     }
 

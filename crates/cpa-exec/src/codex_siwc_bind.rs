@@ -180,6 +180,30 @@ pub fn try_lock(file: &std::fs::File) -> Result<bool, String> {
     }
 }
 
+/// Releases a lock [`try_lock`] took. A Unix lock belongs to the open file description,
+/// which a child forked before its exec briefly shares, so closing only this descriptor
+/// can leave the lock held until that child execs.
+#[cfg(unix)]
+pub fn unlock(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    loop {
+        // SAFETY: a valid open descriptor; flock touches no memory.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+/// Windows handles are not inherited by children, so closing the handle releases it.
+#[cfg(windows)]
+pub fn unlock(_: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
+}
+
 fn open_lock(path: &Path) -> Result<(std::fs::File, PathBuf), String> {
     let mut lock_path = lock_base(path).into_os_string();
     lock_path.push(".lock");
@@ -377,7 +401,7 @@ fn show_url(url: &str, port: u16, no_browser: bool) {
 }
 
 /// [`bind`] through `oauth` and `interaction` (tests use local endpoints).
-pub(crate) async fn bind_with(
+pub async fn bind_with(
     cfg: &Config,
     target: &str,
     port: u16,
@@ -385,7 +409,14 @@ pub(crate) async fn bind_with(
     interaction: Interaction,
     save: Option<crate::login_store::LoginSave>,
 ) -> Result<PathBuf, BindError> {
-    let path = resolve(&cfg.auth_dir, target).map_err(BindError::Log)?;
+    let path = {
+        let auth_dir = cfg.auth_dir.clone();
+        let target = target.to_owned();
+        tokio::task::spawn_blocking(move || resolve(&auth_dir, &target))
+            .await
+            .map_err(|error| BindError::Log(format!("siwc-bind: {error}")))?
+            .map_err(BindError::Log)?
+    };
     let device = {
         let path = path.clone();
         tokio::task::spawn_blocking(move || device_id(&path))

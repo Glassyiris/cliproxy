@@ -87,6 +87,24 @@ fn answers() -> std::sync::MutexGuard<'static, Option<HashMap<PathBuf, Answer>>>
     ANSWERS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+fn with_answers<R>(f: impl FnOnce(&mut Option<HashMap<PathBuf, Answer>>) -> R) -> R {
+    #[cfg(feature = "test-support")]
+    if thread_parser().is_some() {
+        return THREAD_ANSWERS.with(|answers| f(&mut answers.borrow_mut()));
+    }
+    f(&mut answers())
+}
+
+fn answer_epoch() -> u64 {
+    // An independent fixture registration changes only when its scope changes,
+    // not when a different runtime changes the process-wide production parser.
+    #[cfg(feature = "test-support")]
+    if thread_parser().is_some() {
+        return 0;
+    }
+    EPOCH.load(Ordering::Acquire)
+}
+
 /// Called after answers are retired, so auth files are loaded again.
 static ON_CHANGE: RwLock<Option<Arc<dyn Fn() + Send + Sync>>> = RwLock::new(None);
 
@@ -207,6 +225,7 @@ pub fn note_plugin_auth_write(path: &Path, data: &[u8]) {
 #[cfg(feature = "test-support")]
 thread_local! {
     static THREAD_PARSER: std::cell::RefCell<Option<Arc<dyn PluginAuthParser>>> = const { std::cell::RefCell::new(None) };
+    static THREAD_ANSWERS: std::cell::RefCell<Option<HashMap<PathBuf, Answer>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(feature = "test-support")]
@@ -223,14 +242,20 @@ fn thread_parser() -> Option<Arc<dyn PluginAuthParser>> {
 /// thread only: tests sharing a process (`cargo test`) never see it.
 #[cfg(feature = "test-support")]
 pub fn with_thread_plugin_auth_parser<R>(parser: Arc<dyn PluginAuthParser>, f: impl FnOnce() -> R) -> R {
-    struct Reset;
+    struct Reset {
+        parser: Option<Arc<dyn PluginAuthParser>>,
+        answers: Option<HashMap<PathBuf, Answer>>,
+    }
     impl Drop for Reset {
         fn drop(&mut self) {
-            THREAD_PARSER.with(|p| *p.borrow_mut() = None);
+            THREAD_PARSER.with(|p| *p.borrow_mut() = self.parser.take());
+            THREAD_ANSWERS.with(|a| *a.borrow_mut() = self.answers.take());
         }
     }
-    THREAD_PARSER.with(|p| *p.borrow_mut() = Some(parser));
-    let _reset = Reset;
+    let _reset = Reset {
+        parser: THREAD_PARSER.with(|p| p.replace(Some(parser))),
+        answers: THREAD_ANSWERS.with(|a| a.replace(None)),
+    };
     f()
 }
 
@@ -293,7 +318,7 @@ impl Ask<'_> {
             return Some((parsed, false));
         }
         // The epoch before asking: a change during the call retires the answer.
-        let epoch = EPOCH.load(Ordering::Acquire);
+        let epoch = answer_epoch();
         let id = NEXT_PARSE.fetch_add(1, Ordering::Relaxed);
         parsing().push((id, clean(req.path), Vec::new()));
         let parsed = parser.parse_auths(req);
@@ -310,22 +335,24 @@ impl Ask<'_> {
             epoch,
             parsed: parsed.clone(),
         };
-        answers().get_or_insert_default().insert(req.path.to_owned(), answer);
+        with_answers(|answers| answers.get_or_insert_default().insert(req.path.to_owned(), answer));
         Some((parsed, false))
     }
 }
 
 fn cached(path: &Path, hash: &[u8; 32]) -> Option<Parsed> {
-    let answers = answers();
-    let answer = answers.as_ref()?.get(path)?;
-    (answer.hash == *hash && answer.epoch == EPOCH.load(Ordering::Acquire)).then(|| answer.parsed.clone())
+    with_answers(|answers| {
+        let answer = answers.as_ref()?.get(path)?;
+        (answer.hash == *hash && answer.epoch == answer_epoch()).then(|| answer.parsed.clone())
+    })
 }
 
 /// The current answer for `path` whose parse wrote `hash` to it.
 fn written_by_parse(path: &Path, hash: &[u8; 32]) -> Option<Parsed> {
-    let answers = answers();
-    let answer = answers.as_ref()?.get(path)?;
-    (answer.own_writes.contains(hash) && answer.epoch == EPOCH.load(Ordering::Acquire)).then(|| answer.parsed.clone())
+    with_answers(|answers| {
+        let answer = answers.as_ref()?.get(path)?;
+        (answer.own_writes.contains(hash) && answer.epoch == answer_epoch()).then(|| answer.parsed.clone())
+    })
 }
 
 /// Asks plugin auth providers about every auth file in `cfg`'s folder whose current
@@ -336,9 +363,11 @@ pub fn preparse_auth_dir(cfg: &crate::config::Config) {
     let Some(parser) = current() else { return };
     let scan = super::scan_with(cfg, Some(Ask::Fill(&*parser)));
     // Forget the folder's files that are gone (an answer holds the plugin's tokens).
-    if let Some(answers) = answers().as_mut() {
-        answers.retain(|path, _| path.parent() != Some(cfg.auth_dir.as_path()) || scan.read.contains_key(path));
-    }
+    with_answers(|answers| {
+        if let Some(answers) = answers.as_mut() {
+            answers.retain(|path, _| path.parent() != Some(cfg.auth_dir.as_path()) || scan.read.contains_key(path));
+        }
+    });
 }
 
 /// Caches plugin answers for exactly these source documents, without reading working
@@ -347,9 +376,11 @@ pub fn preparse_documents(cfg: &crate::config::Config, documents: impl IntoItera
     let Some(parser) = current() else { return };
     let scan = super::scan_documents_with(cfg, documents, Some(Ask::Fill(&*parser)));
     // This source is authoritative, including nested and external documents.
-    if let Some(answers) = answers().as_mut() {
-        answers.retain(|path, _| scan.read.contains_key(path));
-    }
+    with_answers(|answers| {
+        if let Some(answers) = answers.as_mut() {
+            answers.retain(|path, _| scan.read.contains_key(path));
+        }
+    });
 }
 
 /// Go `ValidateAuthWeight` on a parsed auth.
@@ -560,6 +591,52 @@ mod tests {
 
     use super::super::{FileCredentials, auth_index, file_credentials, scan_with};
     use super::*;
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn thread_parser_registrations_keep_independent_document_answers() {
+        let config = |name: &str| crate::config::Config {
+            auth_dir: std::env::temp_dir().join(format!("cook-parser-{}-{name}", std::process::id())),
+            ..Default::default()
+        };
+        let cfg = config("first");
+        let documents = vec![(cfg.auth_dir.join("auth.json"), br#"{"type":"acme"}"#.to_vec())];
+        let parser = |id: &'static str| {
+            Arc::new(fake(move |_| {
+                Parsed::Handled(vec![auth(id, "acme", serde_json::json!({"type":"acme"}), &[])])
+            })) as Arc<dyn PluginAuthParser>
+        };
+        with_thread_plugin_auth_parser(parser("first"), || {
+            preparse_documents(&cfg, documents.clone());
+            // Deterministic interleaving: another fixture parses its entire,
+            // disjoint document set between this fixture's preparse and scan.
+            std::thread::spawn(move || {
+                let other = config("second");
+                let documents = vec![(other.auth_dir.join("auth.json"), br#"{"type":"acme"}"#.to_vec())];
+                with_thread_plugin_auth_parser(parser("second"), || {
+                    preparse_documents(&other, documents.clone());
+                    assert_eq!(
+                        super::super::scan_documents(&other, documents).credentials[0].id,
+                        "second"
+                    );
+                });
+            })
+            .join()
+            .unwrap();
+            let scan = super::super::scan_documents(&cfg, documents.clone());
+            assert!(scan.deferred.is_empty(), "another fixture evicted this parser's answer");
+            assert_eq!(scan.credentials[0].id, "first");
+        });
+        // A later registration on the same thread must not inherit the previous
+        // parser's answer for identical bytes and paths.
+        with_thread_plugin_auth_parser(parser("replacement"), || {
+            preparse_documents(&cfg, documents.clone());
+            assert_eq!(
+                super::super::scan_documents(&cfg, documents).credentials[0].id,
+                "replacement"
+            );
+        });
+    }
 
     /// Serializes the tests that use the process-wide answer cache and provider
     /// signature: `cargo test` runs tests on parallel threads, and one test's

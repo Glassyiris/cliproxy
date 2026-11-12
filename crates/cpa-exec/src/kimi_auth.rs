@@ -476,6 +476,7 @@ pub fn refresh_patch(credential: &Credential, tokens: &Tokens, base_url: &str, n
 }
 
 /// A finished login: the credential file name and its JSON object.
+#[derive(Clone)]
 pub struct LoginRecord {
     pub file_name: String,
     pub metadata: Map<String, Value>,
@@ -636,7 +637,7 @@ pub async fn login(
     login_with(flow, provider, &cfg.auth_dir, no_browser, save).await
 }
 
-pub(crate) async fn login_with(
+pub async fn login_with(
     flow: DeviceFlow,
     provider: &str,
     auth_dir: &Path,

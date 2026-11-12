@@ -810,6 +810,22 @@ mod tests {
             .with_writer(move || writer.clone())
             .finish();
         let _guard = tracing::subscriber::set_default(subscriber);
+        // tracing-core's single-dispatcher fast path can cache a sibling's
+        // NoSubscriber interest globally (tokio-rs/tracing#3611). Keep a second
+        // inert dispatcher alive; do not change the production level or assertions.
+        let _interest = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+        // A sibling with no subscriber may be the first caller of the WARN site.
+        // Exercise that real refresh path before the capture's own refresh.
+        std::thread::spawn(|| {
+            let fetch: Fetch = Arc::new(|_| Box::pin(async { Err("fixture failure".to_owned()) }));
+            let updater = Updater::new(fetch, Box::new(|_| Ok(())));
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(updater.refresh(&CancellationToken::new(), "fixture", 0));
+        })
+        .join()
+        .unwrap();
         let fetch = fetcher(b"", Vec::new(), |_| Ok(()));
         assert!(fetch(format!("http://bob:SECRET@{addr}/r?token=SECRET")).await.is_err());
         let u = Updater::new(fetch, Box::new(|_| Ok(())));

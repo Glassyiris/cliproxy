@@ -32,7 +32,7 @@ mod style;
 mod sys;
 mod widgets;
 
-pub use client::{Client, Object};
+pub use client::{Client, CredentialSource, CredentialSources, Object};
 pub use cpa_server::logging::LogHook;
 
 /// Bubble Tea `tea.Cmd`: work whose result comes back as a message.

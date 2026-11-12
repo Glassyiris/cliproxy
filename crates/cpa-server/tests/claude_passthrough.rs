@@ -374,7 +374,7 @@ async fn request_log_masks_upstream_credentials() {
     let logs = dir.join("logs");
     std::fs::create_dir_all(&logs).unwrap();
     let mut config = Config::parse(&format!(
-        "request-log: true\nclaude-api-key:\n  - api-key: {API_KEY}\n    base-url: {upstream_url}\n    \
+        "access: {{api-keys: [client-key-1]}}\nrequest-log: true\nclaude-api-key:\n  - api-key: {API_KEY}\n    base-url: {upstream_url}\n    \
          headers:\n      X-Api-Key: {HEADER_KEY}\n"
     ))
     .unwrap();
@@ -395,7 +395,9 @@ async fn request_log_masks_upstream_credentials() {
     cpa_server::install_registry(&rt);
     let management = cpa_server::management::Management::with_options(
         rt.clone(),
-        Arc::new(cpa_server::config_store::ConfigStore::memory()),
+        Arc::new(cpa_server::config_store::ConfigStore::memory_with(
+            &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
+        )),
         cpa_server::management::Options {
             log_dir: Some(logs.clone()),
             management_password: Some(String::new()),

@@ -214,8 +214,10 @@ mod tests {
             },
         ));
         let state = Management::with_options(
-            rt,
-            Arc::new(crate::config_store::ConfigStore::memory()),
+            rt.clone(),
+            Arc::new(crate::config_store::ConfigStore::memory_with(
+                &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
+            )),
             super::super::Options {
                 latest_release_url: Some("http://127.0.0.1:0/latest".into()),
                 update_check_disabled: Some(false),

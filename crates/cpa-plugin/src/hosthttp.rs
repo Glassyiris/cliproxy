@@ -400,7 +400,7 @@ impl Host {
 
     /// The callback context a request names, checked against the caller (Go's checks in
     /// `openHostHTTPOperation` / `acquireHostHTTPOperation`).
-    fn http_scope(&self, caller: &Caller, callback_id: &str) -> Result<RequestScope, CallbackError> {
+    pub(crate) fn http_scope(&self, caller: &Caller, callback_id: &str) -> Result<RequestScope, CallbackError> {
         let callback_id = callback_id.trim();
         if callback_id.is_empty() {
             return Ok(RequestScope::default());

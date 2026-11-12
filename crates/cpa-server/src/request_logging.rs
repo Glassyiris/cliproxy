@@ -59,6 +59,8 @@ fn setting<'a>(config: &'a cpa_core::config::Config, key: &str) -> Option<&'a se
 
 #[derive(Clone)]
 struct CaptureState {
+    owner: Arc<Management>,
+    work: tokio_util::task::TaskTracker,
     rt: Arc<Runtime>,
     dir: PathBuf,
 }
@@ -90,6 +92,8 @@ pub fn router(management: &Arc<Management>, app: axum::Router) -> axum::Router {
     };
     app.layer(axum::middleware::from_fn_with_state(
         CaptureState {
+            owner: management.clone(),
+            work: management.work.clone(),
             rt: management.rt.clone(),
             dir,
         },
@@ -118,6 +122,9 @@ async fn capture(State(state): State<CaptureState>, mut request: Request, next: 
     if !eligible(&request, &path) {
         return next.run(request).await;
     }
+    let Some(operation) = state.owner.enter() else {
+        return next.run(request).await;
+    };
     let config = state.rt.config();
     let enabled = setting(&config, "request-log").and_then(serde_yaml_ng::Value::as_bool) == Some(true);
     let multipart = request.headers().get("content-type").is_some_and(|v| {
@@ -184,8 +191,10 @@ async fn capture(State(state): State<CaptureState>, mut request: Request, next: 
         .get::<RequestId>()
         .map(|id| id.0.clone())
         .unwrap_or_default();
+    let work = state.work.clone();
     let sink = RequestLog(
         Arc::new(Mutex::new(Some(Record {
+            _operation: operation,
             state,
             enabled,
             url,
@@ -214,7 +223,10 @@ async fn capture(State(state): State<CaptureState>, mut request: Request, next: 
             upstream: UpstreamCapture::default(),
             redact_sdp: false,
         }))),
-        Arc::new(Finished::default()),
+        Arc::new(Finished {
+            work,
+            ..Finished::default()
+        }),
     );
     request.extensions_mut().insert(sink.clone());
     let mut guard = Completion(Some(sink.clone()));
@@ -282,7 +294,7 @@ async fn capture_response(sink: RequestLog, head: bool, mut response: Response) 
                 Ok(file) => {
                     record.response_spool = Some(spool);
                     let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(100);
-                    tokio::spawn(spool_response(file, rx, sink.clone()));
+                    record.state.work.spawn(spool_response(file, rx, sink.clone()));
                     guard.0 = None;
                     Some(tx)
                 }
@@ -321,6 +333,7 @@ pub struct RequestLog(Arc<Mutex<Option<Record>>>, Arc<Finished>);
 
 #[derive(Default)]
 struct Finished {
+    work: tokio_util::task::TaskTracker,
     done: AtomicBool,
     notify: tokio::sync::Notify,
 }
@@ -794,7 +807,7 @@ impl WebsocketLog {
     pub async fn close(mut self) {
         if let Some(sink) = self.0.take() {
             // Disconnect cancellation must not cancel the final delivery itself.
-            let _ = tokio::spawn(async move { sink.finish(true).await }).await;
+            let _ = sink.1.work.clone().spawn(async move { sink.finish(true).await }).await;
         }
     }
 }
@@ -809,9 +822,12 @@ impl Drop for WebsocketLog {
 
 fn schedule(sink: RequestLog, websocket: bool) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(async move {
-            sink.finish(websocket).await;
-        });
+        sink.1.work.clone().spawn_on(
+            async move {
+                sink.finish(websocket).await;
+            },
+            &handle,
+        );
     }
 }
 
@@ -1113,6 +1129,8 @@ impl Section {
 }
 
 struct Record {
+    // Moves with the record through spooling and final blocking delivery.
+    _operation: tokio_util::task::task_tracker::TaskTrackerToken,
     state: CaptureState,
     enabled: bool,
     url: String,
@@ -1227,12 +1245,16 @@ impl Record {
             .and_then(serde_yaml_ng::Value::as_i64)
             .unwrap_or(10);
         let max = if max < 0 { 10 } else { max };
-        let _ = tokio::task::spawn_blocking(move || {
-            if let Err(error) = self.write(forced, max, decompress_error) {
-                tracing::warn!("failed to write request log: {error}");
-            }
-        })
-        .await;
+        let _ = self
+            .state
+            .work
+            .clone()
+            .spawn_blocking(move || {
+                if let Err(error) = self.write(forced, max, decompress_error) {
+                    tracing::warn!("failed to write request log: {error}");
+                }
+            })
+            .await;
     }
 
     fn write(self, forced: bool, max: i64, decompress_error: Option<String>) -> io::Result<()> {
@@ -1694,8 +1716,10 @@ mod tests {
             },
         ));
         Management::with_options(
-            rt,
-            Arc::new(crate::config_store::ConfigStore::memory()),
+            rt.clone(),
+            Arc::new(crate::config_store::ConfigStore::memory_with(
+                &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
+            )),
             crate::management::Options {
                 log_dir: Some(dir.to_owned()),
                 management_password: Some(String::new()),
@@ -1756,10 +1780,10 @@ mod tests {
             let case = case.clone();
             let dir = scratch();
             let state = management(&dir, case["kind"] != "disabled" && case["kind"] != "reload", false);
-            let rt = state.rt.clone();
+            let store = state.config_store().clone();
             let app = axum::Router::new().fallback(move |axum::Extension(log): axum::Extension<RequestLog>| {
                 let case = case.clone();
-                let rt = rt.clone();
+                let store = store.clone();
                 async move {
                     let sink = log.capture_sink();
                     let headers = [
@@ -1797,10 +1821,9 @@ mod tests {
                         });
                     } else {
                         if kind == "reload" {
-                            rt.publish_config(
-                                cpa_core::config::Config::parse("observability: {logs: {request-log: true}}\n")
-                                    .unwrap(),
-                            );
+                            store
+                                .import_yaml("observability: {logs: {request-log: true}}\n", "test", "enable capture")
+                                .unwrap();
                             assert!(sink.logs_responses(), "reload: responses logged");
                         }
                         sink.record(ResponseMetadata(201, &response_headers));
@@ -2237,12 +2260,17 @@ mod tests {
                 StatusCode::BAD_REQUEST
             });
             let mut app = router(&state, app);
-            let new = cpa_core::config::Config::parse(&format!(
-                "server: {{commercial-mode: {}}}\nobservability: {{logs: {{request-log: true}}}}\n",
-                !commercial
-            ))
-            .unwrap();
-            state.rt.publish_config(new);
+            state
+                .config_store()
+                .import_yaml(
+                    &format!(
+                        "server: {{commercial-mode: {}}}\nobservability: {{logs: {{request-log: true}}}}\n",
+                        !commercial
+                    ),
+                    "test",
+                    "change commercial mode",
+                )
+                .unwrap();
             let response = app
                 .call(
                     HttpRequest::builder()
@@ -2325,6 +2353,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn management_shutdown_joins_response_log_finalization() {
+        let dir = scratch();
+        let state = management(&dir, true, false);
+        let app = axum::Router::new().fallback(|| async { StatusCode::BAD_REQUEST });
+        let mut app = router(&state, app);
+        let response = app
+            .call(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/v1/responses")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        drop(response);
+        state.shutdown().await;
+        let files = logs(&dir);
+        assert_eq!(
+            files.len(),
+            1,
+            "shutdown returned before its queued response log was written"
+        );
+        assert!(std::fs::read_to_string(&files[0]).unwrap().contains("Status: 400\n"));
+        drop(app);
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
     async fn detached_close_waits_for_http_metadata_and_drop_finalizes_once() {
         for cancel in [false, true] {
             let dir = scratch();
@@ -2337,13 +2395,13 @@ mod tests {
                     assert!(log.detach_websocket().is_none(), "only one connection owner");
                     if cancel {
                         drop(sink);
-                        tx.send(None).await.unwrap();
+                        tx.send((log, None)).await.unwrap();
                         std::future::pending::<()>().await;
                     } else {
                         let close = tokio::spawn(sink.close());
                         tokio::task::yield_now().await;
                         assert!(!close.is_finished(), "must wait for HTTP status");
-                        tx.send(Some(close)).await.unwrap();
+                        tx.send((log, Some(close))).await.unwrap();
                     }
                     StatusCode::BAD_REQUEST
                 }
@@ -2357,12 +2415,14 @@ mod tests {
             if cancel {
                 let mut response = Box::pin(app.call(request));
                 assert!(futures_util::poll!(&mut response).is_pending());
-                rx.recv().await.unwrap();
+                let (log, close) = rx.recv().await.unwrap();
+                assert!(close.is_none());
                 drop(response);
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                log.finished().await;
             } else {
                 let response = app.call(request).await.unwrap();
-                let close = rx.recv().await.unwrap().unwrap();
+                let (_, close) = rx.recv().await.unwrap();
+                let close = close.unwrap();
                 tokio::time::timeout(std::time::Duration::from_secs(5), close)
                     .await
                     .unwrap()
@@ -2520,9 +2580,10 @@ mod tests {
                 .await
                 .unwrap();
             let enable = || {
-                state.rt.publish_config(
-                    cpa_core::config::Config::parse("observability: {logs: {request-log: true}}\n").unwrap(),
-                )
+                state
+                    .config_store()
+                    .import_yaml("observability: {logs: {request-log: true}}\n", "test", "enable capture")
+                    .unwrap();
             };
             if case["before_first"] == true {
                 enable();

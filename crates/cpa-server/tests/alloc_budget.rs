@@ -314,7 +314,7 @@ async fn large_requests_stay_within_their_heap_budget() {
     )
     .unwrap();
     let mut config = Config::parse(&format!(
-        "force-model-prefix: true\ncodex-api-key:\n  - api-key: sk-FAKE-codex\n    base-url: {upstream_url}\n    models:\n      - name: gpt-5.5\n"
+        "access: {{api-keys: [client-key-1]}}\nforce-model-prefix: true\ncodex-api-key:\n  - api-key: sk-FAKE-codex\n    base-url: {upstream_url}\n    models:\n      - name: gpt-5.5\n"
     ))
     .unwrap();
     config.api_keys = vec!["client-key-1".into()];
@@ -338,7 +338,9 @@ async fn large_requests_stay_within_their_heap_budget() {
     // error log (Go's deferred API request), until the response has streamed.
     let management = cpa_server::management::Management::with_options(
         rt.clone(),
-        Arc::new(cpa_server::config_store::ConfigStore::memory()),
+        Arc::new(cpa_server::config_store::ConfigStore::memory_with(
+            &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
+        )),
         cpa_server::management::Options {
             log_dir: Some(dir.join("logs")),
             management_password: Some(String::new()),

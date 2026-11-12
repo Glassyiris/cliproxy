@@ -54,7 +54,11 @@ impl HttpBody for Counted {
     }
 }
 
-fn app(dir: &std::path::Path, yaml: &str, plugin_auth: bool) -> (axum::Router, Arc<cpa_server::Runtime>) {
+fn app(
+    dir: &std::path::Path,
+    yaml: &str,
+    plugin_auth: bool,
+) -> (axum::Router, Arc<cpa_server::Runtime>, Arc<ConfigStore>) {
     std::fs::create_dir_all(dir.join("auth")).unwrap();
     let store = Arc::new(ConfigStore::memory_with(&format!(
         "{yaml}auth-dir: {}\n",
@@ -74,13 +78,13 @@ fn app(dir: &std::path::Path, yaml: &str, plugin_auth: bool) -> (axum::Router, A
     if plugin_auth {
         cpa_server::testing::unloaded_frontend_auth(&rt);
     }
-    let state = Management::with_options(rt.clone(), store, management::Options::default());
+    let state = Management::with_options(rt.clone(), store.clone(), management::Options::default());
     // crates/cook-router/src/main.rs, without Home, observability and the heap trimmer.
     let app = cpa_server::app(rt.clone(), management::router(state.clone()));
     let app = cpa_server::safe_mode::router(&rt, app);
     let app = app.layer(axum::middleware::from_fn(management::cors));
     let app = cpa_server::request_logging::router(&state, app);
-    (cpa_server::body_limit::layer(&rt, app), rt)
+    (cpa_server::body_limit::layer(&rt, app), rt, store)
 }
 
 /// Go answers a failed `/openai/v1/videos` request with a random video ID.
@@ -102,7 +106,7 @@ async fn body_limit_answers_match_go() {
     for (i, case) in fixture.iter().enumerate() {
         let name = case["name"].as_str().unwrap();
         let dir = std::env::temp_dir().join(format!("cpa-body-limit-{}-{i}", std::process::id()));
-        let (app, _) = app(&dir, case["yaml"].as_str().unwrap(), case["plugin_auth"] == true);
+        let (app, _, _) = app(&dir, case["yaml"].as_str().unwrap(), case["plugin_auth"] == true);
         let mut raw = base64::engine::general_purpose::STANDARD
             .decode(case["body_b64"].as_str().unwrap())
             .unwrap();
@@ -178,7 +182,7 @@ async fn body_limit_answers_match_go() {
 async fn a_published_limit_applies_to_the_next_request() {
     let dir = std::env::temp_dir().join(format!("cpa-body-limit-reload-{}", std::process::id()));
     let yaml = "config-version: 8\naccess:\n  api-keys:\n    - test-key\n";
-    let (app, rt) = app(&dir, yaml, false);
+    let (app, _, store) = app(&dir, yaml, false);
     let send = |app: axum::Router| async move {
         let request = axum::http::Request::post("/v1/responses")
             .header("authorization", "Bearer test-key")
@@ -188,11 +192,11 @@ async fn a_published_limit_applies_to_the_next_request() {
         app.oneshot(request).await.unwrap().status().as_u16()
     };
     assert_eq!(send(app.clone()).await, 400, "no limit: the model lookup answers");
-    let store = ConfigStore::memory_with(&format!(
+    let text = format!(
         "{yaml}auth-dir: {}\nserver:\n  max-request-body-bytes: 29\n",
         dir.join("auth").display()
-    ));
-    rt.publish_config(store.load().unwrap().config);
+    );
+    store.import_yaml(&text, "test", "reload body limit").unwrap();
     assert_eq!(send(app).await, 413);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -204,7 +208,7 @@ async fn a_reload_during_a_request_keeps_its_limit() {
     use futures_util::StreamExt as _;
     let dir = std::env::temp_dir().join(format!("cpa-body-limit-mid-{}", std::process::id()));
     let yaml = "config-version: 8\nserver:\n  max-request-body-bytes: 128\naccess:\n  api-keys:\n    - test-key\n";
-    let (app, rt) = app(&dir, yaml, false);
+    let (app, rt, store) = app(&dir, yaml, false);
     let decoded = format!(r#"{{"model":"gpt-5","input":"{}"}}"#, "z".repeat(512));
     let compressed = zstd::encode_all(decoded.as_bytes(), 3).unwrap();
     assert!(compressed.len() < 128);
@@ -227,7 +231,7 @@ async fn a_reload_during_a_request_keeps_its_limit() {
     }
     let text = format!("{yaml}auth-dir: {}\n", dir.join("auth").display())
         .replace("max-request-body-bytes: 128", "max-request-body-bytes: 0");
-    rt.publish_config(ConfigStore::memory_with(&text).load().unwrap().config);
+    store.import_yaml(&text, "test", "reload body limit").unwrap();
     assert_eq!(rt.config().max_request_body_bytes(), None);
     tx.send(Bytes::copy_from_slice(tail)).await.unwrap();
     drop(tx);
