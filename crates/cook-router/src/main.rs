@@ -1664,7 +1664,7 @@ async fn online_plugin_command(raw: &[String]) -> anyhow::Result<i32> {
     let password = online_management_key(prescan_value(&raw[1..], "password").unwrap_or_default()).await?;
     let client = Arc::new(tui::Client::new(&base, &password));
     client.credential_admission().await.map_err(anyhow::Error::msg)?;
-    let mut config = client.login_config().await.map_err(anyhow::Error::msg)?;
+    let mut config = client.plugin_config().await.map_err(anyhow::Error::msg)?;
     let sources = client.credential_sources().await.map_err(anyhow::Error::msg)?;
     let scratch = Arc::new(tempfile::Builder::new().prefix("cook-router-login-").tempdir()?);
     let owner = scratch.clone();
@@ -2372,9 +2372,25 @@ mod tests {
                     serde_json::json!("owned-fixture");
                 document["requests"]["proxy-url"] =
                     serde_json::json!("http://fixture-user:fixture-password@127.0.0.1:9");
+                document["server"]["github-token"] = serde_json::json!("unneeded-server-secret");
                 Ok(())
             })
             .unwrap();
+        // A built-in login reads only the proxy and the SIWC identifier, never the
+        // complete secret-bearing configuration (the compiler adds `config-version`).
+        let minimal = client.login_config().await.unwrap();
+        let sections: Vec<_> = minimal.document.as_mapping().unwrap().keys().cloned().collect();
+        assert!(
+            sections
+                .iter()
+                .all(|key| key == "requests" || key == "oauth" || key == "config-version"),
+            "{sections:?}"
+        );
+        assert!(
+            !serde_json::to_string(&minimal.document)
+                .unwrap()
+                .contains("unneeded-server-secret")
+        );
         let siwc_seed = br#"{"type":"codex","access_token":"outer-at","refresh_token":"outer-rt","opaque":{"keep":true},"siwc":{"device_id":"E61BBE28-07EF-466D-8E5D-A344F94AB305"}}"#;
         for case in ["success", "storage", "deleted"] {
             db.save(&target, siwc_seed).unwrap();

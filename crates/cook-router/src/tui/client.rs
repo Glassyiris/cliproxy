@@ -120,6 +120,8 @@ impl Client {
                         | "/admin/v1/apply?dry_run=true"
                         | "/admin/v1/credentials"
                         | "/admin/v1/export?include_secrets=true"
+                        | "/admin/v1/r/setting/requests?include_secrets=true"
+                        | "/admin/v1/r/setting/oauth"
                 );
         let mut op = method.as_str().go_lower();
         op[..1].make_ascii_uppercase();
@@ -451,13 +453,58 @@ impl Client {
     }
 
     /// Reuse the SQL-free resource importer/compiler; never open a local store.
+    /// The configuration a built-in login reads: the outbound proxy, whose URL can
+    /// carry credentials, and the SIWC client identifier. Never the full export.
     pub async fn login_config(&self) -> Result<cpa_core::config::Config, String> {
+        let requests = self
+            .setting("/admin/v1/r/setting/requests?include_secrets=true")
+            .await?;
+        let identifier = self.setting("/admin/v1/r/setting/oauth").await?.and_then(|oauth| {
+            oauth
+                .pointer("/providers/codex/signin-with-chatgpt-identifier")
+                .cloned()
+        });
+        let mut document = cpa_server::config_store::resources::export_json(0, &[], false);
+        let resources = document["resources"].as_array_mut().expect("export envelope");
+        if let Some(spec) = requests {
+            resources.push(serde_json::json!({"kind": "setting", "id": "requests", "spec": spec}));
+        }
+        if let Some(identifier) = identifier {
+            let spec = serde_json::json!({"providers": {"codex": {"signin-with-chatgpt-identifier": identifier}}});
+            resources.push(serde_json::json!({"kind": "setting", "id": "oauth", "spec": spec}));
+        }
+        Self::compile(document)
+    }
+
+    /// The complete configuration, secrets included, that plugin commands receive as
+    /// raw configuration.
+    pub async fn plugin_config(&self) -> Result<cpa_core::config::Config, String> {
         let document = self.get_json("/admin/v1/export?include_secrets=true").await?;
-        let resources = cpa_server::config_store::resources::import_json(&Value::Object(document).to_string())
+        Self::compile(Value::Object(document))
+    }
+
+    fn compile(document: Value) -> Result<cpa_core::config::Config, String> {
+        let resources = cpa_server::config_store::resources::import_json(&document.to_string())
             .map_err(|_| "invalid owner configuration export".to_owned())?;
         cpa_server::config_store::resources::config(&resources)
             .map(|(config, _)| config)
             .map_err(|_| "invalid owner configuration".to_owned())
+    }
+
+    /// One setting's spec; `None` only for the owner's structured `not_found`.
+    async fn setting(&self, path: &str) -> Result<Option<Value>, String> {
+        let (code, data) = self.request(wreq::Method::GET, path, None).await?;
+        let body: Option<Value> = serde_json::from_slice(&data).ok();
+        if code == 404 && body.as_ref().and_then(|b| b.get("error")) == Some(&Value::from("not_found")) {
+            return Ok(None);
+        }
+        if code >= 400 {
+            let text = String::from_utf8_lossy(cpa_common::gostr::trim_space(&data)).into_owned();
+            return Err(format!("HTTP {code}: {text}"));
+        }
+        body.and_then(|mut b| b.get_mut("spec").map(Value::take))
+            .ok_or_else(|| "invalid owner setting response".to_owned())
+            .map(Some)
     }
 
     pub async fn get_config(&self) -> Result<Object, String> {
@@ -890,6 +937,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn login_config_reads_only_two_settings_and_tolerates_only_structured_absence() {
+        let seen = std::sync::Arc::new(Mutex::new(Vec::<String>::new()));
+        let record = seen.clone();
+        let app = axum::Router::new()
+            .route(
+                "/admin/v1/r/setting/requests",
+                axum::routing::get(|| async {
+                    (
+                        axum::http::StatusCode::NOT_FOUND,
+                        axum::Json(serde_json::json!({"error": "not_found", "message": "no such resource"})),
+                    )
+                }),
+            )
+            .route(
+                "/admin/v1/r/setting/oauth",
+                axum::routing::get(|| async {
+                    axum::Json(serde_json::json!({"kind": "setting", "id": "oauth", "spec": {"providers": {"codex": {"signin-with-chatgpt-identifier": "fixture-id"}}}}))
+                }),
+            )
+            .layer(axum::middleware::from_fn(
+                move |request: axum::extract::Request, next: axum::middleware::Next| {
+                    let record = record.clone();
+                    async move {
+                        record.lock().unwrap().push(request.uri().to_string());
+                        next.run(request).await
+                    }
+                },
+            ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let config = Client::new(&base, "fake-management-key").login_config().await.unwrap();
+        assert_eq!(cpa_exec::codex_siwc::identifier(&config), "fixture-id");
+        assert!(config.document.get("requests").is_none());
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "/admin/v1/r/setting/requests?include_secrets=true",
+                "/admin/v1/r/setting/oauth"
+            ]
+        );
+        // A plain 404 (a wrong base URL) is an error, not an absent proxy.
+        let error = Client::new(&format!("{base}/wrong"), "fake-management-key")
+            .login_config()
+            .await
+            .unwrap_err();
+        assert!(error.contains("HTTP 404"), "{error}");
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
     async fn credential_batches_reject_redirects_and_incomplete_acknowledgements() {
         let followed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let observed = followed.clone();
@@ -908,6 +1007,10 @@ mod tests {
             )
             .route(
                 "/admin/v1/export",
+                axum::routing::get(|| async { axum::response::Redirect::to("/forged-receipt") }),
+            )
+            .route(
+                "/admin/v1/r/setting/{id}",
                 axum::routing::get(|| async { axum::response::Redirect::to("/forged-receipt") }),
             )
             .route(
@@ -950,6 +1053,14 @@ mod tests {
                 .contains("without redirects")
         );
         assert!(client.login_config().await.err().unwrap().contains("without redirects"));
+        assert!(
+            client
+                .plugin_config()
+                .await
+                .err()
+                .unwrap()
+                .contains("without redirects")
+        );
         assert_eq!(followed.load(std::sync::atomic::Ordering::SeqCst), 0);
         let error = Client::new(&format!("{base}/wrong"), "fake-management-key")
             .save_credentials(&documents, None)

@@ -1404,6 +1404,100 @@ async fn ordinary_http_reads_and_write_responses_mask_every_secret() {
 }
 
 #[tokio::test]
+async fn committed_configuration_reaches_access_and_runtime_and_credential_commits_do_not() {
+    let f = Fixture::new("consumers", false).await;
+    let models = |key: &'static str| f.client.get(format!("{}/v1/models", f.base)).bearer_auth(key).send();
+    assert_eq!(models("client-http-test-secret").await.unwrap().status(), 200);
+    assert_eq!(models("consumer-new-client-key").await.unwrap().status(), 401);
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/apply")
+        .json(&json!({"ops": [
+            {"op": "put", "kind": "client-key", "id": "consumer-new", "spec": {"key": "consumer-new-client-key"}, "if_absent": true},
+            {"op": "patch", "kind": "setting", "id": "routing", "patch": {"retry": {"request-retry": 7}}},
+        ]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let published: u64 = response.headers()["x-cook-published-revision"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let revision = response.json::<Value>().await.unwrap()["revision"].as_u64().unwrap();
+    assert_eq!(published, revision, "success follows runtime publication");
+    // Access and the runtime view observe the committed version, not a later reload.
+    assert_eq!(models("consumer-new-client-key").await.unwrap().status(), 200);
+    assert_eq!(f.rt.config().routing.retry.request_retry, 7);
+    let before = f.rt.config();
+    let mut watch = f.rt.subscribe_config();
+    watch.mark_unchanged();
+    // A credential commit is a different domain: no configuration view is reinstalled.
+    let response = f
+        .request(wreq::Method::POST, "/admin/v1/credentials/batch")
+        .json(&json!({"documents": [batch_document("consumer.json", br#"{"type":"claude","access_token":"consumer-at"}"#)]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(Arc::ptr_eq(&before, &f.rt.config()));
+    assert!(!watch.has_changed().unwrap());
+    assert_eq!(f.head(), revision);
+}
+
+#[tokio::test]
+async fn one_resource_can_be_read_with_its_secrets_without_the_full_export() {
+    let f = Fixture::new("resource-secret", false).await;
+    let proxy = "http://user:resource-proxy-secret@127.0.0.1:1";
+    let response = f
+        .request(wreq::Method::PUT, "/admin/v1/r/setting/requests")
+        .json(&json!({"spec": {"proxy-url": proxy}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let response = f
+        .request(wreq::Method::PATCH, "/admin/v1/r/setting/server")
+        .json(&json!({"github-token": "unrelated-resource-secret"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let read = |query: &'static str| {
+        f.request(wreq::Method::GET, &format!("/admin/v1/r/setting/requests{query}"))
+            .send()
+    };
+    let masked = read("").await.unwrap();
+    assert_eq!(masked.status(), 200);
+    let masked: Value = masked.json().await.unwrap();
+    assert_eq!(masked["spec"]["proxy-url"], "$secret");
+    let revealed = read("?include_secrets=true").await.unwrap();
+    assert_eq!(revealed.status(), 200);
+    assert_eq!(revealed.headers().get("cache-control").unwrap(), "no-store");
+    let etag = revealed.headers().get("etag").cloned().unwrap();
+    let text = revealed.text().await.unwrap();
+    assert!(
+        !text.contains("unrelated-resource-secret"),
+        "only the named resource is revealed"
+    );
+    let revealed: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(revealed["spec"]["proxy-url"], proxy);
+    assert_eq!(revealed["kind"], "setting");
+    assert_eq!(revealed["id"], "requests");
+    // The revealed read keeps the resource's own revision tag for conditional writes.
+    let masked_tag = read("").await.unwrap().headers().get("etag").cloned().unwrap();
+    assert_eq!(etag, masked_tag);
+    rejected(read("?include_secrets=maybe").await.unwrap(), 400, "invalid_query").await;
+    let anonymous = wreq::Client::new()
+        .get(format!("{}/admin/v1/r/setting/requests?include_secrets=true", f.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), 401);
+    assert!(!anonymous.text().await.unwrap().contains("resource-proxy-secret"));
+}
+
+#[tokio::test]
 async fn effective_config_indexes_match_live_credentials_before_secrets_are_hidden() {
     let f = Fixture::new("effective-indexes", false).await;
     let response = f.request(wreq::Method::POST, "/admin/v1/apply").json(&json!({"ops": [

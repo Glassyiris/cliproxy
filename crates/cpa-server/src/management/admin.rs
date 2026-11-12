@@ -171,7 +171,10 @@ fn fail(state: &Management, e: &CommitError) -> AdminError {
 }
 
 fn shown(r: &Resource) -> Json {
-    let r = resources::redacted(r);
+    shown_as(&resources::redacted(r))
+}
+
+fn shown_as(r: &Resource) -> Json {
     json!({
         "kind": r.kind,
         "id": r.id,
@@ -757,9 +760,12 @@ pub(crate) async fn list(
     .await
 }
 
+/// `?include_secrets=true` reveals only this resource, for a client that needs one
+/// secret-bearing setting rather than the whole privileged export.
 pub(crate) async fn get(
     State(state): State<Arc<Management>>,
     ResourcePath(kind, id): ResourcePath,
+    AdminQuery(query): AdminQuery<ExportQuery>,
 ) -> Result<Response, AdminError> {
     blocking(state, move |state| {
         let (rev, all) = state.config.snapshot().map_err(|_| AdminError::store(state))?;
@@ -777,7 +783,13 @@ pub(crate) async fn get(
                     &[],
                 )))
             })?;
-        Ok(tagged(send(state, StatusCode::OK, &shown(r), Some(rev)), r.rev))
+        let body = if query.include_secrets {
+            tracing::warn!("admin api: {} {id} read with secrets", kind.name());
+            shown_as(r)
+        } else {
+            shown(r)
+        };
+        Ok(tagged(send(state, StatusCode::OK, &body, Some(rev)), r.rev))
     })
     .await
 }
