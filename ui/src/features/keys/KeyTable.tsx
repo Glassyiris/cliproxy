@@ -59,7 +59,7 @@ function KeyActions({
         onClick={() =>
           void action.run(async () => {
             const ok = await copy(await revealClientKey(resource.id));
-            notify(ok ? "success" : "error", t(ok ? "keys.row.copied" : "keys.row.copyFailed"));
+            notify(ok ? "success" : "error", ok ? t("keys.row.copied") : t("keys.row.copyFailed"));
           })
         }
       />
