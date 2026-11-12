@@ -180,6 +180,30 @@ pub fn try_lock(file: &std::fs::File) -> Result<bool, String> {
     }
 }
 
+/// Releases a lock [`try_lock`] took. A Unix lock belongs to the open file description,
+/// which a child forked before its exec briefly shares, so closing only this descriptor
+/// can leave the lock held until that child execs.
+#[cfg(unix)]
+pub fn unlock(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    loop {
+        // SAFETY: a valid open descriptor; flock touches no memory.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+/// Windows handles are not inherited by children, so closing the handle releases it.
+#[cfg(windows)]
+pub fn unlock(_: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
+}
+
 fn open_lock(path: &Path) -> Result<(std::fs::File, PathBuf), String> {
     let mut lock_path = lock_base(path).into_os_string();
     lock_path.push(".lock");

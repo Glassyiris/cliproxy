@@ -435,5 +435,11 @@ impl Drop for Disk {
         if let Err(error) = release() {
             tracing::warn!(%error, "could not clean up temporary configuration database");
         }
+        // Only after cleanup. A child forked meanwhile shares the guard until it
+        // execs; release the lock itself so a successor never waits for that child.
+        #[cfg(any(unix, windows))]
+        if let Err(error) = cpa_exec::codex_siwc_bind::unlock(&self._ownership) {
+            tracing::warn!(%error, "could not release the configuration ownership guard");
+        }
     }
 }

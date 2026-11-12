@@ -833,6 +833,36 @@ fn exclusive_owner_cannot_be_bypassed_by_another_workspace() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A child forked while the owner runs shares the guard's open file description
+/// until it execs. Releasing the owner must not wait for that child.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_duplicated_guard_descriptor_cannot_keep_a_released_owner_locked() {
+    let (dir, path) = database_path("inherited-guard");
+    let store = crate::testing::config_store(&path).unwrap();
+    let owners = path.parent().unwrap().join(".cook-router-owners");
+    let fd = std::fs::read_dir("/proc/self/fd")
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let target = std::fs::read_link(entry.path()).ok()?;
+            target.starts_with(&owners).then_some(())?;
+            entry.file_name().to_str()?.parse::<i32>().ok()
+        })
+        .next()
+        .expect("the owner holds its guard open");
+    // SAFETY: `store` keeps this descriptor open; it is borrowed only to duplicate it.
+    let inherited = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) }
+        .try_clone_to_owned()
+        .unwrap();
+    drop(store);
+    let next = ConfigStore::open_in(&path, true, dir.join("next-workspace"))
+        .expect("a released owner is free while a forked child still holds its descriptor");
+    drop(next);
+    drop(inherited);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn exclusive_owner_is_process_safe_and_released_after_shutdown() {
     const TEST: &str = "config_store::tests::database::exclusive_owner_is_process_safe_and_released_after_shutdown";
