@@ -8,6 +8,11 @@
 //! (401, counted) -> local password -> MANAGEMENT_PASSWORD -> bcrypt (401, counted).
 //! The fifth counted failure bans the client IP for 30 minutes. "Local" means the
 //! client IP text is exactly `127.0.0.1` or `::1`, after trusted-proxy resolution.
+//!
+//! A request without a key may carry a dashboard session cookie instead ([`super::session`]):
+//! a same-origin check and the dashboard's own header (403 for any method), then the same
+//! checks up to the missing secret and the session record in place of the key, never counted
+//! as a failure. Every answer past either check is `Cache-Control: no-store`.
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -70,6 +75,7 @@ pub(crate) struct Access {
     enabled: AtomicBool,
     attempts: Mutex<Attempts>,
     warned_untrusted_forwarding: AtomicBool,
+    pub(super) sessions: super::session::Sessions,
 }
 
 /// An environment value as Go reads it: raw bytes on Unix; on Windows the UTF-16
@@ -102,6 +108,7 @@ pub(super) fn start_purge(state: &std::sync::Arc<Management>) {
             }
             let Some(state) = state_ref.upgrade() else { return };
             state.access.purge_stale(Instant::now());
+            state.access.sessions.purge(Instant::now());
         }
     });
 }
@@ -125,16 +132,18 @@ impl Access {
             enabled: AtomicBool::new(enabled),
             attempts: Mutex::new(Attempts { by_ip: HashMap::new() }),
             warned_untrusted_forwarding: AtomicBool::new(false),
+            sessions: super::session::Sessions::new(cfg),
         }
     }
 
     /// Go's reload rule: MANAGEMENT_PASSWORD keeps routes on; otherwise availability
     /// follows the config secret alone. A `--password` that enabled routes at startup
     /// no longer counts after the first reload, exactly as in server_reload.go, except
-    /// in the standalone TUI.
+    /// in the standalone TUI. A changed secret ends every dashboard session.
     pub(crate) fn config_published(&self, cfg: &Config) {
         let enabled = !self.env_secret.is_empty() || !cfg.management.secret_key.is_empty() || self.local_secret;
         self.enabled.store(enabled, Ordering::SeqCst);
+        self.sessions.config_published(cfg);
     }
 
     pub(crate) fn available(&self) -> bool {
@@ -160,6 +169,11 @@ impl Access {
             );
         }
         ip
+    }
+
+    /// The peer is a configured trusted proxy, whose forwarding headers count.
+    pub(super) fn trusts(&self, peer: Option<SocketAddr>) -> bool {
+        peer.is_some_and(|peer| self.trusted.contains(peer.ip().to_canonical()))
     }
 
     fn attempts(&self) -> std::sync::MutexGuard<'_, Attempts> {
@@ -197,15 +211,9 @@ impl Access {
         }
     }
 
-    /// Go `AuthenticateManagementKey`. The error is the status and `error` text.
-    pub(crate) async fn authenticate(
-        &self,
-        cfg: &Config,
-        ip: &str,
-        local: bool,
-        provided: &[u8],
-        work: &tokio_util::task::TaskTracker,
-    ) -> Result<(), (StatusCode, String)> {
+    /// The checks before any credential: an active ban, the remote policy and a missing
+    /// secret, each 403.
+    fn admit(&self, cfg: &Config, ip: &str, local: bool) -> Result<(), (StatusCode, String)> {
         {
             let now = Instant::now();
             let mut attempts = self.attempts();
@@ -227,10 +235,23 @@ impl Access {
         if !local && !allow_remote {
             return Err((StatusCode::FORBIDDEN, "remote management disabled".into()));
         }
-        let secret = cfg.management.secret_key.clone();
-        if secret.is_empty() && self.env_secret.is_empty() && !(local && self.local_secret) {
+        if cfg.management.secret_key.is_empty() && self.env_secret.is_empty() && !(local && self.local_secret) {
             return Err((StatusCode::FORBIDDEN, "remote management key not set".into()));
         }
+        Ok(())
+    }
+
+    /// Go `AuthenticateManagementKey`. The error is the status and `error` text.
+    pub(crate) async fn authenticate(
+        &self,
+        cfg: &Config,
+        ip: &str,
+        local: bool,
+        provided: &[u8],
+        work: &tokio_util::task::TaskTracker,
+    ) -> Result<(), (StatusCode, String)> {
+        self.admit(cfg, ip, local)?;
+        let secret = cfg.management.secret_key.clone();
         if provided.is_empty() {
             self.fail(ip);
             return Err((StatusCode::UNAUTHORIZED, "missing management key".into()));
@@ -253,6 +274,24 @@ impl Access {
         self.reset(ip);
         Ok(())
     }
+
+    /// A dashboard session cookie in place of the key. An unknown, expired or revoked id is a
+    /// 401 that counts no failure: ids are unguessable, and a stale cookie must not ban the
+    /// operator's address.
+    pub(crate) fn authenticate_session(
+        &self,
+        cfg: &Config,
+        ip: &str,
+        local: bool,
+        ids: &[&str],
+    ) -> Result<(), (StatusCode, String)> {
+        self.admit(cfg, ip, local)?;
+        if self.sessions.valid(cfg, ids, Instant::now()) {
+            Ok(())
+        } else {
+            Err((StatusCode::UNAUTHORIZED, super::session::EXPIRED.into()))
+        }
+    }
 }
 
 /// `Duration.Round(time.Second).String()` for non-negative whole seconds.
@@ -270,7 +309,7 @@ fn go_duration_seconds(d: Duration) -> String {
 
 /// `Authorization: Bearer <key>` (scheme case-insensitive, value untrimmed), any
 /// other Authorization value verbatim, then `X-Management-Key`. First values only.
-fn provided_key(headers: &HeaderMap) -> &[u8] {
+pub(super) fn provided_key(headers: &HeaderMap) -> &[u8] {
     let auth = headers
         .get(header::AUTHORIZATION)
         .map(HeaderValue::as_bytes)
@@ -289,7 +328,7 @@ fn provided_key(headers: &HeaderMap) -> &[u8] {
     }
 }
 
-fn version_headers(headers: &mut HeaderMap) {
+pub(super) fn version_headers(headers: &mut HeaderMap) {
     for (name, value) in [
         ("X-CPA-VERSION", VERSION),
         ("X-CPA-COMMIT", COMMIT),
@@ -337,12 +376,32 @@ pub(crate) async fn guard(State(state): State<Arc<Management>>, req: Request, ne
     let provided = provided_key(req.headers()).to_vec();
     let cfg = state.rt.config();
     let admin = req.uri().path().starts_with("/admin/v1/");
-    let mut response = match state
-        .access
-        .authenticate(&cfg, &ip, local, &provided, &state.work)
-        .await
-    {
-        Ok(()) => next.run(req).await,
+    // A key decides on its own, as before sessions existed; the cookie counts only without one.
+    let ids: Vec<String> = if provided.is_empty() {
+        super::session::cookie_ids(req.headers())
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let checked = if ids.is_empty() {
+        state
+            .access
+            .authenticate(&cfg, &ip, local, &provided, &state.work)
+            .await
+    } else if let Some(refused) = super::session::refusal(req.headers(), req.uri(), state.access.trusts(peer)) {
+        Err((StatusCode::FORBIDDEN, refused.into()))
+    } else {
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        state.access.authenticate_session(&cfg, &ip, local, &ids)
+    };
+    let mut response = match checked {
+        Ok(()) => {
+            let mut response = next.run(req).await;
+            no_store(response.headers_mut());
+            response
+        }
         Err((status, message)) if admin => super::admin::error(
             &state,
             status.as_u16(),
@@ -357,6 +416,22 @@ pub(crate) async fn guard(State(state): State<Arc<Management>>, req: Request, ne
     };
     version_headers(response.headers_mut());
     response
+}
+
+/// An authenticated answer, error or not, is for its caller only. A shared cache keys by URL and
+/// keeps a cookie-authenticated answer as it would not one requested with `Authorization`, so
+/// every such answer is `no-store`; a handler's own value naming `no-store` stays.
+fn no_store(headers: &mut HeaderMap) {
+    let kept = headers.get_all(header::CACHE_CONTROL).iter().any(|value| {
+        value.to_str().is_ok_and(|value| {
+            value
+                .split(',')
+                .any(|directive| directive.trim().eq_ignore_ascii_case("no-store"))
+        })
+    });
+    if !kept {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
 }
 
 /// Go's global CORS middleware: every response is cross-origin readable and every
@@ -521,6 +596,23 @@ mod tests {
         ];
         for (d, want) in cases {
             assert_eq!(go_duration_seconds(d), want, "{d:?}");
+        }
+    }
+
+    #[test]
+    fn authenticated_answers_are_no_store_unless_the_handler_said_so() {
+        for (handler, want) in [
+            (None, "no-store"),
+            (Some("no-cache"), "no-store"),
+            (Some("max-age=60"), "no-store"),
+            (Some("private, No-Store, max-age=0"), "private, No-Store, max-age=0"),
+        ] {
+            let mut headers = HeaderMap::new();
+            if let Some(value) = handler {
+                headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(value));
+            }
+            no_store(&mut headers);
+            assert_eq!(headers[header::CACHE_CONTROL], want, "{handler:?}");
         }
     }
 

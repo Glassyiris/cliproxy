@@ -217,14 +217,14 @@ pub async fn serve_with_resp(
                     }
                     return;
                 }
-                return serve_connection(stream, peer, app, false).await;
+                return serve_connection(stream, peer, app, false, false).await;
             };
             let Some(mut tls) = handshake(&acceptor, stream, peer, deadline).await else {
                 return;
             };
             match tls.ssl().selected_alpn_protocol() {
-                Some(b"h2") => return serve_connection(tls, peer, app, true).await,
-                Some(b"http/1.1") => return serve_connection(tls, peer, app, false).await,
+                Some(b"h2") => return serve_connection(tls, peer, app, true, true).await,
+                Some(b"http/1.1") => return serve_connection(tls, peer, app, false, true).await,
                 _ => {}
             }
             let first = match tokio::time::timeout_at(deadline, tokio::io::AsyncReadExt::read_u8(&mut tls)).await {
@@ -241,7 +241,7 @@ pub async fn serve_with_resp(
                 }
                 return;
             }
-            serve_connection(io, peer, app, false).await;
+            serve_connection(io, peer, app, false, true).await;
                 } => {},
             }
         });
@@ -333,18 +333,25 @@ async fn handshake(
     }
 }
 
+/// Marks a request that arrived over this listener's own TLS.
+#[derive(Clone, Copy)]
+pub(crate) struct Tls;
+
 /// Serves one connection as HTTP/2 or HTTP/1.1 (with upgrades, for WebSockets). The
 /// HTTP/2 server keeps Go's defaults where they are visible to clients: 250 concurrent
 /// streams and no extended CONNECT (x/net http2 `defaultMaxStreams`,
 /// `disableExtendedConnectProtocol`).
 // ponytail: other HTTP/2 settings (window sizes, frame and header-list limits) are
 // hyper's defaults, not Go's.
-async fn serve_connection<I>(io: I, peer: SocketAddr, app: Router, h2: bool)
+async fn serve_connection<I>(io: I, peer: SocketAddr, app: Router, h2: bool, tls: bool)
 where
     I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
     let service = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
         req.extensions_mut().insert(axum::extract::ConnectInfo(peer));
+        if tls {
+            req.extensions_mut().insert(Tls);
+        }
         let mut app = app.clone();
         tower_service::Service::call(&mut app, req.map(axum::body::Body::new))
     });
@@ -447,14 +454,21 @@ mod tests {
         assert!(err.starts_with("failed to start HTTPS server: "), "{err}");
     }
 
-    /// The route every listener test serves: the protocol version the server saw and the
-    /// peer address from connect info.
+    /// The route every listener test serves: the protocol version the server saw, the
+    /// peer address from connect info, and ` tls` when the listener marked the request.
     fn app() -> Router {
         Router::new().route(
             "/peer",
             axum::routing::get(
                 |axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<SocketAddr>,
-                 req: axum::extract::Request| async move { format!("{:?} {}", req.version(), peer.ip()) },
+                 req: axum::extract::Request| async move {
+                    let tls = if req.extensions().get::<Tls>().is_some() {
+                        " tls"
+                    } else {
+                        ""
+                    };
+                    format!("{:?} {}{tls}", req.version(), peer.ip())
+                },
             ),
         )
     }
@@ -517,7 +531,7 @@ mod tests {
             .unwrap();
         let res = client.get(format!("https://{addr}/peer")).send().await.unwrap();
         assert_eq!(res.version(), wreq::Version::HTTP_2);
-        assert_eq!(res.text().await.unwrap(), "HTTP/2.0 127.0.0.1");
+        assert_eq!(res.text().await.unwrap(), "HTTP/2.0 127.0.0.1 tls");
 
         // http/1.1, and no ALPN at all, are served as HTTP/1.1.
         for alpn in [Some(&b"\x08http/1.1"[..]), None] {
@@ -531,7 +545,7 @@ mod tests {
             let mut reply = String::new();
             http1.read_to_string(&mut reply).await.unwrap();
             assert!(reply.starts_with("HTTP/1.1 200 OK"), "{reply}");
-            assert!(reply.ends_with("HTTP/1.1 127.0.0.1"), "{reply}");
+            assert!(reply.ends_with("HTTP/1.1 127.0.0.1 tls"), "{reply}");
         }
         // Without ALPN, Go hands the connection to the HTTP/1.1 server: no HTTP/2.
         let reply = h2_preface(handshake(None).await.unwrap()).await;

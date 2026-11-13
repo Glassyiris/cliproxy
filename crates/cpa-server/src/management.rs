@@ -44,6 +44,7 @@ mod plugin_store;
 mod plugins;
 pub(crate) mod quota;
 mod quota_probe;
+mod session;
 mod siwc;
 pub use access::cors;
 pub(crate) use access::{Cors, cors_headers};
@@ -856,6 +857,14 @@ pub fn router(state: Arc<Management>) -> Router {
             );
     }
     for (path, route) in [
+        // The dashboard's sign-in: each handler checks its own credential (session.rs).
+        (
+            "session",
+            methods()
+                .get(open!(s, session::check))
+                .post(open!(s, session::create))
+                .delete(open!(s, session::revoke)),
+        ),
         (
             "server/latest-version",
             methods().get(guarded!(s, observability::latest_version)),
