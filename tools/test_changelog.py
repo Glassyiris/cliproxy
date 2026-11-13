@@ -245,7 +245,7 @@ class NeedsFragment(unittest.TestCase):
             "crates/cook-router/examples/x.rs", "ui/src/app/useAction.test.ts", "ui/src/a/B.test.tsx",
             "ui/src/a/README.md", "crates/cook-router/README.md", "docs/INSTALL.md", "README.md", "CONTRIBUTING.md",
             "bench/budgets.txt", "harness/run", ".github/workflows/ci.yml", "ui/scripts/x.mjs",
-            "ui/package.json", "tools/changelog.py", "changes/fix.md", "packaging/aur/PKGBUILD",
+            "ui/package.json", "tools/changelog.py", "changes/fix.md", ".github/ci/pins.env",
         ]:
             with self.subTest(path=path):
                 self.assertFalse(changelog.needs_fragment([path]))
