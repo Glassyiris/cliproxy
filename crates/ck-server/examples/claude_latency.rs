@@ -684,7 +684,7 @@ fn main() {
         ck_server::install_registry(&rt);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(ck_server::listener::serve(
+        tokio::spawn(ck_server::net::listener::serve(
             listener,
             ck_server::router(rt.clone()),
             None,

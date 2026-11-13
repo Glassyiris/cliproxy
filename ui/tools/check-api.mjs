@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const ui = fileURLToPath(new URL("..", import.meta.url));
-const rustFile = fileURLToPath(new URL("../../crates/ck-server/src/management.rs", import.meta.url));
+const rustFile = fileURLToPath(new URL("../../crates/ck-server/src/management/api.rs", import.meta.url));
 const libFile = fileURLToPath(new URL("../../crates/ck-server/src/lib.rs", import.meta.url));
 const allowFile = fileURLToPath(new URL("./api-allowlist.json", import.meta.url));
 const PREFIX = "/v8/management";

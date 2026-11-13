@@ -11,8 +11,8 @@ use ck_core::config::Config;
 use ck_core::credential::Credential;
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::runtime::AttemptStats;
-use ck_server::scheduler::Policy;
+use ck_server::runtime::state::AttemptStats;
+use ck_server::scheduling::scheduler::Policy;
 use ck_server::{Runtime, router};
 use serde_json::Value;
 
@@ -312,7 +312,7 @@ async fn stop_continue_and_force_cooldown_are_independent() {
             "{action}"
         );
         assert_eq!(fixture.seen().len(), expected_attempts, "{action}");
-        let selection = ck_server::runtime::Selection {
+        let selection = ck_server::runtime::state::Selection {
             provider: "claude".into(),
             model: "claude-sonnet-5".into(),
             exclude: vec!["b".into()],

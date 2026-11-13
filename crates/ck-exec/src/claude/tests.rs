@@ -689,7 +689,7 @@ async fn messages_responses_record_the_quota_snapshot() {
 }
 
 /// Go `session.Enrich` + `ExtractSessionID`, as the server applies them before the
-/// executor (crates/ck-server/src/session.rs, on the shared `ck_wire::session`).
+/// executor (crates/ck-server/src/scheduling/session.rs, on the shared `ck_wire::session`).
 fn enrich(mut req: ExecRequest) -> ExecRequest {
     use ck_wire::session::{self as shared, Meta};
     let scope = shared::caller_scope(&req.caller.principal);

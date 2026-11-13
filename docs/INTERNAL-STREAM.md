@@ -2,7 +2,7 @@
 
 ## 1. Purpose and scope
 
-Define the sole internal representation for cooker inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search and AI Studio relay inference traffic. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion; authentication and transport remain boundary responsibilities, while SDP, session commands and media content are inside. Current route evidence: `crates/ck-server/src/lib.rs:81-146`, `crates/ck-server/src/realtime.rs:85-112`, `crates/ck-server/src/codex_alpha.rs:22-25`, `crates/ck-server/src/relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/ck-server/src/realtime.rs:12`. This is a normative target, not a claim of implementation; current-code citations refer to `prep-cook/cooker` master `17608e94`.
+Define the sole internal representation for cooker inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search and AI Studio relay inference traffic. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion; authentication and transport remain boundary responsibilities, while SDP, session commands and media content are inside. Current route evidence: `crates/ck-server/src/lib.rs:81-146`, `crates/ck-server/src/realtime/api.rs:85-112`, `crates/ck-server/src/inference/codex_alpha.rs:22-25`, `crates/ck-server/src/realtime/aistudio_relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/ck-server/src/realtime/api.rs:12`. This is a normative target, not a claim of implementation; current-code citations refer to `prep-cook/cooker` master `17608e94`.
 
 ## 2. Decisions
 
@@ -507,9 +507,9 @@ For request destinations unable to express a supplied semantic field in §4's ca
 | Usage/rate limits, errors, response.done/session close | Usage/`realtime.rates`/terminal per response or session | §4 rates schema; response.done does not close a live connection. |
 
 All accepted realtime media MUST traverse codecs; WebRTC ingress/egress terminate media transport and re-encode packet data through the internal stream rather than negotiate a direct bypass.
-WebRTC media conversion applies only when the existing `media-relay` build feature is built (`crates/ck-server/src/realtime/relay.rs:1-7`); this spec adds no dependency. Builds without it reject WebRTC media visibly; feature-enabled builds must use the relay, never accept a direct media bypass.
+WebRTC media conversion applies only when the existing `media-relay` build feature is built (`crates/ck-server/src/realtime/api/relay.rs:1-7`); this spec adds no dependency. Builds without it reject WebRTC media visibly; feature-enabled builds must use the relay, never accept a direct media bypass.
 Alpha-search requests/results use the §4 `alpha_search` schema and X original; AI Studio inference uses the Gemini codec with relay correlation. These are not exemptions.
-Current alpha search bypasses translation (`crates/ck-server/src/codex_alpha.rs:4-6`); the browser relay registers an executor-side session (`crates/ck-server/src/relay.rs:4-11`).
+Current alpha search bypasses translation (`crates/ck-server/src/inference/codex_alpha.rs:4-6`); the browser relay registers an executor-side session (`crates/ck-server/src/realtime/aistudio_relay.rs:4-11`).
 
 ### 5.27 Today's loss ledger
 
@@ -518,7 +518,7 @@ These are source-verified transformations at the cited baseline, not claims that
 | ID | Current path and loss | Evidence | Survey |
 | --- | --- | --- | --- |
 | L01 | Claude→Chat ignores signature deltas, redacted/server-tool block starts and unsupported delta kinds. | `crates/ck-translate/src/claude_chat_response.rs:133-162` | Mentioned; now verified |
-| L02 | Claude→Chat keeps aggregate cache counts but not TTL buckets; default numeric state also erases missing-versus-zero distinctions. | `crates/ck-translate/src/claude_chat_response.rs:13-49`; bucket-aware accounting: `crates/ck-server/src/usage_record.rs:551-558` | Aggregate loss mentioned |
+| L02 | Claude→Chat keeps aggregate cache counts but not TTL buckets; default numeric state also erases missing-versus-zero distinctions. | `crates/ck-translate/src/claude_chat_response.rs:13-49`; bucket-aware accounting: `crates/ck-server/src/observability/usage_record.rs:551-558` | Aggregate loss mentioned |
 | L03 | Claude→Chat withholds tool argument fragments until block stop and invents `{}` for empty accumulated arguments. | `crates/ck-translate/src/claude_chat_response.rs:152-183` | Buffering mentioned |
 | L04 | Gemini→Chat drops thought signatures, including signature-only parts, and labels inline audio/media as image_url objects. | `crates/ck-translate/src/gemini_chat_response.rs:85-103,170-220` | Mentioned |
 | L05 | Gemini→Chat only projects selected candidate parts/finish fields; grounding, URL context, code and safety metadata have no projection there. | `crates/ck-translate/src/gemini_chat_response.rs:150-236` | Mentioned/unverified in survey |
@@ -528,16 +528,16 @@ These are source-verified transformations at the cited baseline, not claims that
 | L09 | Gemini→Chat streaming emits a remembered finish reason only when a candidate chunk also has usage; a finishing candidate without usage can lose its finish projection. | `crates/ck-translate/src/gemini_chat_response.rs:135-143,224-235` | New |
 | L10 | Chat→Gemini request filters response modalities to text/image; an audio modality is omitted. | `crates/ck-translate/src/gemini_chat_request.rs:139-152` | New |
 | L11 | Claude→Chat request emits top_p only when temperature is absent, dropping top_p when both are supplied. | `crates/ck-translate/src/openai_claude.rs:50-55` | New |
-| L12 | Legacy request reconstruction omits n, best_of, suffix, seed and user; numeric logprobs becomes a boolean; empty prompt becomes “Complete this:”. | `crates/ck-server/src/openai.rs:270-306` | New |
-| L13 | Legacy streamed output drops a logprobs-only chunk without content, finish reason or usage. | `crates/ck-server/src/openai.rs:348-359` | New |
+| L12 | Legacy request reconstruction omits n, best_of, suffix, seed and user; numeric logprobs becomes a boolean; empty prompt becomes “Complete this:”. | `crates/ck-server/src/inference/openai.rs:270-306` | New |
+| L13 | Legacy streamed output drops a logprobs-only chunk without content, finish reason or usage. | `crates/ck-server/src/inference/openai.rs:348-359` | New |
 | L14 | Interactions→Chat ignores non-function step starts and step.stop; unrecognized delta kinds retain only nonempty text, losing structured payloads. | `crates/ck-translate/src/openai_interactions_response.rs:185-244,302-323` | New |
-| L15 | Emulated xAI image completed events omit created and revised_prompt even though extraction retains both and buffered output includes them. | `crates/ck-server/src/images.rs:378-393,437-481` | New |
-| L16 | Speech's xAI request builder reconstructs language/output_format/speed/text/voice_id only; supplied instructions are not forwarded. | `crates/ck-server/src/speech.rs:184-233` | New |
-| L17 | Video status projection collapses expired/cancelled/canceled into failed without retaining the native status in the constructed response. | `crates/ck-server/src/videos.rs:441-449,463-483,555-597` | New |
-| L18 | Realtime declares live usage logging unported; the S0 usage path must not inherit that omission. | `crates/ck-server/src/realtime.rs:24-26` | New |
+| L15 | Emulated xAI image completed events omit created and revised_prompt even though extraction retains both and buffered output includes them. | `crates/ck-server/src/inference/images.rs:378-393,437-481` | New |
+| L16 | Speech's xAI request builder reconstructs language/output_format/speed/text/voice_id only; supplied instructions are not forwarded. | `crates/ck-server/src/inference/speech.rs:184-233` | New |
+| L17 | Video status projection collapses expired/cancelled/canceled into failed without retaining the native status in the constructed response. | `crates/ck-server/src/inference/videos.rs:441-449,463-483,555-597` | New |
+| L18 | Realtime declares live usage logging unported; the S0 usage path must not inherit that omission. | `crates/ck-server/src/realtime/api.rs:24-26` | New |
 
 Existing direct Claude→Responses carriage of redacted thinking must survive even though the Chat projection loses it (`crates/ck-translate/src/claude_responses_response.rs:167-175`).
-Current compact rejects stream=true (`crates/ck-server/src/openai.rs:1064-1079`); S0 retains that operation contract, not a raw-body shortcut.
+Current compact rejects stream=true (`crates/ck-server/src/inference/openai.rs:1064-1079`); S0 retains that operation contract, not a raw-body shortcut.
 
 ## 6. Storage
 
@@ -673,8 +673,8 @@ Keep request-direction and scratch ranges only while an egress snapshot or reade
 Where a final response requires old content, do not evict it silently to meet a limit; fail visibly under the same queue rule.
 A destination that only accepts whole tool JSON may delay tool serialization at egress by reading mapped fragments; internal argument delivery remains incremental.
 SSE, JSON array streams, raw media HTTP bodies, WS JSON/binary messages and WebRTC packets are egress encodings, not alternate internal pipelines.
-Today `crates/ck-server/src/dispatch.rs:2653-2675` bootstraps `Done::Stream` on the first nonempty upstream chunk and concatenates non-streaming output in `BytesMut`; bootstrap is not transport commitment.
-Configured nonstream/media keepalives can commit headers/body before an inference event (`crates/ck-server/src/dispatch.rs:583-632`).
+Today `crates/ck-server/src/inference/dispatch.rs:2653-2675` bootstraps `Done::Stream` on the first nonempty upstream chunk and concatenates non-streaming output in `BytesMut`; bootstrap is not transport commitment.
+Configured nonstream/media keepalives can commit headers/body before an inference event (`crates/ck-server/src/inference/dispatch.rs:583-632`).
 The new single commit point is egress scheduling the first client-deliverable bytes after encoding; suppressed metadata cannot commit, and pre-delivery keepalives/success headers are forbidden (§3.6).
 Today's framer has a 16 MiB per-event default and a BytesMut buffer (`crates/ck-translate/src/sse.rs:9-13,28-34`); that number is evidence, not an adopted S0 stream/pool limit.
 

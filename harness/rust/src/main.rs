@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
     let store = Arc::new(ck_server::testing::config_store(&config_path.with_extension("db"))?);
     store.import_yaml(&std::fs::read_to_string(config_path)?, "harness", "fixture")?;
     let mut config = store.load().map_err(|e| anyhow::anyhow!("{e}"))?.config;
-    let db = ck_server::credential_store::CredentialDb::initialize(store.clone())?;
+    let db = ck_server::store::credential_store::CredentialDb::initialize(store.clone())?;
     ck_server::testing::seed_credentials(&db, Path::new(&args[3]));
     config.auth_dir = db.auth_dir();
     let mut credentials = db.scan(&config)?.credentials;
@@ -47,13 +47,13 @@ async fn main() -> anyhow::Result<()> {
     ck_server::install_registry(&rt);
     rt.start_auto_refresh();
     let management =
-        ck_server::management::Management::with_options(rt.clone(), store, ck_server::management::Options::default());
-    let watcher = ck_server::watching::start(&management);
-    let app = ck_server::app(rt.clone(), ck_server::management::router(management.clone()))
-        .layer(axum::middleware::from_fn(ck_server::management::cors));
-    let app = ck_server::observability::router(&rt, app);
+        ck_server::management::api::Management::with_options(rt.clone(), store, ck_server::management::api::Options::default());
+    let watcher = ck_server::management::watching::start(&management);
+    let app = ck_server::app(rt.clone(), ck_server::management::api::router(management.clone()))
+        .layer(axum::middleware::from_fn(ck_server::management::api::cors));
+    let app = ck_server::observability::api::router(&rt, app);
     // The production listener (crates/cooker uses the same call), plain HTTP.
-    let served = ck_server::listener::serve_with_resp(listener, app, None, Some(management)).await;
+    let served = ck_server::net::listener::serve_with_resp(listener, app, None, Some(management)).await;
     watcher.shutdown().await?;
     rt.shutdown_codex_refreshes().await;
     served?;

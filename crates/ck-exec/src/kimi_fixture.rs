@@ -332,7 +332,7 @@ pub(crate) struct Downstream {
 }
 
 /// The failure status and body the server records for an executor error when the
-/// executor publishes nothing itself (ck_server::classify `go_status`, `error_text`):
+/// executor publishes nothing itself (ck_server::scheduling::classify `go_status`, `error_text`):
 /// transport faults carry no status, as Go's plain errors.
 pub(crate) fn go_failure(e: &ck_core::exec::ExecError) -> (u16, String) {
     let status = if e.scope == ck_core::exec::FailureScope::Transport {
@@ -675,7 +675,7 @@ fn reported_model(format: Format, payload: &[u8]) -> Option<String> {
         .find(|m| !m.is_empty())
 }
 
-/// The record the server publishes from these reports (ck_server usage_record
+/// The record the server publishes from these reports (ck_server::observability::usage_record
 /// `Tracker::publish`): the executor's first `publish`/`publish_failure`, else nothing
 /// after `discard`, else the attempt's `failure`, else a success, which `usage_required` drops when no usage was
 /// reported. `(failed, status, body)`; `None` when nothing is published.

@@ -18,8 +18,8 @@ use ck_core::exec::{Caller, ExecError, ExecSession, ExecStream, FailureScope, Op
 use ck_core::format::Format;
 use ck_exec::Executors;
 use ck_exec::codex::{ClientFrames, SteeringInput};
-use ck_server::dispatch::{self, Call, SessionTurn};
-use ck_server::runtime::Runtime;
+use ck_server::inference::dispatch::{self, Call, SessionTurn};
+use ck_server::runtime::state::Runtime;
 use futures_util::StreamExt;
 
 /// One upstream conversation (the Go handler); failures are Go's `t.Error`.

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::management::{Management, Options};
+use ck_server::management::api::{Management, Options};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
@@ -30,7 +30,7 @@ async fn server_with(management_password: Option<&str>, credentials: Vec<ck_core
     let dir = std::env::temp_dir().join(format!("cooker-resp-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let yaml = "observability:\n  usage:\n    usage-statistics-enabled: true\n".to_owned();
-    let store = Arc::new(ck_server::config_store::ConfigStore::memory_with(&yaml));
+    let store = Arc::new(ck_server::store::config_store::ConfigStore::memory_with(&yaml));
     let executors = Executors {
         claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
         codex: Default::default(),
@@ -48,10 +48,10 @@ async fn server_with(management_password: Option<&str>, credentials: Vec<ck_core
         ..Default::default()
     };
     let management = Management::with_options(rt.clone(), store, options);
-    let app = ck_server::app(rt.clone(), ck_server::management::router(management.clone()));
+    let app = ck_server::app(rt.clone(), ck_server::management::api::router(management.clone()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(ck_server::listener::serve_with_resp(
+    tokio::spawn(ck_server::net::listener::serve_with_resp(
         listener,
         app,
         None,

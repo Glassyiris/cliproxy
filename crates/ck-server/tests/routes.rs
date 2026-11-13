@@ -672,9 +672,9 @@ async fn misc_routes_match_go() {
     // A pending login receives the callback.
     let got = Arc::new(Mutex::new(None));
     let sink = got.clone();
-    p.rt.set_oauth_callback_sink(Some(Arc::new(move |cb: &ck_server::runtime::OAuthCallback| {
+    p.rt.set_oauth_callback_sink(Some(Arc::new(move |cb: &ck_server::runtime::state::OAuthCallback| {
         *sink.lock().unwrap() = Some((cb.provider, cb.state.clone(), cb.code.clone(), cb.error.clone()));
-        ck_server::runtime::OAuthDelivery::Delivered
+        ck_server::runtime::state::OAuthDelivery::Delivered
     })));
     let callback = |path: &'static str| client.get(format!("{}{path}", p.url)).send();
     let ok = callback("/callback?code=%20c1%20&state=s1").await.unwrap();
@@ -704,8 +704,8 @@ async fn misc_routes_match_go() {
     );
     // A Sign in with ChatGPT binding's state (Go `ae3ee3be`): the Codex route refuses
     // it with 409; the other provider routes still show their page.
-    p.rt.set_oauth_callback_sink(Some(Arc::new(|_: &ck_server::runtime::OAuthCallback| {
-        ck_server::runtime::OAuthDelivery::RequiresV8
+    p.rt.set_oauth_callback_sink(Some(Arc::new(|_: &ck_server::runtime::state::OAuthCallback| {
+        ck_server::runtime::state::OAuthDelivery::RequiresV8
     })));
     let refused = callback("/codex/callback?state=siwc&code=c").await.unwrap();
     assert_eq!(refused.status().as_u16(), 409);
@@ -1122,7 +1122,7 @@ async fn response_framing_follows_go_net_http() {
 async fn route_path_uses_gin_templates() {
     use axum::extract::{MatchedPath, OriginalUri};
     let echo = |m: Option<MatchedPath>, OriginalUri(uri): OriginalUri| async move {
-        ck_server::dispatch::route_path(m.as_ref(), &uri)
+        ck_server::inference::dispatch::route_path(m.as_ref(), &uri)
     };
     let app = axum::Router::new()
         .route("/v1beta/models/{*action}", axum::routing::post(echo))
@@ -1285,7 +1285,7 @@ async fn responses_route_prepares_codex_orphan_delegation() {
 async fn session_turns_honour_pin_callback_and_session() {
     use ck_core::exec::{Caller, ExecSession, Operation};
     use ck_core::format::Format;
-    use ck_server::dispatch::{self, Call, SessionTurn};
+    use ck_server::inference::dispatch::{self, Call, SessionTurn};
     let p = proxy(
         "",
         vec![

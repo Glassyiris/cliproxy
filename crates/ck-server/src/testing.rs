@@ -38,21 +38,21 @@ const LOCAL: &str = "cpa_test_local";
 /// Opens a fixture database with a private working/coordinator namespace beside
 /// its snapshot. This must be used even by integration tests, where cfg(test)
 /// does not apply to this library. Never changes process-global TMPDIR.
-pub fn config_store(path: &std::path::Path) -> anyhow::Result<crate::config_store::ConfigStore> {
+pub fn config_store(path: &std::path::Path) -> anyhow::Result<crate::store::config_store::ConfigStore> {
     config_store_mode(path, true)
 }
 
 /// Observes the owner workspace without depending on its directory layout.
-pub fn working_directory(store: &crate::config_store::ConfigStore) -> Option<std::path::PathBuf> {
+pub fn working_directory(store: &crate::store::config_store::ConfigStore) -> Option<std::path::PathBuf> {
     store.working_directory().map(std::path::Path::to_owned)
 }
 
 /// The same fixture namespace, opening only an existing database (offline reads).
-pub fn existing_config_store(path: &std::path::Path) -> anyhow::Result<crate::config_store::ConfigStore> {
+pub fn existing_config_store(path: &std::path::Path) -> anyhow::Result<crate::store::config_store::ConfigStore> {
     config_store_mode(path, false)
 }
 
-fn config_store_mode(path: &std::path::Path, create: bool) -> anyhow::Result<crate::config_store::ConfigStore> {
+fn config_store_mode(path: &std::path::Path, create: bool) -> anyhow::Result<crate::store::config_store::ConfigStore> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -61,19 +61,19 @@ fn config_store_mode(path: &std::path::Path, create: bool) -> anyhow::Result<cra
         std::fs::create_dir_all(parent)?;
     }
     let root = std::fs::canonicalize(parent)?.join(".cooker-test-storage");
-    crate::config_store::ConfigStore::open_in(path, create, root)
+    crate::store::config_store::ConfigStore::open_in(path, create, root)
 }
 
 /// Executes fixture SQL on a fresh copy of canonical state, then installs the
 /// resulting fixture state. Do not retain raw SQLite handles across runtime calls.
-pub fn database_execute(store: &crate::config_store::ConfigStore, sql: &str) -> anyhow::Result<()> {
+pub fn database_execute(store: &crate::store::config_store::ConfigStore, sql: &str) -> anyhow::Result<()> {
     store.fixture_execute(sql)
 }
 
 /// Opens a test-only SQL connection to the mutable database for failure injection.
 /// Keep `store` alive until this connection is closed; `store.path()` names the
 /// immutable published backup, not the database the runtime writes.
-pub fn database_connection(store: &crate::config_store::ConfigStore) -> rusqlite::Connection {
+pub fn database_connection(store: &crate::store::config_store::ConfigStore) -> rusqlite::Connection {
     let path = store.conn().unwrap().path().expect("on-disk test database").to_owned();
     rusqlite::Connection::open(path).expect("test database connection")
 }
@@ -133,7 +133,7 @@ pub(crate) mod publication_effects {
     }
 
     impl Counter {
-        pub(crate) fn new(store: &crate::config_store::ConfigStore) -> Self {
+        pub(crate) fn new(store: &crate::store::config_store::ConfigStore) -> Self {
             let path = store.path().expect("published fixture").to_owned();
             let count = Arc::new(AtomicUsize::new(0));
             assert!(counters().lock().unwrap().insert(path.clone(), count.clone()).is_none());
@@ -163,7 +163,7 @@ pub(crate) mod publication_effects {
         let stores = ["one.db", "two.db"].map(|name| Arc::new(super::config_store(&root.join(name)).unwrap()));
         let backends = stores
             .each_ref()
-            .map(|store| crate::credential_store::CredentialDb::initialize(store.clone()).unwrap());
+            .map(|store| crate::store::credential_store::CredentialDb::initialize(store.clone()).unwrap());
         let path = backends[0].auth_dir().join("a.json");
         let bytes = br#"{"type":"claude","access_token":"private-test"}"#;
         backends[0].save(&path, bytes).unwrap();
@@ -200,7 +200,7 @@ impl Drop for BlockedCheckpoint {
 
 /// An explicit storage-effect fault: construction can complete, but installing
 /// the checkpoint fails. The previous recovery artifact is retained unchanged.
-pub fn block_checkpoint_install(store: &crate::config_store::ConfigStore) -> BlockedCheckpoint {
+pub fn block_checkpoint_install(store: &crate::store::config_store::ConfigStore) -> BlockedCheckpoint {
     let path = std::path::PathBuf::from(database_connection(store).path().unwrap());
     let parked = path.with_extension("blocked-checkpoint");
     std::fs::rename(&path, &parked).unwrap();
@@ -211,7 +211,7 @@ pub fn block_checkpoint_install(store: &crate::config_store::ConfigStore) -> Blo
 /// Saves every `.json` file under `dir` to `db` at the same relative name: the
 /// credentials a fixture staged on disk. The database is the only credential source, so
 /// a fixture saves its credentials after `initialize`, never before it.
-pub fn seed_credentials(db: &crate::credential_store::CredentialDb, dir: &std::path::Path) {
+pub fn seed_credentials(db: &crate::store::credential_store::CredentialDb, dir: &std::path::Path) {
     // The staged files are listed before the first save, and the database's own working
     // directory is skipped: a fixture may stage them beside `config.db`, and a save
     // materializes its working copy there, which a live walk would seed a second time.
@@ -248,7 +248,7 @@ pub fn seed_credentials(db: &crate::credential_store::CredentialDb, dir: &std::p
 /// for a test that starts the binary on that database afterwards.
 pub fn seed_database(database: &std::path::Path, dir: &std::path::Path) {
     let store = Arc::new(config_store(database).expect("test database"));
-    let db = crate::credential_store::CredentialDb::initialize(store).expect("test credentials");
+    let db = crate::store::credential_store::CredentialDb::initialize(store).expect("test credentials");
     seed_credentials(&db, dir);
 }
 
@@ -283,7 +283,7 @@ pub fn runtime(mut config: Config, mut credentials: Vec<Credential>, executors: 
     std::fs::create_dir(&dir).expect("private runtime directory");
     let store = Arc::new(config_store(&dir.join("test.db")).expect("test database"));
     let original = config.auth_dir.clone();
-    let db = crate::credential_store::CredentialDb::initialize(store).expect("test credentials");
+    let db = crate::store::credential_store::CredentialDb::initialize(store).expect("test credentials");
     seed_credentials(&db, &original);
     for credential in &mut credentials {
         if let ck_core::credential::Source::File(path) = &mut credential.source {
@@ -316,7 +316,7 @@ pub fn runtime_with_db(
     config: Config,
     credentials: Vec<Credential>,
     executors: Executors,
-    db: Arc<crate::credential_store::CredentialDb>,
+    db: Arc<crate::store::credential_store::CredentialDb>,
 ) -> Runtime {
     use sha2::Digest;
     let read = db
@@ -488,7 +488,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cooker-plain-runtime-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let store = Arc::new(config_store(&dir.join("test.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(store).unwrap();
+        let db = crate::store::credential_store::CredentialDb::initialize(store).unwrap();
         let plain = Runtime::new(Config::default(), Vec::new(), executors(), db);
         assert!(Arc::ptr_eq(&plain.for_executor(&c), &c));
         let test = runtime(Config::default(), Vec::new(), executors());

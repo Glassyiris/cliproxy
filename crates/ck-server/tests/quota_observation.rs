@@ -14,8 +14,8 @@ use axum::response::{IntoResponse, Response};
 use ck_core::credential::Credential;
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::cooldown_store::{Backend, Quota, Record};
-use ck_server::management::{Management, Options};
+use ck_server::management::api::{Management, Options};
+use ck_server::store::cooldown_store::{Backend, Quota, Record};
 use serde_json::{Value, json};
 
 const PASSWORD: &str = "fake-management-password";
@@ -101,7 +101,7 @@ async fn proxy(name: &str) -> Proxy {
         credential(&auth_dir, "devin-d.json", json!({"type":"devin"}), &[]),
     ];
     let yaml = "access:\n  api-keys: [client-key]\n".to_owned();
-    let store = Arc::new(ck_server::config_store::ConfigStore::memory_with(&yaml));
+    let store = Arc::new(ck_server::store::config_store::ConfigStore::memory_with(&yaml));
     let rt = Arc::new(ck_server::testing::runtime(
         store.load().unwrap().config,
         credentials,
@@ -118,7 +118,7 @@ async fn proxy(name: &str) -> Proxy {
         ..Default::default()
     };
     let management = Management::with_options(rt.clone(), store, options);
-    let app = ck_server::app(rt.clone(), ck_server::management::router(management));
+    let app = ck_server::app(rt.clone(), ck_server::management::api::router(management));
     Proxy {
         url: serve(app).await,
         rt,

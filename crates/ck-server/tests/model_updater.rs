@@ -194,7 +194,7 @@ async fn refresh_skips_failing_sources_and_swaps_a_changed_catalog() {
     std::fs::create_dir_all(&auth).unwrap();
     let hash = bcrypt::hash("fake-management-only", 4).unwrap();
     let yaml = format!("access:\n  api-keys:\n    - fake-client-key\nmanagement:\n  secret-key: '{hash}'\n");
-    let store = Arc::new(ck_server::config_store::ConfigStore::memory_with(&yaml));
+    let store = Arc::new(ck_server::store::config_store::ConfigStore::memory_with(&yaml));
     let rt = Arc::new(ck_server::testing::runtime(
         store.load().unwrap().config,
         vec![credential, gemini],
@@ -202,8 +202,8 @@ async fn refresh_skips_failing_sources_and_swaps_a_changed_catalog() {
     ));
     let registered = |rt: &ck_server::Runtime| rt.registry().ids().any(|id| id == "claude-refreshed-1");
     assert!(!registered(&rt));
-    let management = ck_server::management::Management::new(rt.clone(), store);
-    let app = ck_server::app(rt.clone(), ck_server::management::router(management));
+    let management = ck_server::management::api::Management::new(rt.clone(), store);
+    let app = ck_server::app(rt.clone(), ck_server::management::api::router(management));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -229,14 +229,14 @@ async fn refresh_skips_failing_sources_and_swaps_a_changed_catalog() {
     let generation = catalog_generation();
 
     // Every source fails: the current catalog stays.
-    ck_server::model_updater::refresh(&urls(&["down", "invalid", "mistyped"])).await;
+    ck_server::inference::model_updater::refresh(&urls(&["down", "invalid", "mistyped"])).await;
     assert_eq!(catalog_generation(), generation);
 
     // Each refused catalog leaves the catalog and the served definitions as they were.
     let mut accepted = Vec::new();
     for (name, _) in REFUSED {
         let (before, served_before) = (catalog_generation(), served(addr).await);
-        ck_server::model_updater::refresh(&urls(&[&format!("refused-{name}")])).await;
+        ck_server::inference::model_updater::refresh(&urls(&[&format!("refused-{name}")])).await;
         if catalog_generation() != before || served(addr).await != served_before {
             accepted.push(name);
         }
@@ -244,7 +244,7 @@ async fn refresh_skips_failing_sources_and_swaps_a_changed_catalog() {
     assert!(accepted.is_empty(), "accepted: {accepted:?}");
 
     // A 500 and an invalid catalog are skipped; the third source is applied.
-    ck_server::model_updater::refresh(&urls(&["down", "invalid", "modified"])).await;
+    ck_server::inference::model_updater::refresh(&urls(&["down", "invalid", "modified"])).await;
     assert_eq!(hits.load(Ordering::SeqCst), 6 + REFUSED.len());
     assert_eq!(catalog_generation(), generation + 1);
     assert!(pinned().lookup("claude-refreshed-1").is_some());
@@ -259,18 +259,18 @@ async fn refresh_skips_failing_sources_and_swaps_a_changed_catalog() {
     assert!(registered(&rt));
 
     // The same content again changes nothing.
-    ck_server::model_updater::refresh(&urls(&["modified"])).await;
+    ck_server::inference::model_updater::refresh(&urls(&["modified"])).await;
     assert_eq!(catalog_generation(), generation + 1);
 
     // An empty remote `meta` section keeps the current one (Go tryRefreshModels).
-    ck_server::model_updater::refresh(&urls(&["no-meta"])).await;
+    ck_server::inference::model_updater::refresh(&urls(&["no-meta"])).await;
     assert_eq!(catalog_generation(), generation + 1, "identical once meta is kept");
     assert_eq!(pinned().channel("meta").len(), meta_before);
 
     // `-0` is Go's 0 in the static catalog, the Gemini credential's registration, the
     // client model list and the management rendering; the last of repeated header names
     // wins.
-    ck_server::model_updater::refresh(&urls(&["lenient"])).await;
+    ck_server::inference::model_updater::refresh(&urls(&["lenient"])).await;
     assert_eq!(catalog_generation(), generation + 2);
     let thinking = |min, max| {
         Some(ck_core::registry::ThinkingSupport {

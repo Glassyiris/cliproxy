@@ -14,7 +14,7 @@ use std::path::Path;
 
 use ck_core::config::{Config, TrustedProxies, credentials};
 use ck_core::credential::{Credential, Source};
-use ck_server::config_store::ConfigStore;
+use ck_server::store::config_store::ConfigStore;
 use serde_json::{Value, json};
 
 fn fixture() -> &'static Value {
@@ -416,7 +416,7 @@ mod access {
     use super::*;
     use ck_exec::Executors;
     use ck_exec::claude::ClaudeExecutor;
-    use ck_server::management::{self, Management, Options};
+    use ck_server::management::api::{self as management, Management, Options};
     use std::sync::Arc;
 
     /// Serves the real management router; `X-Test-Peer` stands in for the socket peer.
@@ -518,8 +518,8 @@ mod routes {
     use super::*;
     use ck_exec::Executors;
     use ck_exec::claude::ClaudeExecutor;
-    use ck_server::management::{Management, Options};
-    use ck_server::watching;
+    use ck_server::management::api::{Management, Options};
+    use ck_server::management::watching;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -682,7 +682,7 @@ mod creds {
     use ck_exec::Executors;
     use ck_exec::claude::ClaudeExecutor;
 
-    use ck_server::management::{Management, Options};
+    use ck_server::management::api::{Management, Options};
     use std::collections::HashMap;
     use std::sync::Arc;
 

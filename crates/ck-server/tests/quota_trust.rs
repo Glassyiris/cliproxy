@@ -18,7 +18,7 @@ use ck_core::config::Config;
 use ck_core::credential::Credential;
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::cooldown_store::Backend;
+use ck_server::store::cooldown_store::Backend;
 use serde_json::json;
 
 const FILE: &str = "claude-q.json";
@@ -114,7 +114,7 @@ async fn proxy_with(
     upstream_url: &str,
     save: bool,
     bound: &str,
-    cooldowns: Vec<ck_server::cooldown_store::Record>,
+    cooldowns: Vec<ck_server::store::cooldown_store::Record>,
 ) -> (String, Arc<ck_server::Runtime>) {
     let yaml = format!(
         "access:\n\
@@ -125,7 +125,7 @@ async fn proxy_with(
          \x20   max-trusted-cooldown: \"{bound}\"\n",
     );
     let store = Arc::new(ck_server::testing::config_store(&dir.join("cooker.db")).unwrap());
-    let db = ck_server::credential_store::CredentialDb::initialize(store).unwrap();
+    let db = ck_server::store::credential_store::CredentialDb::initialize(store).unwrap();
     let meta = json!({"type": "claude", "api_key": "sk-fake-claude", "base_url": upstream_url});
     let path = db.auth_dir().join(FILE);
     db.save(&path, meta.to_string().as_bytes()).unwrap();
@@ -285,7 +285,7 @@ async fn early_reset_is_noticed_after_the_bound_with_save_cooldown_status() {
 /// 4 h left, the six-day stated reset kept.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_saved_trust_count_restores_its_window() {
-    use ck_server::cooldown_store::{Quota, Record};
+    use ck_server::store::cooldown_store::{Quota, Record};
     let dir = auth_dir("count");
     let at = SystemTime::now() + SIX_DAYS;
     let record = Record {

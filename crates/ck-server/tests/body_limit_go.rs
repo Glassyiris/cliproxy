@@ -13,8 +13,8 @@ use axum::body::{Body, Bytes, HttpBody};
 use base64::Engine as _;
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::config_store::ConfigStore;
-use ck_server::management::{self, Management};
+use ck_server::management::api::{self as management, Management};
+use ck_server::store::config_store::ConfigStore;
 use http_body::{Frame, SizeHint};
 use serde_json::Value;
 use tower::ServiceExt as _;
@@ -73,10 +73,10 @@ fn app(dir: &std::path::Path, yaml: &str) -> (axum::Router, Arc<ck_server::Runti
     let state = Management::with_options(rt.clone(), store.clone(), management::Options::default());
     // crates/cooker/src/main.rs, without Home, observability and the heap trimmer.
     let app = ck_server::app(rt.clone(), management::router(state.clone()));
-    let app = ck_server::safe_mode::router(&rt, app);
+    let app = ck_server::net::safe_mode::router(&rt, app);
     let app = app.layer(axum::middleware::from_fn(management::cors));
-    let app = ck_server::request_logging::router(&state, app);
-    (ck_server::body_limit::layer(&rt, app), rt, store)
+    let app = ck_server::observability::request_logging::router(&state, app);
+    (ck_server::http::body_limit::layer(&rt, app), rt, store)
 }
 
 /// Go answers a failed `/openai/v1/videos` request with a random video ID.

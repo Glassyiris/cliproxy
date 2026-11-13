@@ -21,8 +21,8 @@ filter = '''
     | (binary_id(ck-exec) & (test(/^codex_ws::tests::duplex::/)
         | test(=codex_live::tests::redact_sdp_scans_many_markers_in_one_pass)
         | test(=antigravity_request::tests::tool_schemas_are_cleaned_in_one_pass)))
-    | (binary_id(ck-server) & test(/^websocket::tests::/))
-    | (binary_id(ck-server) & test(=pprof::tests::pprof_cpu_profile_is_decodable_and_exclusive))
+    | (binary_id(ck-server) & test(/^realtime::websocket::tests::/))
+    | (binary_id(ck-server) & test(=observability::pprof::tests::pprof_cpu_profile_is_decodable_and_exclusive))
 '''
 threads-required = 'num-test-threads'
 priority = 90

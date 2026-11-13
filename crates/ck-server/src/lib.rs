@@ -1,59 +1,17 @@
 //! HTTP surface: routes and client-key auth over an axum-independent [`runtime`].
 
-pub mod aa;
-mod access;
-mod affinity;
-pub mod body_limit;
-pub mod capabilities;
-mod classify;
-mod claude;
-mod codex_alpha;
-mod codex_models;
-mod config_diff;
-pub mod config_store;
-pub mod cooldown_store;
-pub mod credential_store;
-pub mod dispatch;
-mod error_events;
-mod errors;
-mod gemini;
-mod gojson;
-mod images;
-pub mod keepalive;
-pub mod lcp;
-pub mod listener;
-pub mod logging;
+pub mod http;
+pub mod inference;
 pub mod management;
-mod model_router;
-pub mod model_updater;
-mod models;
+pub mod net;
 pub mod observability;
-mod openai;
-pub mod pprof;
-pub mod provider_policy;
 mod realtime;
-mod refresh;
-pub mod registry;
-mod relay;
-pub mod request_logging;
-mod resp;
-mod respond;
 pub mod runtime;
-pub mod safe_mode;
-mod sanitize;
-pub mod scheduler;
-mod session;
-mod speech;
+pub mod scheduling;
+pub mod store;
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub mod testing;
-pub mod usage;
-mod usage_record;
-mod videos;
-pub mod watching;
-mod websocket;
-mod websocket_requests;
-mod websocket_tools;
 
 use std::sync::Arc;
 
@@ -63,7 +21,14 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Router, middleware};
 
-pub use runtime::Runtime;
+use http::{gojson, respond};
+use inference::{claude, codex_alpha, gemini, images, models, openai, speech, videos};
+use net::access;
+use observability::request_logging;
+use realtime::{aistudio_relay, websocket};
+use scheduling::registry;
+
+pub use runtime::state::Runtime;
 
 // ponytail: fixed 64 MiB request cap so image-heavy Claude requests pass (axum's default
 // is 2 MiB; gin has none). Make it configurable if anyone needs more.
@@ -132,8 +97,8 @@ fn api(rt: Arc<Runtime>) -> Router {
         .route("/callback", get(devin_callback))
         .route("/devin/callback", get(devin_callback))
         .merge(v1)
-        .merge(realtime::routes(&rt))
-        .merge(relay::routes(&rt))
+        .merge(realtime::api::routes(&rt))
+        .merge(aistudio_relay::routes(&rt))
         // Matched API routes only: management answers its own HEADs.
         .route_layer(middleware::from_fn(head_only_healthz))
         .method_not_allowed_fallback(|| async { StatusCode::NOT_FOUND })
@@ -247,14 +212,14 @@ async fn callback(State(rt): State<Arc<Runtime>>, OriginalUri(uri): OriginalUri)
     };
     let (code, state, error) = callback_query(uri.query().unwrap_or_default(), false);
     if !state.is_empty() {
-        let delivery = rt.deliver_oauth_callback(&runtime::OAuthCallback {
+        let delivery = rt.deliver_oauth_callback(&runtime::state::OAuthCallback {
             provider,
             state,
             code,
             error,
         });
         // Go v8.0.35 `ae3ee3be`: only the Codex route reports the refusal.
-        if provider == "codex" && delivery == runtime::OAuthDelivery::RequiresV8 {
+        if provider == "codex" && delivery == runtime::state::OAuthDelivery::RequiresV8 {
             return respond::gin_json(
                 409,
                 r#"{"error":"SIWC callbacks require /v8/management/oauth/callback"}"#.into(),
@@ -277,13 +242,13 @@ async fn devin_callback(State(rt): State<Arc<Runtime>>, OriginalUri(uri): Origin
             r#"{"error":"code or error is required"}"#.into(),
         ));
     }
-    let delivered = rt.deliver_oauth_callback(&runtime::OAuthCallback {
+    let delivered = rt.deliver_oauth_callback(&runtime::state::OAuthCallback {
         provider: "devin",
         state,
         code,
         error,
     });
-    if delivered != runtime::OAuthDelivery::Delivered {
+    if delivered != runtime::state::OAuthDelivery::Delivered {
         return no_store(respond::gin_json(
             400,
             r#"{"error":"invalid or expired OAuth callback"}"#.into(),

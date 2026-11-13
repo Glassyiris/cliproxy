@@ -35,7 +35,7 @@ use axum::response::IntoResponse;
 use ck_core::config::Config;
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::request_logging::RequestLog;
+use ck_server::observability::request_logging::RequestLog;
 use futures_util::StreamExt;
 use tower::ServiceExt;
 
@@ -336,12 +336,12 @@ async fn large_requests_stay_within_their_heap_budget() {
     // The cloaked login's requests also go through request capture, as in the server:
     // with request logs off it still keeps each upstream request body for a possible
     // error log (Go's deferred API request), until the response has streamed.
-    let management = ck_server::management::Management::with_options(
+    let management = ck_server::management::api::Management::with_options(
         rt.clone(),
-        Arc::new(ck_server::config_store::ConfigStore::memory_with(
+        Arc::new(ck_server::store::config_store::ConfigStore::memory_with(
             &ck_core::config::yaml_string(&rt.config().document).unwrap(),
         )),
-        ck_server::management::Options {
+        ck_server::management::api::Options {
             log_dir: Some(dir.join("logs")),
             management_password: Some(String::new()),
             ..Default::default()
@@ -349,7 +349,7 @@ async fn large_requests_stay_within_their_heap_budget() {
     );
     // Room for every cloaked request this test sends: 2 warm-ups, 6 samples, 8 at once.
     let captures = Arc::new(Mutex::new(Vec::with_capacity(16)));
-    let logged = ck_server::request_logging::router(
+    let logged = ck_server::observability::request_logging::router(
         &management,
         axum::Router::new().fallback_service(Captures(ck_server::router(rt.clone()), captures.clone())),
     );

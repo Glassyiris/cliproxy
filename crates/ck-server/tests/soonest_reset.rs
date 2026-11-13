@@ -10,9 +10,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::config_store::ConfigStore;
-use ck_server::management::{Management, Options};
-use ck_server::scheduler::Strategy;
+use ck_server::management::api::{Management, Options};
+use ck_server::scheduling::scheduler::Strategy;
+use ck_server::store::config_store::ConfigStore;
 use serde_json::{Value, json};
 
 const PASSWORD: &str = "fake-management-password";
@@ -145,7 +145,7 @@ async fn proxy(name: &str, strategy: &str) -> Proxy {
         ..Default::default()
     };
     let management = Management::with_options(rt.clone(), store, options);
-    let app = ck_server::app(rt.clone(), ck_server::management::router(management.clone()));
+    let app = ck_server::app(rt.clone(), ck_server::management::api::router(management.clone()));
     Proxy {
         url: serve(app).await,
         rt,
@@ -263,7 +263,7 @@ async fn management_api_and_reload_switch_the_strategy() {
         .config_store()
         .import_yaml(&yaml(&p.base, "round-robin"), "test", "")
         .unwrap();
-    ck_server::watching::reload(&p.state).unwrap();
+    ck_server::management::watching::reload(&p.state).unwrap();
     assert_eq!(p.rt.policy().strategy, Strategy::RoundRobin);
     let spread = p.route(2).await;
     assert!(spread.contains(&"x") && spread.contains(&"y"), "{spread:?}");
@@ -276,6 +276,6 @@ async fn reloading_to_an_unset_strategy_selects_soonest_reset() {
     assert_eq!(p.rt.policy().strategy, Strategy::RoundRobin);
     let unset = yaml(&p.base, "");
     p.state.config_store().import_yaml(&unset, "test", "").unwrap();
-    ck_server::watching::reload(&p.state).unwrap();
+    ck_server::management::watching::reload(&p.state).unwrap();
     assert_eq!(p.rt.policy().strategy, Strategy::SoonestReset);
 }

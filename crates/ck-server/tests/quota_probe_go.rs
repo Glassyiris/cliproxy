@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::management::{self, Management};
+use ck_server::management::api::{self as management, Management};
 use serde_json::Value;
 
 /// The recording's upstream: fixed answers by path, every request recorded as Go's
@@ -172,7 +172,7 @@ async fn serve(rt: Arc<ck_server::Runtime>, state: Arc<Management>) -> String {
 
 async fn start(dirs: &Dirs, yaml: &str) -> String {
     let hash = bcrypt::hash("fake-secret", 4).unwrap();
-    let store = Arc::new(ck_server::config_store::ConfigStore::memory_with(
+    let store = Arc::new(ck_server::store::config_store::ConfigStore::memory_with(
         &ck_server::testing::without_auth_dir(&dirs.placeholders(yaml)).replace("$HASH", &hash),
     ));
     let mut config = store.load().unwrap().config;

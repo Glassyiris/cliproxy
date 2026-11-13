@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use ck_exec::Executors;
 use ck_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL};
-use ck_server::config_store::ConfigStore;
+use ck_server::store::config_store::ConfigStore;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,16 +28,16 @@ async fn main() -> anyhow::Result<()> {
     // The deny-all test runtime: a credential that is not local cannot leave the machine.
     let rt = Arc::new(ck_server::testing::runtime(config, credentials, executors));
     ck_server::install_registry(&rt);
-    let options = ck_server::management::Options {
+    let options = ck_server::management::api::Options {
         login_base: Some(login_base),
         ..Default::default()
     };
-    let management = ck_server::management::Management::with_options(rt.clone(), store, options);
-    let _watcher = ck_server::watching::start(&management);
+    let management = ck_server::management::api::Management::with_options(rt.clone(), store, options);
+    let _watcher = ck_server::management::watching::start(&management);
     // As main.rs: management answers what the API routes do not, then CORS and the access log.
-    let app = ck_server::app(rt.clone(), ck_server::management::router(management))
-        .layer(axum::middleware::from_fn(ck_server::management::cors));
-    let app = ck_server::observability::router(&rt, app);
+    let app = ck_server::app(rt.clone(), ck_server::management::api::router(management))
+        .layer(axum::middleware::from_fn(ck_server::management::api::cors));
+    let app = ck_server::observability::api::router(&rt, app);
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
     Ok(())
 }

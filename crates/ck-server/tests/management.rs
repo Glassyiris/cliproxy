@@ -3,9 +3,9 @@ use ck_core::config::Config;
 use ck_core::gostr::GoStr;
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::credential_store::CredentialDb;
-use ck_server::management::Management;
-use ck_server::{Runtime, management, watching};
+use ck_server::management::api::{self as management, Management};
+use ck_server::store::credential_store::CredentialDb;
+use ck_server::{Runtime, management::watching};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -187,7 +187,7 @@ impl Drop for Fixture {
 
 #[tokio::test]
 async fn authorized_credential_reads_and_cooldown_views_need_no_storage() {
-    use ck_server::cooldown_store::{Backend, Record};
+    use ck_server::store::cooldown_store::{Backend, Record};
     let raw = b"{ \"type\": \"claude\", \"access_token\": \"test-only\", \"opaque\": [1,2] }\n";
     let f = Fixture::from_yaml("credential-memory", |auth, hash| {
         std::fs::write(auth.join("raw.json"), raw).unwrap();
@@ -875,7 +875,7 @@ async fn removed_plugin_routes_answer_the_ordinary_not_found() {
 
 #[tokio::test]
 async fn config_api_keys_become_scheduled_credentials_on_write_and_reload() {
-    use ck_server::runtime::Selection;
+    use ck_server::runtime::state::Selection;
     let f = Fixture::new("synth");
     let (base, server) = f.server().await;
     let client = wreq::Client::new();
@@ -2239,7 +2239,7 @@ async fn latest_version_keeps_tls_verification_through_proxy() {
     tls.set_private_key(&key).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = listener.local_addr().unwrap();
-    let tls_server = tokio::spawn(ck_server::listener::serve(
+    let tls_server = tokio::spawn(ck_server::net::listener::serve(
         listener,
         axum::Router::new().fallback(|| async {
             (
@@ -2322,7 +2322,7 @@ async fn latest_version_keeps_tls_verification_through_proxy() {
 async fn runtime_credential_disable_clears_its_cooldowns() {
     use ck_core::credential::Credential;
     use ck_core::exec::{ExecError, FailureScope};
-    use ck_server::runtime::{Outcome, Selection};
+    use ck_server::runtime::state::{Outcome, Selection};
     let f = Fixture::new("runtime-cooldown");
     let id = "aistudio-0123456789abcdef";
     assert!(f.rt.store().add_runtime(Credential::relay_session(id)));
@@ -2677,12 +2677,12 @@ async fn devin_login_completes_through_the_main_listener_callback() {
     });
     let (base, _state, server) = login_server(&f, &fake).await;
     let deliver = |state: &str, code: &str, error: &str| {
-        f.rt.deliver_oauth_callback(&ck_server::runtime::OAuthCallback {
+        f.rt.deliver_oauth_callback(&ck_server::runtime::state::OAuthCallback {
             provider: "devin",
             state: state.to_owned(),
             code: code.to_owned(),
             error: error.to_owned(),
-        }) == ck_server::runtime::OAuthDelivery::Delivered
+        }) == ck_server::runtime::state::OAuthDelivery::Delivered
     };
     // A denied authorization ends the session with Go's message.
     let started = oauth_get(&base, "/oauth/auth-url?provider=devin").await;
@@ -2703,13 +2703,13 @@ async fn devin_login_completes_through_the_main_listener_callback() {
     assert_eq!(query["state"], state);
     assert!(!deliver("unknown-state", "c", ""));
     assert_ne!(
-        f.rt.deliver_oauth_callback(&ck_server::runtime::OAuthCallback {
+        f.rt.deliver_oauth_callback(&ck_server::runtime::state::OAuthCallback {
             provider: "codex",
             state: state.clone(),
             code: "c".into(),
             error: String::new(),
         }),
-        ck_server::runtime::OAuthDelivery::Delivered
+        ck_server::runtime::state::OAuthDelivery::Delivered
     );
     assert!(deliver(&state, "fake-devin-code", ""));
     assert_eq!(final_status(&base, &state, 10).await, json!({"status": "ok"}));
@@ -2764,13 +2764,13 @@ async fn a_panicking_login_worker_fails_the_session() {
     let (base, _state, server) = serve_with(&f, options).await;
     let started = oauth_get(&base, "/oauth/auth-url?provider=codex").await;
     let state = started["state"].as_str().unwrap().to_owned();
-    let delivered = f.rt.deliver_oauth_callback(&ck_server::runtime::OAuthCallback {
+    let delivered = f.rt.deliver_oauth_callback(&ck_server::runtime::state::OAuthCallback {
         provider: "codex",
         state: state.clone(),
         code: "fake-code".into(),
         error: String::new(),
     });
-    assert_eq!(delivered, ck_server::runtime::OAuthDelivery::Delivered);
+    assert_eq!(delivered, ck_server::runtime::state::OAuthDelivery::Delivered);
     assert_eq!(
         final_status(&base, &state, 5).await,
         json!({"status": "error", "error": "Sign-in failed because of an internal error. Start the sign-in again."})
@@ -2794,13 +2794,13 @@ async fn codex_login_completes_through_the_main_listener_callback() {
             .unwrap()
             .starts_with("https://auth.openai.com/oauth/authorize?")
     );
-    let delivered = f.rt.deliver_oauth_callback(&ck_server::runtime::OAuthCallback {
+    let delivered = f.rt.deliver_oauth_callback(&ck_server::runtime::state::OAuthCallback {
         provider: "codex",
         state: state.clone(),
         code: "fake-code".into(),
         error: String::new(),
     });
-    assert_eq!(delivered, ck_server::runtime::OAuthDelivery::Delivered);
+    assert_eq!(delivered, ck_server::runtime::state::OAuthDelivery::Delivered);
     assert_eq!(final_status(&base, &state, 10).await, json!({"status": "ok"}));
     let token_request = seen
         .lock()
@@ -2823,13 +2823,13 @@ async fn codex_login_completes_through_the_main_listener_callback() {
         .expect("saved and published");
     assert_eq!(codex.str("email"), Some("c@example.invalid"));
     assert_ne!(
-        f.rt.deliver_oauth_callback(&ck_server::runtime::OAuthCallback {
+        f.rt.deliver_oauth_callback(&ck_server::runtime::state::OAuthCallback {
             provider: "codex",
             state,
             code: "again".into(),
             error: String::new(),
         }),
-        ck_server::runtime::OAuthDelivery::Delivered
+        ck_server::runtime::state::OAuthDelivery::Delivered
     );
     server.abort();
     fake_server.abort();
@@ -3628,13 +3628,13 @@ async fn kimi_channel_selects_kimi_ai_and_codex_exchange_errors_read_like_go() {
     let started = oauth_get(&base, "/oauth/auth-url?provider=codex").await;
     let state = started["state"].as_str().unwrap().to_owned();
     assert_eq!(
-        f.rt.deliver_oauth_callback(&ck_server::runtime::OAuthCallback {
+        f.rt.deliver_oauth_callback(&ck_server::runtime::state::OAuthCallback {
             provider: "codex",
             state: state.clone(),
             code: "fake-code".into(),
             error: String::new(),
         }),
-        ck_server::runtime::OAuthDelivery::Delivered
+        ck_server::runtime::state::OAuthDelivery::Delivered
     );
     // Go appends the upstream body; session errors are readable by anyone holding
     // the state, so cooker stops at the status (deliberate hardening).
@@ -3982,13 +3982,13 @@ async fn siwc_binding_flows_follow_go() {
         (409, json!({"status": "error", "error": "oauth flow is not pending"}))
     );
     assert_eq!(
-        f.rt.deliver_oauth_callback(&ck_server::runtime::OAuthCallback {
+        f.rt.deliver_oauth_callback(&ck_server::runtime::state::OAuthCallback {
             provider: "codex",
             state: sid.clone(),
             code: "issued-code".into(),
             error: String::new(),
         }),
-        ck_server::runtime::OAuthDelivery::RequiresV8
+        ck_server::runtime::state::OAuthDelivery::RequiresV8
     );
 
     // Incomplete or conflicting callbacks are refused before any exchange.
@@ -4224,7 +4224,7 @@ async fn siwc_binding_flows_follow_go() {
     // a result rewrites the file the way Go's `MarkResult` persist does.
     let fail = |id: &str, model: &str, status: u16, scope| {
         use ck_core::exec::ExecError;
-        let mut selection = ck_server::runtime::Selection::new("codex", model);
+        let mut selection = ck_server::runtime::state::Selection::new("codex", model);
         selection.exclude = ["codex.json", "no-refresh.json"]
             .into_iter()
             .filter(|other| *other != id)
@@ -4234,7 +4234,7 @@ async fn siwc_binding_flows_follow_go() {
         assert_eq!(lease.credential.id, id);
         let mut error = ExecError::local(status, scope, "upstream said no");
         error.retry_after = Some(Duration::from_secs(600));
-        lease.complete(ck_server::runtime::Outcome::Failure(error));
+        lease.complete(ck_server::runtime::state::Outcome::Failure(error));
     };
     use ck_core::exec::FailureScope;
     fail("codex.json", "m-unauthorized", 401, FailureScope::Credential);

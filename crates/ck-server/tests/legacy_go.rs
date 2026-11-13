@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::config_store::ConfigStore;
-use ck_server::management::{self, Management, Options};
+use ck_server::management::api::{self as management, Management, Options};
+use ck_server::store::config_store::ConfigStore;
 use serde_json::Value;
 
 async fn serve() -> (String, tokio::task::JoinHandle<()>) {

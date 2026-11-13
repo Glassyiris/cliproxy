@@ -121,7 +121,7 @@ async fn proxy(dir: &Path, upstream_url: &str) -> String {
     let rt = Arc::new(ck_server::testing::runtime(config, creds, executors));
     // This suite checks wire passthrough, one upstream attempt per request. Scheduler
     // failover/rounds have their own local-upstream integration suite.
-    rt.publish_policy(ck_server::scheduler::Policy {
+    rt.publish_policy(ck_server::scheduling::scheduler::Policy {
         max_retry_credentials: 1,
         ..Default::default()
     });
@@ -403,18 +403,22 @@ async fn request_log_masks_upstream_credentials() {
     };
     let rt = Arc::new(ck_server::testing::runtime(config, creds, executors));
     ck_server::install_registry(&rt);
-    let management = ck_server::management::Management::with_options(
+    let management = ck_server::management::api::Management::with_options(
         rt.clone(),
-        Arc::new(ck_server::config_store::ConfigStore::memory_with(
+        Arc::new(ck_server::store::config_store::ConfigStore::memory_with(
             &ck_core::config::yaml_string(&rt.config().document).unwrap(),
         )),
-        ck_server::management::Options {
+        ck_server::management::api::Options {
             log_dir: Some(logs.clone()),
             management_password: Some(String::new()),
             ..Default::default()
         },
     );
-    let proxy = serve(ck_server::request_logging::router(&management, router(rt))).await;
+    let proxy = serve(ck_server::observability::request_logging::router(
+        &management,
+        router(rt),
+    ))
+    .await;
 
     let res = wreq::Client::new()
         .post(format!("{proxy}/v1/messages"))
@@ -575,7 +579,7 @@ async fn usage_proxy(dir: &Path, upstream_url: &str) -> (Arc<ck_server::Runtime>
     let rt = Arc::new(ck_server::testing::runtime(config, creds, executors));
     rt.usage_queue().configure(true, &rt.config());
     ck_server::install_registry(&rt);
-    let proxy = serve(ck_server::observability::router(&rt, router(rt.clone()))).await;
+    let proxy = serve(ck_server::observability::api::router(&rt, router(rt.clone()))).await;
     (rt, format!("{proxy}/v1/messages"))
 }
 
