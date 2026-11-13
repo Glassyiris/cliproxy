@@ -18,7 +18,7 @@ pub mod mdns;
 
 pub const DEFAULT_SERVICE_TYPE: &str = "_ai-gateway._tcp";
 pub const DEFAULT_DOMAIN: &str = "local.";
-pub const PRODUCT_CPA: &str = "cliproxyapi";
+pub const PRODUCT_CPA: &str = "cook-router";
 const DEFAULT_SUBTYPES: [&str; 5] = [
     "_chat-completions",
     "_responses",
@@ -146,7 +146,7 @@ fn is_hex4(s: &str) -> bool {
     s.len() == 4 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Go `ResolveDiscoveryStateDir`: `$WRITABLE_PATH/discovery`, else the user config dir.
+/// Go `ResolveDiscoveryStateDir`: `$COOK_WRITABLE_PATH/discovery`, else the user config dir.
 pub fn state_dir() -> Option<PathBuf> {
     let trimmed = |k: &str| {
         std::env::var(k)
@@ -154,7 +154,7 @@ pub fn state_dir() -> Option<PathBuf> {
             .map(|v| go_trim(&v).to_owned())
             .filter(|v| !v.is_empty())
     };
-    if let Some(w) = trimmed("WRITABLE_PATH").or_else(|| trimmed("writable_path")) {
+    if let Some(w) = trimmed("COOK_WRITABLE_PATH") {
         return Some(Path::new(&w).join("discovery"));
     }
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());

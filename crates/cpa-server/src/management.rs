@@ -110,11 +110,11 @@ pub struct Options {
     /// reloads, for loopback clients. Go refuses every request without a configured
     /// secret, so its standalone TUI cannot sign in with a keyless config.
     pub standalone: bool,
-    /// Overrides the `MANAGEMENT_PASSWORD` environment variable when set.
+    /// Overrides the `COOK_MANAGEMENT_PASSWORD` environment variable when set.
     pub management_password: Option<String>,
     /// Overrides [`observability::LATEST_RELEASE_URL`] (tests point it at a local server).
     pub latest_release_url: Option<String>,
-    /// Overrides COOK_ROUTER_NO_UPDATE_CHECK (tests only).
+    /// Overrides COOK_NO_UPDATE_CHECK (tests only).
     pub update_check_disabled: Option<bool>,
     /// One local base URL for every provider's login endpoints (tests only).
     pub login_base: Option<String>,
@@ -192,12 +192,9 @@ impl Management {
             .clone()
             .map(std::borrow::Cow::Owned)
             .unwrap_or(std::borrow::Cow::Borrowed(observability::LATEST_RELEASE_URL));
-        let update_check_disabled = options.update_check_disabled.unwrap_or_else(|| {
-            // CLIPROXY_NO_UPDATE_CHECK, the name before the rename, applies while the new one is unset.
-            std::env::var("COOK_ROUTER_NO_UPDATE_CHECK")
-                .or_else(|_| std::env::var("CLIPROXY_NO_UPDATE_CHECK"))
-                .is_ok_and(|v| v == "1")
-        });
+        let update_check_disabled = options
+            .update_check_disabled
+            .unwrap_or_else(|| std::env::var("COOK_NO_UPDATE_CHECK").is_ok_and(|v| v == "1"));
         let login_base = options.login_base.clone();
         let log_dir = options
             .log_dir

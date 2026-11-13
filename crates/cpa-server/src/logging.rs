@@ -284,15 +284,13 @@ fn set_level(enabled: bool) {
     );
 }
 
-/// Go `ResolveLogDirectory`: `$WRITABLE_PATH/logs`, else `logs` when it is a writable
+/// Go `ResolveLogDirectory`: `$COOK_WRITABLE_PATH/logs`, else `logs` when it is a writable
 /// directory, else `<auth-dir>/logs`.
 pub fn resolve_log_dir(cfg: &Config) -> PathBuf {
-    for key in ["WRITABLE_PATH", "writable_path"] {
-        if let Ok(v) = std::env::var(key)
-            && !v.trim().is_empty()
-        {
-            return Path::new(v.trim()).join("logs");
-        }
+    if let Ok(v) = std::env::var("COOK_WRITABLE_PATH")
+        && !v.trim().is_empty()
+    {
+        return Path::new(v.trim()).join("logs");
     }
     let local = Path::new("logs");
     let writable = local.is_dir() && {

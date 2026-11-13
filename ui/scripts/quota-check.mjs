@@ -61,7 +61,7 @@ try {
       if (!path.includes('/v8/management/') && !path.includes('/admin/v1/')) return original(input, init);
       const f = window.quotaFixture;
       let body;
-      const json = (b, status = 200) => new Response(JSON.stringify(b), {status, headers:{'Content-Type':'application/json','X-CPA-COMMIT':'fixture'}});
+      const json = (b, status = 200) => new Response(JSON.stringify(b), {status, headers:{'Content-Type':'application/json','X-Cook-Commit':'fixture'}});
       const sent = init?.body && typeof init.body === 'string' ? JSON.parse(init.body) : {};
       if (path.endsWith('/admin/v1/effective/config')) body = {};
       else if (path.endsWith('/credentials') && init?.method === 'DELETE') {
@@ -94,7 +94,7 @@ try {
         const request = JSON.parse(init.body);
         body = {status_code:f.status, body:JSON.stringify(request.authIndex === 'claude-test' ? {five_hour:{utilization:f.used}} : {rate_limit:{primary_window:{used_percent:f.used}}})};
       } else throw new Error('Unexpected management request: '+path);
-      return new Response(JSON.stringify(body), {headers:{'Content-Type':'application/json','X-CPA-COMMIT':'fixture'}});
+      return new Response(JSON.stringify(body), {headers:{'Content-Type':'application/json','X-Cook-Commit':'fixture'}});
     };
     return true;
   })()`);

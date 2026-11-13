@@ -571,7 +571,7 @@ async fn plugin_routes_match_go() {
                     .get("content-type")
                     .map(|v| v.to_str().unwrap().to_owned())
                     .unwrap_or_default();
-                let version = res.headers().contains_key("x-cpa-version");
+                let version = res.headers().contains_key("x-cook-version");
                 let text = res.text().await.unwrap();
                 serde_json::json!({
                     "status": status,

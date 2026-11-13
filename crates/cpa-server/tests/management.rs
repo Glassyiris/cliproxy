@@ -2036,7 +2036,7 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
         get("tag", true).await,
         (
             503,
-            json!({"error": "update_check_disabled", "message": "Update checks are disabled by COOK_ROUTER_NO_UPDATE_CHECK=1."})
+            json!({"error": "update_check_disabled", "message": "Update checks are disabled by COOK_NO_UPDATE_CHECK=1."})
         )
     );
     assert!(seen.lock().unwrap().is_empty(), "nothing is asked when disabled");

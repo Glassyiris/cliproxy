@@ -184,7 +184,7 @@ observability:
 
 | Setting | What it does |
 |---|---|
-| `secret-key` | The dashboard and Management API password. A plaintext imported value is stored as its bcrypt hash, not rewritten into YAML. The `MANAGEMENT_PASSWORD` environment variable works too. When neither is set, the management API is off. Changing or removing it signs out every dashboard session for good: restoring the old value later brings none back. |
+| `secret-key` | The dashboard and Management API password. A plaintext imported value is stored as its bcrypt hash, not rewritten into YAML. The `COOK_MANAGEMENT_PASSWORD` environment variable works too. When neither is set, the management API is off. Changing or removing it signs out every dashboard session for good: restoring the old value later brings none back. |
 | `allow-remote` | `false` (the default) accepts management requests from this computer only. |
 | `disable-control-panel` | `true` stops serving the dashboard at `/management.html`; the Management API keeps working. |
 
@@ -279,7 +279,7 @@ routing:
 - **Order.** Tiers are tried top down, `strategy` balances inside a tier, and unlisted credentials follow by `priority`. Order only places new conversations: with `session-affinity` a conversation keeps its usable account even when a higher tier recovers, so its cache stays warm.
 - **Failover** to the next credential follows the entry's `request-scoped-errors` actions, else the usual handling.
 
-`X-CPA-Routed-Provider` names the serving credential's selector. It is sent only when `routing.providers` sets `exclude` or `order`, or a model router served the request.
+`X-Cook-Routed-Provider` names the serving credential's selector. It is sent only when `routing.providers` sets `exclude` or `order`, or a model router served the request.
 
 ### Optional preset: fail over only on 429
 
@@ -397,11 +397,11 @@ How a request to `smart` is routed:
 - **Pick.** The grade maps linearly onto the index range of the candidates' cost/capability Pareto front, moved by -15% (`cost`), 0 or +20% (`quality`) of that range; the cheapest variant within 1 index point of it serves, since smaller gaps are benchmark noise. The client's suffix is kept when the route has none of its own. Without any rated candidate, the first available listed model serves, else the newest available model.
 - **Conversation.** A conversation (the session the server derives, see `session_source` in [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)) keeps its model for an hour after its last request, so its prompt cache stays warm. Tool-result requests always keep it; a new user message is graded again and moves the conversation only to a stronger model. It also moves when its model becomes unavailable, leaves `models` or is too small. `count_tokens` neither asks the judge nor binds; image, video and speech routes do not route. A Responses client chaining `previous_response_id` should send `prompt_cache_key`, `conversation_id` or a session header, or each turn can land on another model.
 
-The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-CPA-Routed-Model` names the model that served a request and `X-CPA-Routed-Provider` its provider; `GET /v1/models` lists the routers. Not covered yet: the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cook-router ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
+The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-Cook-Routed-Model` names the model that served a request and `X-Cook-Routed-Provider` its provider; `GET /v1/models` lists the routers. Not covered yet: the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cook-router ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
 
 ## Environment
 
-- `MANAGEMENT_PASSWORD`: the management key, instead of `management.secret-key`.
+- `COOK_MANAGEMENT_PASSWORD`: the management key, instead of `management.secret-key`.
 - `TOKIO_WORKER_THREADS`: the number of request threads, instead of `worker-threads`.
 - `RUST_LOG`: overrides the log level, for example `RUST_LOG=debug`.
 - A `.env` file in the working directory is loaded at start, as in CLIProxyAPI.

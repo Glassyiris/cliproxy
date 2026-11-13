@@ -516,7 +516,7 @@ mod access {
                 }
                 let res = req.send().await.unwrap();
                 let status = res.status().as_u16();
-                let version = res.headers().contains_key("x-cpa-version");
+                let version = res.headers().contains_key("x-cook-version");
                 let body = res.text().await.unwrap();
                 assert_eq!(status, step["status"], "{name}[{i}] {body}");
                 if status != 200 {
@@ -619,16 +619,16 @@ mod routes {
                     "Access-Control-Allow-Methods",
                     "Access-Control-Allow-Headers",
                     "Access-Control-Expose-Headers",
-                    "X-CPA-SUPPORT-PLUGIN",
-                    "X-CPA-COMMIT",
-                    "X-CPA-BUILD-DATE",
+                    "X-Cook-Support-Plugin",
+                    "X-Cook-Commit",
+                    "X-Cook-Build-Date",
                 ] {
                     if let Some(v) = res.headers().get(name) {
                         headers.insert(name.into(), v.to_str().unwrap().into());
                     }
                 }
-                if res.headers().contains_key("x-cpa-version") {
-                    headers.insert("X-CPA-VERSION".into(), "present".into());
+                if res.headers().contains_key("x-cook-version") {
+                    headers.insert("X-Cook-Version".into(), "present".into());
                 }
                 assert!(!res.headers().contains_key("allow"), "{name}[{i}]: gin sends no Allow");
                 let body = res.text().await.unwrap();
@@ -644,7 +644,24 @@ mod routes {
                         assert_eq!(body, step["resp_body"].as_str().unwrap(), "{name}[{i}]");
                     }
                 }
-                let mut want = step["resp_headers"].as_object().unwrap().clone();
+                // Go's recording names the version headers X-CPA-*.
+                let rename = |s: &str| {
+                    [
+                        ("X-CPA-VERSION", "X-Cook-Version"),
+                        ("X-CPA-COMMIT", "X-Cook-Commit"),
+                        ("X-CPA-BUILD-DATE", "X-Cook-Build-Date"),
+                        ("X-CPA-SUPPORT-PLUGIN", "X-Cook-Support-Plugin"),
+                        ("X-CPA-TRACE-ID", "X-Cook-Trace-Id"),
+                    ]
+                    .iter()
+                    .fold(s.to_owned(), |s, (old, new)| s.replace(old, new))
+                };
+                let mut want: serde_json::Map<String, Value> = step["resp_headers"]
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(k, v)| (rename(k), v.as_str().map_or(v.clone(), |s| rename(s).into())))
+                    .collect();
                 if step["path"].as_str().unwrap().starts_with("/admin/v1/") && matches!(status, 401 | 403) {
                     want.insert("Content-Type".into(), "application/json".into());
                     want.insert("Cache-Control".into(), "no-store".into());
@@ -654,13 +671,13 @@ mod routes {
                     && GUARD_REFUSALS
                         .iter()
                         .any(|m| step["resp_body"].as_str().unwrap().contains(m));
-                if headers.contains_key("X-CPA-VERSION") && !guard_refused {
+                if headers.contains_key("X-Cook-Version") && !guard_refused {
                     want.insert("Cache-Control".into(), "no-store".into());
                 }
                 // The goldens come from Go's cgo build, which loads native plugins; this
                 // binary does too, except on Windows.
-                if want.contains_key("X-CPA-SUPPORT-PLUGIN") {
-                    want.insert("X-CPA-SUPPORT-PLUGIN".into(), cpa_plugin::SUPPORT_PLUGIN.into());
+                if want.contains_key("X-Cook-Support-Plugin") {
+                    want.insert("X-Cook-Support-Plugin".into(), cpa_plugin::SUPPORT_PLUGIN.into());
                 }
                 assert_eq!(Value::Object(headers), Value::Object(want), "{name}[{i}] headers");
                 compared += 1;

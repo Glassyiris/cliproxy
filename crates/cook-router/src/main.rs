@@ -20,13 +20,13 @@ use cpa_server::config_store::ConfigStore;
 use cpa_server::credential_store::CredentialDb;
 use cpa_server::listener::bind;
 
-/// Same strings as the management `X-CPA-*` headers.
+/// Same strings as the management `X-Cook-*` headers.
 const VERSION: &str = concat!("cook-router-", env!("CARGO_PKG_VERSION"));
-const COMMIT: &str = match option_env!("CPA_COMMIT") {
+const COMMIT: &str = match option_env!("COOK_COMMIT") {
     Some(v) => v,
     None => "none",
 };
-const BUILD_DATE: &str = match option_env!("CPA_BUILD_DATE") {
+const BUILD_DATE: &str = match option_env!("COOK_BUILD_DATE") {
     Some(v) => v,
     None => "unknown",
 };
@@ -515,7 +515,7 @@ fn main() -> anyhow::Result<()> {
     let loaded = if discover_mode || remote_client {
         None
     } else {
-        let optional = std::env::var("DEPLOY").is_ok_and(|v| v == "cloud");
+        let optional = std::env::var("COOK_DEPLOY").is_ok_and(|v| v == "cloud");
         let loaded =
             reject_remote_store(&|key| std::env::var(key).ok()).and_then(|()| load_config(&db, &config_file, optional));
         // Like a failure inside `run`: the process log keeps why startup stopped.
@@ -681,7 +681,7 @@ async fn run(
         return Ok(());
     }
     let (config_store, mut config) = loaded.context("local config was not initialized")?;
-    let cloud = std::env::var("DEPLOY").is_ok_and(|v| v == "cloud");
+    let cloud = std::env::var("COOK_DEPLOY").is_ok_and(|v| v == "cloud");
     let config_present = !cloud || cloud_config_present(&config_store, &config);
     let backend = initialize_credentials(config_store.clone(), &mut config)?;
     plugin_cli::attach_credentials(&plugins, backend.clone());
@@ -2852,7 +2852,7 @@ mod tests {
             };
             let rt = Arc::new(cpa_server::testing::runtime(config.clone(), Vec::new(), executors));
             let options = cpa_server::management::Options {
-                // MANAGEMENT_PASSWORD; with no config secret it alone decides availability.
+                // COOK_MANAGEMENT_PASSWORD; with no config secret it alone decides availability.
                 management_password: Some(if enabled {
                     "fake-management-only".into()
                 } else {

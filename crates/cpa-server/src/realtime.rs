@@ -400,7 +400,7 @@ fn header_session(headers: &HeaderMap, body: &[u8], execution_session: Option<&s
     cpa_common::session::cpa_session_id(Some(&cpa_common::session::extract_session_id(headers, body, &meta)))
 }
 
-/// Go's `X-CPA-TRACE-ID`, stamped when the credential is selected
+/// Go's `X-Cook-Trace-Id`, stamped when the credential is selected
 /// (`logging.SetGinCPATraceID`): the time, the auth index and the request ID.
 fn trace(credential: &Credential) -> Option<HeaderValue> {
     let trace = crate::dispatch::Trace::with_request_id(crate::observability::current_request_id());
@@ -411,7 +411,7 @@ fn trace(credential: &Credential) -> Option<HeaderValue> {
 /// Adds the trace header to a response sent after the selection.
 fn with_trace(mut response: Response, trace: &Option<HeaderValue>) -> Response {
     if let Some(value) = trace {
-        response.headers_mut().insert("x-cpa-trace-id", value.clone());
+        response.headers_mut().insert("x-cook-trace-id", value.clone());
     }
     response
 }

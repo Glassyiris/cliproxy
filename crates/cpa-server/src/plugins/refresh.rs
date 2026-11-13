@@ -293,7 +293,7 @@ pub(crate) fn failed(store: &crate::runtime::CredentialStore, id: &str, registra
 /// failure and holds the plugin's error code when it is a known one
 /// ([`cpa_exec::oauth::known_error_code`]; empty otherwise). The error's body is the
 /// plugin's free message, which logs never show. Never sent.
-pub(crate) const PLUGIN_ERROR: &str = "x-cpa-plugin-refresh-error";
+pub(crate) const PLUGIN_ERROR: &str = "x-cook-plugin-refresh-error";
 
 /// A failed plugin refresh call as an [`ExecError`]: the plugin's status (500 when it
 /// names none) and message, marked with [`PLUGIN_ERROR`].

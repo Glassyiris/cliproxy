@@ -951,7 +951,7 @@ const server = http.createServer((req, res) => {
       if (url.pathname === "/healthz") return (status = 200), send(200, { "Content-Type": "application/json" }, '{"status":"ok"}');
       if (url.pathname === "/v1/models" && req.method === "GET") return (status = clientModels(req, send));
       if (![PREFIX, "/admin/v1"].some((prefix) => url.pathname.startsWith(prefix + "/") || url.pathname === prefix)) return send(404, {}, "");
-      const headers = { "X-CPA-VERSION": VERSION, "X-CPA-COMMIT": "0000000", "X-CPA-BUILD-DATE": BUILD_DATE, "Cache-Control": "no-store", "X-Cook-Revision": String(configVersion), "X-Cook-Published-Revision": String(configVersion) };
+      const headers = { "X-Cook-Version": VERSION, "X-Cook-Commit": "0000000", "X-Cook-Build-Date": BUILD_DATE, "Cache-Control": "no-store", "X-Cook-Revision": String(configVersion), "X-Cook-Published-Revision": String(configVersion) };
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
       const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || String(req.headers["x-management-key"] || "");
       // The dashboard session, as the server does it (crates/cpa-server/src/management/session.rs):
