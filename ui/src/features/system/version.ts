@@ -1,4 +1,4 @@
-// X-CPA-VERSION reads "cook-router-1.2.3"; a release tag reads "v1.2.3".
+// X-Cook-Version reads "cook-router-1.2.3"; a release tag reads "v1.2.3".
 const bare = (version: string) => version.replace(/^cook-router[/-]/, "").replace(/^v/, "");
 
 const parts = (version: string) => {
