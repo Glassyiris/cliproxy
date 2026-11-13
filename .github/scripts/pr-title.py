@@ -15,11 +15,11 @@ import sys
 
 TYPES = {"feat", "fix", "refactor", "test", "style", "chore", "docs", "deps", "ci", "release"}
 SCOPES = {
-    "cli": "the cook-router binary: command line, TUI, discovery (crates/cook-router)",
-    "server": "HTTP routes, client auth, credential selection, management API (crates/cpa-server)",
-    "exec": "upstream provider executors (crates/cpa-exec)",
-    "translate": "request and response translation (crates/cpa-translate)",
-    "core": "config, credentials, formats, shared helpers (crates/cpa-core, crates/cpa-common)",
+    "cli": "the cooker binary: command line, TUI, discovery (crates/cooker)",
+    "server": "HTTP routes, client auth, credential selection, management API (crates/ck-server)",
+    "exec": "upstream provider executors (crates/ck-exec)",
+    "translate": "request and response translation (crates/ck-translate)",
+    "core": "config, credentials, formats, shared helpers (crates/ck-core, crates/ck-wire)",
     "ui": "the dashboard (ui/)",
     "docker": "the Dockerfile and image",
     "ci": "workflows and CI scripts (.github/)",

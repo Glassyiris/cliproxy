@@ -4,6 +4,6 @@ export default {
   name: "site",
   displayName: "Rosé Pine (Moon/Dawn)",
   description:
-    "cook-router dashboard: Rosé Pine Moon for dark, Dawn for light; greys carry hierarchy, hue only for state.",
+    "cooker dashboard: Rosé Pine Moon for dark, Dawn for light; greys carry hierarchy, hue only for state.",
   maintained: false,
 };

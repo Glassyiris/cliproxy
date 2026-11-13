@@ -43,8 +43,8 @@ class SummaryTests(unittest.TestCase):
                    '"path": "/v0/management/quota/fetch"}}, '
                    '{"op": "upstream", "args": {"method": "quota.reset"}}]}')
         with patch.object(audit, "scan_files", return_value=iter([
-            ("crates/cpa-server/tests/fixtures/quota_probe_go.json", fixture),
-            ("crates/cpa-server/tests/fixtures/media_go.json",
+            ("crates/ck-server/tests/fixtures/quota_probe_go.json", fixture),
+            ("crates/ck-server/tests/fixtures/media_go.json",
              '{"scenarios": [{"method": "POST", "path": "/v1/videos/extensions"}]}'),
         ])):
             tests = audit.test_texts()

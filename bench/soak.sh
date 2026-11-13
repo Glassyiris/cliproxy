@@ -59,7 +59,7 @@ export GOPROXY=off GOTOOLCHAIN=local
 BIN=$(realpath "$1")
 MINUTES=$2
 [[ $MINUTES =~ ^[1-9][0-9]{0,3}$ ]] || { echo "minutes must be a positive whole number" >&2; exit 2; }
-OUT=$(realpath -m "${3:-/tmp/cook-router-soak}")
+OUT=$(realpath -m "${3:-/tmp/cooker-soak}")
 HERE=$(cd "$(dirname "$0")" && pwd)
 MIX=${MIX:-claude}
 PORT=8345
@@ -123,7 +123,7 @@ if [[ $MIX == field ]]; then
         - api-key: "sk-FAKE-bench-codex-key"
 EOF
 fi
-COOK_DB="$DB_DIR/cook.db" "$BIN" --config "$OUT/config.yaml" --local-model > "$OUT/server.log" 2>&1 &
+CK_DB="$DB_DIR/cooker.db" "$BIN" --config "$OUT/config.yaml" --local-model > "$OUT/server.log" 2>&1 &
 SRV_PID=$!
 ready=false
 for _ in $(seq 1 400); do

@@ -380,11 +380,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
-name = "cpa-common"
+name = "ck-wire"
 version = "0.4.1"
 dependencies = [
  "base64 0.22.1",
- "cpa-core",
+ "ck-core",
  "http",
  "memchr",
  "ryu",
@@ -395,7 +395,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cpa-core"
+name = "ck-core"
 version = "0.4.1"
 dependencies = [
  "anyhow",
@@ -412,20 +412,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "cpa-differential-driver"
+name = "ck-differential-driver"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "cpa-core",
- "cpa-exec",
- "cpa-server",
+ "ck-core",
+ "ck-exec",
+ "ck-server",
  "tokio",
  "wreq",
 ]
 
 [[package]]
-name = "cpa-exec"
+name = "ck-exec"
 version = "0.4.1"
 dependencies = [
  "async-compression",
@@ -434,9 +434,9 @@ dependencies = [
  "btls",
  "bytes",
  "chrono",
- "cpa-common",
- "cpa-core",
- "cpa-translate",
+ "ck-wire",
+ "ck-core",
+ "ck-translate",
  "flate2",
  "futures-util",
  "getrandom 0.3.4",
@@ -464,7 +464,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cpa-server"
+name = "ck-server"
 version = "0.4.1"
 dependencies = [
  "anyhow",
@@ -475,10 +475,10 @@ dependencies = [
  "btls",
  "bytes",
  "chrono",
- "cpa-common",
- "cpa-core",
- "cpa-exec",
- "cpa-translate",
+ "ck-wire",
+ "ck-core",
+ "ck-exec",
+ "ck-translate",
  "flate2",
  "futures-util",
  "getrandom 0.3.4",
@@ -510,13 +510,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "cpa-translate"
+name = "ck-translate"
 version = "0.4.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "cpa-common",
- "cpa-core",
+ "ck-wire",
+ "ck-core",
  "rand",
  "regex",
  "serde_json",

@@ -4,7 +4,7 @@ This guide covers routing across your own accounts and API keys, for use on your
 
 ## Add the accounts
 
-Sign in to each account once, from the dashboard (Connect account) or the command line. While the server runs, the command line goes through it: `cook-router --management-base-url http://127.0.0.1:8317 --claude-login` (or `--codex-login`), which reads the management key from `COOK_ROUTER_MANAGEMENT_KEY` or asks for it; with the server stopped, `cook-router --db /path/to/cook.db --claude-login` writes the server's database directly. Every sign-in becomes a credential in SQLite; no directory is watched for account files.
+Sign in to each account once, from the dashboard (Connect account) or the command line. While the server runs, the command line goes through it: `cooker --management-base-url http://127.0.0.1:8317 --claude-login` (or `--codex-login`), which reads the management key from `CK_MANAGEMENT_KEY` or asks for it; with the server stopped, `cooker --db /path/to/cooker.db --claude-login` writes the server's database directly. Every sign-in becomes a credential in SQLite; no directory is watched for account files.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/credentials-dark.png">
@@ -22,7 +22,7 @@ The provider's sign-in page uses whatever account your browser is logged into. T
 | `round-robin` | Takes the accounts in turn, one request each. | The accounts are alike and you want the load even. |
 | `fill-first` | Uses one account until it cools down or reaches a limit, then the next. | You prefer one account and keep another as a fallback. |
 | `weighted-round-robin` | Takes the accounts in turn in proportion to each account's `weight`. An account with weight 0 is left out. | The plans differ in size. |
-| `soonest-reset` (default, alias `reset-first`, a cook-router addition) | Selects the account whose weekly window resets soonest, until it cools down or reaches a limit, then the next soonest. An account without a known reset gets one request to learn it. | You have several subscriptions and want each one's quota used before its week resets. |
+| `soonest-reset` (default, alias `reset-first`, a cooker addition) | Selects the account whose weekly window resets soonest, until it cools down or reaches a limit, then the next soonest. An account without a known reset gets one request to learn it. | You have several subscriptions and want each one's quota used before its week resets. |
 
 `soonest-reset` is the strategy when `routing.strategy` is unset or empty. It spends the subscription whose weekly window frees up soonest, so quota that would expire at the reset is used first. Reset times come from the usage headers of each account's last response (`anthropic-ratelimit-unified-*` for Claude, `x-codex-*` for Codex). Among the ready accounts of the highest priority:
 
@@ -61,7 +61,7 @@ routing:
 
 With affinity on, a conversation stays on the account that served its first request. Providers keep a prompt cache per account, so the next turn of a conversation on the same account reads the long shared beginning from cache: it is cheaper against your limits and the reply starts sooner. Moving a conversation to another account throws that cache away. The proxy recognises a conversation from the session headers that Claude Code, Codex, OpenCode and similar tools send. When a request has none, the proxy matches its messages against the conversations it has seen for the same client key and model: a conversation that grows keeps its account, a branch of an earlier conversation stays on that conversation's account, and a conversation whose early history was summarised (compacted) is recognised from the turns it kept. A request that matches no earlier conversation starts a new one, which its next turns are matched against. Message matching needs a client key (`access.api-keys`) and at least one message that is not a system message; a request without either is identified by its instructions and first user message instead, and when it has no user message, by a hash of its first messages.
 
-When `session-affinity` is omitted, both cook-router and CLIProxyAPI default to off. Affinity works with the routing strategy: a bound conversation keeps its account; new conversations follow the strategy. When the bound account cools down or is disabled, the conversation moves to another account. `session-affinity-ttl` (default `"1h"`) controls how long an idle conversation keeps its account. `session-affinity-subagents` (default `true`) binds child sessions to their parent's account too.
+When `session-affinity` is omitted, both cooker and CLIProxyAPI default to off. Affinity works with the routing strategy: a bound conversation keeps its account; new conversations follow the strategy. When the bound account cools down or is disabled, the conversation moves to another account. `session-affinity-ttl` (default `"1h"`) controls how long an idle conversation keeps its account. `session-affinity-subagents` (default `true`) binds child sessions to their parent's account too.
 
 ## Cooldowns and limits
 
@@ -154,7 +154,7 @@ routing:
     max-retry-interval: 30
 ```
 
-Sign in five times (three Claude accounts, two Codex accounts), then set these fields in each account's panel on the Accounts page. SQLite persists these account edits; do not change old files in `~/.cook-router/auth`.
+Sign in five times (three Claude accounts, two Codex accounts), then set these fields in each account's panel on the Accounts page. SQLite persists these account edits; do not change old files in `~/.cooker/auth`.
 
 | Account | Fields | Why |
 |---|---|---|

@@ -1,7 +1,7 @@
 // End-to-end account sign-in through the dashboard. Disposable servers only.
 //
 // --mode fake: the server's login endpoints point at scripts/fake-logins.mjs (the
-//   login-harness build of cook-router). Claude and Codex finish through a pasted callback
+//   login-harness build of cooker). Claude and Codex finish through a pasted callback
 //   URL, Devin through a pasted callback to the server's /callback, Kimi, Meta and xAI
 //   through the device-code flow; each new credential must appear in the
 //   list. Providers the server lacks must turn into an honest "not available" message.
@@ -107,7 +107,7 @@ try {
           body = { cancelled: true };
         }
         else throw new Error(`Unexpected management request: ${path}`);
-        return route.fulfill({ json: body, headers: { "X-Cook-Commit": "fixture" } });
+        return route.fulfill({ json: body, headers: { "X-Ck-Commit": "fixture" } });
       }
       if (request.pathname.endsWith("/oauth-guide"))
         return route.fulfill({ contentType: "text/html", body: "<h1>Sign-in guide</h1>" });

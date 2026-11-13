@@ -2,14 +2,14 @@
 export const flag = {
   get: (k: string) => {
     try {
-      return localStorage.getItem(`cook-router-${k}`);
+      return localStorage.getItem(`cooker-${k}`);
     } catch {
       return null;
     }
   },
   set: (k: string, v: string) => {
     try {
-      localStorage.setItem(`cook-router-${k}`, v);
+      localStorage.setItem(`cooker-${k}`, v);
     } catch {}
   },
 };

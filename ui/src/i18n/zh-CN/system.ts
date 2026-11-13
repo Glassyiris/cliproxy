@@ -15,7 +15,7 @@ export default {
     "system.config.remoteManagement": "远程管理",
     "system.config.remoteAllowed": "允许",
     "system.config.remoteLocal": "仅限本机",
-    "system.config.remoteLocalNote": "设置 COOK_MANAGEMENT_PASSWORD 后也允许远程访问。",
+    "system.config.remoteLocalNote": "设置 CK_MANAGEMENT_PASSWORD 后也允许远程访问。",
     "system.config.managementApi": "管理 API",
     "system.config.config": "配置",
 

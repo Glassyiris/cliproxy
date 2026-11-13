@@ -206,12 +206,12 @@ jobs:
           context: .
           target: runtime
           load: true
-          tags: cook-router:ci
+          tags: cooker:ci
           cache-from: type=gha,scope=perf
       - name: Smoke test
-        run: docker run --rm cook-router:ci --version
+        run: docker run --rm cooker:ci --version
       - name: Image size gate
-        run: bench/gate.sh image cook-router:ci
+        run: bench/gate.sh image cooker:ci
 
   ci-ok:
     needs: [changes, requirements, dashboard, check, test, test-counts, perf]

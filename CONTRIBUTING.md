@@ -16,7 +16,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-CI runs every check as a stage of the [`Dockerfile`](Dockerfile), and the same command runs it locally with Docker alone: `docker buildx build --target check .` (format, clippy, actionlint, notices, the harness build and the script tests), `--target test` (the tests, with no network), `--target dashboard` and `--target perf` (the size and idle gates). The test stage uses [cargo-nextest](https://nexte.st), which runs test binaries in parallel (`cargo nextest run --workspace --locked`; its settings are in `.config/nextest.toml`), then the doc tests, and cpa-server's unit tests with the optional relay and profiler: `cargo nextest run -p cpa-server --features media-relay,pprof --lib`.
+CI runs every check as a stage of the [`Dockerfile`](Dockerfile), and the same command runs it locally with Docker alone: `docker buildx build --target check .` (format, clippy, actionlint, notices, the harness build and the script tests), `--target test` (the tests, with no network), `--target dashboard` and `--target perf` (the size and idle gates). The test stage uses [cargo-nextest](https://nexte.st), which runs test binaries in parallel (`cargo nextest run --workspace --locked`; its settings are in `.config/nextest.toml`), then the doc tests, and ck-server's unit tests with the optional relay and profiler: `cargo nextest run -p ck-server --features media-relay,pprof --lib`.
 
 Tests use local mock upstreams only. Never point a test at a real provider or use a real account or key, and run the tests with external network access blocked if you can; CI runs them in a network namespace with only a loopback interface. The BoringSSL build and the release link use a lot of memory, so on a small machine set `CARGO_BUILD_JOBS=2`.
 
@@ -26,7 +26,7 @@ CI holds the binary to the numbers in [`bench/budgets.txt`](bench/budgets.txt), 
 
 - Size, on every push to master and on pull requests that can change the binary (see `.github/scripts/ci-lanes.py`): the Linux release binary, its `.text` and `.rodata`, and the number of crates linked in more than one version.
 - Idle, on the same changes: [`bench/idle.sh`](bench/idle.sh) with 1 and with 2,000 auth files: wakeups, CPU ticks, threads and RSS over 30 seconds without requests.
-- Heap per request: `crates/cpa-server/tests/alloc_budget.rs`, part of `cargo test`, sends one 306 KB and one 1.9 MB request through the Claude route, the same sizes through Claude count_tokens (counted locally) and through the Codex Responses route, and the Claude bodies cloaked and signed through a Claude OAuth login with request capture, one at a time and eight at once, under a counting allocator.
+- Heap per request: `crates/ck-server/tests/alloc_budget.rs`, part of `cargo test`, sends one 306 KB and one 1.9 MB request through the Claude route, the same sizes through Claude count_tokens (counted locally) and through the Codex Responses route, and the Claude bodies cloaked and signed through a Claude OAuth login with request capture, one at a time and eight at once, under a counting allocator.
 - Memory soaks ([`bench/soak.sh`](bench/soak.sh)), by hand before a release: the Claude load and the field mix (Claude, Codex and count_tokens requests of 200 KB to 2 MB). The resting RSS must stay flat, and the field mix's peak (`VmHWM`) within its budget.
 
 To run the gates locally, run `docker buildx build --target perf .`. The size lines and the dashboard's `ui/tools/size-budget.json` are ceilings with headroom, so an ordinary pull request does not edit them; the perf and dashboard jobs print each number next to its ceiling. Raise a ceiling or budget only when a change needs it, with a maintainer's approval, and give the reason next to the line.
@@ -63,7 +63,7 @@ A pull request that touches shipped code needs a new fragment: `crates/`, `ui/sr
 
 Pull requests are squash-merged: the pull request title becomes the commit subject on `master`, and GitHub appends the number, as in `fix(ui): keep Overview tiles whole on a phone (#41)`. The description stays on the pull request, so write why there.
 
-- Write the title as `type(scope): subject`. Types: `feat`, `fix`, `refactor`, `test`, `style`, `chore`, `docs`, `deps`, `ci` and `release`. Scopes: `cli` (crates/cook-router), `server`, `exec`, `translate`, `core` (cpa-core and cpa-common), `ui`, `docker`, `ci`, `docs`, `deps`, `bench`, `tools` and `release`.
+- Write the title as `type(scope): subject`. Types: `feat`, `fix`, `refactor`, `test`, `style`, `chore`, `docs`, `deps`, `ci` and `release`. Scopes: `cli` (crates/cooker), `server`, `exec`, `translate`, `core` (ck-core and ck-wire), `ui`, `docker`, `ci`, `docs`, `deps`, `bench`, `tools` and `release`.
 - The subject is an English imperative phrase starting in lower case, such as `retry a reset Claude stream once`, with no full stop. A first word such as `OAuth` keeps its case.
 - The whole title fits in 72 characters.
 - Commit subjects follow the same grammar. Each commit stands alone; fixups are squashed before pushing, not pushed as `fixup!` commits.
@@ -71,6 +71,6 @@ Pull requests are squash-merged: the pull request title becomes the commit subje
 
 ## Issues
 
-Search existing issues first, then pick a form: bug report or feature request, each in English and in Simplified Chinese. State your version (`cook-router --version`) and how you installed it. Remove keys, tokens and account files from logs and configuration before posting. Usage questions go through [SUPPORT.md](.github/SUPPORT.md), and vulnerabilities through [SECURITY.md](SECURITY.md), never a public issue. Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
+Search existing issues first, then pick a form: bug report or feature request, each in English and in Simplified Chinese. State your version (`cooker --version`) and how you installed it. Remove keys, tokens and account files from logs and configuration before posting. Usage questions go through [SUPPORT.md](.github/SUPPORT.md), and vulnerabilities through [SECURITY.md](SECURITY.md), never a public issue. Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
 
 By contributing you agree that your work is released under the [GNU Affero General Public License, version 3 or later](LICENSE).

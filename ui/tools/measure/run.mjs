@@ -119,7 +119,7 @@ const { values: opt } = parseArgs({
 const routes = opt.routes ? opt.routes.split(",").filter(Boolean) : Object.keys(ROUTES);
 const out = path.resolve(
   opt.out ??
-    path.join(os.tmpdir(), "cook-router-measure", new Date().toISOString().replace(/[:.]/g, "-")),
+    path.join(os.tmpdir(), "cooker-measure", new Date().toISOString().replace(/[:.]/g, "-")),
 );
 const children = [];
 
@@ -216,7 +216,7 @@ async function startServers() {
   const port = await freePort();
   const vite = path.join(ui, "node_modules/vite/bin/vite.js");
   const args = [vite, "preview", "--outDir", opt.dist, "--host", "127.0.0.1", "--port"];
-  await start([...args, String(port), "--strictPort"], { CPA_BACKEND: mock }, /(Local)/, "preview");
+  await start([...args, String(port), "--strictPort"], { CK_BACKEND: mock }, /(Local)/, "preview");
   return `http://127.0.0.1:${port}`;
 }
 

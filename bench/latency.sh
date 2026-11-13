@@ -4,7 +4,7 @@
 #
 #   bench/latency.sh <output.jsonl> [harness binary]
 #
-# Builds crates/cpa-server/examples/claude_latency.rs (release) unless a binary is given,
+# Builds crates/ck-server/examples/claude_latency.rs (release) unless a binary is given,
 # then runs it for the OAuth/cloak path (native TLS client against a local TLS mock) and
 # the API-key path (plain HTTP mock), appending one JSON line per body size and
 # concurrency to <output.jsonl>. N, SIZES, CONC and WARMUP pass through to the harness;
@@ -18,7 +18,7 @@ OUT=$(realpath -m "$1")
 HERE=$(cd "$(dirname "$0")" && pwd)
 BIN=${2:-}
 if [[ -z $BIN ]]; then
-  cargo build --release -p cpa-server --example claude_latency --manifest-path "$HERE/../Cargo.toml"
+  cargo build --release -p ck-server --example claude_latency --manifest-path "$HERE/../Cargo.toml"
   BIN=$HERE/../target/release/examples/claude_latency
 fi
 BIN=$(realpath "$BIN")

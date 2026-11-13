@@ -1,12 +1,12 @@
 export default {
   en: {
-    "app.brand.name": "cook-router",
-    "app.document.pageTitle": "{title} · cook-router",
-    "app.document.signInTitle": "Sign in · cook-router",
+    "app.brand.name": "cooker",
+    "app.document.pageTitle": "{title} · cooker",
+    "app.document.signInTitle": "Sign in · cooker",
 
     "app.signIn.managementKey": "Management key",
     "app.signIn.help":
-      "The plain text you set as {setting}, or COOK_MANAGEMENT_PASSWORD. Management keys are stored hashed in the settings database.",
+      "The plain text you set as {setting}, or CK_MANAGEMENT_PASSWORD. Management keys are stored hashed in the settings database.",
     "app.signIn.heading": "Connect to this server",
     "app.signIn.checking": "Checking {host}…",
     "app.signIn.restoring": "Connecting to {host}…",
@@ -21,7 +21,7 @@ export default {
     "app.signIn.connecting": "Connecting…",
     "app.signIn.remember": "Remember on this device",
     "app.signIn.apiOff":
-      "The management API is off. Set management.secret-key in the settings database, or start the server with COOK_MANAGEMENT_PASSWORD.",
+      "The management API is off. Set management.secret-key in the settings database, or start the server with CK_MANAGEMENT_PASSWORD.",
     "app.signIn.remoteDisabled":
       "This server accepts the dashboard only from its own machine. Open it there, or enable management.allow-remote in the settings database with a strong key.",
     "app.signIn.banned": "{message}. Too many wrong keys came from this address.",

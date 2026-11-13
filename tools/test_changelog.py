@@ -29,7 +29,7 @@ def offline(program, args, cwd=None):
 
 class Repo(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory(prefix="cook-router-changelog-")
+        self._tmp = tempfile.TemporaryDirectory(prefix="cooker-changelog-")
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         (self.root / "changes").mkdir()
@@ -232,18 +232,18 @@ class Release(Repo):
 class NeedsFragment(unittest.TestCase):
     def test_shipped_paths_need_a_fragment(self):
         for path in [
-            "crates/cpa-server/src/lib.rs", "ui/src/app/App.tsx", "ui/index.html",
+            "crates/ck-server/src/lib.rs", "ui/src/app/App.tsx", "ui/index.html",
             "ui/public/favicon.svg", "Dockerfile", "vendor/gjson/a.go",
-            "Cargo.toml", "Cargo.lock", "crates/cook-router/Cargo.toml",
+            "Cargo.toml", "Cargo.lock", "crates/cooker/Cargo.toml",
         ]:
             with self.subTest(path=path):
                 self.assertTrue(changelog.needs_fragment([path]))
 
     def test_tests_docs_and_tooling_are_exempt(self):
         for path in [
-            "crates/cpa-server/tests/alloc_budget.rs", "crates/cpa-server/tests/ws_fixtures/a.json",
-            "crates/cook-router/examples/x.rs", "ui/src/app/useAction.test.ts", "ui/src/a/B.test.tsx",
-            "ui/src/a/README.md", "crates/cook-router/README.md", "docs/INSTALL.md", "README.md", "CONTRIBUTING.md",
+            "crates/ck-server/tests/alloc_budget.rs", "crates/ck-server/tests/ws_fixtures/a.json",
+            "crates/cooker/examples/x.rs", "ui/src/app/useAction.test.ts", "ui/src/a/B.test.tsx",
+            "ui/src/a/README.md", "crates/cooker/README.md", "docs/INSTALL.md", "README.md", "CONTRIBUTING.md",
             "bench/budgets.txt", "harness/run", ".github/workflows/ci.yml", "ui/scripts/x.mjs",
             "ui/package.json", "tools/changelog.py", "changes/fix.md", ".github/ci/pins.env",
         ]:
@@ -251,7 +251,7 @@ class NeedsFragment(unittest.TestCase):
                 self.assertFalse(changelog.needs_fragment([path]))
 
     def test_one_shipped_path_among_exempt_ones_is_enough(self):
-        self.assertTrue(changelog.needs_fragment(["README.md", "crates/cpa-core/src/lib.rs", "docs/a.md"]))
+        self.assertTrue(changelog.needs_fragment(["README.md", "crates/ck-core/src/lib.rs", "docs/a.md"]))
 
 
 class ParseDiff(unittest.TestCase):

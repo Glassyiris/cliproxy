@@ -47,7 +47,7 @@ export const routes = {
 } as const satisfies Record<string, Route>;
 
 // Routes outside /v8/management that need no key, relative to the page's base. tools/check-api.mjs
-// finds each in crates/cpa-server/src/lib.rs.
+// finds each in crates/ck-server/src/lib.rs.
 export const publicRoutes = {
   healthz: { method: "GET", path: "/healthz" },
 } as const satisfies Record<string, Route>;

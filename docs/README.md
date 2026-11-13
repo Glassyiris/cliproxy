@@ -1,4 +1,4 @@
-# cook-router documentation
+# cooker documentation
 
 New here? Start with [Getting started](GETTING-STARTED.md).
 

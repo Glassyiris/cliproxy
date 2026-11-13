@@ -1,6 +1,6 @@
 # Benchmarks
 
-> These measurements retain the setup of the named historical releases. Their shared YAML, credential-folder and watcher descriptions are not current deployment instructions. SQLite is now the durable configuration and credential store; see [Configuration](CONFIGURATION.md).
+> These measurements retain the setup of the named historical releases. Their shared YAML, credential-folder and watcher descriptions are not current deployment instructions. SQLite is now the durable configuration and credential store; see [Configuration](CONFIGURATION.md). The product was named cook-router when these were measured; it is now cooker, and only the commands use the new name.
 
 Binary size, memory and throughput of cook-router and CLIProxyAPI on the same configuration, with a local fake upstream. The numbers come from one small machine and a synthetic load, so use them to compare the two servers with each other. They say little about how much traffic either one can carry on bigger hardware.
 
@@ -31,7 +31,7 @@ Measured on 2026-10-03.
 The scripts are in [`bench/`](../bench): `upstream/` is the fake OpenAI-compatible upstream, `load/` the load generator, `run.sh` runs every scenario three times and `summary.sh` prints the median of the three rounds. Both helpers use only the Go standard library. The raw results are in [`bench/results/`](../bench/results), one file per run.
 
 ```sh
-bench/run.sh target/release/cook-router /path/to/cli-proxy-api /tmp/bench 3
+bench/run.sh target/release/cooker /path/to/cli-proxy-api /tmp/bench 3
 bench/summary.sh /tmp/bench/results.jsonl
 ```
 
@@ -140,9 +140,9 @@ Measured on 2026-10-04, after a field report from a Linux machine (glibc, system
 
 ```sh
 bench/messages.sh /tmp/soak go /path/to/cli-proxy-api
-bench/messages.sh /tmp/soak rust target/release/cook-router
-bench/messages.sh /tmp/soak rust-arena2 target/release/cook-router MALLOC_ARENA_MAX=2
-MIN=1000000 MAX=3000000 STEP=100000 N=600 bench/messages.sh /tmp/soak large target/release/cook-router
+bench/messages.sh /tmp/soak rust target/release/cooker
+bench/messages.sh /tmp/soak rust-arena2 target/release/cooker MALLOC_ARENA_MAX=2
+MIN=1000000 MAX=3000000 STEP=100000 N=600 bench/messages.sh /tmp/soak large target/release/cooker
 ```
 
 ### What was found
@@ -153,7 +153,7 @@ MIN=1000000 MAX=3000000 STEP=100000 N=600 bench/messages.sh /tmp/soak large targ
 
 ### What changed
 
-- The `cache_control` block walk reads each block from one pass over the body, in Go's order (tools, system, messages), as do the web-search domain cleanup and the 1h-TTL check. The JSON scanner in `cpa-common` jumps over string contents with `memchr`. Both keep Go's results; the Go golden tests pass unchanged.
+- The `cache_control` block walk reads each block from one pass over the body, in Go's order (tools, system, messages), as do the web-search domain cleanup and the 1h-TTL check. The JSON scanner in `ck-wire` jumps over string contents with `memchr`. Both keep Go's results; the Go golden tests pass unchanged.
 - The final upstream body moves into the HTTP request instead of being copied, and the client's original body is no longer copied into a second `String`.
 - On Linux with glibc, a background thread calls `malloc_trim(0)` once the process goes quiet (under 50 ms of CPU in five seconds) and at least once a minute. An earlier version trimmed every 10 seconds; in two A/B pairs against no trimming it added 3.5 ms to the TTFB p50 in one pair and nothing measurable in the other, within this machine's noise. Trimming when quiet keeps the page faults that follow a trim away from busy periods. macOS and Windows keep their system allocators unchanged. (Since 2026-10-05 this is a task that trims once after startup, then parks until a response ends, runs the trim on the blocking pool rather than a request thread, and forces a trim every minute only while busy; see Idle below.)
 
@@ -222,7 +222,7 @@ The floor (each hour's lowest sample) rose from 26 to 89 MB and the peaks reache
 - The runs in this section used an earlier version of the fake upstreams, whose tool-call fragments did not join into JSON (and, for Codex, did not join into the completed arguments); the load generator did not check them then. It does now. With the corrected fake upstreams the same binary measured the same: on the 2-vCPU machine described under Results, alternating the two versions (10 minutes each, two runs each, `vm2-mock-check-10min`), peak RSS was 159.5 and 155.4 MB against 159.2 and 163.8 MB, resting `RssAnon` 53.0 to 67.1 and 52.8 to 66.9 MB against 52.1 to 66.4 and 53.6 to 66.8 MB, and CPU 42.2 and 41.7 ms per request against 41.9 and 41.2. All four runs passed the soak's gates. The numbers below stand as measured.
 
 ```sh
-MIX=field bench/soak.sh target/release/cook-router 60 /tmp/soak-field
+MIX=field bench/soak.sh target/release/cooker 60 /tmp/soak-field
 ```
 
 ### Results
@@ -286,7 +286,7 @@ Measured on 2026-10-28 with the same load, through `soak.yml`'s `go` input ([run
 ### What was checked and ruled out, or left
 
 - Duplicate tokenizers: confirmed, and fixed by sharing one lazily built encoder per encoding. Go tokenizes at the same places (`helps.CountClaudeInputTokens` for Claude count_tokens and the `message_start` estimate, which share one codec behind a `sync.Once`; Codex, Meta and xAI `CountTokens`; `TokenizerForModel` for OpenAI-compatible counts), so the counts need the real encoders. Nothing is built until a count needs one, and the first count waits for it (0.15 s for o200k_base, 0.06 s for cl100k_base). Without count_tokens, native Claude requests (a Claude client to a Claude model) and Codex Responses requests build none: on a fresh server the first of each added 0.3 to 0.6 MB. The exception is a streamed Claude-format request to a non-Claude model, Codex included: as in Go, its `message_start` gets an estimate of the request's input tokens, which builds o200k_base.
-- Unbounded maps: every map on these routes is bounded by an entry count, a time window or the open connections, and the hour above shows no climb. Two have bounds far above a few MB. The Codex reasoning replay, used only for Claude-format clients of Codex models, keeps up to 10,240 sessions of up to 256 turns each and drops expired ones only when they are read or at that cap (Go also purges them on a timer); a Responses client never fills it. The [LCP session matcher](../crates/cpa-server/src/lcp.rs) is the other. It is used only with session affinity on, for requests that carry no session ID, and it is bounded by entry counts (Go's), not bytes. Driven directly with four interleaved sessions and a counting allocator, 150-turn conversations at one request every 3 seconds held 57.7 MB after an hour and then 60.7 to 67.0 MB (its 1-hour TTL), and 300-turn conversations at one request a second held 82.2 MB from 40 minutes on, before the TTL could expire anything, so its entry caps (4,096 groups, 262,144 prefixes) were what held it there. The field server runs with session affinity off, the default, so the matcher played no part in its report. Left as a general limit, with the numbers in a `ponytail:` note.
+- Unbounded maps: every map on these routes is bounded by an entry count, a time window or the open connections, and the hour above shows no climb. Two have bounds far above a few MB. The Codex reasoning replay, used only for Claude-format clients of Codex models, keeps up to 10,240 sessions of up to 256 turns each and drops expired ones only when they are read or at that cap (Go also purges them on a timer); a Responses client never fills it. The [LCP session matcher](../crates/ck-server/src/lcp.rs) is the other. It is used only with session affinity on, for requests that carry no session ID, and it is bounded by entry counts (Go's), not bytes. Driven directly with four interleaved sessions and a counting allocator, 150-turn conversations at one request every 3 seconds held 57.7 MB after an hour and then 60.7 to 67.0 MB (its 1-hour TTL), and 300-turn conversations at one request a second held 82.2 MB from 40 minutes on, before the TTL could expire anything, so its entry caps (4,096 groups, 262,144 prefixes) were what held it there. The field server runs with session affinity off, the default, so the matcher played no part in its report. Left as a general limit, with the numbers in a `ponytail:` note.
 - Fragmentation: ruled out for the resting floor (above). For peaks, glibc's dynamic mmap threshold lets body-sized buffers come from the arenas and stay resident until the next trim. On the 2-vCPU machine above (10 minutes of the field mix per setting, this change), a fixed `MALLOC_MMAP_THRESHOLD_` lowered the peak but cost CPU, and `MALLOC_ARENA_MAX=2` changed neither (the server and the load generator shared the 2 vCPUs, so CPU per request is higher than on the runners):
 
   | Setting | Resting `RssAnon` (MB) | Highest `RssAnon` sample (MB) | Peak RSS (`VmHWM`, MB) | CPU per request (ms) |
@@ -298,7 +298,7 @@ Measured on 2026-10-28 with the same load, through `soak.yml`'s `go` input ([run
   | `MALLOC_ARENA_MAX=2` | 51.8 to 59.2 | 111.8 | 155.0 | 42.6 |
 
   A 1 MiB threshold took 26.6 MB (17%) off the peak for 16 to 19% more CPU per request, and 256 KiB 33.8 MB for 27 to 31% more: every large buffer then comes from fresh, zeroed pages. The server sets none of these; `MALLOC_MMAP_THRESHOLD_` in its environment remains an option for anyone who would trade that CPU for the lower peak.
-- Peak per request: the Claude route peaks at 6.0x its body (11,083,177 bytes of live heap for a 1,843,825-byte request), count_tokens on the same body at 7.3x (13,530,973 bytes, in 1,630,109 allocations) and the Codex route at 8.8x (16,783,275 bytes for 1,916,052). `crates/cpa-server/tests/alloc_budget.rs` now gates all three. Codex request shaping rewrites the body pass by pass, each pass a new copy; walking it once is a larger change, left with its numbers in a `ponytail:` note in `crates/cpa-exec/src/codex_request.rs`.
+- Peak per request: the Claude route peaks at 6.0x its body (11,083,177 bytes of live heap for a 1,843,825-byte request), count_tokens on the same body at 7.3x (13,530,973 bytes, in 1,630,109 allocations) and the Codex route at 8.8x (16,783,275 bytes for 1,916,052). `crates/ck-server/tests/alloc_budget.rs` now gates all three. Codex request shaping rewrites the body pass by pass, each pass a new copy; walking it once is a larger change, left with its numbers in a `ponytail:` note in `crates/ck-exec/src/codex_request.rs`.
 
 ### Gates
 
@@ -315,10 +315,10 @@ Measured on 2026-10-11, after a field report from a Linux server (glibc, systemd
 - [`bench/soak.sh`](../bench/soak.sh) with `MIX=cloak`, in a loopback-only network namespace. 10 sessions send streamed `/v1/messages` requests for `claude-opus-5-5`, shaped as in the Claude soak; each conversation grows from 1.5 MB in 50 KB steps, to about 2 MB by the end of a batch (requests averaged 1,738 KB). The server has one Claude API key with `fingerprint-profile: claude-code-cli` whose `base-url` is the fake upstream, so the requests are cloaked, their tools renamed and the CLI identity applied, as for a login. The fake upstream reads the whole request, waits 2 seconds, as a real upstream does before the first token of a long prompt, and then streams 150 events 50 ms apart: a request takes 9.6 seconds, close to the field's medians, and the sessions run in step, so ten requests arrive within a second of each other. Batches of 100 turns, 20 seconds of rest after each (the resting RSS), 60 seconds idle after the last.
 - The soak does not cover what only a login on `api.anthropic.com` runs: the request signing and the native TLS client (an OAuth login would fetch its account profile from there). The heap gate below covers the signing.
 - A virtual machine with 2 vCPUs (Intel Xeon at 2.60 GHz) and 3.8 GB of memory, running Debian 12 (glibc 2.36) with Linux 6.1, shared by the server, the fake upstream and the load generator. Release builds with rustc 1.99.0: master at `b52c478` (0.2.3, whose request path is 0.2.2's) and this change, run alternately, 8 minutes each.
-- Attribution: heaptrack on builds with line tables (`[profile.release]` with `debug = "line-tables-only"` and `strip = false`), with the same load in 100-request runs (heaptrack slows the server, so its peaks are lower than without it), and the counting allocator of `crates/cpa-server/tests/alloc_budget.rs`.
+- Attribution: heaptrack on builds with line tables (`[profile.release]` with `debug = "line-tables-only"` and `strip = false`), with the same load in 100-request runs (heaptrack slows the server, so its peaks are lower than without it), and the counting allocator of `crates/ck-server/tests/alloc_budget.rs`.
 
 ```sh
-MIX=cloak IDLE=60 bench/soak.sh target/release/cook-router 8 /tmp/soak-cloak
+MIX=cloak IDLE=60 bench/soak.sh target/release/cooker 8 /tmp/soak-cloak
 ```
 
 ### What drove the peak
@@ -334,7 +334,7 @@ Two things, in about a 2:1 ratio on master: the heap that requests held while th
 
 - The Claude executor drops the translated body once the request is prepared, for a Claude client; a translated client still keeps it to translate the response.
 - Request capture keeps the body being sent, by reference, instead of a copy of it: the error log that needs it is unchanged.
-- The cloak reads what its later checks need from the uncloaked body before rewriting it, instead of keeping a copy; the messages with inserted system turns are written once instead of copied three times; the signature sanitizer borrows the messages it does not change and returns nothing when it changes none; the CCH signature is computed on the body in place; the tool renaming sizes its output for the aliases and applies its edits at the offsets it found them, rather than looking every path up again from the start; rewrites that change nothing pass the body on instead of copying it; and a JSON set that replaces a large value (messages, system) gives the unused room back. Request bytes are unchanged: the Go golden tests in `cpa-exec` and the executor's other tests pass. The Go-against-Rust differential harness was built but not run.
+- The cloak reads what its later checks need from the uncloaked body before rewriting it, instead of keeping a copy; the messages with inserted system turns are written once instead of copied three times; the signature sanitizer borrows the messages it does not change and returns nothing when it changes none; the CCH signature is computed on the body in place; the tool renaming sizes its output for the aliases and applies its edits at the offsets it found them, rather than looking every path up again from the start; rewrites that change nothing pass the body on instead of copying it; and a JSON set that replaces a large value (messages, system) gives the unused room back. Request bytes are unchanged: the Go golden tests in `ck-exec` and the executor's other tests pass. The Go-against-Rust differential harness was built but not run.
 
 ### Results
 
@@ -376,15 +376,15 @@ Snapshots after a burst of 100 requests and 60 seconds idle, with the load gener
 ### What is left
 
 - Each waiting request still holds two copies of its body, as in Go: the client's, which dispatch keeps for retries until the upstream answers, and the one sent, which the HTTP client keeps for redirects until then and request capture for the error log until the response ends.
-- A cloaked 1.9 MB request still allocates 32 buffers of 256 KiB or more and peaks at 5.1x its body: each remaining rewrite returns a new copy. Recording the edits from one walk and splicing them into one output, as `signals.rs` does for cache_control, is the way to the 3x target (`ponytail:` note in `crates/cpa-exec/src/claude.rs`).
+- A cloaked 1.9 MB request still allocates 32 buffers of 256 KiB or more and peaks at 5.1x its body: each remaining rewrite returns a new copy. Recording the edits from one walk and splicing them into one output, as `signals.rs` does for cache_control, is the way to the 3x target (`ponytail:` note in `crates/ck-exec/src/claude.rs`).
 - glibc still keeps what a burst freed until the next trim: when the server goes quiet, or at the forced trim that comes once a minute while it stays busy. Fresh pages for every large buffer (`MALLOC_MMAP_THRESHOLD_`) would remove that too, at the CPU cost above. Forcing that trim every 10 seconds while busy instead is not part of this change: `malloc_trim` locks each arena in turn, so request threads can wait on it although it runs on the blocking pool. In one soak run of this change with it, between the two above, the median of the sampled RSS was 67.6 MB against 78.4 and 79.2 MB, `VmHWM` 112.5 MB against 111.4 and 117.1 MB, CPU 58 ms per request against 57, and the time to first byte at p99 of each batch 2,153 to 2,289 ms against 2,215 to 2,266 ms. The soak records no maximum time to first byte. On an intermediate build with the 200-request load of the attribution runs, it lowered `VmHWM` from 159.8 and 163.9 MB to 147.2 and 151.1 MB.
 - hyper keeps an idle client connection's read buffer at the size its last upload grew it to, up to about 400 KB. That limit is also hyper's limit on request headers, so lowering it would refuse headers Go accepts (Go reads up to 1 MB).
-- Codex request shaping still makes 44 large buffers for a 1.9 MB request (`ponytail:` note in `crates/cpa-exec/src/codex_request.rs`).
+- Codex request shaping still makes 44 large buffers for a 1.9 MB request (`ponytail:` note in `crates/ck-exec/src/codex_request.rs`).
 - CPU: the field's hour used 283 s of CPU for 567 requests, 0.5 s each, about 8 times this soak's. The soak cannot say why: the field server's CPU, TLS on both sides, the signing and the response lengths all differ.
 
 ### Gates
 
-- `crates/cpa-server/tests/alloc_budget.rs` now also sends the Claude bodies to a Claude OAuth login through request capture, cloaked and signed: `alloc.cloak.306k.*` and `alloc.cloak.1900k.*` in [`bench/budgets.txt`](../bench/budgets.txt) (5.1x the body; master measures 9.0x), and eight 1.9 MB requests at once with the fake upstream holding back its answers: `alloc.cloak.1900k.c8.held_bytes`, the heap the eight keep while they wait (15.7 MB; master 60.0 MB). Each request is measured only once the capture of the one before it is finalized, so the previous request's kept body is not freed inside the measurement. Master fails all of them but the 306k allocation count (4,549 against a ceiling of 4,576). `alloc.cloak.1900k.c8.peak_bytes`, the eight's peak with their preparation, is reported without a line: it depends on scheduling (26.5 to 30.3 MB over 7 runs on this machine; master 67.2 to 78.2 MB over 5), and how far it varies on GitHub-hosted runners is not known yet. The existing Claude and count_tokens budgets are re-measured lower.
+- `crates/ck-server/tests/alloc_budget.rs` now also sends the Claude bodies to a Claude OAuth login through request capture, cloaked and signed: `alloc.cloak.306k.*` and `alloc.cloak.1900k.*` in [`bench/budgets.txt`](../bench/budgets.txt) (5.1x the body; master measures 9.0x), and eight 1.9 MB requests at once with the fake upstream holding back its answers: `alloc.cloak.1900k.c8.held_bytes`, the heap the eight keep while they wait (15.7 MB; master 60.0 MB). Each request is measured only once the capture of the one before it is finalized, so the previous request's kept body is not freed inside the measurement. Master fails all of them but the 306k allocation count (4,549 against a ceiling of 4,576). `alloc.cloak.1900k.c8.peak_bytes`, the eight's peak with their preparation, is reported without a line: it depends on scheduling (26.5 to 30.3 MB over 7 runs on this machine; master 67.2 to 78.2 MB over 5), and how far it varies on GitHub-hosted runners is not known yet. The existing Claude and count_tokens budgets are re-measured lower.
 - `MIX=cloak` has no `soak.*` budget yet: as for the other mixes, the bound should come from a GitHub-hosted runner.
 - Raw results: [`bench/results/2026-10-11-cloak.jsonl`](../bench/results/2026-10-11-cloak.jsonl), one `bench/soak.sh` summary per run (`vm2-cloak-ab-8min`, in the order they ran, with the run with a forced trim every 10 seconds), plus the heaptrack, allocator-setting, trim-cadence, after-burst snapshot and heap gate runs.
 
@@ -396,7 +396,7 @@ Measured on 2026-10-05: how long cook-router holds a streamed `/v1/messages` req
 
 - A virtual machine with 8 vCPUs (Intel Xeon at 2.60 GHz) and 16 GB of memory, running Debian 12 (glibc 2.36) with Linux 6.1. It is shared, so compare numbers measured in the same session.
 - "master" is `1849512` (0.1.2) with only the harness and its five trace marks added; "this change" is the branch described below. Both are release builds (thin LTO, one codegen unit) with line tables kept for profiling, rustc 1.99.0.
-- [`bench/latency.sh`](../bench/latency.sh) runs [`claude_latency`](../crates/cpa-server/examples/claude_latency.rs) in a loopback-only network namespace, once per path. It is one process with two Tokio runtimes of 4 workers each: one runs the production router, listener and Claude executor; the other runs a mock Anthropic upstream and a keep-alive HTTP/1.1 client. Sharing one process gives every timestamp the same monotonic clock.
+- [`bench/latency.sh`](../bench/latency.sh) runs [`claude_latency`](../crates/ck-server/examples/claude_latency.rs) in a loopback-only network namespace, once per path. It is one process with two Tokio runtimes of 4 workers each: one runs the production router, listener and Claude executor; the other runs a mock Anthropic upstream and a keep-alive HTTP/1.1 client. Sharing one process gives every timestamp the same monotonic clock.
 - OAuth path: a Claude Code OAuth credential (an `sk-ant-oat` token with its device and account IDs, so no profile fetch) and the production native TLS profile, with the executor's test hooks resolving `api.anthropic.com` to a local TLS mock that trusts a throwaway CA. Cloaking, cache_control handling, tool-name aliasing, signature sanitising and CCH signing all run. API-key path: a `claude-api-key` entry whose `base-url` is a plain HTTP mock.
 - Bodies: coding-agent conversations of 5,000, 50,000, 300,000 and 2,000,000 bytes (a system prompt with a cache breakpoint, tool definitions, assistant turns with signed thinking, text and `tool_use`, user `tool_result` turns), sent with `stream: true`. The mock reads the whole request and answers at once with a short SSE stream.
 - Per cell: 20 warm-up requests, then 200 measured, from 1 client or from 8 concurrent clients (25 each). The same requests are also sent straight to the mock; "added" is the proxied percentile minus the direct one. Two rounds, run master, this change, master, this change; each cell shows round 1, round 2.
@@ -484,7 +484,7 @@ The Codex client for `chatgpt.com` opens a new TCP and TLS connection for every 
 
 ### What changed
 
-- gjson 0.8.1, which the Claude executor uses for most body reads, scanned JSON strings one byte at a time; almost all of a coding agent's prompt is string content. A patched copy in [`vendor/gjson`](../vendor/README.md) finds string ends with `memchr2`, and its validator does the same; results are unchanged and tested against the original functions. `cpa_common::json::valid` got the same string skip. Before this, `gjson::scan_squash` alone took 44% of the CPU in a `perf` profile of the OAuth path at 300 KB.
+- gjson 0.8.1, which the Claude executor uses for most body reads, scanned JSON strings one byte at a time; almost all of a coding agent's prompt is string content. A patched copy in [`vendor/gjson`](../vendor/README.md) finds string ends with `memchr2`, and its validator does the same; results are unchanged and tested against the original functions. `ck_wire::json::valid` got the same string skip. Before this, `gjson::scan_squash` alone took 44% of the CPU in a `perf` profile of the OAuth path at 300 KB.
 - Session-ID extraction (run by the server and again by the executor) asked for about twenty top-level keys, each found by scanning the body. It now walks a valid JSON object's top level once and keeps borrowed slices of the roots it queries; values are decoded on lookup, other members are skipped without decoding, and a duplicate key, an escaped key, an invalid body or any other path scans as before.
 - The executor decodes UTF-8 with the fast validator before falling back to the lossy decoder, and the tool-name aliasing no longer copies its output once more.
 - The bytes sent upstream are unchanged: the gjson change is checked against the original functions, the session index against plain lookups, and the Claude, Codex and server test suites (including the Go golden tests) pass.
@@ -567,8 +567,8 @@ Measured on 2026-10-06 on Linux, to see what a server costs while nobody uses it
 - After a 30-second warm-up without requests, which outlasts the startup heap trim (5 to 10 seconds after start, on the blocking pool) and the pool's 10-second keep-alive, it sums the context switches of every thread alive across the next 30 seconds from `/proc/<pid>/task/*/status` (each one is a thread waking up), and reads the CPU ticks (1/100 s), the thread count at both ends and `VmRSS`. A thread that exits inside the window makes the run fail, since its wakeups would go uncounted.
 
 ```sh
-bench/idle.sh target/release/cook-router 1 30
-bench/idle.sh target/release/cook-router 2000 30
+bench/idle.sh target/release/cooker 1 30
+bench/idle.sh target/release/cooker 2000 30
 ```
 
 ### Results
@@ -605,7 +605,7 @@ CPU time is read in clock ticks of 10 ms, so Go's figure is one tick in five min
 The same machine and builds, with `bench/messages.sh` (the Claude soak load: 8 sessions of 100 to 500 KB streamed requests, 1,200 requests per run). The server and the load share all 4 vCPUs, so master starts 4 request threads and this change 2. Two runs each, alternating.
 
 ```sh
-N=1200 C=8 SERVER_CPUS=0-3 LOAD_CPUS=0-3 bench/messages.sh /tmp/soak rust target/release/cook-router
+N=1200 C=8 SERVER_CPUS=0-3 LOAD_CPUS=0-3 bench/messages.sh /tmp/soak rust target/release/cooker
 ```
 
 | Server | Run | Peak RSS (MB) | RSS 30 s later (MB) | CPU s | Requests/s | TTFB p50 / p99 (ms) |

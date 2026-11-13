@@ -1,12 +1,12 @@
 export default {
   "zh-CN": {
-    "app.brand.name": "cook-router",
-    "app.document.pageTitle": "{title} · cook-router",
-    "app.document.signInTitle": "登录 · cook-router",
+    "app.brand.name": "cooker",
+    "app.document.pageTitle": "{title} · cooker",
+    "app.document.signInTitle": "登录 · cooker",
 
     "app.signIn.managementKey": "管理密钥",
     "app.signIn.help":
-      "为 {setting} 设置的明文，或 COOK_MANAGEMENT_PASSWORD。管理密钥以哈希形式存储在设置数据库中。",
+      "为 {setting} 设置的明文，或 CK_MANAGEMENT_PASSWORD。管理密钥以哈希形式存储在设置数据库中。",
     "app.signIn.heading": "连接到此服务器",
     "app.signIn.checking": "正在检查 {host}…",
     "app.signIn.restoring": "正在连接到 {host}…",
@@ -21,7 +21,7 @@ export default {
     "app.signIn.connecting": "正在连接…",
     "app.signIn.remember": "在这台设备上记住我",
     "app.signIn.apiOff":
-      "管理 API 未开启。请在设置数据库中配置 management.secret-key，或用 COOK_MANAGEMENT_PASSWORD 启动服务器。",
+      "管理 API 未开启。请在设置数据库中配置 management.secret-key，或用 CK_MANAGEMENT_PASSWORD 启动服务器。",
     "app.signIn.remoteDisabled":
       "此服务器只接受本机打开的面板。请在服务器所在的机器上打开，或在设置数据库中启用 management.allow-remote 并使用强密钥。",
     "app.signIn.banned": "{message}。此地址输错密钥的次数过多。",

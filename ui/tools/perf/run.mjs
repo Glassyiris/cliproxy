@@ -43,7 +43,7 @@ const POLLS = Number(opt.polls);
 const LOADS = Number(opt.loads);
 const REPS = Number(opt.reps);
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const out = path.resolve(opt.out || path.join(os.tmpdir(), "cook-router-perf", stamp));
+const out = path.resolve(opt.out || path.join(os.tmpdir(), "cooker-perf", stamp));
 mkdirSync(out, { recursive: true });
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -258,10 +258,10 @@ async function main() {
   });
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
-  start("preview", process.execPath, [path.join(uiRoot, "node_modules/vite/bin/vite.js"), "preview", "--outDir", path.resolve(opt.dist), "--host", "127.0.0.1", "--port", String(port), "--strictPort"], { CPA_BACKEND: mockUrl });
+  start("preview", process.execPath, [path.join(uiRoot, "node_modules/vite/bin/vite.js"), "preview", "--outDir", path.resolve(opt.dist), "--host", "127.0.0.1", "--port", String(port), "--strictPort"], { CK_BACKEND: mockUrl });
   await until(async () => (await fetch(`${base}/`)).ok, 30_000, "vite preview");
   const probe = await fetch(`${base}/admin/v1/effective/config`, { headers: { Authorization: `Bearer ${opt.key}` } });
-  if (!probe.ok || !(probe.headers.get("x-cook-version") || "").startsWith("cook-router")) throw new HarnessError(`the /admin proxy to the mock does not work (HTTP ${probe.status})`);
+  if (!probe.ok || !(probe.headers.get("x-ck-version") || "").startsWith("cooker")) throw new HarnessError(`the /admin proxy to the mock does not work (HTTP ${probe.status})`);
   log(`mock ${mockUrl}  ui ${base}  dist ${opt.dist}`);
 
   const browser = await chromium.launch({

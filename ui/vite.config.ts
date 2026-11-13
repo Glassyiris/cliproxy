@@ -3,8 +3,8 @@ import react from "@vitejs/plugin-react";
 import stylex from "@stylexjs/unplugin/vite";
 import { noticesPlugin } from "./tools/notices-plugin.ts";
 
-// Development only: point the proxy at another backend with CPA_BACKEND=http://127.0.0.1:8318.
-const backend = process.env.CPA_BACKEND || "http://127.0.0.1:8317";
+// Development only: point the proxy at another backend with CK_BACKEND=http://127.0.0.1:8318.
+const backend = process.env.CK_BACKEND || "http://127.0.0.1:8317";
 
 export default defineConfig({
   base: "./",
@@ -26,7 +26,7 @@ export default defineConfig({
       useCSSLayers: { before: ["reset", "astryx-base"], prefix: "app", after: ["astryx-theme"] },
     }),
     react(),
-    // Inert unless COOK_ROUTER_NOTICES_OUT is set (tools/third-party-notices.py).
+    // Inert unless CK_NOTICES_OUT is set (tools/third-party-notices.py).
     noticesPlugin(),
   ],
   // cors: false lets OPTIONS capability probes reach the backend instead of Vite.
@@ -35,6 +35,6 @@ export default defineConfig({
     cors: false,
     proxy: { "/v8": backend, "/admin": backend, "/v1": backend, "/healthz": backend },
   },
-  // The Rust binary embeds ui/dist at compile time (crates/cpa-server/build.rs).
+  // The Rust binary embeds ui/dist at compile time (crates/ck-server/build.rs).
   build: { target: "es2022", sourcemap: false, outDir: "dist" },
 });

@@ -31,7 +31,7 @@ export function readList<T>(config: Config, section: Section, channel: Channel):
 export type AliasProblems = { name?: "required"; alias?: "required" | "duplicate" | "same" };
 
 /**
- * The server's `sanitize_aliases` (crates/cpa-core/src/registry/dynamic.rs) drops an alias that
+ * The server's `sanitize_aliases` (crates/ck-core/src/registry/dynamic.rs) drops an alias that
  * is empty, equal to its upstream name, or already taken, all compared ignoring case, so a form
  * that accepted one would report a success the runtime ignores.
  */
@@ -51,7 +51,7 @@ export const newAlias = (name: string, alias: string, keep: boolean): Alias =>
 export const isExcluded = (list: string[], pattern: string) => list.includes(pattern);
 
 /**
- * The server's `wildcard` (crates/cpa-core/src/registry/dynamic.rs), which it applies to the
+ * The server's `wildcard` (crates/ck-core/src/registry/dynamic.rs), which it applies to the
  * lowercased pattern and model ID: `*` matches any run, the rest must match in order.
  */
 export function wildcard(pattern: string, value: string) {

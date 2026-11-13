@@ -647,6 +647,149 @@ dependencies = [
 ]
 
 [[package]]
+name = "ck-core"
+version = "0.4.1"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "http",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2",
+ "tracing",
+ "unsafe-libyaml",
+]
+
+[[package]]
+name = "ck-exec"
+version = "0.4.1"
+dependencies = [
+ "async-compression",
+ "axum",
+ "base64 0.22.1",
+ "brotli-decompressor",
+ "btls",
+ "bytes",
+ "chrono",
+ "ck-core",
+ "ck-translate",
+ "ck-wire",
+ "flate2",
+ "futures-util",
+ "getrandom 0.3.4",
+ "gjson",
+ "http",
+ "http-body",
+ "http2",
+ "httpdate",
+ "libc",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2",
+ "socket2",
+ "tiktoken-rs",
+ "tokio",
+ "tokio-btls",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "url",
+ "uuid",
+ "windows-sys 0.61.2",
+ "wreq",
+]
+
+[[package]]
+name = "ck-server"
+version = "0.4.1"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "async-trait",
+ "axum",
+ "backtrace",
+ "base64 0.22.1",
+ "bcrypt",
+ "btls",
+ "bytes",
+ "chrono",
+ "ck-core",
+ "ck-exec",
+ "ck-server",
+ "ck-translate",
+ "ck-wire",
+ "flate2",
+ "futures-util",
+ "getrandom 0.3.4",
+ "gjson",
+ "http-body",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "pprof",
+ "regex",
+ "rtc",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2",
+ "socket2",
+ "subtle",
+ "tokio",
+ "tokio-btls",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tower",
+ "tower-service",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+ "webrtc",
+ "windows-sys 0.61.2",
+ "wreq",
+ "zstd",
+]
+
+[[package]]
+name = "ck-translate"
+version = "0.4.1"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "ck-core",
+ "ck-wire",
+ "rand 0.9.5",
+ "regex",
+ "serde_json",
+ "sha2",
+ "uuid",
+]
+
+[[package]]
+name = "ck-wire"
+version = "0.4.1"
+dependencies = [
+ "base64 0.22.1",
+ "ck-core",
+ "flate2",
+ "http",
+ "memchr",
+ "ryu",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "clang-sys"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -765,17 +908,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "cook-router"
+name = "cooker"
 version = "0.4.1"
 dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
+ "ck-core",
+ "ck-exec",
+ "ck-server",
+ "ck-wire",
  "clap",
- "cpa-common",
- "cpa-core",
- "cpa-exec",
- "cpa-server",
  "futures-util",
  "getrandom 0.3.4",
  "http-body",
@@ -799,149 +942,6 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
-
-[[package]]
-name = "cpa-common"
-version = "0.4.1"
-dependencies = [
- "base64 0.22.1",
- "cpa-core",
- "flate2",
- "http",
- "memchr",
- "ryu",
- "serde_json",
- "serde_yaml_ng",
- "sha2",
- "tokio",
-]
-
-[[package]]
-name = "cpa-core"
-version = "0.4.1"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "bytes",
- "futures-util",
- "http",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha2",
- "tracing",
- "unsafe-libyaml",
-]
-
-[[package]]
-name = "cpa-exec"
-version = "0.4.1"
-dependencies = [
- "async-compression",
- "axum",
- "base64 0.22.1",
- "brotli-decompressor",
- "btls",
- "bytes",
- "chrono",
- "cpa-common",
- "cpa-core",
- "cpa-translate",
- "flate2",
- "futures-util",
- "getrandom 0.3.4",
- "gjson",
- "http",
- "http-body",
- "http2",
- "httpdate",
- "libc",
- "regex",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha2",
- "socket2",
- "tiktoken-rs",
- "tokio",
- "tokio-btls",
- "tokio-tungstenite",
- "tokio-util",
- "tower",
- "tracing",
- "url",
- "uuid",
- "windows-sys 0.61.2",
- "wreq",
-]
-
-[[package]]
-name = "cpa-server"
-version = "0.4.1"
-dependencies = [
- "anyhow",
- "async-compression",
- "async-trait",
- "axum",
- "backtrace",
- "base64 0.22.1",
- "bcrypt",
- "btls",
- "bytes",
- "chrono",
- "cpa-common",
- "cpa-core",
- "cpa-exec",
- "cpa-server",
- "cpa-translate",
- "flate2",
- "futures-util",
- "getrandom 0.3.4",
- "gjson",
- "http-body",
- "hyper",
- "hyper-util",
- "libc",
- "pprof",
- "regex",
- "rtc",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha2",
- "socket2",
- "subtle",
- "tokio",
- "tokio-btls",
- "tokio-tungstenite",
- "tokio-util",
- "tower",
- "tower-service",
- "tracing",
- "tracing-subscriber",
- "url",
- "uuid",
- "webrtc",
- "windows-sys 0.61.2",
- "wreq",
- "zstd",
-]
-
-[[package]]
-name = "cpa-translate"
-version = "0.4.1"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "cpa-common",
- "cpa-core",
- "rand 0.9.5",
- "regex",
- "serde_json",
- "sha2",
- "uuid",
-]
 
 [[package]]
 name = "cpufeatures"

@@ -34,15 +34,15 @@ test("API requests carry the session cookie, never a key, and never access stora
     Response.json(
       { "config-version": 8 },
       {
-        headers: { "X-Cook-Version": "cook-router-1.0.0", "X-Cook-Commit": "abc1234" },
+        headers: { "X-Ck-Version": "cooker-1.0.0", "X-Ck-Commit": "abc1234" },
       },
     );
   assert.deepEqual(await request(routes.readConfig), { "config-version": 8 });
   assert.equal(server.sent[0].headers.Authorization, undefined);
-  assert.equal(server.sent[0].headers["X-Cook-Dashboard"], "1");
+  assert.equal(server.sent[0].headers["X-Ck-Dashboard"], "1");
   assert.equal(server.sent[0].credentials, "same-origin");
   assert.equal(server.sent[0].url.href, "http://cpa.test/proxy/admin/v1/effective/config");
-  assert.deepEqual(builds.at(-1), { version: "cook-router-1.0.0", commit: "abc1234", built: "" });
+  assert.deepEqual(builds.at(-1), { version: "cooker-1.0.0", commit: "abc1234", built: "" });
   disconnect();
   const sent = server.sent.length;
   await assert.rejects(
@@ -72,7 +72,7 @@ test("only the sign-in request carries the key, and session requests work signed
   assert.equal(typed.headers.Authorization, "Bearer typed");
   assert.equal(typed.credentials, "same-origin");
   assert.equal(check.headers.Authorization, undefined);
-  assert.equal(check.headers["X-Cook-Dashboard"], "1");
+  assert.equal(check.headers["X-Ck-Dashboard"], "1");
 });
 
 test("server errors keep status and message; 401 signs out", async () => {
