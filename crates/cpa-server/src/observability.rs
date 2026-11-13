@@ -586,7 +586,7 @@ mod tests {
             let response = app.call(request).await.unwrap();
             let trace = response
                 .headers()
-                .get("x-cpa-trace-id")
+                .get("x-cook-trace-id")
                 .expect("selected credential trace")
                 .to_str()
                 .unwrap()

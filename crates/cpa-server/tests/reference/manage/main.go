@@ -940,12 +940,8 @@ func main() {
 	scenarios := []accessScenario{
 		{Name: "local_header_forms", Secret: "fake-secret", Steps: []step{
 			{Remote: local, Headers: good},
-			{Remote: local, Headers: h("X-Management-Key", "fake-secret")},
-			{Remote: local, Headers: h("Authorization", "fake-secret")},
 			{Remote: local, Headers: h("Authorization", "bEaReR fake-secret")},
 			{Remote: local, Headers: h("Authorization", "Bearer  fake-secret")},
-			{Remote: local, Headers: h("Authorization", "Basic abc", "X-Management-Key", "fake-secret")},
-			{Remote: local, Headers: h("Authorization", "Bearer ", "X-Management-Key", "fake-secret")},
 			{Remote: local, Headers: h("Authorization", "Bearer fake-secret", "Authorization", "Bearer other")},
 			{Remote: local},
 		}},
@@ -986,7 +982,6 @@ func main() {
 		{Name: "env_secret_allows_remote", Env: "fake-env", Steps: []step{
 			{Remote: "203.0.113.8:1", Headers: h("Authorization", "Bearer fake-env")},
 			{Remote: "203.0.113.8:1", Headers: wrong},
-			{Remote: local, Headers: h("X-Management-Key", "fake-env")},
 		}},
 		{Name: "env_and_config_secret", Env: "fake-env", Secret: "fake-secret", Steps: []step{
 			{Remote: "203.0.113.8:1", Headers: good},
@@ -995,7 +990,6 @@ func main() {
 		{Name: "local_password_is_loopback_only", Secret: "fake-secret", AllowRemote: true, LocalPassword: "fake-local", Steps: []step{
 			{Remote: local, Headers: h("Authorization", "Bearer fake-local")},
 			{Remote: "203.0.113.9:1", Headers: h("Authorization", "Bearer fake-local")},
-			{Remote: "[::1]:3", Headers: h("X-Management-Key", "fake-local")},
 		}},
 		{Name: "local_password_without_secret", LocalPassword: "fake-local", Steps: []step{
 			{Remote: local, Headers: h("Authorization", "Bearer fake-local")},

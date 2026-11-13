@@ -15,7 +15,7 @@ export default {
     "system.config.remoteManagement": "遠端管理",
     "system.config.remoteAllowed": "允許",
     "system.config.remoteLocal": "僅限本機",
-    "system.config.remoteLocalNote": "設定 MANAGEMENT_PASSWORD 後也允許遠端存取。",
+    "system.config.remoteLocalNote": "設定 COOK_MANAGEMENT_PASSWORD 後也允許遠端存取。",
     "system.config.managementApi": "管理 API",
     "system.config.config": "設定",
 

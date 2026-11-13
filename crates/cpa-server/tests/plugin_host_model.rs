@@ -47,7 +47,7 @@ async fn upstream(State(seen): State<Arc<Seen>>, req: Request) -> Response {
         ("connection", "x-private"),
         ("x-private", "hop"),
         ("x-litellm-test", "gateway"),
-        ("x-cpa-trace-id", "reserved"),
+        ("x-cook-trace-id", "reserved"),
     ] {
         response.headers_mut().insert(name, value.parse().unwrap());
     }
@@ -121,7 +121,7 @@ fn check_headers(headers: &Value, upstream: &str) {
         "Connection",
         "X-Private",
         "X-Litellm-Test",
-        "X-Cpa-Trace-Id",
+        "X-Cook-Trace-Id",
     ] {
         assert!(headers.get(name).is_none(), "unsafe upstream header {name}");
     }

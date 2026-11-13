@@ -14,7 +14,7 @@
 //! live ids never reach the database snapshot or its backups. Publishing a different
 //! `management.secret-key`, or removing it, drops every record, so restoring the old secret
 //! later revives none; a sign-in checked against a secret replaced meanwhile gets no session.
-//! `MANAGEMENT_PASSWORD` and the local password are read once at startup and cannot change
+//! `COOK_MANAGEMENT_PASSWORD` and the local password are read once at startup and cannot change
 //! while sessions live.
 //!
 //! The cookie is `SameSite=Strict`, so browsers attach it to same-site requests only. Every

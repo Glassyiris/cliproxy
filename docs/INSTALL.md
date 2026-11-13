@@ -29,7 +29,7 @@ management:
   secret-key: "PASTE-MANAGEMENT-KEY"  # the dashboard password
 ```
 
-Sign in at `http://127.0.0.1:8317/management.html` with `management.secret-key` from the imported config, or with the value of `MANAGEMENT_PASSWORD` if you set that environment variable. Keep a private copy of the keys: SQLite stores the management key as a bcrypt hash. [CONFIGURATION.md](CONFIGURATION.md) explains the settings.
+Sign in at `http://127.0.0.1:8317/management.html` with `management.secret-key` from the imported config, or with the value of `COOK_MANAGEMENT_PASSWORD` if you set that environment variable. Keep a private copy of the keys: SQLite stores the management key as a bcrypt hash. [CONFIGURATION.md](CONFIGURATION.md) explains the settings.
 
 Docker bridge requests are non-local, so the initial import needs `management.allow-remote: true`; publishing on `127.0.0.1` as above still keeps other machines out. Point any legacy `oauth.auth-dir` at the private credential import source only; ongoing login and refresh state belongs to SQLite.
 

@@ -491,7 +491,7 @@ async fn remote_policy_does_not_trust_forwarded_headers() {
     let r = client
         .get(format!("{base}/admin/v1/effective/config"))
         .header("X-Forwarded-For", "203.0.113.5")
-        .header("X-Management-Key", "fake-management-only")
+        .bearer_auth("fake-management-only")
         .send()
         .await
         .unwrap();
@@ -2036,7 +2036,7 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
         get("tag", true).await,
         (
             503,
-            json!({"error": "update_check_disabled", "message": "Update checks are disabled by COOK_ROUTER_NO_UPDATE_CHECK=1."})
+            json!({"error": "update_check_disabled", "message": "Update checks are disabled by COOK_NO_UPDATE_CHECK=1."})
         )
     );
     assert!(seen.lock().unwrap().is_empty(), "nothing is asked when disabled");
@@ -5297,5 +5297,59 @@ async fn cookie_answers_stay_unreadable_to_other_origins() {
     assert_eq!(preflight.headers()["access-control-allow-origin"], "*");
     assert_eq!(preflight.headers()["access-control-allow-headers"], "*");
     assert!(preflight.headers().get("access-control-allow-credentials").is_none());
+    server.abort();
+}
+
+#[tokio::test]
+async fn management_accepts_only_a_bearer_key_or_the_session_cookie() {
+    let f = Fixture::new("bearer-only");
+    let (base, server) = f.server().await;
+    let config = format!("{base}/admin/v1/effective/config");
+    let key = "fake-management-only";
+    let client = wreq::Client::new();
+    let get = |name: &'static str, value: String| client.get(&config).header(name, value).send();
+    assert_eq!(
+        get("Authorization", format!("Bearer {key}")).await.unwrap().status(),
+        200
+    );
+    assert_eq!(
+        get("Authorization", format!("bearer {key}")).await.unwrap().status(),
+        200
+    );
+    let (_, id) = session_cookie(&sign_in(&base, json!({})).await);
+    assert_eq!(
+        with_cookie(wreq::Method::GET, config.clone(), &id, &[]).await.status(),
+        200
+    );
+    // A correct key in any other form is no key. Each refusal counts as a failed
+    // attempt, so these stay below the loopback ban.
+    for (name, value) in [
+        ("X-Management-Key", key.to_owned()),
+        ("Authorization", key.to_owned()),
+        ("Authorization", format!("Basic {key}")),
+    ] {
+        assert_eq!(get(name, value.clone()).await.unwrap().status(), 401, "{name}: {value}");
+    }
+    let both = client
+        .get(&config)
+        .header("Authorization", "Bearer ")
+        .header("X-Management-Key", key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        both.status(),
+        401,
+        "an empty Bearer value does not fall back to X-Management-Key"
+    );
+    // The session exchange reads the same header.
+    let refused = client
+        .post(format!("{base}/v8/management/session"))
+        .header("X-Management-Key", key)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 401);
     server.abort();
 }

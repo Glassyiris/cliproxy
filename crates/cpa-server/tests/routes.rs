@@ -203,7 +203,7 @@ async fn chat_completions_translate_and_stream_upstream_for_non_stream_clients()
     assert_eq!(seen[0].1["stream"], true);
     assert_eq!(seen[0].1["messages"][0]["role"], "user");
     // Go cpa_trace.go: selection time, auth index and a UUIDv7 request ID.
-    let trace = headers["x-cpa-trace-id"].to_str().unwrap().to_owned();
+    let trace = headers["x-cook-trace-id"].to_str().unwrap().to_owned();
     let parts: Vec<&str> = trace.splitn(3, '-').collect();
     assert_eq!(parts[0].len(), 14);
     assert_eq!(parts[1].len(), 16);
@@ -1184,7 +1184,7 @@ async fn usage_queue_records_every_attempt() {
 
     let (status, headers, text) = post(&p.url, "/v1/messages", &body).await;
     assert_eq!(status, 200, "{text}");
-    let trace = headers["x-cpa-trace-id"].to_str().unwrap();
+    let trace = headers["x-cook-trace-id"].to_str().unwrap();
     let request_id = trace.splitn(3, '-').nth(2).unwrap();
     let records = pop();
     assert_eq!(records.len(), 2, "{records:?}");

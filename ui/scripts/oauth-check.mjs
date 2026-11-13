@@ -108,7 +108,7 @@ try {
           body = { cancelled: true };
         }
         else throw new Error(`Unexpected management request: ${path}`);
-        return route.fulfill({ json: body, headers: { "X-CPA-COMMIT": "fixture" } });
+        return route.fulfill({ json: body, headers: { "X-Cook-Commit": "fixture" } });
       }
       if (request.pathname.endsWith("/v0/resource/plugins/commandcode-go-cliproxyapi/oauth"))
         return route.fulfill({ contentType: "text/html", body: "<h1>Plugin sign-in guide</h1>" });

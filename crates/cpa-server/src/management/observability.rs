@@ -30,7 +30,7 @@ pub(crate) async fn latest_version(State(state): State<Arc<Management>>) -> Resp
                 ("error", "update_check_disabled".into()),
                 (
                     "message",
-                    "Update checks are disabled by COOK_ROUTER_NO_UPDATE_CHECK=1.".into(),
+                    "Update checks are disabled by COOK_NO_UPDATE_CHECK=1.".into(),
                 ),
             ],
         );

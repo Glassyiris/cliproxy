@@ -5,7 +5,7 @@
 //!
 //! Order matters and is Go's: availability (404, empty body) -> version headers ->
 //! active ban (403) -> remote policy (403) -> missing secret (403) -> missing key
-//! (401, counted) -> local password -> MANAGEMENT_PASSWORD -> bcrypt (401, counted).
+//! (401, counted) -> local password -> COOK_MANAGEMENT_PASSWORD -> bcrypt (401, counted).
 //! The fifth counted failure bans the client IP for 30 minutes. "Local" means the
 //! client IP text is exactly `127.0.0.1` or `::1`, after trusted-proxy resolution.
 //!
@@ -35,19 +35,19 @@ pub(super) const PURGE_EVERY: Duration = Duration::from_secs(3600);
 const MAX_IDLE: Duration = Duration::from_secs(2 * 3600);
 
 pub const VERSION: &str = concat!("cook-router-", env!("CARGO_PKG_VERSION"));
-const COMMIT: &str = match option_env!("CPA_COMMIT") {
+const COMMIT: &str = match option_env!("COOK_COMMIT") {
     Some(v) => v,
     None => "none",
 };
-const BUILD_DATE: &str = match option_env!("CPA_BUILD_DATE") {
+const BUILD_DATE: &str = match option_env!("COOK_BUILD_DATE") {
     Some(v) => v,
     None => "unknown",
 };
 /// Go reports "1" only for cgo builds that can load native plugins.
 const SUPPORT_PLUGIN: &str = cpa_plugin::SUPPORT_PLUGIN;
 
-const EXPOSED_HEADERS: &str = "X-CPA-TRACE-ID, X-CPA-VERSION, X-CPA-COMMIT, X-CPA-BUILD-DATE, \
-X-CPA-SUPPORT-PLUGIN, X-SERVER-VERSION, X-SERVER-BUILD-DATE, Location, Retry-After, ETag, \
+const EXPOSED_HEADERS: &str = "X-Cook-Trace-Id, X-Cook-Version, X-Cook-Commit, X-Cook-Build-Date, \
+X-Cook-Support-Plugin, X-SERVER-VERSION, X-SERVER-BUILD-DATE, Location, Retry-After, ETag, \
 X-Request-Id, OpenAI-Request-Id";
 
 #[derive(Clone, Copy)]
@@ -118,7 +118,7 @@ impl Access {
         // Go: os.LookupEnv + TrimSpace; empty means unset.
         let raw: Vec<u8> = match options.management_password {
             Some(value) => value.into_bytes(),
-            None => env_bytes("MANAGEMENT_PASSWORD"),
+            None => env_bytes("COOK_MANAGEMENT_PASSWORD"),
         };
         let env_secret = go_trim_space(&raw).to_vec();
         let local_password = options.local_password;
@@ -136,7 +136,7 @@ impl Access {
         }
     }
 
-    /// Go's reload rule: MANAGEMENT_PASSWORD keeps routes on; otherwise availability
+    /// Go's reload rule: COOK_MANAGEMENT_PASSWORD keeps routes on; otherwise availability
     /// follows the config secret alone. A `--password` that enabled routes at startup
     /// no longer counts after the first reload, exactly as in server_reload.go, except
     /// in the standalone TUI. A changed secret ends every dashboard session.
@@ -307,33 +307,25 @@ fn go_duration_seconds(d: Duration) -> String {
     }
 }
 
-/// `Authorization: Bearer <key>` (scheme case-insensitive, value untrimmed), any
-/// other Authorization value verbatim, then `X-Management-Key`. First values only.
+/// The key of `Authorization: Bearer <key>` (the scheme is case-insensitive, the value
+/// untrimmed); empty for any other form. First value only.
 pub(super) fn provided_key(headers: &HeaderMap) -> &[u8] {
     let auth = headers
         .get(header::AUTHORIZATION)
         .map(HeaderValue::as_bytes)
         .unwrap_or_default();
-    let key = match auth.iter().position(|&b| b == b' ') {
+    match auth.iter().position(|&b| b == b' ') {
         Some(i) if auth[..i].eq_ignore_ascii_case(b"bearer") => &auth[i + 1..],
-        _ => auth,
-    };
-    if key.is_empty() {
-        headers
-            .get("X-Management-Key")
-            .map(HeaderValue::as_bytes)
-            .unwrap_or_default()
-    } else {
-        key
+        _ => &[],
     }
 }
 
 pub(super) fn version_headers(headers: &mut HeaderMap) {
     for (name, value) in [
-        ("X-CPA-VERSION", VERSION),
-        ("X-CPA-COMMIT", COMMIT),
-        ("X-CPA-BUILD-DATE", BUILD_DATE),
-        ("X-CPA-SUPPORT-PLUGIN", SUPPORT_PLUGIN),
+        ("X-Cook-Version", VERSION),
+        ("X-Cook-Commit", COMMIT),
+        ("X-Cook-Build-Date", BUILD_DATE),
+        ("X-Cook-Support-Plugin", SUPPORT_PLUGIN),
     ] {
         headers.insert(name, HeaderValue::from_static(value));
     }
@@ -617,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn key_extraction_matches_go_header_rules() {
+    fn only_a_bearer_authorization_carries_the_key() {
         let get = |pairs: &[(&'static str, &str)]| {
             let mut h = HeaderMap::new();
             for (k, v) in pairs {
@@ -628,14 +620,12 @@ mod tests {
         assert_eq!(get(&[("authorization", "Bearer  k")]), " k");
         assert_eq!(get(&[("authorization", "bEaReR k")]), "k");
         assert_eq!(
-            get(&[("authorization", "Basic k"), ("x-management-key", "m")]),
-            "Basic k"
-        );
-        assert_eq!(get(&[("authorization", "Bearer "), ("x-management-key", "m")]), "m");
-        assert_eq!(
             get(&[("authorization", "Bearer a"), ("authorization", "Bearer b")]),
             "a"
         );
-        assert_eq!(get(&[("authorization", "raw")]), "raw");
+        assert_eq!(get(&[("authorization", "Basic k")]), "");
+        assert_eq!(get(&[("authorization", "raw")]), "");
+        assert_eq!(get(&[("x-management-key", "m")]), "");
+        assert_eq!(get(&[("authorization", "Bearer "), ("x-management-key", "m")]), "");
     }
 }

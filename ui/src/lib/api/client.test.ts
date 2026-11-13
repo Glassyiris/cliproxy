@@ -34,7 +34,7 @@ test("API requests carry the session cookie, never a key, and never access stora
     Response.json(
       { "config-version": 8 },
       {
-        headers: { "X-CPA-VERSION": "cook-router-1.0.0", "X-CPA-COMMIT": "abc1234" },
+        headers: { "X-Cook-Version": "cook-router-1.0.0", "X-Cook-Commit": "abc1234" },
       },
     );
   assert.deepEqual(await request(routes.readConfig), { "config-version": 8 });

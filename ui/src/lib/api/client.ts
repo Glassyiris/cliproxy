@@ -13,7 +13,7 @@ export type SessionHooks = {
   server(build: ServerBuild | null): void;
 };
 
-/** X-CPA-VERSION, X-CPA-COMMIT and X-CPA-BUILD-DATE; empty when the header is absent. */
+/** X-Cook-Version, X-Cook-Commit and X-Cook-Build-Date; empty when the header is absent. */
 export type ServerBuild = { version: string; commit: string; built: string };
 
 let connected = false;
@@ -184,9 +184,9 @@ async function send(route: Route, call: Call) {
   if (at !== revision) throw new ConnectionError("session-changed");
   const header = (name: string) => response.headers.get(name) ?? "";
   hooks.server({
-    version: header("x-cpa-version"),
-    commit: header("x-cpa-commit"),
-    built: header("x-cpa-build-date"),
+    version: header("x-cook-version"),
+    commit: header("x-cook-commit"),
+    built: header("x-cook-build-date"),
   });
   return response;
 }

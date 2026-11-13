@@ -15,7 +15,7 @@ export default {
     "system.config.remoteManagement": "Remote management",
     "system.config.remoteAllowed": "Allowed",
     "system.config.remoteLocal": "Local only",
-    "system.config.remoteLocalNote": "MANAGEMENT_PASSWORD also allows remote access.",
+    "system.config.remoteLocalNote": "COOK_MANAGEMENT_PASSWORD also allows remote access.",
     "system.config.managementApi": "Management API",
     "system.config.config": "the configuration",
 

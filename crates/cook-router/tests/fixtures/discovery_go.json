@@ -60,7 +60,7 @@
       ],
       "text": [
         "version=1",
-        "product=cliproxyapi",
+        "product=cook-router",
         "instance_id=8F3B",
         "tls=0",
         "auth_required=true",
@@ -101,7 +101,7 @@
           "generate_content",
           "interactions"
         ],
-        "product": "cliproxyapi",
+        "product": "cook-router",
         "auth_required": true,
         "auth_methods": [
           "api_key"
@@ -123,7 +123,7 @@
           "instance_id": "8F3B",
           "management": "false",
           "node_role": "standalone",
-          "product": "cliproxyapi",
+          "product": "cook-router",
           "protocols": "chat-completions,responses,messages,generate-content,interactions",
           "tls": "0",
           "version": "1"
@@ -546,7 +546,7 @@
     {
       "in": [
         "version=1",
-        "Product=cliproxyapi",
+        "Product=cook-router",
         "a=b=c",
         "flag",
         "=x",
@@ -560,7 +560,7 @@
         "dup": "2",
         "flag": "",
         "k": "v",
-        "product": "cliproxyapi",
+        "product": "cook-router",
         "version": "1"
       }
     },
@@ -719,7 +719,7 @@
     {
       "opts": {
         "Version": "1",
-        "Product": "cliproxyapi",
+        "Product": "cook-router",
         "Protocols": [
           "chat-completions",
           "responses",
@@ -748,7 +748,7 @@
       },
       "records": [
         "version=1",
-        "product=cliproxyapi",
+        "product=cook-router",
         "tls=0",
         "auth_required=true",
         "api_openai=/v1",
@@ -764,7 +764,7 @@
     {
       "opts": {
         "Version": "1",
-        "Product": "cliproxyapi",
+        "Product": "cook-router",
         "Protocols": [
           "chat-completions",
           "responses",
@@ -793,7 +793,7 @@
       },
       "records": [
         "version=1",
-        "product=cliproxyapi",
+        "product=cook-router",
         "instance_id=8F3B",
         "tls=0",
         "auth_required=true",
@@ -810,7 +810,7 @@
     {
       "opts": {
         "Version": "1",
-        "Product": "cliproxyapi",
+        "Product": "cook-router",
         "Protocols": [
           "chat-completions",
           "responses",
@@ -839,7 +839,7 @@
       },
       "records": [
         "version=1",
-        "product=cliproxyapi",
+        "product=cook-router",
         "instance_id=8F3B",
         "tls=1",
         "auth_required=false",
@@ -902,7 +902,7 @@
     {
       "opts": {
         "Version": "1",
-        "Product": "cliproxyapi",
+        "Product": "cook-router",
         "Protocols": [
           "chat-completions",
           "responses",
@@ -931,7 +931,7 @@
       },
       "records": [
         "version=1",
-        "product=cliproxyapi",
+        "product=cook-router",
         "instance_id=8F3B",
         "tls=0",
         "auth_required=true",
@@ -947,7 +947,7 @@
     {
       "opts": {
         "Version": "1",
-        "Product": "cliproxyapi",
+        "Product": "cook-router",
         "Protocols": [
           "feature-",
           "feature-f",
@@ -1026,7 +1026,7 @@
       },
       "records": [
         "version=1",
-        "product=cliproxyapi",
+        "product=cook-router",
         "instance_id=8F3B",
         "tls=0",
         "auth_required=true",
@@ -1056,7 +1056,7 @@
       },
       "records": [
         "version=1",
-        "product=cliproxyapi",
+        "product=cook-router",
         "tls=0",
         "auth_required=false",
         "api_openai=/v1",

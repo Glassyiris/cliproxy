@@ -44,7 +44,7 @@ pub mod transform;
 
 pub use host::{Host, Record, RegisteredPluginInfo, Snapshot};
 
-/// Go `pluginhost.SupportPluginHeaderValue` (`X-CPA-SUPPORT-PLUGIN`): "1" where native
+/// Go `pluginhost.SupportPluginHeaderValue` (`X-Cook-Support-Plugin`): "1" where native
 /// plugins load, as in Go's cgo builds.
 /// ponytail: Windows DLL loading is not ported, so Windows reports "0".
 pub const SUPPORT_PLUGIN: &str = if cfg!(unix) { "1" } else { "0" };

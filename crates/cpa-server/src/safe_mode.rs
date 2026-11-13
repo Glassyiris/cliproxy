@@ -88,7 +88,7 @@ async fn guard(State(rt): State<Arc<Runtime>>, request: Request, next: Next) -> 
         let mut response = crate::respond::gin_json(403, r#"{"error":"unsafe_example_api_key","message":"Proxy API endpoints are disabled because api-keys contains template values. Open /management.html?safe-mode=configure, update api-keys in Management, then retry."}"#.into());
         response
             .headers_mut()
-            .insert("x-cpa-safe-mode", "example-api-key".parse().unwrap());
+            .insert("x-cook-safe-mode", "example-api-key".parse().unwrap());
         return response;
     }
     next.run(request).await
@@ -176,7 +176,7 @@ mod tests {
                         "{method} {path}"
                     );
                     assert_eq!(response.headers().get("access-control-allow-origin").unwrap(), "*");
-                    assert_eq!(response.headers().contains_key("x-cpa-safe-mode"), enabled && blocked);
+                    assert_eq!(response.headers().contains_key("x-cook-safe-mode"), enabled && blocked);
                     assert_eq!(
                         response.headers().get("cache-control").map(|v| v.to_str().unwrap()),
                         (enabled && html).then_some("no-store")

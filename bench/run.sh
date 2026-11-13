@@ -93,10 +93,10 @@ start_server() { # name scenario round
   [[ -e "$dir" ]] && mv "$dir" "$(mktemp -d /tmp/bench-old.XXXXXX)"
   write_config "$dir"
   local t0; t0=$(ms)
-  # -local-model on both: no remote model catalog download during the run.
+  # --local-model on both (Go accepts the double-dash form too): no remote model catalog download during the run.
   local bin=$GO_BIN
   [[ $1 == rust ]] && bin=$RUST_BIN
-  COOK_DB="$dir/cook.db" taskset -c 0 "$bin" -config "$dir/config.yaml" -local-model > "$OUT/logs/$1-$2-$3.log" 2>&1 &
+  COOK_DB="$dir/cook.db" taskset -c 0 "$bin" --config "$dir/config.yaml" --local-model > "$OUT/logs/$1-$2-$3.log" 2>&1 &
   SRV_PID=$!
   for _ in $(seq 1 400); do
     if curl -sf -H "Authorization: Bearer $KEY" "http://127.0.0.1:$PORT/v1/models" | grep -q bench-model; then

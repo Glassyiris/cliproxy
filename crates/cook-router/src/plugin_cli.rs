@@ -12,33 +12,6 @@ use cpa_plugin::Host;
 use cpa_plugin::cli::{CliFlag, Output};
 use cpa_server::credential_store::CredentialDb;
 
-/// Plugin-declared flags as Go's `flag` package sees them: a `flag.Value` looked up by
-/// name, `IsBoolFlag` for bools, and `Set` called for every occurrence as it is parsed.
-pub trait PluginFlags {
-    /// `Some(is_bool)` for a plugin flag.
-    fn lookup(&self, name: &str) -> Option<bool>;
-    fn set(&self, name: &str, value: &str) -> Result<(), String>;
-}
-
-/// No plugin flags (the `discover` subcommand, and Go's discover mode).
-impl PluginFlags for () {
-    fn lookup(&self, _: &str) -> Option<bool> {
-        None
-    }
-    fn set(&self, _: &str, _: &str) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-impl PluginFlags for Host {
-    fn lookup(&self, name: &str) -> Option<bool> {
-        self.command_line_flag(name).map(|f| f.kind == "bool")
-    }
-    fn set(&self, name: &str, value: &str) -> Result<(), String> {
-        self.set_command_line_flag(name, value)
-    }
-}
-
 /// Loads plugins from the bootstrap config and registers their flags. `builtin` says
 /// whether the binary already has a flag of that name. Returns the host and the flags
 /// it accepted.
@@ -49,8 +22,7 @@ pub async fn bootstrap(cfg: Config, builtin: &dyn Fn(&str) -> bool) -> (Host, Ve
     (host, flags)
 }
 
-/// The command with the plugin flags added, so `-h` lists them as Go's usage does.
-/// Parsing never reaches clap for them (the flag rewrite consumes them first).
+/// The command with the plugin flags added, so clap parses them and `--help` lists them.
 pub fn with_flags(mut cmd: clap::Command, flags: &[CliFlag]) -> clap::Command {
     for flag in flags {
         // Go has no -version flag; a plugin may own the name.
@@ -73,6 +45,27 @@ pub fn with_flags(mut cmd: clap::Command, flags: &[CliFlag]) -> clap::Command {
         );
     }
     cmd
+}
+
+/// Hands each plugin flag given on the command line to its plugin, which validates the
+/// value. A boolean flag is set to `true`.
+pub fn set_flags(host: &Host, matches: &clap::ArgMatches) -> Result<(), String> {
+    for id in matches.ids() {
+        let id = id.as_str();
+        let Some(name) = id.strip_prefix("plugin:") else {
+            continue;
+        };
+        if matches.value_source(id) != Some(clap::parser::ValueSource::CommandLine) {
+            continue;
+        }
+        let value = match matches.try_get_one::<bool>(id) {
+            Ok(Some(_)) => "true".to_owned(),
+            _ => matches.get_one::<String>(id).cloned().unwrap_or_default(),
+        };
+        host.set_command_line_flag(name, &value)
+            .map_err(|e| format!("invalid value {value:?} for flag --{name}: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Go `flag.CommandLine.VisitAll` for the built-in flags: each flag's `Value.String()`
