@@ -93,13 +93,13 @@ impl Retention {
         stream: &Stream,
         read: impl FnOnce(&mut crate::publication::State) -> (R, bool),
     ) -> R {
-        let mut state = stream.state.lock().unwrap();
+        let mut state = stream.state.lock();
         // Maintenance sets the flag before locking stream state. Once it has observed a
         // stream, that mutex's release/acquire edge makes later readers take the fence.
         let _retention = if self.active.load(Ordering::Acquire) {
             drop(state);
             let guard = self.fence.read().unwrap();
-            state = stream.state.lock().unwrap();
+            state = stream.state.lock();
             Some(guard)
         } else {
             None
@@ -129,7 +129,7 @@ impl Inner {
         let mut cache = self.cache.lock().unwrap();
         while let Some(key) = cache.order.iter().find(|(_, id)| *id != exclude).copied() {
             let stream = cache.streams[&key.1].clone();
-            let mut state = stream.state.lock().unwrap();
+            let mut state = stream.state.lock();
             cache.order.remove(&key);
             // Queue timestamps are lower bounds. Refresh stale heads before choosing a victim.
             if state.last_read != key.0 {
@@ -154,7 +154,7 @@ impl Inner {
                     break;
                 }
                 let stream = cache.streams[&id].clone();
-                let mut state = stream.state.lock().unwrap();
+                let mut state = stream.state.lock();
                 cache.order.remove(&(read, id));
                 if state.last_read != read {
                     cache.order.insert((state.last_read, id));

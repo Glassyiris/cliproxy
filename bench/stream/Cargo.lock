@@ -31,6 +31,7 @@ name = "ck-stream"
 version = "0.4.1"
 dependencies = [
  "libc",
+ "parking_lot",
  "tokio",
 ]
 

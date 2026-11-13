@@ -1,13 +1,14 @@
 use std::{
     collections::VecDeque,
     sync::{
-        Arc, Mutex, MutexGuard,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     task::Poll,
     time::Duration,
 };
 
+use parking_lot::{Mutex, MutexGuard};
 use tokio::sync::Notify;
 
 use crate::{
@@ -187,7 +188,7 @@ impl Stream {
             self.invalidate();
             return;
         }
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock();
         if state.terminal.is_none() {
             state.terminal = Some(terminal);
             self.advance_generation();
@@ -197,7 +198,7 @@ impl Stream {
     }
 
     pub(crate) fn invalidate(&self) {
-        self.invalidate_locked(&mut self.state.lock().unwrap());
+        self.invalidate_locked(&mut self.state.lock());
     }
 
     pub(crate) fn invalidate_locked(&self, state: &mut State) -> u32 {
@@ -222,7 +223,7 @@ impl Stream {
 
 impl Drop for Stream {
     fn drop(&mut self) {
-        let state = self.state.get_mut().unwrap();
+        let state = self.state.get_mut();
         for frame in &mut state.frames {
             if let Some(index) = frame.pool.take() {
                 self.pool.release(index);
@@ -302,7 +303,7 @@ impl Writer {
         if len == 0 || len > self.inner.limits.max_event_bytes || (aligned && len > FRAME_BYTES) {
             return Err(Error::InvalidRecord);
         }
-        let mut state = self.stream.state.lock().unwrap();
+        let mut state = self.stream.state.lock();
         if self.stream.invalidated.load(Ordering::Acquire) {
             return Err(Error::Gone);
         }
@@ -373,7 +374,7 @@ impl Writer {
                     return Err(error);
                 }
             };
-            state = self.stream.state.lock().unwrap();
+            state = self.stream.state.lock();
             if self.stream.invalidated.load(Ordering::Acquire) || state.terminal.is_some() {
                 self.inner.pool.release(frame);
                 drop(state);
@@ -390,7 +391,7 @@ impl Writer {
     }
 
     fn rollback(&self, old_count: usize) {
-        let mut state = self.stream.state.lock().unwrap();
+        let mut state = self.stream.state.lock();
         while state.frames.len() > old_count {
             if let Some(frame) = state.frames.pop_back().unwrap().pool {
                 self.inner.pool.release(frame);
@@ -419,7 +420,7 @@ impl Writer {
     /// Frame numbers and record sequence numbers are never recycled.
     pub fn release_before(&mut self, position: Position) -> Result<(), Error> {
         let end = position.byte(self.id())?;
-        let mut state = self.stream.state.lock().unwrap();
+        let mut state = self.stream.state.lock();
         if end > state.end {
             return Err(Error::InvalidPosition);
         }
@@ -482,7 +483,7 @@ impl Reservation<'_> {
             return Err(Error::InvalidPosition);
         }
         let stream = &self.writer.stream;
-        let state = stream.state.lock().unwrap();
+        let state = stream.state.lock();
         if stream.invalidated.load(Ordering::Acquire) {
             return Err(Error::Gone);
         }
@@ -499,7 +500,7 @@ impl Reservation<'_> {
             return Err(Error::IncompleteRecord);
         }
         let stream = &self.writer.stream;
-        let mut state = stream.state.lock().unwrap();
+        let mut state = stream.state.lock();
         if stream.invalidated.load(Ordering::Acquire) {
             return Err(Error::Gone);
         }
@@ -539,7 +540,7 @@ pub struct Reader {
 impl Reader {
     pub(crate) fn new(stream: Arc<Stream>, after: u64) -> Result<Self, Error> {
         {
-            let mut state = stream.state.lock().unwrap();
+            let mut state = stream.state.lock();
             if stream.invalidated.load(Ordering::Acquire) || after < state.base_sequence {
                 return Err(Error::Gone);
             }
@@ -642,7 +643,7 @@ impl Reader {
 
 impl Drop for Reader {
     fn drop(&mut self) {
-        self.stream.state.lock().unwrap().readers -= 1;
+        self.stream.state.lock().readers -= 1;
     }
 }
 
@@ -681,7 +682,7 @@ impl Lease {
         let frame = if position.frame == self.record.start.frame {
             self.first_frame
         } else {
-            let state = self.stream.state.lock().unwrap();
+            let state = self.stream.state.lock();
             state.frames[(position.frame - state.base_frame) as usize]
                 .pool
                 .ok_or(Error::Gone)?
@@ -730,7 +731,7 @@ impl Drop for Lease {
                 ((), true)
             });
         } else {
-            self.release(&mut self.stream.state.lock().unwrap());
+            self.release(&mut self.stream.state.lock());
         }
     }
 }

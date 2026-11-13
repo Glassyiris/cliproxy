@@ -655,6 +655,8 @@ Retained event indexes coalesce consecutive records only when length, stride, ty
 
 Reservation input errors (`len == 0`, above `max_event_bytes`, or an aligned record larger than one frame) return `InvalidRecord` without changing the published prefix or terminating the writer. Frame/metadata exhaustion and failed backing reservations remain terminal storage failures; operator-facing I/O errors preserve their OS cause.
 
+Per-stream metadata uses `parking_lot::Mutex`; publication, invalidation and lease pin updates retain the same exclusive critical sections. This mutex does not poison after an unwinding panic. Cache and retention-fence locks keep their existing poisoning behavior.
+
 Reads update timestamps under each stream's metadata lock. Eviction and expiry set a maintenance flag before taking stream locks; readers observing the flag drop their stream lock and wait on the retention fence. Once maintenance has observed a stream, the metadata lock's release/acquire edge makes later readers observe that flag. This stabilizes stale queue heads without global read-lock traffic during ordinary delivery. Cache membership remains separately locked. A pinned victim permits another allocation attempt only after invalidation actually releases a frame.
 
 The retention fence and clock have shared ownership independent of cache membership. Each stream retains that context; readers and leases retain only their stream, so ordinary record delivery does not increment a process-wide cache reference count. Leases still keep the mapping and retention context alive after store shutdown.
