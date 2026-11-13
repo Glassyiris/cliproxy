@@ -39,7 +39,7 @@ Owners directed S1 to proceed with these binding defaults; an owner ruling may r
 | B9 | Default (2026-11-13), change by owner ruling | Grounding/code execution/URL context are named events; unsupported egress drops with debug logs. | Q |
 | C2 | Default (2026-11-13), change by owner ruling | Invalid textual UTF-8: client 400; upstream error; binary media is not text. | Q |
 | D1 | Default (2026-11-13), change by owner ruling | Configurable stream limits; event, metadata and cache sizes and cache age start with the §6.4 provisional values, replace after measurement. | Q |
-| D2 | Settled | The gateway buffers like a router: a slow client never pauses upstream reads; upstream bytes are collected into the pool and relayed at the client's pace. The per-stream limit, the pool and FIFO age bound the buffer; exceeding them fails the stream visibly (G7). Leased frames are never overwritten. | Owner ruling 2026-11-14 |
+| D2 | Settled | The gateway buffers like a router: a slow client never pauses upstream reads; upstream bytes are collected into the pool and relayed at the client's pace. Unread bytes are buffered, not cached: only the per-stream limit and the pool bound them, never age; exceeding a limit fails the stream visibly (G7). Leased frames are never overwritten. | Owner ruling 2026-11-14 |
 | D3 | Default (2026-11-13), change by owner ruling | No failover after the first event producing client-deliverable bytes. | Q |
 | F | Default (2026-11-13), change by owner ruling | Measure first, obtain owner-approved thresholds; use §9 commands and codec metrics. | Q |
 
@@ -601,12 +601,12 @@ Default (G8, 2026-11-14): the per-request limit is 512 MiB and at most 1/8 of th
 | `stream.max_event_bytes` | 1 MiB/event | Ordinary framed event including extensions; bound parser work, chunk large content/media instead. |
 | `stream.max_metadata_bytes` | 1 MiB/exchange | Tables/indexes/parser/consumer bookkeeping; bound tiny-event amplification. |
 | `stream.cache_bytes` | ⌊`pool_frames` / 2⌋ × 50,000 (42,949 frames, or 2,147,450,000 bytes, at the 4 GiB ceiling, where `pool_frames` is 85,899) | Retained backlog/replay is part of the pool, not another pool; leave capacity for active encoding. |
-| `stream.cache_max_age` | 60 s/block | Bound logical stalled retention; first enqueue sets age, reads never refresh it. |
+| `stream.cache_max_age` | 60 s/block | Bound retention of bytes already relayed to every reader (replay/aggregation retention); first enqueue sets age, reads never refresh it. Unread bytes are exempt (D2). |
 
-Owner ruling (D2, 2026-11-14): a slow consumer never pauses upstream reads. The stream keeps collecting into the pool and the gateway relays at the client's pace; `max_blocks`, the pool and `cache_max_age` bound that buffer.
+Owner ruling (D2, 2026-11-14): a slow consumer never pauses upstream reads. The stream keeps collecting into the pool and the gateway relays at the client's pace; Only `max_blocks` and the pool bound that buffer; `cache_max_age` never expires bytes a reader has not yet received.
 Startup rejects zero capacities/age, pool/cache sizes that are not frame multiples, `cache_bytes > pool_bytes`, `max_blocks < 4`, `max_blocks * 50000 > pool_bytes / 8`, or `max_event_bytes > max_blocks * 50000`. Metadata must hold the configured block table plus one event index and reader entry; validate against actual entry sizes with checked arithmetic.
 1. Queue retained blocks in first-enqueue FIFO order, including unread/replay-pinned entries. Release consumed, unneeded blocks; physical reuse always waits for the last lease. Upstream reads never pause for a slow consumer (D2); every arriving byte and timer flush consumes quota.
-2. At size/allocation pressure, process the oldest retained entries first: reclaim unneeded unleased entries; if a live retained entry must be removed, logically invalidate its owning stream. Age expiry invalidates that owner at 60 s by default even while its client lags. Never skip live bytes and continue that stream.
+2. At size/allocation pressure, process the oldest retained entries first: reclaim unneeded unleased entries; if a live retained entry must be removed, logically invalidate its owning stream. Age expiry applies only to bytes every reader has already received; it never invalidates a stream for unread bytes, however slow its client (D2). Never skip live bytes and continue that stream.
 3. Invalidation cancels the producer, ends the stream with `stream.storage_exhausted` via §6.2, and makes readers see the terminal error then end-of-stream. Drop retention references; leased frames stay immutable and charged to pool/exchange limits until their last lease releases. FIFO logical removal is not physical reclamation.
 4. Retry the pending reservation only against actually free capacity, including growth by `fallocate` under `pool_bytes`. Owner ruling (G7): if stream, pool, cache or metadata limits still prevent it, or `fallocate` returns ENOSPC, return an error and fail the allocating stream visibly with an error event; no heap fallback, no indefinite wait, provider failover, spill or degradation. A reader that never releases keeps its frames indefinitely; once the pool runs out, new allocations fail visibly too.
 
@@ -634,7 +634,7 @@ Accounting: mapped tmpfs pages count as `RssShmem` inside `VmRSS`, as `shmem` in
 | Ordinary event exceeds limit | Client 413 for oversized input; upstream error for oversized output; never silently truncate. |
 | Invalid textual UTF-8/JSON | Client 400; upstream terminal error; no replacement-character repair or raw passthrough. Binary media remains valid arbitrary bytes. |
 | Partial input record | Hold only mapped spans up to event/stream limits; timer-flush custom data; ordinary incomplete JSON is not published. |
-| Slow consumer | Keep reading upstream into the pool (D2); unread bytes stay charged; the per-stream limit, FIFO pressure or age invalidation fail the stream visibly; never an unbounded queue. |
+| Slow consumer | Keep reading upstream into the pool (D2); unread bytes stay charged; the per-stream limit or pool pressure fail the stream visibly, age never does; never an unbounded queue. |
 | Stream block/cache limit | Apply §6.4 FIFO expiry/eviction and visible whole-stream failure; no resource-exhaustion provider failover. |
 | Cancellation | Cancel upstream HTTP/WS/media I/O and cooperative work, stop producers, wake readers; outstanding leases obey §6.4, never forced reuse or retry. |
 | Pre-delivery upstream failure | Routing may retry another permitted upstream/credential with a fresh attempt stream; do not mix failed-attempt events into the selected response. |
@@ -683,7 +683,7 @@ Cover every registered client/upstream combination and applicable request/stream
 | Media | Exact bytes/MIME/timing, 36,864-byte full chunks, whole encoded event ≤50,000 bytes, framing overflow shortens the chunk; ≤100 ms collection while allocation succeeds, including a slow consumer; failed reservation ends with error. |
 | Duplex | Responses append/history and realtime control/media/sideband preserve direction/turn/session/packet identity; cancellation closes owned work. |
 | Storage | Concurrent publication exposes complete prefixes; cross-block JSON, lost-wakeup races, cancellation, stale handles and frame reuse cannot leak/corrupt content. A frame held by a reader is never reused or punched. |
-| Bounds | Exercise a throttled client against a fast upstream (upstream reads never pause; the per-stream limit fails visibly), FIFO size/age invalidation, error then EOF, and last-lease-only reuse; a stuck lease survives expiry and forces visible allocation failure, never overwrite/heap growth. |
+| Bounds | Exercise a throttled client against a fast upstream (upstream reads never pause; the per-stream limit fails visibly), FIFO size invalidation, age expiry of relayed bytes only (a stalled client's unread bytes survive past `cache_max_age`), error then EOF, and last-lease-only reuse; a stuck lease survives expiry and forces visible allocation failure, never overwrite/heap growth. |
 | Permissions/lifecycle | Real private mmap pool on tmpfs and configured disk directory; modes, unlink, process death and last-reader release verified. Pool exhaustion on a small tmpfs returns an error (ENOSPC from `fallocate`), never SIGBUS. |
 | Loss ledger | L01–L18 receive consumer-visible regression coverage where applicable; no test merely greps source or repeats implementation wiring. |
 
