@@ -540,7 +540,7 @@ pub(crate) async fn credential_batch(
         deletions.push((deletion, path));
     }
     let batch = Arc::new((documents, deletions));
-    loop {
+    for _ in 0..16 {
         let attempt = batch.clone();
         let busy = match blocking(state.clone(), move |state| credential_batch_attempt(state, &attempt)).await? {
             BatchAttempt::Done(response) => return Ok(response),
@@ -548,14 +548,19 @@ pub(crate) async fn credential_batch(
         };
         // Wait off the store for this document alone, then repeat every check: whatever
         // its holder committed meanwhile is the source the conditions now apply to.
-        drop(
-            state
-                .rt
-                .lock_codex_file(&busy)
-                .await
-                .map_err(|_| AdminError::store(&state))?,
-        );
+        let lock = state
+            .rt
+            .lock_codex_file(&busy)
+            .await
+            .map_err(|_| AdminError::store(&state))?;
+        ck_exec::codex_siwc_bind::unlock(&lock).map_err(|_| AdminError::store(&state))?;
     }
+    Err(AdminError::new(
+        &state,
+        500,
+        "store_failed",
+        "the credential lock kept changing hands",
+    ))
 }
 
 type CredentialBatchParts = (
@@ -592,6 +597,7 @@ fn credential_batch_attempt(
         if !ck_exec::codex_siwc_bind::try_lock(&lock).map_err(|_| AdminError::store(state))? {
             return Ok(BatchAttempt::Busy(path.clone()));
         }
+        ck_exec::codex_siwc_bind::unlock(&lock).map_err(|_| AdminError::store(state))?;
     }
     let mut prepared = Vec::with_capacity(documents.len());
     for (document, path, bytes) in documents {

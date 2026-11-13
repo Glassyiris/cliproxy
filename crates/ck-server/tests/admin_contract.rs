@@ -234,6 +234,7 @@ async fn credential_batch_preserves_bytes_and_is_in_the_portable_snapshot() {
 }
 
 /// Marks the re-executed test process that runs under a lowered descriptor limit.
+#[cfg(unix)]
 const LOW_NOFILE_CHILD: &str = "CK_ADMIN_CONTRACT_LOW_NOFILE_CHILD";
 
 /// One batch must not hold a descriptor per document: the child lowers only its own soft
@@ -273,6 +274,7 @@ fn credential_batch_of_2000_documents_fits_a_1024_descriptor_limit() {
     );
 }
 
+#[cfg(unix)]
 async fn large_credential_batch(count: usize) {
     use base64::Engine as _;
     let f = Fixture::new("credential-batch-low-nofile", false).await;
