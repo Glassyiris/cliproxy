@@ -29,8 +29,11 @@ export default {
     "app.connection.unreachable":
       "The server did not answer. Check that it is running and that this address reaches it.",
     "app.connection.timeout": "The server did not answer within 30 seconds. Try again.",
-    "app.signIn.rejected": "The management key was rejected. Sign in again.",
+    "app.signIn.rejected": "The session ended or the management key changed. Sign in again.",
+    "app.signIn.cookieBlocked":
+      "The key was accepted, but this browser did not keep the sign-in cookie. Allow cookies for this site and try again.",
     "app.signIn.signedOutElsewhere": "Signed out in another tab. Sign in again.",
+    "app.signOut.failed": "Could not sign out. You are still signed in; try again.",
 
     "app.nav.footer": "Connection and preferences",
     "app.palette.label": "Go to page",

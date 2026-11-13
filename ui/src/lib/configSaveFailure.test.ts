@@ -8,7 +8,7 @@ const server = fakeServer();
 const { ApiError, connect } = await import("./api/client.ts");
 const { replaceConfigValue } = await import("./api/config.ts");
 const { configSaveFailure } = await import("./configSaveFailure.ts");
-connect("management-key", { unauthorized() {}, server() {} });
+connect({ unauthorized() {}, server() {} });
 
 test("destination rejection names every secret field and retains the unsaved JSON edits", async () => {
   const draft =

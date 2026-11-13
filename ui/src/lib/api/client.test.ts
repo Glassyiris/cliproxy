@@ -20,10 +20,9 @@ const { accountProbes, usageProbes } = await import("./probes.ts");
 
 const builds: (ServerBuild | null)[] = [];
 let rejected = 0;
-const signIn = () =>
-  connect("secret", { unauthorized: () => rejected++, server: (b) => builds.push(b) });
+const signIn = () => connect({ unauthorized: () => rejected++, server: (b) => builds.push(b) });
 
-test("API session sends the key only while connected and never accesses storage", async () => {
+test("API requests carry the session cookie, never a key, and never access storage", async () => {
   disconnect();
   await assert.rejects(
     request(routes.readConfig),
@@ -39,7 +38,9 @@ test("API session sends the key only while connected and never accesses storage"
       },
     );
   assert.deepEqual(await request(routes.readConfig), { "config-version": 8 });
-  assert.equal(server.sent[0].headers.Authorization, "Bearer secret");
+  assert.equal(server.sent[0].headers.Authorization, undefined);
+  assert.equal(server.sent[0].headers["X-Cook-Dashboard"], "1");
+  assert.equal(server.sent[0].credentials, "same-origin");
   assert.equal(server.sent[0].url.href, "http://cpa.test/proxy/admin/v1/effective/config");
   assert.deepEqual(builds.at(-1), { version: "cook-router-1.0.0", commit: "abc1234", built: "" });
   disconnect();
@@ -50,6 +51,28 @@ test("API session sends the key only while connected and never accesses storage"
   );
   assert.equal(server.sent.length, sent);
   assert.equal(storageAccess.mock.callCount(), 0);
+});
+
+test("only the sign-in request carries the key, and session requests work signed out", async () => {
+  disconnect();
+  server.sent.length = 0;
+  server.answer = () => Response.json({ error: "invalid management key" }, { status: 401 });
+  const before = rejected;
+  await assert.rejects(
+    request(routes.signIn, { body: { remember: true }, outside: { key: "typed" } }),
+    (e) => e instanceof ApiError && e.status === 401,
+  );
+  await assert.rejects(
+    request(routes.checkSession, { outside: {} }),
+    (e) => e instanceof ApiError && e.status === 401,
+  );
+  assert.equal(rejected, before, "a refused sign-in is not an ended session");
+  const [typed, check] = server.sent;
+  assert.equal(typed.url.href, "http://cpa.test/proxy/v8/management/session");
+  assert.equal(typed.headers.Authorization, "Bearer typed");
+  assert.equal(typed.credentials, "same-origin");
+  assert.equal(check.headers.Authorization, undefined);
+  assert.equal(check.headers["X-Cook-Dashboard"], "1");
 });
 
 test("server errors keep status and message; 401 signs out", async () => {

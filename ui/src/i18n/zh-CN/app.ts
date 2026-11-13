@@ -28,8 +28,11 @@ export default {
     "app.signIn.wrongKey": "密钥不正确。请填写明文，而不是数据库中存储的哈希。",
     "app.connection.unreachable": "服务器没有响应。请确认服务器正在运行，并且此地址可以访问它。",
     "app.connection.timeout": "服务器在 30 秒内没有响应。请重试。",
-    "app.signIn.rejected": "管理密钥已被拒绝。请重新登录。",
+    "app.signIn.rejected": "登录已失效或管理密钥已更改，请重新登录。",
+    "app.signIn.cookieBlocked":
+      "密钥正确，但浏览器没有保存登录 Cookie。请允许此网站使用 Cookie 后重试。",
     "app.signIn.signedOutElsewhere": "已在其他标签页退出登录，请重新登录。",
+    "app.signOut.failed": "退出登录失败，当前仍处于登录状态，请重试。",
 
     "app.nav.footer": "连接与偏好设置",
     "app.palette.label": "前往页面",

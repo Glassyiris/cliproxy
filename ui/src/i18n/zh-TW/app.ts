@@ -28,8 +28,11 @@ export default {
     "app.signIn.wrongKey": "金鑰不正確。請填寫明文，而不是資料庫中儲存的雜湊。",
     "app.connection.unreachable": "伺服器沒有回應。請確認伺服器正在執行，且此位址可以連到它。",
     "app.connection.timeout": "伺服器在 30 秒內沒有回應。請重試。",
-    "app.signIn.rejected": "管理金鑰已被拒絕。請重新登入。",
+    "app.signIn.rejected": "登入已失效或管理金鑰已變更，請重新登入。",
+    "app.signIn.cookieBlocked":
+      "金鑰正確，但瀏覽器沒有儲存登入 Cookie。請允許此網站使用 Cookie 後重試。",
     "app.signIn.signedOutElsewhere": "已在其他分頁登出，請重新登入。",
+    "app.signOut.failed": "登出失敗，目前仍在登入狀態，請再試一次。",
 
     "app.nav.footer": "連線與偏好設定",
     "app.palette.label": "前往頁面",
