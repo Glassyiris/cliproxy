@@ -173,7 +173,13 @@ impl Stream {
             .header(self.slot)
             .committed
             .store(state.end, Ordering::Release);
-        self.pool.header(self.slot).generation.fetch_add(1, Ordering::Release);
+        self.advance_generation();
+    }
+
+    fn advance_generation(&self) {
+        // The stream metadata lock serializes every generation writer.
+        let generation = &self.pool.header(self.slot).generation;
+        generation.store(generation.load(Ordering::Relaxed).wrapping_add(1), Ordering::Release);
     }
 
     pub(crate) fn finish(&self, terminal: Terminal) {
@@ -184,7 +190,7 @@ impl Stream {
         let mut state = self.state.lock().unwrap();
         if state.terminal.is_none() {
             state.terminal = Some(terminal);
-            self.pool.header(self.slot).generation.fetch_add(1, Ordering::Release);
+            self.advance_generation();
         }
         drop(state);
         self.notify.notify_waiters();
@@ -208,7 +214,7 @@ impl Stream {
             }
         }
         state.records.clear();
-        self.pool.header(self.slot).generation.fetch_add(1, Ordering::Release);
+        self.advance_generation();
         self.notify.notify_waiters();
         released
     }
@@ -525,6 +531,8 @@ pub enum Read {
 pub struct Reader {
     stream: Arc<Stream>,
     next: u64,
+    available: u64,
+    committed: u64,
     terminal_seen: bool,
 }
 
@@ -546,6 +554,8 @@ impl Reader {
         Ok(Self {
             stream,
             next: after,
+            available: 0,
+            committed: 0,
             terminal_seen: false,
         })
     }
@@ -560,14 +570,17 @@ impl Reader {
                 self.terminal_seen = true;
                 return (Poll::Ready(Some(Read::Terminal(Terminal::Gone))), false);
             }
-            // The header is the publication authority; state supplies complete-record boundaries.
-            let committed = stream.pool.header(stream.slot).committed.load(Ordering::Acquire);
+            // Cache only a prefix acquired from the mapped publication header under this lock.
+            if self.next >= self.available {
+                self.committed = stream.pool.header(stream.slot).committed.load(Ordering::Acquire);
+                self.available = state.next_sequence;
+            }
             let index = state.records.partition_point(|run| run.next_sequence <= self.next);
             if let Some(record) = state
                 .records
                 .get(index)
                 .and_then(|run| run.record(stream.id, self.next))
-                && record.end.byte(stream.id).is_ok_and(|end| end <= committed)
+                && record.end.byte(stream.id).is_ok_and(|end| end <= self.committed)
             {
                 for number in record.start.frame..=last_frame(record) {
                     let index = (number - state.base_frame) as usize;
@@ -606,6 +619,14 @@ impl Reader {
     }
 
     pub async fn next(&mut self) -> Option<Read> {
+        if self.terminal_seen {
+            return None;
+        }
+        if self.next < self.available
+            && let Poll::Ready(value) = self.try_next()
+        {
+            return value;
+        }
         loop {
             let stream = self.stream.clone();
             let notified = stream.notify.notified();
