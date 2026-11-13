@@ -97,15 +97,6 @@ try {
   }
   console.log(`PASS credential actions match server capabilities (${summary.join(", ")})`);
 
-  // A route the server lacks is read once, not retried in a loop.
-  const before = evaluate("window.__calls.length");
-  browser("click", 'nav a[href="#overview"]');
-  browser("click", 'nav a[href="#accounts"]');
-  browser("wait", "4000");
-  const pluginReads = evaluate(`window.__calls.slice(${before}).filter(c=>c.path.endsWith('/plugins')&&c.method==='GET').length`);
-  assert.ok(pluginReads <= 1, `GET /plugins read ${pluginReads} times`);
-  console.log(`PASS unsupported reads are not retried in a loop (${pluginReads} read of GET /plugins)`);
-
   browser("click", 'nav a[href="#models?view=payload"]');
   settled();
   browser("find", "role", "button", "click", "--name", "Add rule");

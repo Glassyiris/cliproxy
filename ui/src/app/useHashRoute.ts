@@ -1,15 +1,7 @@
 // The hash is the app's location: the page, its argument (the open row) and its query (tab,
 // filter, search), so reload and Back keep them. One listener for the whole app, so the unsaved
 // guard decides once per change, whoever reads the route.
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { parseHash } from "./routes.ts";
 
 type Parsed = ReturnType<typeof parseHash>;
@@ -94,27 +86,14 @@ function subscribe(listener: () => void) {
   };
 }
 
-/**
- * Under this provider, `useHashRoute().arg` is the named query key instead of the path argument: a
- * page hosted in a dialog over another page keeps its open item there, so the two do not share one
- * argument (the plugins dialog over Configuration).
- */
-export const ArgFromQuery = createContext<string | null>(null);
-
 /** The current page and its argument. An unknown hash opens the first page. */
 export function useHashRoute() {
-  const current = useSyncExternalStore(subscribe, () => place);
-  const key = useContext(ArgFromQuery);
-  const scoped = useSyncExternalStore(subscribe, () => (key ? (params[key] ?? "") : null));
-  return useMemo(
-    () => (scoped === null ? current : { route: current.route, arg: scoped }),
-    [current, scoped],
-  );
+  return useSyncExternalStore(subscribe, () => place);
 }
 
 /**
  * How a query change enters history: `push` for a choice the operator would go Back from (a tab,
- * a family, an open store), `replace` for typing and filters, so a search does not add a Back
+ * a family), `replace` for typing and filters, so a search does not add a Back
  * step per key.
  */
 type HashMode = "push" | "replace";

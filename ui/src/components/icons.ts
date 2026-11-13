@@ -16,7 +16,6 @@ import {
   KeyRound,
   Layers,
   LayoutDashboard,
-  Package,
   Plug,
   Plus,
   Radio,
@@ -56,7 +55,6 @@ export const icons = {
   logs: ScrollText,
   server: ServerCog,
   settings: "wrench",
-  plugins: Package,
   attention: "warning",
   allClear: "success",
 } as const satisfies Record<string, IconProps["icon"]>;

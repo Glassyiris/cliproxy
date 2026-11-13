@@ -138,7 +138,6 @@ export const destinations: readonly { hash: string; route: string; title(): stri
   { hash: "#clients?open=use", route: "clients", title: () => t("app.nav.use") },
   { hash: "#models?view=payload", route: "models", title: () => t("app.nav.payload") },
   { hash: "#activity?view=logs", route: "activity", title: () => t("app.nav.logs") },
-  { hash: "#settings?open=plugins", route: "settings", title: () => t("app.nav.plugins") },
   { hash: "#settings?open=about", route: "settings", title: () => t("app.nav.system") },
 ];
 

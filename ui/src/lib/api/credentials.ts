@@ -46,9 +46,6 @@ export type Credential = {
   quota: QuotaObservation;
   cooldowns: Cooldown[];
   model_quotas?: Record<string, QuotaObservation>;
-  supports_quota?: boolean;
-  quota_provider?: string;
-  quota_plugin_id?: string;
   email?: string;
   project_id?: string;
   account_type?: "oauth" | "api_key";

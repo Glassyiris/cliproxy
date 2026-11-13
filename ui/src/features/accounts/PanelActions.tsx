@@ -1,7 +1,7 @@
 // What can be done to the open account: the two actions used most as buttons, the rest in one
 // menu after them, so the row stays one line in the panel. Unsupported actions render disabled
 // and are named in the page's one MissingActions line.
-import { RotateCcw, TimerReset } from "lucide-react";
+import { TimerReset } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
 import type { DropdownMenuItemData, DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -12,7 +12,6 @@ import { icons } from "../../components/icons.ts";
 import type { useQuota } from "../../app/QuotaProvider.tsx";
 import { useAvailable } from "../../components/MissingActions.tsx";
 import { downloadCredential, refreshCredentials } from "../../lib/api/credentials.ts";
-import { resetPluginQuota } from "../../lib/api/plugins.ts";
 import { routes } from "../../lib/api/routes.ts";
 import { resetCooldown } from "../../lib/api/routing.ts";
 import { saveBlob } from "../../lib/download.ts";
@@ -70,10 +69,9 @@ type MenuAction = DropdownMenuItemData & { label: string; busy: string };
 
 type Available = ReturnType<typeof useAvailable>;
 
-/** The resets: the local cooldown, and the quota a plugin stored; each asks first. */
+/** The resets: the local cooldown; it asks first. */
 function resets({ row, writes }: Pick<PanelProps, "row" | "writes">, isAvailable: Available) {
   const a = row.account;
-  const plugin = a.quota_plugin_id;
   const items: MenuAction[] = [
     {
       label: t("accounts.actions.resetCooldown"),
@@ -94,25 +92,6 @@ function resets({ row, writes }: Pick<PanelProps, "row" | "writes">, isAvailable
         }),
     },
   ];
-  if (plugin)
-    items.push({
-      label: t("accounts.actions.resetStored"),
-      icon: RotateCcw,
-      busy: "stored",
-      isDisabled: !isAvailable(routes.resetPluginQuota),
-      onClick: () =>
-        writes.ask({
-          title: t("accounts.confirm.storedTitle", { name: row.name }),
-          description: t("accounts.confirm.storedDetail", { plugin }),
-          actionLabel: t("accounts.actions.resetStored"),
-          run: sendThenReload(
-            writes,
-            "stored",
-            () => resetPluginQuota(plugin, a.auth_index),
-            t("accounts.done.storedReset"),
-          ),
-        }),
-    });
   return items;
 }
 

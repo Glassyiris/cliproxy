@@ -7,10 +7,8 @@ import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { SelectableCard } from "@astryxdesign/core/SelectableCard";
 import { Text } from "@astryxdesign/core/Text";
 import { icons } from "../../components/icons.ts";
-import { usePlugins } from "../../app/serverQueries.ts";
 import { useAvailable } from "../../components/MissingActions.tsx";
 import { providerIcon } from "../../components/ProviderIcon.tsx";
-import { ReadError } from "../../components/ReadError.tsx";
 import { routes } from "../../lib/api/routes.ts";
 import { label } from "../../lib/credentials.ts";
 import { t } from "../../lib/i18n.ts";
@@ -92,14 +90,10 @@ export function Ways({
   /** The ways this server answered as not available. */
   gone: string[];
 }) {
-  const plugins = usePlugins();
   const available = useAvailable();
   const canStart = available(routes.startOAuth);
-  const fromPlugins = (plugins.data?.plugins ?? [])
-    .filter((p) => p.supports_oauth)
-    .map((p) => p.oauth_provider || p.id);
   const unavailable = t("connect.providers.unavailable");
-  const providers = [...new Set([...builtIn, ...fromPlugins])].map((provider): Choice => ({
+  const providers = builtIn.map((provider): Choice => ({
     way: { kind: "signIn", provider },
     name: label(provider),
     icon: providerIcon(provider),
@@ -129,21 +123,12 @@ export function Ways({
   const key = chosen ? wayKey(chosen) : "";
   return (
     <FormLayout>
-      <VStack gap={2} aria-busy={plugins.isPending}>
-        <Choices
-          title={t("connect.way.providers")}
-          choices={providers}
-          chosen={key}
-          onChoose={onChoose}
-        />
-        {plugins.isError && (
-          <ReadError
-            error={plugins.error}
-            what={t("connect.providers.what")}
-            retry={() => void plugins.refetch()}
-          />
-        )}
-      </VStack>
+      <Choices
+        title={t("connect.way.providers")}
+        choices={providers}
+        chosen={key}
+        onChoose={onChoose}
+      />
       <Choices title={t("connect.way.other")} choices={other} chosen={key} onChoose={onChoose} />
     </FormLayout>
   );

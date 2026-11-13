@@ -49,7 +49,6 @@ export default {
     "app.nav.payload": "请求体规则",
     "app.nav.usage": "用量",
     "app.nav.logs": "日志",
-    "app.nav.plugins": "插件",
     "app.nav.connect": "连接账号",
     "app.nav.system": "系统",
     "app.nav.github": "GitHub",

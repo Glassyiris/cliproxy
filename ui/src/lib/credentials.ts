@@ -188,7 +188,7 @@ export type AccountRow = {
 
 const named = (w: Window, names: string[]) => "name" in w.label && names.includes(w.label.name);
 const titled = (w: Window, pattern: RegExp) => "text" in w.label && pattern.test(w.label.text);
-// Built-in windows by name; plugin windows by the length their title gives ("Pro · 5h", "7d").
+// Built-in windows by name; Kimi windows by the length their title gives ("5h", "7d").
 const isSession = (w: Window) =>
   named(w, ["session", "fiveHourLimit", "daily", "primaryLimit"]) ||
   titled(w, /session|5-hour|\b5 ?h\b|daily|primary/i);

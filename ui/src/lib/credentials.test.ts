@@ -94,10 +94,10 @@ test("account rows: status words, honest unknowns, low, last used and weekly ord
   const week = row({}, checked([w({ name: "lengthLimit", seconds: 7 * 86_400 + 3600 }, 12)]));
   assert.deepEqual(used(week.weekly), [12, null]);
 
-  // Plugin windows are recognised by their length; any reported window can make a row Low.
-  const plugin = row({}, checked([w({ text: "Pro · 5h" }, 90), w({ text: "Pro · 7d" }, 30), w({ text: "Pro · monthly" }, 95)]));
-  assert.deepEqual([used(plugin.session), used(plugin.weekly)], [[90, null], [30, null]]);
-  assert.deepEqual([plugin.low, plugin.sub], [true, { kind: "low", window: { text: "Pro · monthly" }, used: 95 }]);
+  // Windows titled by text (Kimi limits) are recognised by their length; any reported window can make a row Low.
+  const kimi = row({}, checked([w({ text: "Pro · 5h" }, 90), w({ text: "Pro · 7d" }, 30), w({ text: "Pro · monthly" }, 95)]));
+  assert.deepEqual([used(kimi.session), used(kimi.weekly)], [[90, null], [30, null]]);
+  assert.deepEqual([kimi.low, kimi.sub], [true, { kind: "low", window: { text: "Pro · monthly" }, used: 95 }]);
   // Low: a ready account at 85% or more of either window says which.
   assert.deepEqual([codex.low, codex.sub], [true, { kind: "low", window: "session", used: 91 }]);
   assert.equal(row({}, checked([w(session, 84.9), w({ name: "weeklyLimit" }, 10)])).low, false);

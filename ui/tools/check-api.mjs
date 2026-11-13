@@ -376,7 +376,7 @@ class Evaluator {
 }
 
 const describe = (node) => (node.e === "path" ? node.path.join("::") : node.e);
-const key = (r) => `${r.method} ${r.path.replace(/^\/admin\/v1\/r\/(?:setting|provider|client-key|router|plugin)$/, "/admin/v1/r/{kind}")}`;
+const key = (r) => `${r.method} ${r.path.replace(/^\/admin\/v1\/r\/(?:setting|provider|client-key|router)$/, "/admin/v1/r/{kind}")}`;
 
 function serverRoutes() {
   const tokens = tokenize(readFileSync(rustFile, "utf8"));

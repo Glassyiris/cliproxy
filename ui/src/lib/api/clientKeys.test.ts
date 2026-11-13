@@ -102,14 +102,14 @@ test("masked or empty values cannot become a client credential", async () => {
   await assert.rejects(revealClientKey(resource.id), ConfigChangedError);
 });
 
-test("masked plugin switches patch by revision without revealing their spec", async () => {
+test("masked provider switches patch by revision without revealing their spec", async () => {
   server.sent.length = 0;
   server.answer = () => Response.json(written);
-  const plugin = { kind: "plugin", id: "plugin-stable", ord: 0, rev: 7, spec: "$secret" };
-  await patchResource(plugin, { enabled: false });
+  const provider = { kind: "provider", id: "provider-stable", ord: 0, rev: 7, spec: "$secret" };
+  await patchResource(provider, { enabled: false });
   assert.equal(server.sent.length, 1);
   assert.equal(server.sent[0].url.pathname, "/admin/v1/apply");
   assert.deepEqual(server.sent[0].body, {
-    ops: [{ op: "patch", kind: "plugin", id: plugin.id, patch: { enabled: false }, if_rev: 7 }],
+    ops: [{ op: "patch", kind: "provider", id: provider.id, patch: { enabled: false }, if_rev: 7 }],
   });
 });

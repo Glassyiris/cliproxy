@@ -49,7 +49,6 @@ export default {
     "app.nav.payload": "請求內容規則",
     "app.nav.usage": "用量",
     "app.nav.logs": "日誌",
-    "app.nav.plugins": "外掛",
     "app.nav.connect": "連接帳號",
     "app.nav.system": "系統",
     "app.nav.github": "GitHub",

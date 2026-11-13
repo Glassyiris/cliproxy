@@ -1,14 +1,5 @@
 import type { Data } from "./json.ts";
 
-type PluginBucket = {
-  remainingFraction?: unknown;
-  remaining_fraction?: unknown;
-  window?: string;
-  description?: string;
-  resetTime?: string;
-  reset_time?: string;
-};
-type PluginGroup = { displayName?: string; display_name?: string; buckets?: PluginBucket[] };
 type CodexLimit = {
   used_percent?: unknown;
   limit_window_seconds?: unknown;
@@ -25,7 +16,6 @@ type ClaudeLimit = {
 };
 type ClaudeBucket = { utilization?: unknown; resets_at?: string | null };
 type QuotaPayload = Data & {
-  groups?: PluginGroup[];
   rate_limit?: Record<string, CodexLimit>;
   rateLimit?: Record<string, CodexLimit>;
   usages?: Record<string, KimiLimit>;
@@ -43,7 +33,7 @@ type QuotaObservation = { observed_at?: string; signals?: Record<string, string>
 
 /**
  * A window's title. Built-in ones are names the dashboard translates, titled as the provider's
- * own CLI titles them; plugin groups and Kimi limits bring their own text from the server.
+ * own CLI titles them; Kimi limits bring their own text from the server.
  */
 export type WindowLabel =
   | {
@@ -79,26 +69,9 @@ export type Window = {
   extra?: { spent: Money; limit: Money | null };
 };
 const clamp = (n: number) => Math.round(Math.max(0, Math.min(100, n)) * 10) / 10;
-/** Normalised plugin groups first; then the built-in Claude, Codex and Kimi usage payloads. */
+/** The built-in Claude, Codex and Kimi usage payloads. */
 export function quotaWindows(p: string, payload: QuotaPayload): Window[] {
   const out: Window[] = [];
-  if (Array.isArray(payload.groups)) {
-    for (const g of payload.groups)
-      for (const b of g.buckets || []) {
-        const left = b.remainingFraction ?? b.remaining_fraction;
-        if (typeof left === "number")
-          out.push({
-            label: {
-              text: [g.displayName || g.display_name, b.window || b.description]
-                .filter(Boolean)
-                .join(" · "),
-            },
-            used: clamp((1 - left) * 100),
-            reset: b.resetTime || b.reset_time || "",
-          });
-      }
-    return out;
-  }
   if (p === "claude") return claudeWindows(payload);
   if (p === "codex") {
     for (const [k, v] of Object.entries<CodexLimit>(payload.rate_limit || payload.rateLimit || {}))

@@ -22,7 +22,6 @@ test("quota is percent used, not remaining; unknown payloads stay empty", () => 
     ],
   );
   assert.deepEqual(quotaWindows("codex", { rate_limit: { secondary_window: { used_percent: 3 } } })[0].label, { name: "secondaryLimit" });
-  assert.equal(quotaWindows("x", { groups: [{ displayName: "Pro", buckets: [{ remainingFraction: 0.25 }] }] })[0].used, 75);
   assert.deepEqual(quotaWindows("gemini", {}), []);
 });
 

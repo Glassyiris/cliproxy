@@ -6,8 +6,8 @@ import { absent, configPath, storedValue } from "./configPath.ts";
 test("config paths stay literal in JSON and reject empty or traversal segments", () => {
   for (const path of ["", "/oauth", "oauth/", "oauth//key", "oauth/../key", "a/./b", "a\\b"])
     assert.throws(() => configPath(path), /Invalid configuration path/);
-  assert.equal(configPath("plugins/configs/my plugin"), "plugins/configs/my plugin");
-  assert.equal(configPath("plugins/configs/百分比%"), "plugins/configs/百分比%");
+  assert.equal(configPath("routing/aliases/my alias"), "routing/aliases/my alias");
+  assert.equal(configPath("routing/aliases/百分比%"), "routing/aliases/百分比%");
 });
 
 test("stored values distinguish a missing key from null and ignore inherited properties", () => {

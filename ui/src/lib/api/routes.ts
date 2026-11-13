@@ -44,13 +44,6 @@ export const routes = {
   cancelOAuth: { method: "DELETE", path: "/oauth/session" },
   importOAuth: { method: "POST", path: "/oauth/import" },
   submitOAuthCallback: { method: "POST", path: "/oauth/callback" },
-
-  listPlugins: { method: "GET", path: "/plugins" },
-  deletePlugin: { method: "DELETE", path: "/plugins/{id}" },
-  listPluginStore: { method: "GET", path: "/plugins/store" },
-  installPlugin: { method: "POST", path: "/plugins/store/{id}/install" },
-  fetchPluginQuota: { method: "POST", path: "/plugins/{id}/quota" },
-  resetPluginQuota: { method: "DELETE", path: "/plugins/{id}/quota" },
 } as const satisfies Record<string, Route>;
 
 // Routes outside /v8/management that need no key, relative to the page's base. tools/check-api.mjs

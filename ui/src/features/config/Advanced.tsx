@@ -13,7 +13,6 @@ import { Text } from "@astryxdesign/core/Text";
 import type { Action } from "../../app/useAction.ts";
 import { useHashParams } from "../../app/useHashRoute.ts";
 import { ConfigEditor } from "../../components/ConfigEditor.tsx";
-import { PluginConfigEditor } from "../../components/PluginConfigEditor.tsx";
 import type { Config } from "../../lib/api/config.ts";
 import { t } from "../../lib/i18n.ts";
 import { layout } from "../../themes/site/layout.ts";
@@ -31,7 +30,6 @@ const covered = new Set([
   "observability",
   "oauth",
   "api-keys",
-  "plugins",
   // Read once at startup; changes require a restart.
   "worker-threads",
 ]);
@@ -99,7 +97,6 @@ export function Advanced({ action, config }: { action: Action; config: Config | 
   const [params, setParams] = useHashParams();
   const open = (key: string | undefined) => setParams({ key }, "push");
   const key = params.key;
-  const pluginId = key ? /^plugins\/configs\/([^/]+)$/.exec(key)?.[1] : undefined;
   return (
     <VStack gap={0}>
       {sectionsOf(config).map((name) => (
@@ -112,14 +109,7 @@ export function Advanced({ action, config }: { action: Action; config: Config | 
         />
       ))}
       <ConfigEditor
-        source={key && !pluginId ? { path: key } : null}
-        title={key ?? ""}
-        hashKey="key"
-        action={action}
-        onClose={() => open(undefined)}
-      />
-      <PluginConfigEditor
-        id={pluginId ?? null}
+        source={key ? { path: key } : null}
         title={key ?? ""}
         hashKey="key"
         action={action}

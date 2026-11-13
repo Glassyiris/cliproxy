@@ -1,9 +1,7 @@
 // Live quota checks. A check asks the provider through the server (/requests/api-call with the
-// credential's own token, or a quota plugin), so it only ever runs when the user presses a button.
+// credential's own token), so it only ever runs when the user presses a button.
 import { ApiError, available, ConnectionError } from "./api/client.ts";
 import type { Credential } from "./api/credentials.ts";
-import type { Plugin } from "./api/plugins.ts";
-import { fetchPluginQuota } from "./api/plugins.ts";
 import { callProvider } from "./api/requests.ts";
 import { routes } from "./api/routes.ts";
 import { provider, type Limits } from "./credentials.ts";
@@ -34,12 +32,8 @@ export type QuotaReading =
   | { at: number; windows: Window[]; error?: QuotaError; code?: number }
   | { error: QuotaError; code?: number };
 
-/** Usage endpoint or quota plugin for this account's provider, whether or not this server offers the route a check needs. */
-export const quotaApplies = (a: Credential, plugins: Plugin[]) =>
-  !!quotaPlugin(plugins, provider(a)) || !!usageURL[provider(a)];
-
-const quotaPlugin = (plugins: Plugin[], p: string) =>
-  plugins.find((x) => x.supports_quota && (x.quota_provider || x.id) === p);
+/** Usage endpoint for this account's provider, whether or not this server offers the route a check needs. */
+export const quotaApplies = (a: Credential) => !!usageURL[provider(a)];
 
 const refusal = (p: string, status: number): QuotaError => ({
   reason:
@@ -63,8 +57,8 @@ function failure(e: unknown): QuotaError | null {
 type QuotaPending = "queued" | "checking";
 const quotaKey = (a: Credential) => a.auth_index || a.name;
 
-/** Where the checker reads the current plugins and credentials from. */
-type QuotaSources = { plugins(): Plugin[]; credentials(): Credential[] };
+/** Where the checker reads the current credentials from. */
+type QuotaSources = { credentials(): Credential[] };
 
 /**
  * Checks run one at a time, and each account at most once every 2 minutes counted from when its
@@ -81,10 +75,8 @@ export function createQuotaChecker(sources: QuotaSources) {
   let epoch = 0;
   const changed = () => listeners.forEach((l) => l());
 
-  const plugin = (p: string) => quotaPlugin(sources.plugins(), p);
-  /** The provider has a usage endpoint or quota plugin this server can call. */
-  const hasSource = (a: Credential) =>
-    !!plugin(provider(a)) || (!!usageURL[provider(a)] && available(routes.callProvider));
+  /** The provider has a usage endpoint and this server offers the route a check needs. */
+  const hasSource = (a: Credential) => !!usageURL[provider(a)] && available(routes.callProvider);
   const canCheck = (a: Credential) => !a.disabled && hasSource(a);
   const gap = (k: string, now: number) => Math.max(0, (tried.get(k) ?? -Infinity) + GAP - now);
   /** Milliseconds until this account may be checked again; a queued or running check counts as a full wait. */
@@ -109,34 +101,30 @@ export function createQuotaChecker(sources: QuotaSources) {
       void readings.set(quotaKey(a), { ...readings.get(quotaKey(a)), error, code });
     let raw: unknown;
     try {
-      const pl = plugin(p);
-      if (pl) raw = await fetchPluginQuota(pl.id, a.auth_index);
-      else {
-        const header: Record<string, string> = {
-          Authorization: "Bearer $TOKEN$",
-          "Content-Type": "application/json",
-        };
-        if (p === "claude")
-          Object.assign(header, {
-            "anthropic-beta": "oauth-2025-04-20",
-            "User-Agent": "claude-cli/2.1.280 (external, cli)",
-          });
-        if (p === "codex") {
-          header["User-Agent"] = "codex-tui/0.149.1";
-          // The file's own account_id first; the token's claim is the fallback.
-          const account = a.account_id || a.id_token?.chatgpt_account_id;
-          if (account) header["Chatgpt-Account-Id"] = account;
-        }
-        const r = await callProvider({
-          authIndex: a.auth_index,
-          method: "GET",
-          url: usageURL[p],
-          header,
+      const header: Record<string, string> = {
+        Authorization: "Bearer $TOKEN$",
+        "Content-Type": "application/json",
+      };
+      if (p === "claude")
+        Object.assign(header, {
+          "anthropic-beta": "oauth-2025-04-20",
+          "User-Agent": "claude-cli/2.1.280 (external, cli)",
         });
-        if (r.status_code < 200 || r.status_code >= 300)
-          return fail(refusal(p, r.status_code), r.status_code);
-        raw = r.body;
+      if (p === "codex") {
+        header["User-Agent"] = "codex-tui/0.149.1";
+        // The file's own account_id first; the token's claim is the fallback.
+        const account = a.account_id || a.id_token?.chatgpt_account_id;
+        if (account) header["Chatgpt-Account-Id"] = account;
       }
+      const r = await callProvider({
+        authIndex: a.auth_index,
+        method: "GET",
+        url: usageURL[p],
+        header,
+      });
+      if (r.status_code < 200 || r.status_code >= 300)
+        return fail(refusal(p, r.status_code), r.status_code);
+      raw = r.body;
     } catch (e) {
       const error = failure(e);
       return error ? fail(error) : undefined;

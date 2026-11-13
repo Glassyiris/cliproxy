@@ -88,13 +88,16 @@ test("server errors keep status and message; 401 signs out", async () => {
   );
   assert.equal(rejected, 1);
   server.answer = () =>
-    Response.json({ error: "invalid_plugin_id", message: "invalid plugin id" }, { status: 400 });
+    Response.json({ error: "invalid_log_name", message: "invalid log name" }, { status: 400 });
   await assert.rejects(
-    request(routes.deletePlugin, { params: { id: "a b" } }),
+    request(routes.downloadErrorLog, { params: { name: "a b" } }),
     (e) =>
-      e instanceof ApiError && e.code === "invalid_plugin_id" && e.message === "invalid plugin id",
+      e instanceof ApiError && e.code === "invalid_log_name" && e.message === "invalid log name",
   );
-  assert.equal(server.sent.at(-1)!.url.pathname, "/proxy/v8/management/plugins/a%20b");
+  assert.equal(
+    server.sent.at(-1)!.url.pathname,
+    "/proxy/v8/management/observability/logs/errors/a%20b",
+  );
 });
 
 test("an empty 404, 501 or 405 marks the route not implemented until the next sign-in", async () => {

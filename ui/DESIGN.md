@@ -137,7 +137,7 @@ Each tab and dialog hosts a feature page from `src/features/` through a thin hos
 | Clients (`clients`) | Which key do I use, and how do I revoke one? | `table-page` (minimal) | Dialog: Use with a tool (`?open=use`), from the header and from a key's row menu |
 | Models (`models`) | Which models can clients ask for, and where do they go? | `table-filter` | Views: Models, Payload rules (`?view=payload`) |
 | Activity (`activity`) | Where does traffic come from, and what happened to a request? | `dashboard-comparison`, `table-filter` | Views: Usage, Logs (`?view=logs`) |
-| Settings (`settings`) | Which server setting do I change, and what does it affect? | `settings-sidebar` | Dialog: Plugins (`?open=plugins`), from the header |
+| Settings (`settings`) | Which server setting do I change, and what does it affect? | `settings-sidebar` | Dialog: System (`?open=about`) |
 | Sign-in (not a route) | Which server do I connect to, and what do I enter? | `login-card` | — |
 | Connect an account (dialog over any page, `?open=connect`) | Which kind of account, and how far is the authorization? | `form-wizard-dialog` | After the type is chosen only that flow shows |
 | About (preferences dialog, `?open=about`) | Which build is this, and is it current? | `settings-dialog` | The dialog's About panel (below) |
@@ -303,7 +303,7 @@ settings dialog.
 
 | Need | Use |
 |---|---|
-| Account, key, model, plugin, log rows | One `Row` pattern on Astryx `List`/`Table`: status lamp + label, name + secondary line, metrics, row menu |
+| Account, key, model, log rows | One `Row` pattern on Astryx `List`/`Table`: status lamp + label, name + secondary line, metrics, row menu |
 | Detail | Astryx `LayoutPanel` + `MetadataList`; `BottomSheet` on phones (Roles) |
 | Edits | Astryx `Dialog purpose="form"`; config edits show a diff and reread before write |
 | Quota windows | Astryx `ProgressBar` with label and reset time |

@@ -11,7 +11,6 @@ import payload from "./payload.ts";
 import usage from "./usage.ts";
 import logs from "./logs.ts";
 import config from "./config.ts";
-import plugins from "./plugins.ts";
 import connect from "./connect.ts";
 import system from "./system.ts";
 
@@ -27,7 +26,6 @@ export default {
   ...usage["zh-CN"],
   ...logs["zh-CN"],
   ...config["zh-CN"],
-  ...plugins["zh-CN"],
   ...connect["zh-CN"],
   ...system["zh-CN"],
 };
