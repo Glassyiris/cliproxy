@@ -43,11 +43,8 @@ const BUILD_DATE: &str = match option_env!("COOK_BUILD_DATE") {
     Some(v) => v,
     None => "unknown",
 };
-/// Go reports "1" only for cgo builds that can load native plugins.
-const SUPPORT_PLUGIN: &str = cpa_plugin::SUPPORT_PLUGIN;
-
 const EXPOSED_HEADERS: &str = "X-Cook-Trace-Id, X-Cook-Version, X-Cook-Commit, X-Cook-Build-Date, \
-X-Cook-Support-Plugin, X-SERVER-VERSION, X-SERVER-BUILD-DATE, Location, Retry-After, ETag, \
+X-SERVER-VERSION, X-SERVER-BUILD-DATE, Location, Retry-After, ETag, \
 X-Request-Id, OpenAI-Request-Id";
 
 #[derive(Clone, Copy)]
@@ -325,7 +322,6 @@ pub(super) fn version_headers(headers: &mut HeaderMap) {
         ("X-Cook-Version", VERSION),
         ("X-Cook-Commit", COMMIT),
         ("X-Cook-Build-Date", BUILD_DATE),
-        ("X-Cook-Support-Plugin", SUPPORT_PLUGIN),
     ] {
         headers.insert(name, HeaderValue::from_static(value));
     }
