@@ -16,25 +16,37 @@ use cpa_core::exec::Caller;
 
 use crate::runtime::Runtime;
 
-/// Go `AuthMiddleware`: client keys, then plugin frontend auth providers.
-pub async fn require_client_key(State(rt): State<Arc<Runtime>>, req: Request, next: Next) -> Response {
-    let (mut req, access) = crate::plugins::authenticate(&rt, req).await;
-    let caller = match access {
-        Ok(crate::plugins::Access::Open) => Caller {
-            principal: String::new(),
-            source: "",
-            provider: String::new(),
-        },
-        Ok(crate::plugins::Access::Granted(caller)) => caller,
-        // gin `AbortWithStatusJSON(status, gin.H{"error": msg})`.
-        Err(denied) => {
-            let body = crate::gojson::Obj::new().str("error", denied.message).finish();
-            return crate::respond::gin_json(denied.status, body);
+/// Go `AuthMiddleware` over the config access provider: open without client keys, else
+/// one of them must match. A matched caller carries the provider name Go records.
+pub async fn require_client_key(State(rt): State<Arc<Runtime>>, mut req: Request, next: Next) -> Response {
+    let caller = match client_caller(&rt, req.headers(), req.uri().query().unwrap_or_default()) {
+        Ok(caller) => caller,
+        // gin `AbortWithStatusJSON(401, gin.H{"error": msg})`.
+        Err(message) => {
+            let body = crate::gojson::Obj::new().str("error", message).finish();
+            return crate::respond::gin_json(401, body);
         }
     };
     req.extensions_mut().insert(caller);
-    let query = req.uri().query().unwrap_or_default().to_owned();
-    crate::plugins::execution::with_query(&query, next.run(req)).await
+    next.run(req).await
+}
+
+/// Go `configaccess` provider name, recorded on callers a client key admitted.
+pub(crate) const CONFIG_PROVIDER: &str = "config-inline";
+
+/// The caller the configured client keys admit: an anonymous one without keys, else
+/// the matching key with [`CONFIG_PROVIDER`]; the 401 message otherwise.
+pub(crate) fn client_caller(rt: &Runtime, headers: &HeaderMap, query: &str) -> Result<Caller, &'static str> {
+    let config = rt.config();
+    let caller = authenticate(&config.api_keys, headers, query)?;
+    Ok(if config.api_keys.is_empty() {
+        caller
+    } else {
+        Caller {
+            provider: CONFIG_PROVIDER.to_owned(),
+            ..caller
+        }
+    })
 }
 
 pub(crate) fn authenticate(keys: &[String], headers: &HeaderMap, query: &str) -> Result<Caller, &'static str> {
@@ -168,6 +180,55 @@ mod tests {
 
     fn auth(query: &str, headers: &[(&'static str, &str)]) -> Result<Caller, &'static str> {
         auth_with(&["good"], query, headers)
+    }
+
+    /// Go `AuthMiddleware` over the config provider: open without keys (no provider
+    /// recorded), a matching key admits as [`CONFIG_PROVIDER`], anything else is gin's 401.
+    #[tokio::test]
+    async fn client_keys_record_the_config_provider_and_refuse_with_401() {
+        use tower::ServiceExt as _;
+        let call = |keys: &[&str], key: Option<&str>| {
+            let cfg = cpa_core::config::Config {
+                api_keys: keys.iter().map(|k| (*k).to_owned()).collect(),
+                ..Default::default()
+            };
+            let rt = Arc::new(crate::testing::runtime(
+                cfg,
+                Vec::new(),
+                cpa_exec::Executors {
+                    claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                    codex: Default::default(),
+                    devices: Default::default(),
+                    openai: Default::default(),
+                    google: Default::default(),
+                },
+            ));
+            let app = axum::Router::new()
+                .route(
+                    "/",
+                    axum::routing::get(
+                        |axum::Extension(caller): axum::Extension<Caller>| async move { caller.provider },
+                    ),
+                )
+                .layer(axum::middleware::from_fn_with_state(rt, require_client_key));
+            let mut request = axum::http::Request::builder().uri("/");
+            if let Some(key) = key {
+                request = request.header("authorization", format!("Bearer {key}"));
+            }
+            async move {
+                let response = app
+                    .oneshot(request.body(axum::body::Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                let status = response.status().as_u16();
+                let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                (status, String::from_utf8_lossy(&body).into_owned())
+            }
+        };
+        assert_eq!(call(&[], None).await, (200, String::new()));
+        assert_eq!(call(&["good"], Some("good")).await, (200, CONFIG_PROVIDER.to_owned()));
+        let (status, body) = call(&["good"], Some("bad")).await;
+        assert_eq!((status, body.contains("Invalid API key")), (401, true), "{body}");
     }
 
     #[test]

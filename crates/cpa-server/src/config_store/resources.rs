@@ -10,15 +10,12 @@ use serde_json::Value as Json;
 mod annotations;
 mod document;
 mod io;
-mod plugin;
 mod secrets;
 
 pub use annotations::strip_read_annotations_at;
 use annotations::{strip_provider_annotations, strip_provider_read_annotations};
 pub use document::{at_path, config, document, set_path, split};
 pub use io::{ImportError, export_json, import_json, import_yaml};
-pub(crate) use plugin::RAW_YAML;
-pub use plugin::patch_plugin_controls;
 pub use secrets::{document_for_read, hash_management_key, redact_document, redacted, resolve_secrets};
 
 /// The kinds of resource. A setting is one top-level section of the document; the
@@ -33,18 +30,10 @@ pub enum Kind {
     ClientKey,
     /// One entry of `model-routers`.
     Router,
-    /// One entry of `plugins.configs`, keyed by its id.
-    Plugin,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [
-        Kind::Setting,
-        Kind::Provider,
-        Kind::ClientKey,
-        Kind::Router,
-        Kind::Plugin,
-    ];
+    pub const ALL: [Kind; 4] = [Kind::Setting, Kind::Provider, Kind::ClientKey, Kind::Router];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -52,7 +41,6 @@ impl Kind {
             Kind::Provider => "provider",
             Kind::ClientKey => "client-key",
             Kind::Router => "router",
-            Kind::Plugin => "plugin",
         }
     }
 
@@ -215,10 +203,9 @@ pub fn check(r: &Resource) -> Result<(), Fault> {
             }
         }
     }
-    plugin::check(r)?;
     match r.kind {
         Kind::Setting if NOT_SETTINGS.contains(&r.id.as_str()) => {
-            fault("this section is stored as provider, router or plugin resources")
+            fault("this section is stored as provider or router resources")
         }
         Kind::Setting if r.id == "access" && r.spec.get("api-keys").is_some() => {
             fault("client keys are client-key resources, not part of setting/access")

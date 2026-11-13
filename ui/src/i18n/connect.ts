@@ -1,7 +1,6 @@
 export default {
   en: {
     "connect.providers.unavailable": "Not available on this server",
-    "connect.providers.what": "plugin providers",
     "connect.providers.notOnServer": "{provider} sign-in is not available on this server.",
     "connect.start.unsafe": "The server returned an unsafe sign-in URL.",
     "connect.phase.wait": "Waiting for approval",

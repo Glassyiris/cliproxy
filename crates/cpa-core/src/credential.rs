@@ -38,9 +38,6 @@ pub struct Credential {
     /// Store-wide monotonic stamp set on every accepted change, never reused even after
     /// a delete and re-create. Patches against an old revision are rejected.
     pub revision: u64,
-    /// Go `NextRefreshAfter` as the plugin auth parser returned it for this credential.
-    /// Registering the credential takes it per Go's registration rule; never persisted.
-    pub next_refresh_after: Option<std::time::SystemTime>,
 }
 
 impl Credential {
@@ -62,7 +59,6 @@ impl Credential {
             attributes: BTreeMap::from([("runtime_only".to_owned(), "true".to_owned())]),
             metadata,
             revision: 0,
-            next_refresh_after: None,
         }
     }
 
@@ -91,7 +87,6 @@ impl Credential {
             attributes: BTreeMap::new(),
             metadata,
             revision: 0,
-            next_refresh_after: None,
         };
         cred.refresh_derived();
         Some(cred)
@@ -122,5 +117,38 @@ impl MetadataPatch {
         for (key, value) in &self.set {
             metadata.insert(key.clone(), value.clone());
         }
+    }
+}
+
+/// Go `CanonicalCredentialMetadataKey`: the metadata key a legacy hyphenated
+/// spelling is stored under.
+pub fn canonical_metadata_key(key: &str) -> &str {
+    match key {
+        "api-key" => "api_key",
+        "base-url" => "base_url",
+        "disable-cooling" => "disable_cooling",
+        "excluded-models" => "excluded_models",
+        "fingerprint-profile" => "fingerprint_profile",
+        "model-aliases" => "model_aliases",
+        "openapi-location" => "openapi_location",
+        "openapi-models" => "openapi_models",
+        "proxy-url" => "proxy_url",
+        "request-retry" => "request_retry",
+        "request-scoped-errors" => "request_scoped_errors",
+        "tool-prefix-disabled" => "tool_prefix_disabled",
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_metadata_key;
+
+    #[test]
+    fn legacy_hyphenated_metadata_keys_map_to_their_canonical_names() {
+        assert_eq!(canonical_metadata_key("base-url"), "base_url");
+        assert_eq!(canonical_metadata_key("tool-prefix-disabled"), "tool_prefix_disabled");
+        assert_eq!(canonical_metadata_key("base_url"), "base_url");
+        assert_eq!(canonical_metadata_key("x-custom"), "x-custom");
     }
 }

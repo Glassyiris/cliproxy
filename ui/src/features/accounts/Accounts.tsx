@@ -28,7 +28,7 @@ import { HStack, StackItem, VStack } from "@astryxdesign/core/Layout";
 import { useConnectAccount } from "../../app/connectEntry.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { useQuota } from "../../app/QuotaProvider.tsx";
-import { useCredentials, usePlugins } from "../../app/serverQueries.ts";
+import { useCredentials } from "../../app/serverQueries.ts";
 import { useHashParams, useHashRoute } from "../../app/useHashRoute.ts";
 import { CountedSelector } from "../../components/CountedSelector.tsx";
 import { MissingActions, useAvailable } from "../../components/MissingActions.tsx";
@@ -66,7 +66,6 @@ const missing = () => [
   { route: routes.deleteCredentials, label: t("accounts.missing.delete") },
   { route: routes.resetCooldown, label: t("accounts.missing.cooldown") },
   { route: routes.callProvider, label: t("accounts.missing.quota") },
-  { route: routes.resetPluginQuota, label: t("accounts.missing.stored") },
 ];
 
 /**
@@ -140,19 +139,6 @@ function useRows(now: number) {
     [credentials.data, quota, now],
   );
   return { credentials, quota, rows };
-}
-
-/** Quota sources come from the plugins; when they fail to load, say so where quota is checked. */
-function PluginsError() {
-  const plugins = usePlugins();
-  if (!plugins.isError) return null;
-  return (
-    <ReadError
-      error={plugins.error}
-      what={t("accounts.page.pluginsWhat")}
-      retry={() => void plugins.refetch()}
-    />
-  );
 }
 
 /** Upload credential JSON files; the field empties again once they are sent. */
@@ -484,7 +470,6 @@ export default function Accounts() {
           retry={() => void credentials.refetch()}
         />
       )}
-      <PluginsError />
       {isMobile && <Band page={page} />}
       <VStack gap={0} ref={listRef}>
         <List page={page} />

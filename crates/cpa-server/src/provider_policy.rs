@@ -189,7 +189,6 @@ mod tests {
             attributes: Default::default(),
             metadata: Default::default(),
             revision: 0,
-            next_refresh_after: None,
         }
     }
 

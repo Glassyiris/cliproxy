@@ -1,5 +1,5 @@
 //! Raw credential source documents in the config database. The private, stable
-//! working directory is a cache for existing provider/plugin file protocols; only
+//! working directory is a cache for existing provider file protocols; only
 //! SQLite is durable, and these rows never enter config revisions or exports.
 
 use std::collections::BTreeSet;
@@ -221,17 +221,9 @@ impl CredentialDb {
             .collect()
     }
 
-    /// Synthesizes all canonical documents, including plugin paths outside the
-    /// top-level working directory, through the same parser as legacy file scans.
+    /// Synthesizes all canonical documents through the same parser as legacy file scans.
     pub fn scan(&self, config: &cpa_core::config::Config) -> anyhow::Result<cpa_core::config::credentials::AuthScan> {
         Ok(cpa_core::config::credentials::scan_documents(config, self.documents()?))
-    }
-
-    /// Plugin parsers run outside management/runtime locks; scans consume only
-    /// their cached answers for these exact canonical source bytes.
-    pub fn preparse(&self, config: &cpa_core::config::Config) -> anyhow::Result<()> {
-        cpa_core::config::credentials::preparse_documents(config, self.documents()?);
-        Ok(())
     }
 
     /// Commits before any caller may publish the new credential. The owner gate
@@ -286,7 +278,7 @@ impl CredentialDb {
         Ok(())
     }
 
-    /// Hydrates canonical documents, runs provider/plugin writers, then commits
+    /// Hydrates canonical documents, runs provider writers, then commits
     /// their final source documents together under the owner gate. A failed
     /// write or transaction restores the unchanged canonical working documents.
     pub fn write_files<T>(&self, paths: &[PathBuf], write: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
@@ -473,23 +465,6 @@ impl CredentialCommand<'_> {
         result
     }
 
-    pub(crate) fn hold_virtual(&self, grant: crate::runtime::HeldVirtualGrant) -> bool {
-        if self.pending.is_none() {
-            return false;
-        }
-        self.retain_virtual(grant);
-        true
-    }
-
-    pub(crate) fn retain_virtual(&self, grant: crate::runtime::HeldVirtualGrant) {
-        if let Some((path, hash)) = grant.source_fence()
-            && let Ok(name) = self.db.name(path)
-        {
-            self.db.store.fence_virtual_source(name, hash);
-        }
-        self.db.store.hold_virtual(grant);
-    }
-
     fn current(&self) -> Arc<State> {
         self.pending
             .as_ref()
@@ -611,7 +586,7 @@ fn private_dir(dir: &Path) -> anyhow::Result<()> {
 }
 
 fn materialize(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
-    // Avoid replacing equal files: provenance, plugin parse caches and file times
+    // Avoid replacing equal files: provenance and file times
     // remain stable when a config-only reload hydrates the credential cache.
     if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
         && std::fs::read(path).ok().as_deref() == Some(bytes)
@@ -621,7 +596,69 @@ fn materialize(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         create_dir(parent)?;
     }
-    cpa_plugin::auth::atomic_write(path, bytes).map_err(anyhow::Error::msg)
+    atomic_write(path, bytes).map_err(anyhow::Error::msg)
+}
+
+/// Go `atomicWriteFile`: a 0600 temp file beside `path`, renamed over it.
+pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> Result<(), String> {
+    use std::io::Write as _;
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d,
+        _ => Path::new("."),
+    };
+    create_private_dir(dir).map_err(|e| format!("create auth directory: {}", path_error("mkdir", dir, &e)))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    // Like Go `os.CreateTemp`: a fresh name until one is unused.
+    let mut attempt = 0u32;
+    let (tmp_path, mut tmp) = loop {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        let candidate = dir.join(format!(".credential-{}{nanos}{attempt}.tmp", std::process::id()));
+        match options.open(&candidate) {
+            Ok(file) => break (candidate, file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 10_000 => attempt += 1,
+            Err(e) => {
+                return Err(format!("create temp auth file: {}", path_error("open", &candidate, &e)));
+            }
+        }
+    };
+    let result = tmp
+        .write_all(data)
+        .map_err(|e| format!("write temp auth file: {}", path_error("write", &tmp_path, &e)))
+        .and_then(|()| {
+            drop(tmp);
+            std::fs::rename(&tmp_path, path).map_err(|e| format!("rename temp auth file: {e}"))
+        });
+    let _ = std::fs::remove_file(&tmp_path);
+    result
+}
+
+/// `os.MkdirAll(dir, 0o700)`.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
+}
+
+/// Go's `*fs.PathError` text: `op path: errno`.
+fn path_error(op: &str, path: &Path, e: &std::io::Error) -> String {
+    format!("{op} {}: {}", path.display(), errno_text(e))
+}
+
+/// Go's `syscall.Errno` text: strerror in lower case, without Rust's suffix.
+fn errno_text(e: &std::io::Error) -> String {
+    let text = e.to_string();
+    let text = text.split(" (os error").next().unwrap_or_default();
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map_or_else(String::new, |c| c.to_lowercase().chain(chars).collect())
 }
 
 fn remove(path: &Path) -> anyhow::Result<()> {
@@ -973,7 +1010,7 @@ mod tests {
     #[test]
     fn raw_documents_and_deletions_survive_a_discarded_cache() {
         let root = directory();
-        let original = b"{\n  \"type\":\"plugin-private\",\"opaque\":{\"secret\":\"first\"}\n}\n";
+        let original = b"{\n  \"type\":\"opaque-type\",\"opaque\":{\"secret\":\"first\"}\n}\n";
         let path = root.join("cook.db");
         let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store
@@ -984,7 +1021,7 @@ mod tests {
         let auth = db.auth_dir().join("auth.json");
         db.save(&auth, original).unwrap();
         assert_eq!(db.read(&auth).unwrap().unwrap(), original);
-        let updated = b"{\"type\":\"plugin-private\",\"opaque\":[1,2],\"access_token\":\"second\"}\n";
+        let updated = b"{\"type\":\"opaque-type\",\"opaque\":[1,2],\"access_token\":\"second\"}\n";
         db.save(&auth, updated).unwrap();
         assert_eq!(store.snapshot().unwrap().0, config_head);
         assert!(!store.load().unwrap().text.contains("second"));
@@ -1014,7 +1051,7 @@ mod tests {
         let db = CredentialDb::initialize(store.clone()).unwrap();
         let nested = db.auth_dir().join("nested/auth.json");
         let external = root.join("explicit.json");
-        let bytes = br#"{"type":"claude","access_token":"durable","opaque":{"plugin":"kept"}}"#;
+        let bytes = br#"{"type":"claude","access_token":"durable","opaque":{"extension":"kept"}}"#;
         db.save(&nested, bytes).unwrap();
         db.save(&external, bytes).unwrap();
         let mut cfg = store.load().unwrap().config;

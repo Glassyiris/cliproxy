@@ -303,7 +303,6 @@ let config = {
   client: {},
   multimedia: {},
   observability: { logs: { "logging-to-file": true }, usage: { enabled: true } },
-  plugins: { enabled: true, dir: "plugins", configs: { "quota-demo": { enabled: true }, "idle-demo": { enabled: false } } },
 };
 const walk = (root, parts) => parts.reduce((v, k) => (v && typeof v === "object" && Object.hasOwn(v, k) ? v[k] : undefined), root);
 const emptyLike = (v) => v == null || (typeof v === "object" && Object.keys(v).length === 0);
@@ -360,7 +359,6 @@ function mask(value, field = "", headers = false) {
 }
 function shownConfig(document) {
   const shown = mask(document);
-  if (shown.plugins?.configs) for (const id of Object.keys(shown.plugins.configs)) shown.plugins.configs[id] = "$secret";
   return shown;
 }
 function resolveHiddenSecrets(value, before) {
@@ -393,7 +391,6 @@ function resources(document) {
     if (["config-version", "api-keys", "model-routers"].includes(id)) continue;
     const spec = structuredClone(value);
     if (id === "access") delete spec["api-keys"];
-    if (id === "plugins") delete spec.configs;
     if (Object.keys(spec).length) add("setting", id, spec);
   }
   for (const [family, groups] of Object.entries(document["api-keys"] || {})) groups.forEach((entry, ord) => {
@@ -402,7 +399,6 @@ function resources(document) {
   });
   (document.access?.["api-keys"] || []).forEach((entry, ord) => add("client-key", entry["@id"], { key: entry.key }, ord));
   (document["model-routers"] || []).forEach(({ "@id": id, ...spec }, ord) => add("router", id, spec, ord));
-  for (const [id, spec] of Object.entries(document.plugins?.configs || {})) add("plugin", id, spec);
   return list;
 }
 const resourceKey = ({ kind, id }) => `${kind}/${id}`;
@@ -410,7 +406,7 @@ const resourceRevisions = new Map(resources(config).map((resource) => [resourceK
 function readResources(document = config) {
   return resources(document).map((resource) => ({ ...resource, ...resourceRevisions.get(resourceKey(resource)) }));
 }
-const shownResource = (resource) => ({ ...resource, spec: resource.kind === "plugin" ? "$secret" : mask(resource.spec) });
+const shownResource = (resource) => ({ ...resource, spec: mask(resource.spec) });
 function replaceClientKey(document, id, spec, deleting) {
   if (!deleting && (typeof spec?.key !== "string" || !spec.key.trim() || Object.keys(spec).length !== 1)) throw new Error("client key must have a non-empty key");
   document.access ??= {};
@@ -420,19 +416,11 @@ function replaceClientKey(document, id, spec, deleting) {
   else if (index < 0) list.push({ "@id": id, key: spec.key });
   else list[index] = { "@id": id, key: spec.key };
 }
-function replacePlugin(document, id, spec, deleting) {
-  if (!deleting && (!spec || typeof spec !== "object" || Array.isArray(spec))) throw new Error("plugin spec must be a mapping");
-  document.plugins ??= {};
-  document.plugins.configs ??= {};
-  if (deleting) delete document.plugins.configs[id];
-  else document.plugins.configs[id] = spec;
-}
 function replaceResource(document, operation, existing) {
   const { kind, id } = operation;
   const deleting = operation.op === "delete";
   const spec = deleting ? undefined : resolveHiddenSecrets(withoutAuth(operation.op === "patch" ? mergePatch(existing.spec, operation.patch) : operation.spec), existing?.spec);
   if (kind === "client-key") replaceClientKey(document, id, spec, deleting);
-  else if (kind === "plugin") replacePlugin(document, id, spec, deleting);
   else throw new Error("unsupported resource kind");
 }
 function mergePatch(value, patch) {
@@ -473,7 +461,7 @@ function mutatePath(document, parts, value, unset) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Logs, plugins, OAuth sessions, usage
+// Logs, OAuth sessions, usage
 const logs = [];
 const LOG_MESSAGES = [
   ["info", "GIN", "200 | 1.2ms | 127.0.0.1 | GET /v8/management/credentials"],
@@ -496,32 +484,6 @@ const errorLogs = [
   { name: `error-v1-responses-2026-11-07T21-40-02-${hex(8)}.log`, size: 9120, modified: Math.floor(startedAt / 1000) - 36000 },
 ];
 
-const plugins = [
-  { id: "quota-demo", name: "Quota Demo", version: "1.2.0", registered: true, enabled: true, oauth: false, quota: true },
-  { id: "oauth-demo", name: "OAuth Demo", version: "0.9.1", registered: true, enabled: true, oauth: true, quota: false },
-  { id: "idle-demo", name: "Idle Demo", version: "0.1.0", registered: false, enabled: false, oauth: false, quota: false },
-];
-const pluginView = (p) => ({
-  id: p.id,
-  path: `plugins/${p.id}`,
-  configured: true,
-  registered: p.registered,
-  enabled: config.plugins.configs?.[p.id]?.enabled ?? p.enabled,
-  effective_enabled: config.plugins.enabled && (config.plugins.configs?.[p.id]?.enabled ?? p.enabled) && p.registered,
-  supports_oauth: p.oauth,
-  oauth_provider: p.oauth ? "demo-oauth" : "",
-  supports_quota: p.quota,
-  ...(p.quota ? { quota_provider: "demo" } : {}),
-  logo: "",
-  config_fields: [],
-  menus: [],
-  metadata: { name: p.name, version: p.version, author: "Mock", github_repository: "", logo: "", config_fields: [] },
-});
-const storeCatalog = [
-  { id: "quota-demo", name: "Quota Demo", description: "Reads provider quota windows.", version: "1.2.0" },
-  { id: "log-shipper", name: "Log Shipper", description: "Ships request logs to an HTTP endpoint.", version: "0.4.0" },
-  { id: "model-lab", name: "Model Lab", description: "Extra model definitions.", version: "2.0.3" },
-];
 const sessions = new Map();
 /** Live dashboard session ids. */
 const dashboardSessions = new Set();
@@ -566,7 +528,7 @@ const str = (v) => (typeof v === "string" ? v.trim() : "");
 on("GET", "/admin/v1/effective/config", () => ok(shownConfig(config)));
 on("GET", "/admin/v1/r/([^/]+)", (ctx) => {
   const kind = decodeURIComponent(ctx.m[1]);
-  if (!["setting", "provider", "client-key", "router", "plugin"].includes(kind)) return fail(400, "invalid_kind");
+  if (!["setting", "provider", "client-key", "router"].includes(kind)) return fail(400, "invalid_kind");
   return { ...ok({ items: readResources().filter((resource) => resource.kind === kind).map(shownResource) }), headers: { ETag: `"${configVersion}"` } };
 });
 on("GET", "/admin/v1/r/([^/]+)/([^/]+)", (ctx) => {
@@ -582,7 +544,7 @@ on("GET", "/admin/v1/export", (ctx) => {
 function validOperation(operation) {
   if (!operation) return false;
   if (["set", "unset"].includes(operation.op)) return typeof operation.path === "string" && (operation.op !== "set" || Object.hasOwn(operation, "value"));
-  return ["put", "patch", "delete"].includes(operation.op) && ["client-key", "plugin"].includes(operation.kind) && typeof operation.id === "string" && /^[A-Za-z0-9_.-]+$/.test(operation.id) && (operation.op !== "put" || Object.hasOwn(operation, "spec")) && (operation.op !== "patch" || Object.hasOwn(operation, "patch"));
+  return ["put", "patch", "delete"].includes(operation.op) && operation.kind === "client-key" && typeof operation.id === "string" && /^[A-Za-z0-9_.-]+$/.test(operation.id) && (operation.op !== "put" || Object.hasOwn(operation, "spec")) && (operation.op !== "patch" || Object.hasOwn(operation, "patch"));
 }
 function matchesExpectation(document, parts, operation) {
   if (!Object.hasOwn(operation, "expect")) return true;
@@ -631,7 +593,7 @@ on("POST", "/admin/v1/apply", (ctx) => {
       return fail(400, "invalid_path", { message: error.message });
     }
   }
-  for (const path of ["credentials/concurrency/lifecycle-config-revision", "credentials/concurrency/observation-barrier-revision", "plugins/auth-revision"]) {
+  for (const path of ["credentials/concurrency/lifecycle-config-revision", "credentials/concurrency/observation-barrier-revision"]) {
     if (!isDeepStrictEqual(walk(config, path.split("/")), walk(next, path.split("/")))) return fail(400, "read_only_field");
   }
   const written = !isDeepStrictEqual(config, next);
@@ -838,7 +800,7 @@ on("GET", "/observability/usage/queue", (ctx) => {
 on("GET", "/oauth/auth-url", (ctx) => {
   const provider = str(ctx.q.get("provider")).toLowerCase();
   if (!provider) return fail(400, "provider is required");
-  if (!MODELS[provider] && !plugins.some((p) => p.oauth && "demo-oauth" === provider)) return fail(400, "unsupported provider", { code: "provider_not_found" });
+  if (!MODELS[provider]) return fail(400, "unsupported provider", { code: "provider_not_found" });
   const state = hex(16);
   sessions.set(state, { provider, at: Date.now(), cancelled: false });
   return ok({ status: "ok", url: `https://auth.example.invalid/authorize?state=${state}`, state });
@@ -886,41 +848,6 @@ on("GET", "/observability/logs/requests/([^/]+)", (ctx) => {
   const id = decodeURIComponent(ctx.m[1]).trim();
   if (!id) return fail(400, "missing request ID");
   return text(200, `=== REQUEST INFO ===\nRequest ID: ${id}\nURL: /v1/messages\nMethod: POST\n\n=== RESPONSE ===\nStatus: 200\n`);
-});
-
-// Plugins
-on("GET", "/plugins", () => ok({ plugins_enabled: config.plugins.enabled, plugins_dir: "plugins", plugins: plugins.map(pluginView) }));
-on("GET", "/plugins/store", () =>
-  ok({
-    plugins_enabled: config.plugins.enabled,
-    plugins_dir: "plugins",
-    sources: [{ id: "official", name: "Official", url: "https://plugins.example.invalid/index.json" }],
-    plugins: storeCatalog.map((p) => {
-      const have = plugins.find((x) => x.id === p.id);
-      return { store_id: `official/${p.id}`, source_id: "official", source_name: "Official", source_url: "https://plugins.example.invalid/index.json", ...p, author: "Mock", repository: "", install_type: "binary", auth_required: false, auth_configured: false, installed: !!have, update_available: !!have && have.version !== p.version };
-    }),
-  }),
-);
-on("POST", "/plugins/store/([^/]+)/install", (ctx) => {
-  const id = decodeURIComponent(ctx.m[1]);
-  const p = storeCatalog.find((x) => x.id === id);
-  if (!p) return fail(404, "plugin not found in store");
-  const have = plugins.find((x) => x.id === id);
-  if (have) have.version = p.version;
-  else plugins.push({ id, name: p.name, version: p.version, registered: false, enabled: false, oauth: false, quota: false });
-  return ok({ status: "installed", source_id: "official", source_name: "Official", id, version: p.version, install_type: "binary", path: `plugins/${id}`, plugins_enabled: config.plugins.enabled });
-});
-on("POST", "/plugins/([^/]+)/quota", (ctx) => {
-  const id = decodeURIComponent(ctx.m[1]);
-  if (!plugins.some((p) => p.id === id && p.quota)) return fail(404, "plugin not found");
-  return ok({ groups: [{ displayName: "Demo", buckets: [{ window: "5h", remainingFraction: 0.6, resetTime: iso(Date.now() + 3_600_000) }, { window: "7d", remainingFraction: 0.8, resetTime: iso(Date.now() + 86_400_000) }] }] });
-});
-on("DELETE", "/plugins/([^/]+)", (ctx) => {
-  const id = decodeURIComponent(ctx.m[1]);
-  const i = plugins.findIndex((p) => p.id === id);
-  if (i < 0) return fail(404, "plugin not found");
-  plugins.splice(i, 1);
-  return ok({ status: "deleted", id, path: `plugins/${id}`, file_deleted: true, configured_removed: true, restart_required: false });
 });
 
 // ---------------------------------------------------------------------------------------------

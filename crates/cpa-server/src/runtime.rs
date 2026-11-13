@@ -104,8 +104,6 @@ pub struct Runtime {
     usage: Arc<crate::usage::UsageQueue>,
     /// `--local-model`: embedded model catalogs only, no remote catalog refresh.
     local_model: std::sync::atomic::AtomicBool,
-    /// The native plugin host, synced with each published config (see [`crate::plugins`]).
-    plugins: crate::plugins::PluginRuntime,
     /// Set by test runtime fixtures: executor calls get credentials that
     /// cannot leave the machine.
     pub(crate) deny_external: std::sync::atomic::AtomicBool,
@@ -203,7 +201,6 @@ impl Runtime {
             pool_offsets: Mutex::default(),
             usage: Arc::default(),
             local_model: Default::default(),
-            plugins: Default::default(),
             deny_external: Default::default(),
             refresh_done: tokio::sync::watch::Sender::new(()),
             codex_refreshes: CodexRefreshes::default(),
@@ -244,24 +241,6 @@ impl Runtime {
     /// Whether `--local-model` was given.
     pub fn local_model(&self) -> bool {
         self.local_model.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    /// Serves with `host`, a plugin host that already runs (Go hands the host that
-    /// registered plugin command-line flags to the service; additive API). Call before
-    /// [`crate::plugins::start`].
-    pub fn with_plugin_host(mut self, host: cpa_plugin::Host) -> Self {
-        self.plugins = crate::plugins::PluginRuntime::with_host(host);
-        self
-    }
-
-    /// The plugin host (additive API). [`crate::plugins::start`] syncs it with the
-    /// config.
-    pub fn plugins(&self) -> &cpa_plugin::Host {
-        self.plugins.host()
-    }
-
-    pub(crate) fn plugin_runtime(&self) -> &crate::plugins::PluginRuntime {
-        &self.plugins
     }
 
     /// The config snapshot to use for one whole request.
@@ -404,7 +383,6 @@ impl Runtime {
             let mut current = self.config.write().unwrap_or_else(PoisonError::into_inner);
             let previous = std::mem::replace(&mut *current, config.clone());
             self.publish_policy(policy);
-            self.plugins.config_published(config.clone());
             previous
         };
         let previous = transition_from.unwrap_or(previous);
@@ -571,7 +549,7 @@ impl Runtime {
     ) -> Result<Lease, AcquireError> {
         let aliases = crate::registry::global_aliases(cfg);
         let scope = selection.clone();
-        let admit = admission(registry, &aliases, &scope, &self.executors, self.plugin_runtime());
+        let admit = admission(registry, &aliases, &scope, &self.executors);
         // `soonest-reset` ranks by the quota windows the executors last observed.
         let now = std::time::SystemTime::now();
         let ranks = |c: &Credential| {
@@ -585,9 +563,7 @@ impl Runtime {
                 crate::scheduler::Windows::observed(&provider, &s.signals, s.observed_at, now)
             })
         };
-        let request = crate::plugins::scheduler_request(self, &selection, &policy, &admit)?;
-        let pick = crate::plugins::scheduler_pick(self, request).await?;
-        let mut lease = self.store.select_picked(selection, policy, &admit, &ranks, pick)?;
+        let mut lease = self.store.select_ranked(selection, policy, &admit, &ranks)?;
         if self.executors.readiness(&lease.credential, cfg) != Readiness::PrepareNow {
             return Ok(lease);
         }
@@ -755,7 +731,7 @@ impl Runtime {
             ));
         }
         // Another request may have prepared it while we waited. The registration it is
-        // current under is what a plugin refresh records its outcome for.
+        // current under is what the refresh commits under.
         let (current, registered) = self
             .store
             .get_registered(id)
@@ -779,21 +755,19 @@ impl Runtime {
         match failed {
             Some(revision) if current.revision != revision && !self.store.grant_blocks(&current) => return Ok(current),
             Some(_) => {}
-            None if self.readiness(&current, cfg) == Readiness::Ready && !self.store.grant_blocks(&current) => {
+            None if self.executors.readiness(&current, cfg) == Readiness::Ready
+                && !self.store.grant_blocks(&current) =>
+            {
                 return Ok(current);
             }
             None => {}
         }
         let refused = refused.map(|c| Arc::new(c.clone()));
         let view = self.for_executor(&current);
-        let plugin = crate::plugins::refresh::route(self, &current, cfg);
         // Go `CodexExecutor.Refresh` on a Codex credential file: one transaction, under
-        // the file's credential lock, owned apart from the caller. A plugin-virtual one
-        // refreshes in memory and leaves the plugin's file alone (DIFFERENCES-FROM-GO.md).
+        // the file's credential lock, owned apart from the caller.
         if let Source::File(path) = &current.source
-            && plugin.is_none()
             && current.provider == "codex"
-            && !marked(&current, "plugin_virtual")
         {
             let mode = match failed {
                 Some(_) if management => cpa_exec::codex_refresh::RefreshMode::Management,
@@ -816,8 +790,7 @@ impl Runtime {
             )
             .await;
         }
-        // Every locally owned SQLite document shares the same cross-process lock,
-        // including plugin refreshes and virtual children of one source document.
+        // Every locally owned SQLite document shares the same cross-process lock.
         // Codex above owns its lock in its cancellation-safe transaction instead.
         let document_lock = match &current.source {
             Source::File(path) => {
@@ -828,13 +801,12 @@ impl Runtime {
                 let store = self.store.clone();
                 let cfg = cfg.clone();
                 let original = current.clone();
-                let parser = self.plugins().auth_parser();
                 let locked = self
                     .store
                     .persistence_tasks
                     .spawn_blocking(move || {
                         store
-                            .restore_refresh_document(&backend, &original, registered, &cfg, &*parser)
+                            .restore_refresh_document(&backend, &original, registered, &cfg)
                             .map(|fresh| (lock, fresh))
                     })
                     .await
@@ -867,54 +839,24 @@ impl Runtime {
             && ((!management
                 && failed.is_some()
                 && original_access != cpa_core::config::credentials::access_token_sha256(&current))
-                || (failed.is_none() && self.readiness(&current, cfg) == Readiness::Ready))
+                || (failed.is_none() && self.executors.readiness(&current, cfg) == Readiness::Ready))
         {
             return Ok(current);
         }
         let view = self.for_executor(&current);
-        let plugin = crate::plugins::refresh::route(self, &current, cfg);
-        // A plugin answer also publishes the committed document's proxy URL (the merged
-        // one, or a concurrent edit's when that wins the merge) as the credential's.
-        let prepared = match (&plugin, failed) {
-            (Some(route), _) => crate::plugins::refresh::refresh(self, route, &view, &current, registered)
-                .await
-                .map(|r| (r.patch, r.answered, r.completed_grant, r.source, r.preserved_source)),
-            (None, Some(_)) if management => self
-                .executors
-                .prepare_management(&view, cfg)
-                .await
-                .map(|p| (p, false, false, None, None)),
-            (None, Some(_)) => self
-                .executors
-                .prepare_forced(&view, cfg)
-                .await
-                .map(|p| (p, false, false, None, None)),
-            (None, None) => self
-                .executors
-                .prepare(&view, cfg)
-                .await
-                .map(|p| (p, false, false, None, None)),
+        let prepared = match failed {
+            Some(_) if management => self.executors.prepare_management(&view, cfg).await,
+            Some(_) => self.executors.prepare_forced(&view, cfg).await,
+            None => self.executors.prepare(&view, cfg).await,
         };
         // Still under the preparation lock, so a refresh queued behind this one sees it.
-        let (patch, publish_proxy, completed_plugin_grant, plugin_source, preserved_source) =
-            prepared.inspect_err(|e| {
-                if let Some(refused) = &refused {
-                    self.store.reject_refused(refused, registered.registration, e);
-                }
-            })?;
-        let publish_proxy = move |c: &mut Credential| {
-            if publish_proxy {
-                publish_metadata_proxy(c);
+        let patch = prepared.inspect_err(|e| {
+            if let Some(refused) = &refused {
+                self.store.reject_refused(refused, registered.registration, e);
             }
-        };
+        })?;
         let store = self.store.clone();
-        let fence = RefreshFence {
-            registered,
-            plugin: plugin.is_some(),
-            completed_plugin_grant,
-            plugin_source,
-            preserved_source,
-        };
+        let fence = RefreshFence { registered };
         let committed = self
             .store
             .persistence_tasks
@@ -923,17 +865,13 @@ impl Runtime {
                 move || {
                     let _guard = guard;
                     let _document_lock = document_lock;
-                    commit_refresh(&store, &id, &current, fence, &patch, publish_proxy)
+                    commit_refresh(&store, &id, &current, fence, &patch)
                 }
             })
             .await
             .map_err(|e| PatchError::Io(e.to_string()))
             .and_then(|r| r)
             .map_err(|e| {
-                // The plugin refreshed but nothing was saved: back off as for a failed refresh.
-                if plugin.is_some() {
-                    crate::plugins::refresh::failed(&self.store, id, registered.registration, chrono::Utc::now());
-                }
                 ExecError::local(
                     500,
                     FailureScope::Request,
@@ -941,20 +879,6 @@ impl Runtime {
                 )
             })?;
         Ok(committed)
-    }
-
-    /// [`Executors::readiness`], plus the schedule of credentials a plugin refreshes
-    /// ([`crate::plugins::refresh`]), which never holds a request. Built-in providers
-    /// read their executor alone.
-    fn readiness(&self, c: &Credential, cfg: &Config) -> Readiness {
-        match self.executors.readiness(c, cfg) {
-            Readiness::Ready if self.plugin_refresh_due(c, cfg, chrono::Utc::now()) => Readiness::RefreshSoon,
-            readiness => readiness,
-        }
-    }
-
-    fn plugin_refresh_due(&self, c: &Credential, cfg: &Config, now: chrono::DateTime<chrono::Utc>) -> bool {
-        crate::plugins::refresh::due_at(self, c, cfg).is_some_and(|at| at <= now)
     }
 
     /// Go `tryRefreshAfterUnauthorized`: after an upstream 401 on a credential whose
@@ -1119,14 +1043,10 @@ async fn refresh_loop(weak: std::sync::Weak<Runtime>) {
                     // Go refreshes a disabled credential; here its due refresh waits until
                     // it is enabled, logged once per revision, when it comes due.
                     if c.disabled && refreshable(c) && !state.disabled_noted(c) {
-                        let plugin_due = crate::plugins::refresh::due_at(&rt, c, &cfg);
-                        if rt.executors.needs_prepare_at(c, &cfg, eventually) || plugin_due.is_some() {
+                        if rt.executors.needs_prepare_at(c, &cfg, eventually) {
                             soonest(now + HORIZON);
                         }
-                        let due = rt
-                            .executors
-                            .prepare_due(c, &cfg, wall, horizon)
-                            .or_else(|| plugin_due.filter(|at| *at <= wall + horizon).map(|at| at.max(wall)));
+                        let due = rt.executors.prepare_due(c, &cfg, wall, horizon);
                         match due {
                             Some(at) if at > wall => soonest(now + (at - wall).to_std().unwrap_or_default()),
                             Some(_) => {
@@ -1169,14 +1089,10 @@ async fn refresh_loop(weak: std::sync::Weak<Runtime>) {
                     }
                     continue;
                 }
-                let plugin_due = crate::plugins::refresh::due_at(&rt, c, &cfg);
-                if rt.executors.needs_prepare_at(c, &cfg, eventually) || plugin_due.is_some() {
+                if rt.executors.needs_prepare_at(c, &cfg, eventually) {
                     soonest(now + HORIZON);
                 }
-                let due = rt
-                    .executors
-                    .prepare_due(c, &cfg, wall, horizon)
-                    .or_else(|| plugin_due.filter(|at| *at <= wall + horizon).map(|at| at.max(wall)));
+                let due = rt.executors.prepare_due(c, &cfg, wall, horizon);
                 match due {
                     Some(at) if at > wall => soonest(now + (at - wall).to_std().unwrap_or_default()),
                     Some(_) if state.reserve(c, now) => jobs.push(spawn(c, false)),
@@ -1288,14 +1204,10 @@ async fn run_refresh_job(
             prepare.await
         }
     };
-    // A panic records no plugin deadline: it backs off here, plugin route or not.
-    let (result, panicked) = match prepared {
-        Ok(result) => (result, false),
-        Err(panic) => {
-            let text = format!("refresh panicked: {}", panic_text(&*panic));
-            (Err(ExecError::local(500, FailureScope::Request, text)), true)
-        }
-    };
+    let result = prepared.unwrap_or_else(|panic| {
+        let text = format!("refresh panicked: {}", panic_text(&*panic));
+        Err(ExecError::local(500, FailureScope::Request, text))
+    });
     if rejected && result.is_ok() {
         rt.store.forget_unauthorized(&credential.id, credential.revision);
     }
@@ -1313,23 +1225,15 @@ async fn run_refresh_job(
         }
         return;
     };
-    // A plugin refresh keeps its own deadlines (Go `NextRefreshAfter`,
-    // `crate::plugins::refresh`): release the reservation only.
-    let plugin = !panicked && crate::plugins::refresh::route(&rt, &current, &cfg).is_some();
-    let ineffective = !plugin && result.is_ok() && rt.readiness(&current, &cfg) != Readiness::Ready;
+    let ineffective = result.is_ok() && rt.executors.readiness(&current, &cfg) != Readiness::Ready;
     let now = Instant::now();
     let retry = reservation.end(|state| {
-        state.finish(&current, result.as_ref().err().filter(|_| !plugin), ineffective, now);
+        state.finish(&current, result.as_ref().err(), ineffective, now);
         state.retry_at(&current)
     });
     match &result {
         Err(error) => {
-            let next = if plugin {
-                crate::plugins::refresh::due_at(&rt, &current, &cfg)
-                    .map(|at| (at - chrono::Utc::now()).to_std().unwrap_or_default())
-            } else {
-                retry.map(|at| at.saturating_duration_since(now))
-            };
+            let next = retry.map(|at| at.saturating_duration_since(now));
             warn_refresh_failed(&current, trigger, error, next);
         }
         // Go retries an ineffective refresh after 30 s and logs nothing.
@@ -1403,9 +1307,8 @@ const REFRESH_LOOP_RESTART: Duration = Duration::from_secs(if cfg!(test) { 0 } e
 /// One warning per failed refresh (Go logs most of these at Debug; see
 /// DIFFERENCES-FROM-GO.md): provider, credential, status, the error and when the next
 /// attempt is. `trigger` names what started it. A built-in executor's error text is
-/// sanitized as client-facing upstream errors are (Go `SanitizeUpstreamErrorSummary`);
-/// of a plugin's failure only its error code is logged, never its message, and token
-/// endpoint bodies never reach the error text.
+/// sanitized as client-facing upstream errors are (Go `SanitizeUpstreamErrorSummary`),
+/// and token endpoint bodies never reach the error text.
 fn warn_refresh_failed(c: &Credential, trigger: &str, error: &ExecError, next: Option<Duration>) {
     let text = refresh_error_text(error);
     let next = match next {
@@ -1422,13 +1325,7 @@ fn warn_refresh_failed(c: &Credential, trigger: &str, error: &ExecError, next: O
 
 /// What [`warn_refresh_failed`] logs of a refresh error.
 fn refresh_error_text(error: &ExecError) -> String {
-    match error.headers.get(crate::plugins::refresh::PLUGIN_ERROR) {
-        Some(code) => match code.to_str().unwrap_or_default() {
-            "" => "plugin refresh failed".to_owned(),
-            code => format!("plugin refresh failed: {code}"),
-        },
-        None => crate::sanitize::summary(&String::from_utf8_lossy(&error.body)),
-    }
+    crate::sanitize::summary(&String::from_utf8_lossy(&error.body))
 }
 
 /// A due refresh held back by its previous job, which is still running: logged once
@@ -1471,21 +1368,10 @@ fn refresh_workers(cfg: &Config) -> usize {
         .map_or(16, |n| n as usize)
 }
 
-/// How a selection picks among its ready candidates.
-pub(crate) enum Pick {
-    /// The configured selector (strategy and session affinity).
-    Configured,
-    /// A plugin scheduler's delegation to a built-in strategy.
-    Builtin(crate::scheduler::Strategy),
-    /// A plugin scheduler's chosen credential.
-    Auth(String),
-}
-
 /// A selection's eligible credentials with their execution models, and those of them
 /// that are ready now with their provider keys; when none is ready, the error Go's
-/// availability check reports. `configured` adds the configured selector's own filter
-/// (weighted round-robin skips non-positive weights); a plugin scheduler and its
-/// built-in delegates see every available credential.
+/// availability check reports. The configured selector's own filter applies (weighted
+/// round-robin skips non-positive weights).
 #[allow(clippy::type_complexity)]
 fn ready<'a>(
     creds: &'a [Arc<Credential>],
@@ -1494,7 +1380,6 @@ fn ready<'a>(
     policy: &Policy,
     admit: &Admit<'_>,
     now: Instant,
-    configured: bool,
 ) -> Result<(Vec<(&'a Arc<Credential>, String)>, Vec<(&'a Arc<Credential>, String)>), AcquireError> {
     let eligible: Vec<_> = creds
         .iter()
@@ -1507,7 +1392,7 @@ fn ready<'a>(
                 &selection.model,
             )
         })
-        .filter(|c| policy.retry_limit(c) >= selection.retry_round && (!configured || scheduler.admits(c, policy)))
+        .filter(|c| policy.retry_limit(c) >= selection.retry_round && scheduler.admits(c, policy))
         .filter_map(|c| admit(c).map(|m| (c, m)))
         .collect();
     let candidates: Vec<_> = eligible
@@ -1553,13 +1438,6 @@ pub enum AcquireError {
         id: String,
         error: ExecError,
     },
-    /// A plugin scheduler rejected the selection (Go `pickViaPluginScheduler`).
-    Rejected {
-        code: String,
-        message: String,
-    },
-    /// A plugin scheduler's call failed; Go returns its error as the selection error.
-    Scheduler(ExecError),
 }
 
 /// Route-model state is separate from the lease's resolved execution model.
@@ -1584,9 +1462,6 @@ pub struct Selection {
     /// Credential IDs already tried in this request.
     pub exclude: Vec<String>,
     pub retry_round: usize,
-    /// What a plugin scheduler learns about the request (Go `SchedulerPickRequest`'s
-    /// `Stream` and `Options`); without it the scheduler sees no headers or metadata.
-    pub scheduler: Option<Arc<crate::plugins::SchedulerContext>>,
     /// A model router's provider scope and order (cook-router only); `None` follows
     /// `routing.providers`.
     pub scope: Option<Arc<crate::provider_policy::Providers>>,
@@ -1683,20 +1558,16 @@ pub enum Outcome {
 /// cooldowns live. `None` rejects the credential.
 pub type Admit<'a> = dyn Fn(&Credential) -> Option<String> + 'a;
 
-/// Registry admission (Go `authSupportsRouteModel`) plus a registered executor, built-in
-/// or plugin.
+/// Registry admission (Go `authSupportsRouteModel`) plus a registered executor.
 pub fn admission<'a>(
     registry: &'a Registry,
     aliases: &'a HashMap<String, Vec<crate::registry::OAuthAlias>>,
     selection: &'a Selection,
     executors: &'a Executors,
-    plugins: &'a crate::plugins::PluginRuntime,
 ) -> impl Fn(&Credential) -> Option<String> + 'a {
     move |c| {
         let provider = crate::registry::provider_key(c);
-        if !selection.provider_keys().contains(&provider)
-            || !(executors.supports(&c.provider) || plugins.has_executor(&c.provider))
-        {
+        if !selection.provider_keys().contains(&provider) || !executors.supports(&c.provider) {
             return None;
         }
         let key = crate::registry::selection_model(aliases, c, &selection.model);
@@ -1804,97 +1675,7 @@ pub enum PatchError {
 pub(crate) struct RefreshFence {
     /// The registration and credential version the refresh started under
     /// ([`CredentialStore::get_registered`]).
-    pub registered: crate::plugins::refresh::Registered,
-    /// A plugin refresh, whose schedule the commit records.
-    pub plugin: bool,
-    pub completed_plugin_grant: bool,
-    pub plugin_source: Option<cpa_plugin::auth::AuthProviderFence>,
-    pub preserved_source: Option<cpa_plugin::hostauth::AuthSaveSourceFence>,
-}
-
-/// Owner-lifetime execution state. No individual plugin child is a source document.
-pub(crate) struct HeldVirtualGrant {
-    store: std::sync::Weak<CredentialStore>,
-    original: Arc<Credential>,
-    patch: MetadataPatch,
-    fence: RefreshFence,
-    source: Option<[u8; 32]>,
-    publish_proxy: bool,
-    // A valid raw callback with no parsed target stays volatile and withheld;
-    // there is no safe individual-child interpretation of an arbitrary shared file.
-    unmapped: Option<Vec<u8>>,
-}
-
-impl HeldVirtualGrant {
-    pub(crate) fn source_fence(&self) -> Option<(&Path, Option<[u8; 32]>)> {
-        match &self.original.source {
-            Source::File(path) => Some((path, self.source)),
-            _ => None,
-        }
-    }
-
-    /// Called only after durable publication and required projections, under the
-    /// existing admission. Pins defer possible component teardown until unlock.
-    pub(crate) fn admit(self, owner: &crate::config_store::ConfigStore) -> Option<Self> {
-        let store = self.store.upgrade()?;
-        owner.pin_configuration_owner(store.clone());
-        if self
-            .fence
-            .plugin_source
-            .as_ref()
-            .is_some_and(|source| !source.current())
-        {
-            return None;
-        }
-        let Source::File(path) = &self.original.source else {
-            return None;
-        };
-        let source = self.source?;
-        if store
-            .credential_backend()
-            .read(path)
-            .ok()
-            .flatten()
-            .is_none_or(|bytes| sha256(&bytes) != source)
-        {
-            return None;
-        }
-        let (current, registered) = store.get_registered(&self.original.id)?;
-        if registered.registration != self.fence.registered.registration
-            || registered.credential_version != self.fence.registered.credential_version
-            || current.source != self.original.source
-            || !marked(&current, "plugin_virtual")
-        {
-            return None;
-        }
-        if self.unmapped.is_some() {
-            return Some(self);
-        }
-        let (patch, _) = rebase_patch(
-            &current.provider,
-            &self.original.metadata,
-            &current.metadata,
-            &self.patch,
-        );
-        // Virtual writes skip source persistence. This is deliberately the internal
-        // admitted transition, never apply_refresh/public save (which reenter).
-        let result = store.apply_patch_admitted(
-            &mut None,
-            (&current.id, current.revision),
-            Some(self.fence.clone()),
-            &patch,
-            |credential| {
-                if self.publish_proxy {
-                    publish_metadata_proxy(credential);
-                }
-            },
-            |credential| credentials_changed(&self.original, credential),
-        );
-        if result.is_ok_and(|(_, rotated)| rotated) {
-            store.recover_unauthorized(&current.id);
-        }
-        None
-    }
+    pub registered: Registered,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1921,17 +1702,7 @@ pub(crate) struct Rejections {
     pub refreshed: HashMap<String, (u64, Instant)>,
 }
 
-struct VirtualInvalid {
-    original: Arc<Credential>,
-    source: Option<[u8; 32]>,
-    opaque: bool,
-    admitted: Option<(Arc<Credential>, crate::plugins::refresh::Registered)>,
-}
-
 pub struct CredentialStore {
-    owner_weak: std::sync::Weak<Self>,
-    // Keep invalidated virtual results fenced even after stale disposal/reimport.
-    virtual_invalid: Mutex<HashMap<String, VirtualInvalid>>,
     inner: RwLock<Inner>,
     policy: RwLock<Arc<Policy>>,
     scheduler: Mutex<Scheduler>,
@@ -1972,14 +1743,60 @@ pub struct CredentialStore {
     /// Ends the upstream WebSocket sessions a removed credential serves (set by the
     /// runtime to [`cpa_exec::Executors::credential_session_closer`]).
     session_closer: std::sync::OnceLock<SessionCloser>,
-    /// Go `LastRefreshedAt` and `NextRefreshAfter` of the credentials a plugin
-    /// refreshes, registered with every change to the set
-    /// ([`crate::plugins::refresh::register`]).
-    refresh_schedules: crate::plugins::refresh::Schedules,
+    /// What a refresh of each credential starts under, registered with every change to
+    /// the set ([`Self::register`]).
+    registrations: Mutex<HashMap<String, Registered>>,
 }
 
 /// Ends the upstream WebSocket sessions of one removed credential.
 type SessionCloser = Box<dyn Fn(&str) + Send + Sync>;
+
+/// What a refresh of a credential started under: Go `RegistrationEpoch`, set when the
+/// credential's ID enters the set and kept while it is registered again, and
+/// `CredentialVersion`, bumped by every registration that changes its tokens or keys. A
+/// refresh that meets another registration or version drops its result, as Go's does,
+/// unless a Codex token partition it refreshed still applies.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub(crate) struct Registered {
+    pub registration: u64,
+    pub credential_version: u64,
+}
+
+/// The source of [`Registered::registration`] numbers.
+static REGISTRATIONS: AtomicU64 = AtomicU64::new(1);
+
+/// [`CredentialStore::register`] on the map itself.
+fn register_change(
+    registrations: &mut HashMap<String, Registered>,
+    before: &[Arc<Credential>],
+    after: &[Arc<Credential>],
+) {
+    let previous: HashMap<&str, &Credential> = before.iter().map(|c| (c.id.as_str(), &**c)).collect();
+    let mut registered = Vec::new();
+    for c in after {
+        let previous = previous.get(c.id.as_str());
+        if previous.is_some_and(|p| p.revision == c.revision) {
+            continue;
+        }
+        let kept = previous.and_then(|_| registrations.get(&c.id).copied());
+        let next = match (kept, previous) {
+            (Some(kept), Some(previous)) => Registered {
+                registration: kept.registration,
+                credential_version: kept.credential_version + u64::from(credentials_changed(previous, c)),
+            },
+            _ => Registered {
+                registration: REGISTRATIONS.fetch_add(1, Ordering::Relaxed),
+                credential_version: 1,
+            },
+        };
+        registered.push((c.id.clone(), next));
+    }
+    let live: std::collections::HashSet<&str> = after.iter().map(|c| c.id.as_str()).collect();
+    for id in previous.keys().filter(|id| !live.contains(*id)) {
+        registrations.remove(*id);
+    }
+    registrations.extend(registered);
+}
 
 /// The ids in `before` that `after` no longer has.
 fn removed_ids(before: &[Arc<Credential>], after: &[Arc<Credential>]) -> Vec<String> {
@@ -1991,8 +1808,7 @@ fn removed_ids(before: &[Arc<Credential>], after: &[Arc<Credential>]) -> Vec<Str
         .collect()
 }
 
-/// Whether `key` is set to `true` on `credential` (Go `IsPluginVirtualAuth`,
-/// `isRuntimeOnlyAuth`).
+/// Whether `key` is set to `true` on `credential` (Go `isRuntimeOnlyAuth`).
 fn marked(credential: &Credential, key: &str) -> bool {
     credential
         .attributes
@@ -2068,12 +1884,9 @@ impl CredentialStore {
             cred.revision = inner.generation;
             inner.creds.push(Arc::new(cred));
         }
-        let refresh_schedules = crate::plugins::refresh::Schedules::default();
-        crate::plugins::refresh::register(&refresh_schedules, &[], &inner.creds, &[]);
-        crate::plugins::refresh::begin_bootstrap(&refresh_schedules);
-        Arc::new_cyclic(|owner_weak| Self {
-            owner_weak: owner_weak.clone(),
-            virtual_invalid: Mutex::default(),
+        let mut registrations = HashMap::new();
+        register_change(&mut registrations, &[], &inner.creds);
+        Arc::new(Self {
             inner: RwLock::new(inner),
             policy: RwLock::new(Arc::new(Policy::default())),
             scheduler: Mutex::default(),
@@ -2096,7 +1909,7 @@ impl CredentialStore {
             unauthorized: Mutex::default(),
             unauthorized_noted: tokio::sync::watch::Sender::new(()),
             session_closer: std::sync::OnceLock::new(),
-            refresh_schedules,
+            registrations: Mutex::new(registrations),
         })
     }
 
@@ -2117,34 +1930,6 @@ impl CredentialStore {
     }
 
     fn grant_blocks(&self, credential: &Credential) -> bool {
-        if let Some(invalid) = self
-            .virtual_invalid
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&credential.id)
-        {
-            if invalid.opaque {
-                if !invalid.admitted.as_ref().is_some_and(|(admitted, registered)| {
-                    admitted.metadata == credential.metadata
-                        && admitted.source == credential.source
-                        && self.registered(&credential.id) == *registered
-                }) {
-                    let adopted_replacement = self.provenance(&credential.id).is_some_and(|source| {
-                        source.revision == credential.revision
-                            && Some(source.sha256) != invalid.source
-                            && match &credential.source {
-                                Source::File(path) => self.backend.required_source(path) == Some(Some(source.sha256)),
-                                _ => false,
-                            }
-                    });
-                    if !adopted_replacement {
-                        return true;
-                    }
-                }
-            } else if !credentials_changed(&invalid.original, credential) {
-                return true;
-            }
-        }
         let Source::File(path) = &credential.source else {
             return false;
         };
@@ -2170,16 +1955,14 @@ impl CredentialStore {
     }
 
     /// Called under the stable document lock, before a local refresh can spend a token.
-    /// A plugin child adopts its own parsed metadata, never its shared raw document.
     fn restore_refresh_document(
         &self,
         backend: &crate::credential_store::CredentialDb,
         current: &Arc<Credential>,
-        registered: crate::plugins::refresh::Registered,
+        registered: Registered,
         cfg: &Config,
-        parser: &dyn cpa_core::config::credentials::PluginAuthParser,
-    ) -> Result<(Arc<Credential>, crate::plugins::refresh::Registered), PatchError> {
-        use cpa_core::config::credentials::{self, ParseRequest, Parsed};
+    ) -> Result<(Arc<Credential>, Registered), PatchError> {
+        use cpa_core::config::credentials;
         let Source::File(path) = &current.source else {
             return Err(PatchError::ConfigBacked);
         };
@@ -2195,48 +1978,17 @@ impl CredentialStore {
         {
             return Ok((current.clone(), registered));
         }
-        let metadata: Map<String, Value> = serde_json::from_slice(&bytes).map_err(|e| PatchError::Io(e.to_string()))?;
-        let provider = metadata
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .go_lower();
-        let provider = if provider == "gemini" { "gemini-cli" } else { &provider };
-        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-        let parsed = match parser.parse_auths(&ParseRequest {
-            provider,
-            path,
-            file_name: &file_name,
-            raw_json: &bytes,
-        }) {
-            Parsed::Handled(auths) => credentials::plugin_save_credentials(path, &metadata, auths)
-                .map_err(PatchError::Io)?
-                .into_iter()
-                .find(|c| c.id == current.id),
-            Parsed::NotHandled if !marked(current, "plugin_virtual") => {
-                credentials::from_file(cfg, &cfg.auth_dir, path, &bytes).map_err(PatchError::Io)?
-            }
-            Parsed::NotHandled => None,
-        }
-        .filter(|c| c.provider == current.provider)
-        .ok_or(PatchError::NotFound)?;
-        // A parse may call host.auth.save. Its older answer cannot authorize a grant.
-        if backend
-            .read(path)
-            .map_err(|e| PatchError::Io(e.to_string()))?
-            .as_deref()
-            != Some(bytes.as_slice())
-        {
-            return Err(PatchError::Stale {
-                current: current.revision,
-            });
-        }
+        let parsed = credentials::from_file(cfg, &cfg.auth_dir, path, &bytes)
+            .map_err(PatchError::Io)?
+            .filter(|c| c.provider == current.provider)
+            .ok_or(PatchError::NotFound)?;
         let mut next = Credential::clone(current);
         next.metadata = parsed.metadata;
         next.disabled = parsed.disabled;
         next.refresh_derived();
         publish_metadata_proxy(&mut next);
+        #[cfg(test)]
+        tests::before_restore(path);
         let adopted = self
             .write_unlocked(
                 &current.id,
@@ -2261,11 +2013,7 @@ impl CredentialStore {
                         inner.generation += 1;
                         next.revision = inner.generation;
                         let next = Arc::new(next);
-                        self.register(
-                            std::slice::from_ref(&inner.creds[index]),
-                            std::slice::from_ref(&next),
-                            &[],
-                        );
+                        self.register(std::slice::from_ref(&inner.creds[index]), std::slice::from_ref(&next));
                         inner.creds[index] = next;
                         inner.epoch += 1;
                         self.changed.send_replace(());
@@ -2284,29 +2032,32 @@ impl CredentialStore {
     }
 
     /// Credential `id` and what a refresh of it starts under: its registration and
-    /// credential version ([`crate::plugins::refresh::Registered`]), read together.
-    pub(crate) fn get_registered(&self, id: &str) -> Option<(Arc<Credential>, crate::plugins::refresh::Registered)> {
+    /// credential version ([`Registered`]), read together.
+    pub(crate) fn get_registered(&self, id: &str) -> Option<(Arc<Credential>, Registered)> {
         let inner = self.read();
         let credential = inner.creds.iter().find(|c| c.id == id)?.clone();
         Some((credential, self.registered(id)))
     }
 
     /// What a refresh of `id` starts under; zeros for none.
-    fn registered(&self, id: &str) -> crate::plugins::refresh::Registered {
-        crate::plugins::refresh::registered(&self.refresh_schedules, id).unwrap_or_default()
+    fn registered(&self, id: &str) -> Registered {
+        self.registrations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .copied()
+            .unwrap_or_default()
     }
 
-    /// Records a refresh outcome of credential `id` (Go reads `m.auths[id]` under
-    /// `m.mu`): `record` sees the current credential and its schedule while it is under
-    /// `registration` (`NotFound` otherwise) and, given `at`, still at that revision
-    /// and credential version (`Stale` otherwise). No registration can land in
-    /// between.
+    /// Checks a refresh outcome of credential `id` (Go reads `m.auths[id]` under
+    /// `m.mu`): the current credential while it is under `registration` (`NotFound`
+    /// otherwise) and, given `at`, still at that revision and credential version
+    /// (`Stale` otherwise).
     pub(crate) fn record_refresh(
         &self,
         id: &str,
         registration: u64,
         at: Option<(u64, u64)>,
-        record: impl FnOnce(&Credential, &mut crate::plugins::refresh::Schedule),
     ) -> Result<Arc<Credential>, PatchError> {
         let inner = self.read();
         let current = inner.creds.iter().find(|c| c.id == id).ok_or(PatchError::NotFound)?;
@@ -2319,33 +2070,18 @@ impl CredentialStore {
                 current: current.revision,
             });
         }
-        crate::plugins::refresh::record(&self.refresh_schedules, current, record);
         Ok(current.clone())
     }
 
-    /// The plugin refresh schedules ([`crate::plugins::refresh::register`]).
-    pub(crate) fn refresh_schedules(&self) -> &crate::plugins::refresh::Schedules {
-        &self.refresh_schedules
-    }
-
-    /// Ends the startup window in which the credentials loaded before plugins parse auth
-    /// files are provisional ([`crate::plugins::refresh::end_bootstrap`]).
-    pub fn end_bootstrap(&self) {
-        if crate::plugins::refresh::end_bootstrap(&self.refresh_schedules) {
-            // The refresh loop skips provisional schedules; it looks again.
-            self.changed.send_replace(());
-        }
-    }
-
-    /// Registers the plugin refresh schedules of a change from `before` to `after`;
-    /// called with the change, under the write lock.
-    fn register(
-        &self,
-        before: &[Arc<Credential>],
-        after: &[Arc<Credential>],
-        saved: &[cpa_plugin::hostauth::SavedRefresh],
-    ) {
-        crate::plugins::refresh::register(&self.refresh_schedules, before, after, saved);
+    /// Registers a change to the set from `before` to `after` (the credentials it
+    /// replaced, and the set or the credentials replacing them); called with the change,
+    /// under the write lock. Go `Register` gives an auth new to the manager the next
+    /// epoch for its ID; `Update` keeps it, and bumps its credential version when its
+    /// credentials changed (`updateInternal`, `CredentialsChanged`). A credential that
+    /// leaves the set loses its registration (Go `Manager.Remove`).
+    fn register(&self, before: &[Arc<Credential>], after: &[Arc<Credential>]) {
+        let mut registrations = self.registrations.lock().unwrap_or_else(PoisonError::into_inner);
+        register_change(&mut registrations, before, after);
     }
 
     /// Go `ApplyConfigWithCooldownStateStore` plus the restore that follows a config
@@ -2458,7 +2194,6 @@ impl CredentialStore {
         if !matches!(&credential.source, Source::File(_))
             || credential.disabled
             || marked(credential, "runtime_only")
-            || marked(credential, "plugin_virtual")
             || self
                 .persisted
                 .lock()
@@ -2511,8 +2246,8 @@ impl CredentialStore {
         let Source::File(path) = &credential.source else {
             return Ok(());
         };
-        // Go also skips runtime-only credentials and plugin-virtual ones.
-        if credential.disabled || marked(credential, "runtime_only") || marked(credential, "plugin_virtual") {
+        // Go also skips runtime-only credentials.
+        if credential.disabled || marked(credential, "runtime_only") {
             return Ok(());
         }
         {
@@ -2593,7 +2328,7 @@ impl CredentialStore {
         Ok(())
     }
 
-    /// Go `updateInternalLocked` for a credential a reload, save, import or upsert
+    /// Go `updateInternalLocked` for a credential a reload, save or import
     /// replaced with other tokens or another API key (`CredentialsChanged`), enabled
     /// before and after: its unauthorized cooldowns go, so the new token is selectable
     /// at once, and every other cooldown (a model's 429, a live credential quota) stays.
@@ -2671,84 +2406,15 @@ impl CredentialStore {
         admit: &Admit<'_>,
         ranks: &crate::scheduler::Ranks<'_>,
     ) -> Result<Lease, AcquireError> {
-        self.select_picked(selection, policy, admit, ranks, Pick::Configured)
-    }
-
-    /// The ready candidates a plugin scheduler chooses among (Go
-    /// `availableAuthsForSelector`'s priority list): the highest priority tier, or every
-    /// tier when the scheduler asks for them.
-    pub(crate) fn scheduler_candidates(
-        &self,
-        selection: &Selection,
-        policy: &Policy,
-        admit: &Admit<'_>,
-        across: bool,
-    ) -> Result<Vec<Arc<Credential>>, AcquireError> {
-        let allowed = |c: &Credential| (!self.grant_blocks(c)).then(|| admit(c)).flatten();
-        let admit: &Admit<'_> = &allowed;
-        let inner = self.read();
-        let scheduler = self.scheduler.lock().unwrap_or_else(PoisonError::into_inner);
-        let (_, ready) = ready(
-            &inner.creds,
-            &scheduler,
-            selection,
-            policy,
-            admit,
-            Instant::now(),
-            false,
-        )?;
-        let scope = crate::scheduler::scope(selection, policy);
-        let tier = ready.iter().map(|(c, _)| scope.rank(c)).max();
-        let mut out: Vec<_> = ready
-            .into_iter()
-            .filter(|(c, _)| across || Some(scope.rank(c)) == tier)
-            .map(|(c, _)| Arc::clone(c))
-            .collect();
-        // Go `availableAuthsFromPriorityBuckets` orders both modes by ID.
-        out.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok(out)
-    }
-
-    /// [`Self::select_ranked`] with the choice a plugin scheduler made.
-    pub(crate) fn select_picked(
-        self: &Arc<Self>,
-        selection: Selection,
-        policy: Arc<Policy>,
-        admit: &Admit<'_>,
-        ranks: &crate::scheduler::Ranks<'_>,
-        pick: Pick,
-    ) -> Result<Lease, AcquireError> {
         let allowed = |c: &Credential| (!self.grant_blocks(c)).then(|| admit(c)).flatten();
         let admit: &Admit<'_> = &allowed;
         let now = Instant::now();
         let credential = {
             let inner = self.read();
             let mut scheduler = self.scheduler.lock().unwrap_or_else(PoisonError::into_inner);
-            let configured = matches!(pick, Pick::Configured);
-            let (eligible, candidates) = ready(&inner.creds, &scheduler, &selection, &policy, admit, now, configured)?;
+            let (eligible, candidates) = ready(&inner.creds, &scheduler, &selection, &policy, admit, now)?;
             let refs: Vec<(&Credential, &str)> = candidates.iter().map(|(c, p)| (c.as_ref(), p.as_str())).collect();
-            let chosen = match &pick {
-                // Go serves the candidate from its pre-call snapshot without checking it
-                // again; here one that stopped being ready during the call leaves the
-                // choice to the configured selector (docs/DIFFERENCES-FROM-GO.md).
-                Pick::Auth(id) => refs.iter().find(|(c, _)| c.id == *id).map(|(c, _)| (*c, None)),
-                Pick::Builtin(strategy) => scheduler
-                    .pick_builtin(&refs, &selection, &policy, *strategy, ranks)
-                    .map(|c| (c, None)),
-                Pick::Configured => None,
-            };
-            let (picked, lcp) = match chosen {
-                Some(chosen) => chosen,
-                None => {
-                    let refs: Vec<_> = refs.into_iter().filter(|(c, _)| scheduler.admits(c, &policy)).collect();
-                    if refs.is_empty() {
-                        // Only the configured selector's filter removed them: its error.
-                        return Err(ready(&inner.creds, &scheduler, &selection, &policy, admit, now, true)
-                            .expect_err("no admitted candidate is ready"));
-                    }
-                    scheduler.pick_session(&refs, &selection, &policy, ranks, now).unwrap()
-                }
-            };
+            let (picked, lcp) = scheduler.pick_session(&refs, &selection, &policy, ranks, now).unwrap();
             let (c, m) = eligible.iter().find(|(c, _)| c.id == picked.id).unwrap();
             let generation = scheduler.reserve_probe(c, m, now);
             (Arc::clone(c), lcp, generation, scheduler.dispatch())
@@ -3058,77 +2724,9 @@ impl CredentialStore {
             .retain(|id, _| !seen.refreshed.contains_key(id) || snapshot.iter().any(|c| c.id == *id));
     }
 
-    /// A virtual callback is a result for its job's child, never a source-file save.
-    pub(crate) fn commit_virtual_callback(
-        &self,
-        command: &mut Option<crate::credential_store::CredentialCommand<'_>>,
-        original: &Arc<Credential>,
-        fence: RefreshFence,
-        next: Option<Credential>,
-        data: &[u8],
-    ) -> Result<(), PatchError> {
-        self.virtual_invalid
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(
-                original.id.clone(),
-                VirtualInvalid {
-                    original: original.clone(),
-                    source: self.provenance(&original.id).map(|source| source.sha256),
-                    opaque: true,
-                    admitted: None,
-                },
-            );
-        let Some(next) = next.filter(|next| next.provider == original.provider) else {
-            // ponytail: an arbitrary shared document without this parsed child cannot
-            // be interpreted safely. Retain its raw result for owner-lifetime diagnosis,
-            // withhold the child and report refusal; never write/activate that document.
-            command
-                .as_ref()
-                .ok_or(PatchError::ConfigBacked)?
-                .retain_virtual(HeldVirtualGrant {
-                    store: self.owner_weak.clone(),
-                    original: original.clone(),
-                    patch: MetadataPatch::default(),
-                    fence,
-                    source: self.provenance(&original.id).map(|source| source.sha256),
-                    publish_proxy: false,
-                    unmapped: Some(data.to_vec()),
-                });
-            return Err(PatchError::Io(
-                "virtual callback result retained without an applicable parsed target".into(),
-            ));
-        };
-        let patch = MetadataPatch {
-            set: next
-                .metadata
-                .iter()
-                .filter(|(key, value)| original.metadata.get(*key) != Some(*value))
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect(),
-            remove: original
-                .metadata
-                .keys()
-                .filter(|key| !next.metadata.contains_key(*key))
-                .cloned()
-                .collect(),
-        };
-        let current = self.get(&original.id).ok_or(PatchError::NotFound)?;
-        self.apply_patch_admitted(
-            command,
-            (&original.id, current.revision),
-            Some(fence),
-            &patch,
-            publish_metadata_proxy,
-            |next| credentials_changed(original, next),
-        )
-        .map(|_| ())
-    }
-
     /// [`Self::apply_patch`] for a token refresh that started under `fence`'s
     /// registration: refused (`NotFound`) once the credential's ID was registered again
-    /// (Go's `RegistrationEpoch` check), and a plugin refresh's schedule is recorded
-    /// with the commit ([`crate::plugins::refresh::committed`]). When `rotated` says the
+    /// (Go's `RegistrationEpoch` check). When `rotated` says the
     /// candidate replaces the tokens, its time is recorded with memory publication,
     /// before any scan can see the new revision without it (Go `LastRefreshedAt`).
     /// `rotated` is a pure comparison of the prepared candidate, not an after-commit
@@ -3148,21 +2746,11 @@ impl CredentialStore {
         after.refresh_derived();
         let changes_tokens = credentials_changed(&before, &after);
         // Only post-prepare token results may bypass failed publication admission.
-        let mut command = Some(if changes_tokens || fence.completed_plugin_grant {
+        let mut command = Some(if changes_tokens {
             self.granted_command()?
         } else {
             self.credential_command()?
         });
-        if fence.preserved_source.is_some() && fence.plugin_source.as_ref().is_some_and(|source| !source.current()) {
-            return Err(PatchError::NotFound);
-        }
-        if let (Some(command), Source::File(path), Some(source)) =
-            (command.as_mut(), &before.source, fence.preserved_source)
-        {
-            command
-                .authorize_completed_source(path, source.sha256)
-                .map_err(|e| PatchError::Io(e.to_string()))?;
-        }
         self.apply_patch_admitted(&mut command, (id, expected_revision), Some(fence), patch, edit, rotated)
     }
 
@@ -3178,7 +2766,7 @@ impl CredentialStore {
     fn admit_codex_refresh(
         &self,
         original: &Credential,
-        registered: crate::plugins::refresh::Registered,
+        registered: Registered,
         patch: &cpa_exec::codex_refresh::RefreshPatch,
     ) -> Result<CodexAdmission, PatchError> {
         let id = original.id.as_str();
@@ -3222,11 +2810,7 @@ impl CredentialStore {
                     next.revision = inner.generation;
                     self.note_provenance(&next.id, next.revision, sha256(bytes), None);
                     let next = Arc::new(next);
-                    self.register(
-                        std::slice::from_ref(&inner.creds[index]),
-                        std::slice::from_ref(&next),
-                        &[],
-                    );
+                    self.register(std::slice::from_ref(&inner.creds[index]), std::slice::from_ref(&next));
                     if credentials_changed(original, &next) {
                         self.unauthorized
                             .lock()
@@ -3295,7 +2879,7 @@ impl CredentialStore {
     }
 
     /// [`Self::apply_patch`], with `edit` applied to the credential before it is
-    /// published (fields outside the document, such as a plugin refresh's proxy URL),
+    /// published (fields outside the document),
     /// and a token refresh's `fence` ([`Self::apply_refresh`]).
     fn apply_patch_with(
         &self,
@@ -3347,20 +2931,6 @@ impl CredentialStore {
                 patch.apply(&mut next.metadata);
                 next.refresh_derived();
                 edit(&mut next);
-                if marked(current, "plugin_virtual")
-                    && let (Some(fence), Some(command)) = (fence.as_ref(), _command.as_ref())
-                    && command.hold_virtual(HeldVirtualGrant {
-                        store: self.owner_weak.clone(),
-                        original: current.clone(),
-                        patch: patch.clone(),
-                        fence: fence.clone(),
-                        source: self.provenance(id).map(|source| source.sha256),
-                        publish_proxy: next.attributes.get("proxy_url") != current.attributes.get("proxy_url"),
-                        unmapped: None,
-                    })
-                {
-                    return Err(PatchError::Io("virtual grant held until publication recovery".into()));
-                }
                 // Go `FileTokenStore.Save` always records the disabled state.
                 next.metadata.insert("disabled".into(), Value::Bool(next.disabled));
                 // Go's `json.NewEncoder(f).Encode`: compact JSON and a newline.
@@ -3379,54 +2949,28 @@ impl CredentialStore {
                 next.revision = inner.generation;
                 // The written bytes are serde's, not Go's: a later management save takes
                 // its numbers from `doc`, Go's metadata after the refresh, or refuses.
-                if marked(&next, "plugin_virtual") {
-                    // A child update changes no source bytes. Keep the shared-file
-                    // provenance so later preparation cannot reload its old tokens.
-                    if let Some(source) = self
-                        .provenance
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .get_mut(&next.id)
-                    {
-                        source.revision = next.revision;
+                match basis {
+                    Some((doc, loaded)) => {
+                        let provenance = Provenance {
+                            revision: next.revision,
+                            sha256: sha256(bytes),
+                            doc: Some(Arc::new(doc)),
+                            loaded,
+                        };
+                        self.provenance
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .insert(next.id.clone(), provenance);
                     }
-                } else {
-                    match basis {
-                        Some((doc, loaded)) => {
-                            let provenance = Provenance {
-                                revision: next.revision,
-                                sha256: sha256(bytes),
-                                doc: Some(Arc::new(doc)),
-                                loaded,
-                            };
-                            self.provenance
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .insert(next.id.clone(), provenance);
-                        }
-                        None => {
-                            self.provenance
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .remove(&next.id);
-                        }
+                    None => {
+                        self.provenance
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .remove(&next.id);
                     }
                 }
                 let next = Arc::new(next);
-                self.register(
-                    std::slice::from_ref(&inner.creds[index]),
-                    std::slice::from_ref(&next),
-                    &[],
-                );
-                // Go publishes `LastRefreshedAt` with the refreshed auth (`MergeRefreshedAuth`
-                // under `m.mu`), so a registration after this commit replaces it. The
-                // writer checked the refresh's registration under the gate. Lock order:
-                // `inner`, then the schedules, as in `register`.
-                if fence.as_ref().is_some_and(|f| f.plugin) {
-                    crate::plugins::refresh::record(&self.refresh_schedules, &next, |c, s| {
-                        crate::plugins::refresh::committed(c, s, chrono::Utc::now())
-                    });
-                }
+                self.register(std::slice::from_ref(&inner.creds[index]), std::slice::from_ref(&next));
                 if rotated {
                     self.unauthorized
                         .lock()
@@ -3435,16 +2979,6 @@ impl CredentialStore {
                         .insert(id.to_owned(), (next.revision, Instant::now()));
                 }
                 inner.creds[index] = next;
-                if fence.as_ref().is_some_and(|fence| fence.completed_plugin_grant)
-                    && let Some(invalid) = self
-                        .virtual_invalid
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .get_mut(id)
-                    && invalid.opaque
-                {
-                    invalid.admitted = Some((inner.creds[index].clone(), self.registered(id)));
-                }
                 inner.epoch += 1;
                 self.changed.send_replace(());
                 (inner.creds[index].clone(), rotated)
@@ -3470,7 +3004,7 @@ impl CredentialStore {
         &self,
         id: &str,
         expected_revision: u64,
-        registered: Option<crate::plugins::refresh::Registered>,
+        registered: Option<Registered>,
         exclusive: bool,
         prepare: impl FnOnce(
             &Arc<Credential>,
@@ -3493,7 +3027,7 @@ impl CredentialStore {
         &self,
         command: &mut Option<crate::credential_store::CredentialCommand<'_>>,
         (id, expected_revision): (&str, u64),
-        registered: Option<crate::plugins::refresh::Registered>,
+        registered: Option<Registered>,
         exclusive: bool,
         prepare: impl FnOnce(
             &Arc<Credential>,
@@ -3541,10 +3075,7 @@ impl CredentialStore {
         let Some((path, bytes, value)) = prepare(&current, command)? else {
             return Ok(None);
         };
-        // Go `Manager.persist` never writes a plugin-virtual credential (one of several a
-        // plugin parsed from one file): its document is not the file's. A refresh or
-        // patch of one is kept in memory.
-        if let Some(path) = path.filter(|_| !marked(&current, "plugin_virtual")) {
+        if let Some(path) = path {
             if self.grant_blocks(&current) && !command.as_ref().is_some_and(|command| command.preserves_source(&path)) {
                 return Err(PatchError::Io(
                     "credential source requires recovery adoption before editing".into(),
@@ -3615,7 +3146,7 @@ impl CredentialStore {
         next.source = slot.source.clone();
         next.revision = generation;
         let next = Arc::new(next);
-        self.register(std::slice::from_ref(slot), std::slice::from_ref(&next), &[]);
+        self.register(std::slice::from_ref(slot), std::slice::from_ref(&next));
         let cleared = self.clear_replaced_unauthorized(std::slice::from_ref(slot), std::slice::from_ref(&next));
         *slot = next;
         let committed = slot.clone();
@@ -3695,39 +3226,35 @@ impl CredentialStore {
                 let Source::File(path) = &current.source else {
                     return Err(PatchError::ConfigBacked);
                 };
-                if !marked(current, "plugin_virtual") {
-                    let command = command.as_mut().ok_or(PatchError::ConfigBacked)?;
-                    if !command.is_grant() && self.grant_blocks(current) {
-                        return Err(PatchError::Io(
-                            "credential source requires recovery adoption before editing".into(),
-                        ));
-                    }
-                    let (bytes, expected) = if write {
-                        (bytes, disk)
-                    } else {
-                        let original = command
-                            .read(path)
-                            .map_err(|e| PatchError::Io(e.to_string()))?
-                            .ok_or(PatchError::NotFound)?;
-                        let expected = disk.or_else(|| Some(Some(sha256(&original))));
-                        (original, expected)
-                    };
-                    let saved = match expected {
-                        Some(expected) => command.save_checked(path, &bytes, Some(expected)),
-                        None => command.save(path, &bytes).map(|()| true),
-                    }
-                    .map_err(|e| PatchError::Io(e.to_string()))?;
-                    if !saved {
-                        return Err(PatchError::Stale {
-                            current: current.revision,
-                        });
-                    }
-                    let held = Some(sha256(&bytes));
-                    // The SQL acknowledgement already happened, even for write=false.
-                    return Ok(Some((None, bytes, (next, held))));
+                let command = command.as_mut().ok_or(PatchError::ConfigBacked)?;
+                if !command.is_grant() && self.grant_blocks(current) {
+                    return Err(PatchError::Io(
+                        "credential source requires recovery adoption before editing".into(),
+                    ));
                 }
-                // Virtual children never replace their shared source document.
-                Ok(Some((None, bytes, (next, None))))
+                let (bytes, expected) = if write {
+                    (bytes, disk)
+                } else {
+                    let original = command
+                        .read(path)
+                        .map_err(|e| PatchError::Io(e.to_string()))?
+                        .ok_or(PatchError::NotFound)?;
+                    let expected = disk.or_else(|| Some(Some(sha256(&original))));
+                    (original, expected)
+                };
+                let saved = match expected {
+                    Some(expected) => command.save_checked(path, &bytes, Some(expected)),
+                    None => command.save(path, &bytes).map(|()| true),
+                }
+                .map_err(|e| PatchError::Io(e.to_string()))?;
+                if !saved {
+                    return Err(PatchError::Stale {
+                        current: current.revision,
+                    });
+                }
+                let held = Some(sha256(&bytes));
+                // The SQL acknowledgement already happened, even for write=false.
+                Ok(Some((None, bytes, (next, held))))
             },
             |inner, index, _, (next, held)| {
                 let before = inner.creds.clone();
@@ -3746,7 +3273,7 @@ impl CredentialStore {
                     let at = index.min(inner.creds.len());
                     inner.creds.insert(at, Arc::new(next));
                 }
-                self.register(&before, &inner.creds, &[]);
+                self.register(&before, &inner.creds);
                 self.clear_replaced_unauthorized(&before, &inner.creds);
                 inner.epoch += 1;
                 self.changed.send_replace(());
@@ -3873,26 +3400,13 @@ impl CredentialStore {
     /// refresh or management save cannot be undone. Returns rejected source paths.
     pub fn reconcile_scanned(
         &self,
-        credentials: Vec<Credential>,
+        mut credentials: Vec<Credential>,
         read: &std::collections::BTreeMap<std::path::PathBuf, [u8; 32]>,
-    ) -> Vec<std::path::PathBuf> {
-        self.reconcile_scanned_with(credentials, read, |_, _| {})
-    }
-
-    /// [`Self::reconcile_scanned`]; `keep` first adds to the set from the current
-    /// credentials, under the gate, so no write lands between what it reads and the swap.
-    pub fn reconcile_scanned_with(
-        &self,
-        credentials: Vec<Credential>,
-        read: &std::collections::BTreeMap<std::path::PathBuf, [u8; 32]>,
-        keep: impl FnOnce(&[Arc<Credential>], &mut Vec<Credential>),
     ) -> Vec<std::path::PathBuf> {
         use sha2::{Digest, Sha256};
         let reload = self.reload.write().unwrap_or_else(PoisonError::into_inner);
-        let mut credentials = credentials;
-        keep(&self.snapshot(), &mut credentials);
         // A credential this scan synthesized has no revision yet; one kept for an
-        // incomplete or deferred file is the store's own record, not built from `read`.
+        // incomplete file is the store's own record, not built from `read`.
         let built: std::collections::HashSet<std::path::PathBuf> = credentials
             .iter()
             .filter(|c| c.revision == 0)
@@ -3934,16 +3448,8 @@ impl CredentialStore {
         for c in &inner.creds {
             by_id.entry(c.id.as_str()).or_insert(c);
         }
-        // A credential the startup load registered provisionally is registered again
-        // when the first plugin-aware load parses another `NextRefreshAfter` for it,
-        // whatever else it equals: Go's first load registers it with that one.
-        let provisional = crate::plugins::refresh::provisional(&self.refresh_schedules);
         for mut cred in credentials {
-            let same = |c: &Credential| {
-                unchanged(c, &cred)
-                    && !(provisional.contains(c.id.as_str()) && c.next_refresh_after != cred.next_refresh_after)
-            };
-            match by_id.get(cred.id.as_str()).filter(|c| same(c)) {
+            match by_id.get(cred.id.as_str()).filter(|c| unchanged(c, &cred)) {
                 Some(&existing) => next.push(existing.clone()),
                 None => {
                     inner.generation += 1;
@@ -3962,7 +3468,7 @@ impl CredentialStore {
             .collect();
         next.extend(runtime);
         let removed = removed_ids(&inner.creds, &next);
-        self.register(&inner.creds, &next, &[]);
+        self.register(&inner.creds, &next);
         self.clear_replaced_unauthorized(&inner.creds, &next);
         inner.creds = next;
         inner.epoch += 1;
@@ -3983,77 +3489,6 @@ impl CredentialStore {
         rejected
     }
 
-    /// Inserts or replaces one credential (a plugin's `host.auth.save`) under a single
-    /// write lock, so a concurrent `apply_patch` on another credential is never undone
-    /// the way a snapshot followed by [`Self::reconcile`] could undo it. An unchanged
-    /// credential keeps its revision, as in `reconcile`.
-    pub fn upsert(&self, credential: Credential) {
-        self.upsert_file(None, vec![credential], &[]);
-    }
-
-    /// [`Self::upsert`] for every credential an auth file saved at `path` holds (Go
-    /// `upsertAuthRecordsForPath`): the file's other credentials, parsed from it
-    /// earlier, go, runtime-only ones excepted. `saved` has the refresh schedules a
-    /// plugin's save registers its credentials with.
-    pub fn upsert_file(
-        &self,
-        path: Option<&std::path::Path>,
-        credentials: Vec<Credential>,
-        saved: &[cpa_plugin::hostauth::SavedRefresh],
-    ) {
-        let reload = self.reload.write().unwrap_or_else(PoisonError::into_inner);
-        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
-        let before = inner.creds.clone();
-        let mut changed = false;
-        let mut removed = Vec::new();
-        if let Some(path) = path {
-            let clean = cpa_core::config::credentials::absolute_clean_path;
-            let target = clean(path);
-            let before = std::mem::take(&mut inner.creds);
-            for credential in before {
-                let stale = !marked(&credential, "runtime_only")
-                    && !credentials.iter().any(|c| c.id == credential.id)
-                    && matches!(&credential.source, Source::File(p) if clean(p) == target);
-                if stale {
-                    removed.push(credential.id.clone());
-                } else {
-                    inner.creds.push(credential);
-                }
-            }
-            changed = !removed.is_empty();
-        }
-        for mut credential in credentials {
-            let slot = inner.creds.iter().position(|c| c.id == credential.id);
-            if slot.is_some_and(|i| unchanged(&inner.creds[i], &credential)) {
-                continue;
-            }
-            inner.generation += 1;
-            credential.revision = inner.generation;
-            let credential = Arc::new(credential);
-            match slot {
-                Some(i) => inner.creds[i] = credential,
-                None => inner.creds.push(credential),
-            }
-            changed = true;
-        }
-        if !changed {
-            return;
-        }
-        self.register(&before, &inner.creds, saved);
-        self.clear_replaced_unauthorized(&before, &inner.creds);
-        inner.epoch += 1;
-        self.changed.send_replace(());
-        self.scheduler
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .reconcile(&inner.creds);
-        drop(inner);
-        drop(reload);
-        self.close_sessions(removed);
-        self.clear_disabled_cooldowns();
-        self.persist_cooldowns();
-    }
-
     /// Adds a runtime-only credential (Go's auth add for a `/v1/ws` relay session)
     /// unless one with its ID is already active. Additive API for the relay route.
     pub fn add_runtime(&self, mut credential: Credential) -> bool {
@@ -4066,7 +3501,7 @@ impl CredentialStore {
         inner.generation += 1;
         credential.revision = inner.generation;
         inner.creds.push(Arc::new(credential));
-        self.register(&before, &inner.creds, &[]);
+        self.register(&before, &inner.creds);
         inner.epoch += 1;
         self.changed.send_replace(());
         self.scheduler
@@ -4085,7 +3520,7 @@ impl CredentialStore {
         if inner.creds.len() == before.len() {
             return;
         }
-        self.register(&before, &inner.creds, &[]);
+        self.register(&before, &inner.creds);
         inner.epoch += 1;
         self.changed.send_replace(());
         self.scheduler
@@ -4210,34 +3645,18 @@ pub(crate) fn commit_refresh(
     current: &Credential,
     mut fence: RefreshFence,
     patch: &MetadataPatch,
-    publish_proxy: impl Fn(&mut Credential) + Copy,
 ) -> Result<Arc<Credential>, PatchError> {
-    let mut returned = current.clone();
-    patch.apply(&mut returned.metadata);
-    if marked(current, "plugin_virtual") && (fence.completed_plugin_grant || credentials_changed(current, &returned)) {
-        // An opaque completed result conservatively withholds the old registration.
-        // ponytail: opaque metadata edits require replay or a source-backed authorized
-        // replacement; epoch churn alone cannot prove an unknown token changed.
-        store
-            .virtual_invalid
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(
-                id.to_owned(),
-                VirtualInvalid {
-                    original: Arc::new(current.clone()),
-                    source: store.provenance(id).map(|source| source.sha256),
-                    opaque: fence.completed_plugin_grant && !credentials_changed(current, &returned),
-                    admitted: None,
-                },
-            );
-    }
     let mut revision = current.revision;
     let mut attempt = patch.clone();
     loop {
-        match store.apply_refresh(id, revision, fence.clone(), &attempt, publish_proxy, |c| {
-            credentials_changed(current, c)
-        }) {
+        match store.apply_refresh(
+            id,
+            revision,
+            fence.clone(),
+            &attempt,
+            |_| {},
+            |c| credentials_changed(current, c),
+        ) {
             // Edited since the snapshot (the prepare lock does not hold off other writers),
             // within the refresh's registration: the writer refuses a re-registered ID
             // first (Go "stale registration epoch"), on every retry. Go 935aa6e3: an edit
@@ -4263,20 +3682,12 @@ pub(crate) fn commit_refresh(
                 // applies even when the other partition changed meanwhile
                 // (`CredentialRefreshPatch.CanApplyTo`).
                 let moved = now.credential_version != fence.registered.credential_version;
-                // apply_refresh checked this job's canonical hash under owner admission
-                // before reporting Stale. Only its exact runtime admission may advance.
-                let own_admission = fence.preserved_source.is_some_and(|source| {
-                    now.registration == source.registration
-                        && now.credential_version == source.version
-                        && !latest.disabled
-                        && latest.source == current.source
-                });
-                if (moved || credentials_changed(current, &latest)) && !partition_applies && !own_admission {
+                if (moved || credentials_changed(current, &latest)) && !partition_applies {
                     return Ok(latest);
                 }
                 // Merged into `latest` from here, at its credential version.
                 fence.registered = now;
-                attempt = if own_admission { patch.clone() } else { rebased };
+                attempt = rebased;
                 revision = latest.revision;
                 if attempt.set.is_empty() && attempt.remove.is_empty() {
                     // Nothing left to write, but the refresh happened (Go records
@@ -4286,11 +3697,7 @@ pub(crate) fn commit_refresh(
                     // check, as revisions are never reused, so the empty patch is never
                     // written.
                     let at = (revision, fence.registered.credential_version);
-                    match store.record_refresh(id, fence.registered.registration, Some(at), |c, s| {
-                        if fence.plugin {
-                            crate::plugins::refresh::committed(c, s, chrono::Utc::now());
-                        }
-                    }) {
+                    match store.record_refresh(id, fence.registered.registration, Some(at)) {
                         Err(PatchError::Stale { .. }) => continue,
                         recorded => return recorded,
                     }
@@ -4457,7 +3864,7 @@ async fn refresh_codex_file(
     refresher: cpa_exec::codex_refresh::Refresher,
     guard: tokio::sync::OwnedMutexGuard<()>,
     current: Arc<Credential>,
-    registered: crate::plugins::refresh::Registered,
+    registered: Registered,
     view: Arc<Credential>,
     path: std::path::PathBuf,
     mode: cpa_exec::codex_refresh::RefreshMode,
@@ -4536,12 +3943,12 @@ fn codex_patched(bytes: &[u8], patch: &cpa_exec::codex_refresh::RefreshPatch, re
     if !refresh_write {
         let legacy: Vec<String> = doc
             .keys()
-            .filter(|k| cpa_plugin::auth::canonical_metadata_key(k) != k.as_str())
+            .filter(|k| cpa_core::credential::canonical_metadata_key(k) != k.as_str())
             .cloned()
             .collect();
         for key in legacy {
             let value = doc.remove(&key).expect("listed above");
-            doc.entry(cpa_plugin::auth::canonical_metadata_key(&key).to_owned())
+            doc.entry(cpa_core::credential::canonical_metadata_key(&key).to_owned())
                 .or_insert(value);
         }
     }
@@ -4863,9 +4270,21 @@ pub(crate) mod tests {
     /// Runs once, for its file, where a Codex refresh is about to be admitted.
     static BEFORE_ADMIT: Mutex<Vec<AdmitHook>> = Mutex::new(Vec::new());
 
+    /// Runs once, for its file, after a refresh read the stored document it will adopt
+    /// and before it takes the credential writer to adopt it.
+    static BEFORE_RESTORE: Mutex<Vec<AdmitHook>> = Mutex::new(Vec::new());
+
     pub(super) fn before_admit(path: &Path) {
+        run_hook(&BEFORE_ADMIT, path);
+    }
+
+    pub(super) fn before_restore(path: &Path) {
+        run_hook(&BEFORE_RESTORE, path);
+    }
+
+    fn run_hook(hooks: &Mutex<Vec<AdmitHook>>, path: &Path) {
         let hook = {
-            let mut hooks = BEFORE_ADMIT.lock().unwrap();
+            let mut hooks = hooks.lock().unwrap();
             hooks.iter().position(|(p, _)| p == path).map(|i| hooks.remove(i).1)
         };
         if let Some(hook) = hook {
@@ -4909,12 +4328,8 @@ pub(crate) mod tests {
         patch.set.insert("access_token".into(), "p2".into());
         let fence = RefreshFence {
             registered: registration,
-            plugin: false,
-            completed_plugin_grant: false,
-            plugin_source: None,
-            preserved_source: None,
         };
-        let committed = commit_refresh(&store, "a.json", &current, fence, &patch, |_| {});
+        let committed = commit_refresh(&store, "a.json", &current, fence, &patch);
         assert!(AFTER_STALE.with(|hook| hook.take()).is_none(), "the hook ran");
         assert!(matches!(committed, Err(PatchError::NotFound)), "{committed:?}");
         assert_eq!(store.get("a.json").unwrap().metadata["access_token"], "b");
@@ -4973,6 +4388,26 @@ pub(crate) mod tests {
             std::fs::create_dir_all(dir).unwrap();
             Credential::from_file(dir, &dir.join(id), metadata).unwrap()
         })
+    }
+
+    /// The registration map follows the set: an edit keeps the registration, a removal
+    /// drops the entry, and the same ID added again starts a new registration.
+    #[test]
+    fn registrations_follow_the_credential_set() {
+        let a = Arc::new(cred("registered.json", "claude", false));
+        let mut map = HashMap::new();
+        register_change(&mut map, &[], std::slice::from_ref(&a));
+        let first = map[&a.id];
+        let mut edited = Credential::clone(&a);
+        edited.revision += 1;
+        edited.disabled = true;
+        let edited = Arc::new(edited);
+        register_change(&mut map, std::slice::from_ref(&a), std::slice::from_ref(&edited));
+        assert_eq!(map[&a.id].registration, first.registration);
+        register_change(&mut map, std::slice::from_ref(&edited), &[]);
+        assert!(!map.contains_key(&a.id));
+        register_change(&mut map, &[], std::slice::from_ref(&a));
+        assert_ne!(map[&a.id].registration, first.registration);
     }
 
     fn sel(provider: &str) -> Selection {
@@ -5137,10 +4572,7 @@ pub(crate) mod tests {
         backend: &crate::credential_store::CredentialDb,
         cfg: &Config,
     ) -> cpa_core::config::credentials::AuthScan {
-        crate::testing::with_builtin_auth_parser(|| {
-            backend.preparse(cfg).unwrap();
-            backend.scan(cfg).unwrap()
-        })
+        backend.scan(cfg).unwrap()
     }
     fn reload_private(rt: &Runtime, dir: &Path) {
         let mut cfg = (*rt.config()).clone();
@@ -5158,10 +4590,7 @@ pub(crate) mod tests {
         let (database, backend) = sqlite_backend(&dir);
         let mut cfg = Config::parse("").unwrap();
         cfg.auth_dir = backend.auth_dir();
-        let scan = crate::testing::with_builtin_auth_parser(|| {
-            backend.preparse(&cfg).unwrap();
-            backend.scan(&cfg).unwrap()
-        });
+        let scan = backend.scan(&cfg).unwrap();
         let store = CredentialStore::new(scan.credentials, backend.clone());
         store.note_loaded(&scan.read);
         let original = store.get("codex.json").unwrap();
@@ -5214,7 +4643,7 @@ pub(crate) mod tests {
         let (database, backend) = sqlite_backend(&dir);
         let mut cfg = Config::parse("").unwrap();
         cfg.auth_dir = backend.auth_dir();
-        let store = CredentialStore::new(crate::testing::builtin_auth_files(&cfg), backend.clone());
+        let store = CredentialStore::new(cpa_core::config::credentials::from_auth_dir(&cfg), backend.clone());
         let original = store.get("codex.json").unwrap();
         let path = cfg.auth_dir.join("codex.json");
         std::fs::remove_file(&path).unwrap();
@@ -5273,7 +4702,7 @@ pub(crate) mod tests {
         let (database, backend) = sqlite_backend(&dir);
         let mut cfg = Config::parse("").unwrap();
         cfg.auth_dir = backend.auth_dir();
-        let store = CredentialStore::new(crate::testing::builtin_auth_files(&cfg), backend.clone());
+        let store = CredentialStore::new(cpa_core::config::credentials::from_auth_dir(&cfg), backend.clone());
         let original = store.get("codex.json").unwrap();
         let epoch = store.epoch();
         let path = cfg.auth_dir.join("codex.json");
@@ -5309,78 +4738,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sqlite_plugin_child_adopts_its_parsed_tokens_without_overwriting_the_source_document() {
-        use cpa_core::config::credentials::{self, ParseRequest, Parsed, ParsedAuth, PluginAuthParser};
-        struct Parser;
-        impl PluginAuthParser for Parser {
-            fn parse_auths(&self, req: &ParseRequest<'_>) -> Parsed {
-                let doc: Value = serde_json::from_slice(req.raw_json).unwrap();
-                Parsed::Handled(
-                    ["child-a", "child-b"]
-                        .into_iter()
-                        .map(|id| ParsedAuth {
-                            id: id.into(),
-                            provider: "pp".into(),
-                            metadata: serde_json::json!({"type":"pp","access_token":doc[id]})
-                                .as_object()
-                                .unwrap()
-                                .clone(),
-                            ..Default::default()
-                        })
-                        .collect(),
-                )
-            }
-        }
-        let dir = std::env::temp_dir().join(format!("cpa-runtime-plugin-sqlite-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("plugin.json"),
-            br#"{"type":"pp","child-a":"old-a","child-b":"old-b"}"#,
-        )
-        .unwrap();
-        let (database, backend) = sqlite_backend(&dir);
-        let path = backend.auth_dir().join("plugin.json");
-        let metadata = serde_json::json!({"type":"pp"}).as_object().unwrap().clone();
-        let children = credentials::plugin_save_credentials(
-            &path,
-            &metadata,
-            ["child-a", "child-b"]
-                .into_iter()
-                .map(|id| ParsedAuth {
-                    id: id.into(),
-                    provider: "pp".into(),
-                    metadata: serde_json::json!({"type":"pp","access_token":"old"})
-                        .as_object()
-                        .unwrap()
-                        .clone(),
-                    ..Default::default()
-                })
-                .collect(),
-        )
-        .unwrap();
-        let store = CredentialStore::new(children, backend.clone());
-        let (current, registered) = store.get_registered("child-a").unwrap();
-        assert!(marked(&current, "plugin_virtual"));
-        let fresh = br#"{"type":"pp","child-a":"new-a","child-b":"new-b","unknown":[1,2]}"#;
-        let lock = cpa_exec::codex_siwc_bind::lock_file(&path).unwrap();
-        backend.save(&path, fresh).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        let mut cfg = Config::parse("").unwrap();
-        cfg.auth_dir = backend.auth_dir();
-        let (adopted, _) = store
-            .restore_refresh_document(&backend, &current, registered, &cfg, &Parser)
-            .unwrap();
-        assert_eq!(adopted.str("access_token"), Some("new-a"));
-        assert_eq!(backend.read(&path).unwrap().as_deref(), Some(fresh.as_slice()));
-        assert_eq!(std::fs::read(&path).unwrap(), fresh);
-        drop(lock);
-        drop(store);
-        drop(backend);
-        drop(database);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
     fn patch_persists_atomically_preserves_unknown_fields_and_rejects_stale() {
         let dir = std::env::temp_dir().join(format!("cpa-store-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -5401,7 +4758,7 @@ pub(crate) mod tests {
         .unwrap();
         let mut cfg = cpa_core::config::Config::parse("").unwrap();
         cfg.auth_dir = dir.clone();
-        let store = test_store(crate::testing::builtin_auth_files(&cfg));
+        let store = test_store(cpa_core::config::credentials::from_auth_dir(&cfg));
         let rev = store.get("claude-a.json").unwrap().revision;
 
         let mut patch = MetadataPatch::default();
@@ -5455,26 +4812,30 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A plugin save running alongside token refreshes of another credential never
-    /// reinstalls a stale copy of it: every refresh finds the revision it left.
+    /// A whole-document save of one credential running alongside token refreshes of
+    /// another never reinstalls a stale copy of it: every refresh finds the revision it
+    /// left.
     #[test]
-    fn upsert_never_undoes_a_concurrent_patch() {
-        let dir = std::env::temp_dir().join(format!("cpa-upsert-{}", std::process::id()));
+    fn a_document_save_never_undoes_a_concurrent_patch() {
+        let dir = std::env::temp_dir().join(format!("cpa-save-patch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("refreshed.json"), r#"{"type":"claude","refresh_token":"r0"}"#).unwrap();
         std::fs::write(dir.join("saved.json"), r#"{"type":"claude"}"#).unwrap();
         let mut cfg = cpa_core::config::Config::parse("").unwrap();
         cfg.auth_dir = dir.clone();
-        let store = Arc::new(test_store(crate::testing::builtin_auth_files(&cfg)));
-        let saved = (*store.get("saved.json").unwrap()).clone();
+        let store = test_store(cpa_core::config::credentials::from_auth_dir(&cfg));
         let saver = {
             let store = store.clone();
             std::thread::spawn(move || {
                 for n in 0..500 {
-                    let mut next = saved.clone();
+                    let current = store.get("saved.json").unwrap();
+                    let mut next = Credential::clone(&current);
                     next.metadata.insert("n".into(), n.into());
-                    store.upsert(next);
+                    let bytes = serde_json::to_vec(&next.metadata).unwrap();
+                    store
+                        .replace_file_backed("saved.json", current.revision, &bytes, Some(next))
+                        .unwrap_or_else(|e| panic!("save {n} was refused: {e:?}"));
                 }
             })
         };
@@ -5545,7 +4906,7 @@ pub(crate) mod tests {
         }
         let mut cfg = cpa_core::config::Config::parse("").unwrap();
         cfg.auth_dir = dir.clone();
-        let store = test_store(crate::testing::builtin_auth_files(&cfg));
+        let store = test_store(cpa_core::config::credentials::from_auth_dir(&cfg));
         (dir, cfg, store)
     }
 
@@ -5616,7 +4977,6 @@ pub(crate) mod tests {
         // against the bytes it read, as every production reload does, and B's write
         // survives either order.
         let backend = store.credential_backend();
-        backend.preparse(&cfg).unwrap();
         let mut rescan = backend.scan(&cfg).unwrap();
         rescan.read.remove(&dir.join("a.json")).expect("the scan read A");
         assert!(rescan.read.contains_key(&dir.join("b.json")), "the scan read B");
@@ -5703,62 +5063,48 @@ pub(crate) mod tests {
     /// A scanned SQLite document cannot overwrite a later durable save or deletion.
     #[test]
     fn a_stale_scan_cannot_undo_a_later_write() {
-        use cpa_core::config::credentials::{ParseRequest, Parsed, PluginAuthParser};
-        struct BuiltIn;
-        impl PluginAuthParser for BuiltIn {
-            fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
-                Parsed::NotHandled
-            }
-        }
-        // Keep this built-in fixture independent of another runtime's native
-        // parser registration and epoch changes in the shared test process.
-        cpa_core::config::credentials::with_thread_plugin_auth_parser(Arc::new(BuiltIn), || {
-            let dir = std::env::temp_dir().join(format!("cpa-stale-scan-{}", uuid::Uuid::new_v4()));
-            std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("synthetic.json");
-            std::fs::write(&path, br#"{"type":"codex","prefix":"pfx-8"}"#).unwrap();
-            let mut cfg = Config::parse("").unwrap();
-            cfg.auth_dir = dir.clone();
-            let store = test_store(crate::testing::builtin_auth_files(&cfg));
-            let backend = store.credential_backend();
-            backend.preparse(&cfg).unwrap();
-            let stale = backend.scan(&cfg).unwrap();
-            let revision = store.get("synthetic.json").unwrap().revision;
-            let mut patch = MetadataPatch::default();
-            patch.set.insert("prefix".into(), "pfx-9".into());
-            store.apply_patch("synthetic.json", revision, &patch).unwrap();
-            let current = || store.get("synthetic.json").unwrap();
-            let before = current();
-            store.reconcile_scanned(stale.credentials, &stale.read);
-            assert_eq!(current().metadata["prefix"], "pfx-9");
-            assert_eq!(current().revision, before.revision);
-            backend
-                .save(&path, br#"{"type":"codex","prefix":"saved-edit"}"#)
-                .unwrap();
-            backend.preparse(&cfg).unwrap();
-            let saved = backend.scan(&cfg).unwrap();
-            std::fs::write(&path, b"corrupt cache").unwrap();
-            store.reconcile_scanned(saved.credentials, &saved.read);
-            assert_eq!(
-                current().metadata["prefix"],
-                "saved-edit",
-                "cache cannot veto a SQLite save"
-            );
-            let before = current();
-            backend
-                .save(&path, br#"{"type":"codex","prefix":"deleted-edit"}"#)
-                .unwrap();
-            backend.preparse(&cfg).unwrap();
-            let deleted = backend.scan(&cfg).unwrap();
-            backend.delete(&path).unwrap();
-            store.reconcile_scanned(deleted.credentials, &deleted.read);
-            assert_eq!(
-                current().revision,
-                before.revision,
-                "a deleted document's snapshot was applied"
-            );
-            std::fs::remove_dir_all(dir).unwrap();
-        });
+        let dir = std::env::temp_dir().join(format!("cpa-stale-scan-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("synthetic.json");
+        std::fs::write(&path, br#"{"type":"codex","prefix":"pfx-8"}"#).unwrap();
+        let mut cfg = Config::parse("").unwrap();
+        cfg.auth_dir = dir.clone();
+        let store = test_store(cpa_core::config::credentials::from_auth_dir(&cfg));
+        let backend = store.credential_backend();
+        let stale = backend.scan(&cfg).unwrap();
+        let revision = store.get("synthetic.json").unwrap().revision;
+        let mut patch = MetadataPatch::default();
+        patch.set.insert("prefix".into(), "pfx-9".into());
+        store.apply_patch("synthetic.json", revision, &patch).unwrap();
+        let current = || store.get("synthetic.json").unwrap();
+        let before = current();
+        store.reconcile_scanned(stale.credentials, &stale.read);
+        assert_eq!(current().metadata["prefix"], "pfx-9");
+        assert_eq!(current().revision, before.revision);
+        backend
+            .save(&path, br#"{"type":"codex","prefix":"saved-edit"}"#)
+            .unwrap();
+        let saved = backend.scan(&cfg).unwrap();
+        std::fs::write(&path, b"corrupt cache").unwrap();
+        store.reconcile_scanned(saved.credentials, &saved.read);
+        assert_eq!(
+            current().metadata["prefix"],
+            "saved-edit",
+            "cache cannot veto a SQLite save"
+        );
+        let before = current();
+        backend
+            .save(&path, br#"{"type":"codex","prefix":"deleted-edit"}"#)
+            .unwrap();
+        let deleted = backend.scan(&cfg).unwrap();
+        backend.delete(&path).unwrap();
+        store.reconcile_scanned(deleted.credentials, &deleted.read);
+        assert_eq!(
+            current().revision,
+            before.revision,
+            "a deleted document's snapshot was applied"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -6235,32 +5581,6 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Go `Manager.persist` skips plugin-virtual auths: a refresh of one of the
-    /// credentials a plugin parsed from one file commits in memory and leaves the shared
-    /// file alone.
-    #[test]
-    fn a_plugin_virtual_refresh_never_rewrites_the_shared_source_file() {
-        let dir = std::env::temp_dir().join(format!("virtual-{}-{}", std::process::id(), line!()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("multi.json");
-        let source = r#"{"type":"claude","accounts":[{"access_token":"a"},{"access_token":"b"}]}"#;
-        std::fs::write(&path, source).unwrap();
-        let metadata: Map<String, Value> = serde_json::from_str(r#"{"type":"claude","access_token":"a"}"#).unwrap();
-        let mut credential = Credential::from_file(&dir, &path, metadata).unwrap();
-        credential.id = "multi-a".into();
-        credential.attributes.insert("plugin_virtual".into(), "true".into());
-        let store = test_store(vec![credential]);
-        let current = store.get("multi-a").unwrap();
-        let mut patch = MetadataPatch::default();
-        patch.set.insert("access_token".into(), "refreshed".into());
-        let committed = store.apply_patch("multi-a", current.revision, &patch).unwrap();
-        assert_eq!(committed.metadata["access_token"], "refreshed");
-        assert_eq!(store.get("multi-a").unwrap().metadata["access_token"], "refreshed");
-        store.persist_credential(&committed).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     /// SQLite cooldown snapshots survive restart and reset, and restore Go-format records.
     #[test]
     fn cooldowns_persist_restore_and_reset_through_sqlite() {
@@ -6723,7 +6043,7 @@ pub(crate) mod tests {
             cpa_exec::codex_oauth::CodexOAuth::with_endpoints(client.clone(), &token_url, &token_url, &token_url);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -6844,7 +6164,7 @@ pub(crate) mod tests {
                 cpa_exec::codex_oauth::CodexOAuth::with_endpoints(client.clone(), &token_url, &token_url, &token_url);
             let rt = Arc::new(test_runtime(
                 cfg.clone(),
-                crate::testing::builtin_auth_files(&cfg)
+                cpa_core::config::credentials::from_auth_dir(&cfg)
                     .into_iter()
                     .map(crate::testing::local)
                     .collect(),
@@ -7279,13 +6599,7 @@ pub(crate) mod tests {
                 let result = store.apply_refresh(
                     &original.id,
                     original.revision,
-                    RefreshFence {
-                        registered,
-                        plugin: false,
-                        completed_plugin_grant: false,
-                        plugin_source: None,
-                        preserved_source: None,
-                    },
+                    RefreshFence { registered },
                     &MetadataPatch {
                         set: serde_json::from_value(
                             serde_json::json!({"access_token":"returned","refresh_token":"R2"}),
@@ -7414,246 +6728,6 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    /// The source file is shared plugin data, not either child's token document.
-    /// A real loopback OAuth response supplies the consumed result at the effect port.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn pending_virtual_grant_is_held_without_rewriting_its_source_and_admitted_once() {
-        let mock = CodexDisk::gated(&[], 0).await;
-        let root = std::env::temp_dir().join(format!("cpa-pending-virtual-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).unwrap();
-        let (database, backend) = sqlite_backend(&root);
-        let path = backend.auth_dir().join("shared.json");
-        let raw = br#"{"type":"claude","wrapped":"shared-plugin-material"}"#;
-        backend.save(&path, raw).unwrap();
-        let mut cfg = Config::parse("").unwrap();
-        cfg.auth_dir = backend.auth_dir();
-        let children = ["child-a", "child-b"].map(|id| {
-            let mut child = cred(id, "claude", false);
-            child.source = Source::File(path.clone());
-            child.attributes.insert("plugin_virtual".into(), "true".into());
-            child.metadata = serde_json::json!({
-                "type": "claude", "access_token": format!("sk-ant-oat-{id}"),
-                "refresh_token": format!("refresh-{id}"),
-                "expired": (chrono::Utc::now() - chrono::Duration::minutes(1)).to_rfc3339(),
-                "account_uuid": "private-fixture", "claude_device_ids": ["b".repeat(64)]
-            })
-            .as_object()
-            .unwrap()
-            .clone();
-            child.refresh_derived();
-            child
-        });
-        let endpoint = format!("{}/oauth/token", mock.base);
-        let rt = Arc::new(Runtime::new(
-            cfg,
-            children.to_vec(),
-            Executors {
-                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1")
-                    .unwrap()
-                    .with_oauth(cpa_exec::oauth::OAuth::with_endpoints(
-                        wreq::Client::new(),
-                        &endpoint,
-                        &endpoint,
-                        &endpoint,
-                    )),
-                codex: Default::default(),
-                devices: Default::default(),
-                openai: Default::default(),
-                google: Default::default(),
-            },
-            backend.clone(),
-        ));
-        rt.store
-            .note_loaded(&std::collections::BTreeMap::from([(path.clone(), sha256(raw))]));
-        rt.deny_external.store(true, Ordering::Relaxed);
-        let refresh = tokio::spawn({
-            let rt = rt.clone();
-            async move { rt.refresh_credential("child-a").await }
-        });
-        mock.wait_for_grants(1).await;
-        let blocked = crate::testing::block_publication(database.path().unwrap());
-        assert!(
-            database
-                .import_yaml("server: {port: 8318}\n", "test", "pending")
-                .is_err()
-        );
-        mock.gate.add_permits(1);
-        assert!(refresh.await.unwrap().is_err(), "holding is not ordinary save success");
-        let old = rt.store.get("child-a").unwrap();
-        assert_eq!(old.str("refresh_token"), Some("refresh-child-a"));
-        assert!(rt.store.tokens_rejected(&old), "spent virtual tokens cannot dispatch");
-        assert!(rt.refresh_credential("child-b").await.is_err());
-        assert_eq!(mock.grants.lock().unwrap().len(), 1, "new grant starts are paused");
-        assert_eq!(std::fs::read(&path).unwrap(), raw);
-        assert_eq!(backend.documents().unwrap(), vec![(path.clone(), raw.to_vec())]);
-        drop(blocked);
-        backend.admit_work().unwrap();
-        let adopted = rt.store.get("child-a").unwrap();
-        assert_eq!(adopted.str("refresh_token"), Some("outer-ref-refreshed"));
-        assert!(!rt.store.tokens_rejected(&adopted));
-        let revision = adopted.revision;
-        backend.admit_work().unwrap();
-        assert_eq!(
-            rt.store.get("child-a").unwrap().revision,
-            revision,
-            "admit exactly once"
-        );
-        assert_eq!(mock.grants.lock().unwrap().len(), 1);
-        assert_eq!(std::fs::read(&path).unwrap(), raw);
-        assert_eq!(backend.documents().unwrap(), vec![(path.clone(), raw.to_vec())]);
-        let backup = root.join("cold");
-        std::fs::create_dir(&backup).unwrap();
-        std::fs::copy(database.path().unwrap(), backup.join("state.db")).unwrap();
-        let cold = Arc::new(crate::testing::config_store(&backup.join("state.db")).unwrap());
-        let cold_db = crate::credential_store::CredentialDb::initialize(cold).unwrap();
-        assert!(
-            cold_db.documents().unwrap().iter().all(|(_, bytes)| bytes == raw),
-            "volatile child results are not cold-restored"
-        );
-        rt.shutdown_codex_refreshes().await;
-        drop((cold_db, rt, backend, database));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn held_virtual_grants_recheck_registration_version_and_source_at_recovery() {
-        for case in [
-            "deleted",
-            "reimported",
-            "version-aba",
-            "source-replaced",
-            "metadata-edit",
-            "projection-pending",
-        ] {
-            let root = std::env::temp_dir().join(format!("cpa-virtual-fence-{}", uuid::Uuid::new_v4()));
-            std::fs::create_dir(&root).unwrap();
-            let (database, backend) = sqlite_backend(&root);
-            let path = backend.auth_dir().join("shared.json");
-            let raw = br#"{"type":"acme","wrapped":"original"}"#;
-            backend.save(&path, raw).unwrap();
-            let mut original = cred("child", "acme", false);
-            original.source = Source::File(path.clone());
-            original.attributes.insert("plugin_virtual".into(), "true".into());
-            original.metadata.insert("access_token".into(), "old-access".into());
-            original.metadata.insert("refresh_token".into(), "old-refresh".into());
-            let store = CredentialStore::new(vec![original.clone()], backend.clone());
-            store.note_loaded(&std::collections::BTreeMap::from([(path.clone(), sha256(raw))]));
-            let weak = Arc::downgrade(&store);
-            let projection_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let ready = projection_ready.clone();
-            let subscription = database
-                .install_configuration(move |view| {
-                    if view.change == crate::config_store::ConfigurationChange::Initial {
-                        return Ok(());
-                    }
-                    if case == "projection-pending" && !ready.load(Ordering::SeqCst) {
-                        anyhow::bail!("required projection unavailable");
-                    }
-                    let store = weak.upgrade().unwrap();
-                    let mut current = store.get("child").unwrap().as_ref().clone();
-                    match case {
-                        "deleted" => store.reconcile(vec![]),
-                        "reimported" => {
-                            store.reconcile(vec![]);
-                            store.upsert(current);
-                        }
-                        "version-aba" => {
-                            current.metadata.insert("refresh_token".into(), "other-refresh".into());
-                            store.upsert(current.clone());
-                            current.metadata.insert("refresh_token".into(), "old-refresh".into());
-                            store.upsert(current);
-                        }
-                        "metadata-edit" => {
-                            current.metadata.insert("prefix".into(), "kept-edit".into());
-                            current.refresh_derived();
-                            store.upsert(current);
-                        }
-                        _ => {}
-                    }
-                    Ok(())
-                })
-                .unwrap();
-            let blocked =
-                (case != "projection-pending").then(|| crate::testing::block_publication(database.path().unwrap()));
-            assert!(
-                database
-                    .import_yaml("server: {port: 8318}\n", "test", "pending")
-                    .is_err()
-            );
-            if case == "source-replaced" {
-                assert!(
-                    backend
-                        .granted_command()
-                        .unwrap()
-                        .save(&path, br#"{"type":"acme","wrapped":"replaced"}"#)
-                        .is_err()
-                );
-            }
-            let (current, registered) = store.get_registered("child").unwrap();
-            let patch = MetadataPatch {
-                set: serde_json::json!({"access_token":"new-access","refresh_token":"new-refresh"})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-                remove: vec![],
-            };
-            assert!(
-                commit_refresh(
-                    &store,
-                    "child",
-                    &current,
-                    RefreshFence {
-                        registered,
-                        plugin: true,
-                        completed_plugin_grant: false,
-                        plugin_source: None,
-                        preserved_source: None,
-                    },
-                    &patch,
-                    |_| {}
-                )
-                .is_err()
-            );
-            assert!(store.tokens_rejected(&current));
-            assert!(
-                store.apply_patch("child", current.revision, &patch).is_err(),
-                "ordinary edits cannot borrow preservation admission"
-            );
-            drop(blocked);
-            if case == "projection-pending" {
-                assert!(backend.admit_work().is_err());
-                assert_eq!(store.get("child").unwrap().str("refresh_token"), Some("old-refresh"));
-                projection_ready.store(true, Ordering::SeqCst);
-            }
-            backend.admit_work().unwrap();
-            match case {
-                "deleted" => assert!(store.get("child").is_none()),
-                "projection-pending" => {
-                    assert_eq!(store.get("child").unwrap().str("refresh_token"), Some("new-refresh"));
-                }
-                "metadata-edit" => {
-                    let adopted = store.get("child").unwrap();
-                    assert_eq!(adopted.str("refresh_token"), Some("new-refresh"));
-                    assert_eq!(adopted.str("prefix"), Some("kept-edit"));
-                    assert!(!store.tokens_rejected(&adopted));
-                }
-                _ => {
-                    let refused = store.get("child").unwrap();
-                    assert_eq!(refused.str("refresh_token"), Some("old-refresh"), "{case}");
-                    assert!(
-                        store.tokens_rejected(&refused),
-                        "stale disposal must not license old tokens: {case}"
-                    );
-                }
-            }
-            let revision = store.get("child").map(|c| c.revision);
-            backend.admit_work().unwrap();
-            assert_eq!(store.get("child").map(|c| c.revision), revision);
-            drop((subscription, store, backend, database));
-            std::fs::remove_dir_all(root).unwrap();
-        }
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sqlite_codex_refresh_restores_newer_accepted_tokens_under_the_document_lock() {
         let file = codex_file(
@@ -7757,13 +6831,6 @@ pub(crate) mod tests {
 
     #[test]
     fn a_private_codex_backend_prepares_its_canonical_documents_before_registration() {
-        use cpa_core::config::credentials::{self, ParseRequest, Parsed, PluginAuthParser};
-        struct Suppress;
-        impl PluginAuthParser for Suppress {
-            fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
-                Parsed::Handled(vec![])
-            }
-        }
         let dir = std::env::temp_dir().join(format!("cpa-canonical-prepare-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let file = codex_file(
@@ -7772,15 +6839,13 @@ pub(crate) mod tests {
         );
         std::fs::write(dir.join("codex.json"), file.to_string()).unwrap();
         let (database, backend) = sqlite_backend(&dir);
-        credentials::with_thread_plugin_auth_parser(Arc::new(Suppress), || {
-            let rt = CodexDisk::runtime_backend(backend.clone(), "http://127.0.0.1:1");
-            assert!(
-                rt.store.get("codex.json").is_some(),
-                "canonical fixture documents must not be deferred by an unrelated parser"
-            );
-            assert_eq!(backend.documents().unwrap().len(), 1);
-            drop(rt);
-        });
+        let rt = CodexDisk::runtime_backend(backend.clone(), "http://127.0.0.1:1");
+        assert!(
+            rt.store.get("codex.json").is_some(),
+            "canonical fixture documents register"
+        );
+        assert_eq!(backend.documents().unwrap().len(), 1);
+        drop(rt);
         drop((backend, database));
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -7865,6 +6930,40 @@ pub(crate) mod tests {
         assert_eq!(Value::Object(adopted.metadata.clone()), newer);
         assert_eq!(backend.read(&path).unwrap().unwrap(), newer_bytes);
         assert_eq!(std::fs::read(&path).unwrap(), newer_bytes);
+        drop(rt);
+        drop(backend);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A write that lands between reading the stored document and adopting it wins: the
+    /// adoption fails as stale instead of writing the older bytes back over it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_write_after_the_refresh_read_the_document_is_not_overwritten() {
+        let (rt, dir) = claude_refresh_fixture(&["claude-raced.json"], "", |_| async {
+            panic!("a stale adoption must not spend a refresh token")
+        })
+        .await;
+        let backend = rt.store.credential_backend();
+        let path = dir.join("claude-raced.json");
+        let mut document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        document["expired"] = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339().into();
+        document["refresh_token"] = "read-refresh".into();
+        backend.save(&path, &serde_json::to_vec(&document).unwrap()).unwrap();
+        document["refresh_token"] = "raced-refresh".into();
+        let raced = serde_json::to_vec(&document).unwrap();
+        BEFORE_RESTORE.lock().unwrap().push((
+            path.clone(),
+            Box::new({
+                let (backend, path, raced) = (backend.clone(), path.clone(), raced.clone());
+                move || backend.save(&path, &raced).unwrap()
+            }),
+        ));
+        let error = rt
+            .prepare_credential("claude-raced.json", &rt.config(), None)
+            .await
+            .unwrap_err();
+        assert!(format!("{error:?}").contains("Stale"), "{error:?}");
+        assert_eq!(backend.read(&path).unwrap().unwrap(), raced);
         drop(rt);
         drop(backend);
         std::fs::remove_dir_all(dir).unwrap();
@@ -8847,7 +7946,7 @@ pub(crate) mod tests {
             cpa_exec::codex_oauth::CodexOAuth::with_endpoints(client.clone(), &token_url, &token_url, &token_url);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -9243,7 +8342,7 @@ pub(crate) mod tests {
         let oauth = cpa_exec::oauth::OAuth::with_endpoints(wreq::Client::new(), &token, &profile, &profile);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -9402,7 +8501,7 @@ pub(crate) mod tests {
         let oauth = cpa_exec::oauth::OAuth::with_endpoints(wreq::Client::new(), &token, &profile, &profile);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -9716,7 +8815,7 @@ pub(crate) mod tests {
         let oauth = cpa_exec::oauth::OAuth::with_endpoints(wreq::Client::new(), &token, &profile, &profile);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -9939,125 +9038,6 @@ pub(crate) mod tests {
         rt.shutdown_codex_refreshes().await;
         drop(rt);
         std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// A plugin-routed refresh job that panics records no deadline of the plugin's, so
-    /// the refresh state backs it off like any failure instead of starting it again on
-    /// the next scan.
-    #[cfg(unix)]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[cfg_attr(feature = "media-relay", ignore = "needs the Go plugin toolchain")]
-    async fn a_panicking_plugin_refresh_backs_off() {
-        let tmp = std::env::temp_dir();
-        let Some(built) = cpa_plugin::testing::built_plugins(&tmp, "a_panicking_plugin_refresh") else {
-            return;
-        };
-        let dir = cpa_plugin::testing::scratch(&tmp, "plugin-refresh-panic");
-        let (auths, plugins, records) = (dir.join("auths"), dir.join("plugins"), dir.join("records"));
-        for d in [&auths, &plugins, &records] {
-            std::fs::create_dir_all(d).unwrap();
-        }
-        std::fs::copy(built.join("recorder.so"), plugins.join("acme.so")).unwrap();
-        std::fs::write(
-            auths.join("p.json"),
-            r#"{"type":"acme","access_token":"p","refresh_interval":"1h"}"#,
-        )
-        .unwrap();
-        let yaml = format!(
-            "plugins:\n  enabled: true\n  dir: {}\n  configs:\n    acme:\n      enabled: true\n      label: acme\n      record: {}\n      caps: auth_provider\n",
-            plugins.display(),
-            records.display()
-        );
-        let mut cfg = Config::parse(&yaml).unwrap();
-        cfg.auth_dir = auths.clone();
-        let mut credentials = cpa_core::config::credentials::from_config(&cfg);
-        credentials.extend(crate::testing::builtin_auth_files(&cfg));
-        let rt = Arc::new(test_runtime(
-            cfg,
-            credentials,
-            Executors {
-                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
-                codex: Default::default(),
-                devices: Default::default(),
-                openai: Default::default(),
-                google: Default::default(),
-            },
-        ));
-        crate::plugins::start(&rt).await;
-        // As after the first plugin-aware load.
-        rt.store.end_bootstrap();
-        let c = rt.store.get("p.json").unwrap();
-        assert!(
-            crate::plugins::refresh::route(&rt, &c, &rt.config()).is_some(),
-            "plugin-routed"
-        );
-        tests::arm_panic("prepare", "p.json");
-        rt.start_auto_refresh();
-        let backed_off = tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let c = rt.store.get("p.json").unwrap();
-                let retry = rt.refresh_state.lock().unwrap().retry_at(&c);
-                if retry.is_some_and(|at| at > Instant::now() + Duration::from_secs(250)) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        });
-        if backed_off.await.is_err() {
-            let c = rt.store.get("p.json").unwrap();
-            panic!(
-                "no backoff: reached {}, retry {:?}, due {:?}, schedule {:?}",
-                tests::reached("prepare", "p.json"),
-                rt.refresh_state
-                    .lock()
-                    .unwrap()
-                    .retry_at(&c)
-                    .map(|at| at.saturating_duration_since(Instant::now())),
-                crate::plugins::refresh::due_at(&rt, &c, &rt.config()),
-                rt.store.refresh_schedules().lock().unwrap().get("p.json").copied()
-            );
-        }
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-        assert_eq!(
-            tests::reached("prepare", "p.json"),
-            1,
-            "no second attempt before the backoff"
-        );
-        rt.stop_auto_refresh();
-        rt.shutdown_codex_refreshes().await;
-        rt.plugins().shutdown_all(None).await;
-        drop(rt);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// Of a plugin's refresh failure only the status and a known error code are logged:
-    /// its free message may hold anything, an unlabelled token included, which the
-    /// pattern-based sanitizer cannot see.
-    #[test]
-    fn a_plugin_refresh_failure_logs_no_plugin_message() {
-        let logs = Logs::default();
-        let _guard = logs.install();
-        let c = cred("p.json", "acme", false);
-        for code in ["invalid_grant", "rejected"] {
-            let error = crate::plugins::refresh::call_error(cpa_plugin::rpc::CallError::Rpc {
-                code: code.into(),
-                message: "rejected abc123xyz456opaque".into(),
-                status: 401,
-            });
-            warn_refresh_failed(&c, "", &error, None);
-        }
-        let text = logs.text();
-        assert!(
-            text.contains(
-                "credential refresh failed for acme (p.json): status 401: plugin refresh failed: invalid_grant;"
-            ),
-            "{text}"
-        );
-        assert!(
-            text.contains("status 401: plugin refresh failed; next attempt"),
-            "an unknown code, which could be a token, is left out: {text}"
-        );
-        assert!(!text.contains("abc123"), "{text}");
     }
 
     /// The loop sets no timer while nothing can come due, and a credential added later

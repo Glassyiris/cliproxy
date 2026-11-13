@@ -88,8 +88,6 @@ function setStatus(c: Context, rows: Row[], selected: ReadonlySet<string>, disab
   const also = units.filter((r) => !selected.has(r.key));
   const doneText = (count: number) =>
     disabled ? t("accounts.batch.disabled", { count }) : t("accounts.batch.enabled", { count });
-  // A plugin source switches its whole file on one request, which the list does not mark, so
-  // the outcome is read back: an account a file-wide change already switched is not asked again.
   // A runtime-only account leaves the list once disabled (Rust auth_files.rs `entry`), so a
   // request's own success stands; the list only turns a failure into done.
   const isDone = (r: Row) =>

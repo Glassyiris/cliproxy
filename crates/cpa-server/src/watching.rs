@@ -1,14 +1,13 @@
-//! Reconciles canonical credentials after explicit owner/plugin notifications.
+//! Reconciles canonical credentials after explicit owner notifications.
 //!
 //! Configuration views arrive directly from accepted service commands. This task
 //! has no timer, filesystem watcher or published-snapshot discovery path.
 //!
-//! Credential working files are caches for provider/plugin APIs that require paths.
-//! They are restored and written under the database's write lock; hand edits are not
-//! supported or observed. Scans read SQLite source documents. Plugin parsing runs
-//! outside management/runtime locks, then publication under `Management::disk` keeps
-//! incomplete documents and rejects scans made stale by a concurrent credential save.
-use cpa_core::config::credentials;
+//! Credential working files are caches for provider APIs that require paths. They are
+//! restored and written under the database's write lock; hand edits are not supported
+//! or observed. Scans read SQLite source documents; publication under
+//! `Management::disk` keeps incomplete documents and rejects scans made stale by a
+//! concurrent credential save.
 use cpa_core::credential::{Credential, Source};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -40,32 +39,27 @@ impl Drop for Notifications {
 }
 
 pub fn start(state: &Arc<Management>) -> Notifications {
-    let plugin_auth = Arc::new(tokio::sync::Notify::new());
-    credentials::on_plugin_auth_change(Some(Arc::new({
-        let plugin_auth = plugin_auth.clone();
-        move || plugin_auth.notify_one()
-    })));
     let credential_changes = state.credential_changes.clone();
     let state = Arc::downgrade(state);
-    // Load once at startup, including any plugin providers installed before the hook.
-    plugin_auth.notify_one();
     let stop = tokio_util::sync::CancellationToken::new();
     let cancelled = stop.clone();
     let task = tokio::spawn(async move {
+        // Load once at startup, then after every credential change notification.
+        let mut first = true;
         loop {
-            tokio::select! {
-                biased;
-                () = cancelled.cancelled() => return,
-                () = plugin_auth.notified() => {},
-                () = credential_changes.notified() => {},
-            };
+            if !std::mem::take(&mut first) {
+                tokio::select! {
+                    biased;
+                    () = cancelled.cancelled() => return,
+                    () = credential_changes.notified() => {},
+                };
+            }
             if cancelled.is_cancelled() {
                 return;
             }
             let Some(state) = state.upgrade() else { return };
-            let plugin_auth = plugin_auth.clone();
             let reloaded = tokio::task::spawn_blocking(move || {
-                if let Err(error) = reload_with_notify(&state, Some(&plugin_auth)) {
+                if let Err(error) = reload(&state) {
                     tracing::error!("failed to reload config: {error}");
                 }
             })
@@ -93,18 +87,6 @@ impl std::error::Error for ReloadError {}
 /// Blocking reload of stored config and credential documents, shared with deterministic
 /// tests. An invalid config keeps the last good config while credentials reconcile.
 pub fn reload(state: &Management) -> Result<(), ReloadError> {
-    reload_with_notify(state, None)
-}
-
-fn reload_with_notify(state: &Management, plugin_auth: Option<&tokio::sync::Notify>) -> Result<(), ReloadError> {
-    // Plugin callbacks may save credentials or wait on the async runtime. Never parse
-    // while holding `disk` or the store's reconciliation gate.
-    if credentials::plugin_auth_parser_active() {
-        let db = state.rt.store().credential_backend();
-        if let Err(error) = db.preparse(&state.rt.config()) {
-            tracing::error!("credential database: preparsing source documents failed: {error:#}");
-        }
-    }
     let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
     let (mut config, error) = match state.stored_config() {
         Ok(config) => (config, None),
@@ -113,13 +95,7 @@ fn reload_with_notify(state: &Management, plugin_auth: Option<&tokio::sync::Noti
     state.lock_auth_dir(&mut config);
     let mut scan = state.scan_credentials(&config);
     keep_incomplete(state, &mut scan.credentials, &scan.incomplete);
-    // A source can change between preparse and scan, including through a plugin's
-    // own save callback. Retry via Notify even when no later database commit occurs.
-    let retry = !scan.deferred.is_empty() || !scan.unapplied.is_empty();
     state.publish(config, Some(scan));
-    if retry && let Some(plugin_auth) = plugin_auth {
-        plugin_auth.notify_one();
-    }
     match error {
         Some(error) => Err(error),
         None => Ok(()),
@@ -547,149 +523,6 @@ mod tests {
         assert_eq!(store.get("a.json").unwrap().metadata["access_token"], "refreshed");
         reload(&state).unwrap();
         assert_eq!(store.get("a.json").unwrap().metadata["access_token"], "refreshed");
-        drop(state);
-        drop(db);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_deferred_document_keeps_a_refresh_committed_before_publication() {
-        use cpa_core::config::credentials::{ParseRequest, Parsed, ParsedAuth, PluginAuthParser};
-        struct Acme;
-        impl PluginAuthParser for Acme {
-            fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
-                Parsed::Handled(vec![ParsedAuth {
-                    provider: "acme".into(),
-                    id: "acme-a".into(),
-                    metadata: serde_json::json!({"type": "acme", "token": "old"})
-                        .as_object()
-                        .cloned()
-                        .unwrap(),
-                    ..Default::default()
-                }])
-            }
-        }
-        credentials::with_thread_plugin_auth_parser(Arc::new(Acme), || {
-            let (state, db, root) = state();
-            let file = db.auth_dir().join("acme.json");
-            db.save(&file, br#"{"type":"acme","v":1}"#).unwrap();
-            reload(&state).unwrap();
-            let store = state.rt.store().clone();
-            assert_eq!(store.get("acme-a").unwrap().metadata["token"], "old");
-            db.save(&file, br#"{"type":"acme","v":2}"#).unwrap();
-            let config = (*state.rt.config()).clone();
-            let scan = db.scan(&config).unwrap();
-            assert!(scan.deferred.contains(&file));
-            let refreshed = store.clone();
-            crate::management::BEFORE_RECONCILE.lock().unwrap().push((
-                config.auth_dir.clone(),
-                Box::new(move || {
-                    let current = refreshed.get("acme-a").unwrap();
-                    let mut patch = cpa_core::credential::MetadataPatch::default();
-                    patch.set.insert("token".into(), "refreshed".into());
-                    refreshed.apply_patch("acme-a", current.revision, &patch).unwrap();
-                }),
-            ));
-            state.publish(config, Some(scan));
-            assert_eq!(store.get("acme-a").unwrap().metadata["token"], "refreshed");
-            drop(state);
-            drop(db);
-            std::fs::remove_dir_all(root).unwrap();
-        });
-    }
-
-    #[tokio::test]
-    async fn a_plugin_bundle_publishes_only_once_parsed() {
-        use cpa_core::config::credentials::{ParseRequest, Parsed, ParsedAuth, PluginAuthParser};
-        struct Bundles;
-        impl PluginAuthParser for Bundles {
-            fn parse_auths(&self, req: &ParseRequest<'_>) -> Parsed {
-                if req.file_name != "bundle.json" {
-                    return Parsed::NotHandled;
-                }
-                let auth = |id: &str| ParsedAuth {
-                    provider: "claude".into(),
-                    id: id.into(),
-                    metadata: serde_json::json!({"type": "claude", "access_token": id})
-                        .as_object()
-                        .cloned()
-                        .unwrap(),
-                    ..Default::default()
-                };
-                Parsed::Handled(vec![auth("claude-a"), auth("claude-b")])
-            }
-        }
-        credentials::with_thread_plugin_auth_parser(Arc::new(Bundles), || {
-            let (state, db, root) = state();
-            let file = db.auth_dir().join("bundle.json");
-            db.save(
-                &file,
-                br#"{"type":"claude","accounts":[{"access_token":"a"},{"access_token":"b"}]}"#,
-            )
-            .unwrap();
-            let config = (*state.rt.config()).clone();
-            let scan = db.scan(&config).unwrap();
-            assert!(scan.deferred.contains(&file));
-            state.publish(config, Some(scan));
-            assert!(
-                state.rt.store().snapshot().is_empty(),
-                "published before plugin parsing"
-            );
-            reload(&state).unwrap();
-            let mut ids: Vec<String> = state.rt.store().snapshot().iter().map(|c| c.id.clone()).collect();
-            ids.sort();
-            assert_eq!(ids, ["claude-a", "claude-b"]);
-            drop(state);
-            drop(db);
-            std::fs::remove_dir_all(root).unwrap();
-        });
-    }
-
-    #[tokio::test]
-    async fn a_deferred_parse_notifies_the_reload_loop_to_retry() {
-        use cpa_core::config::credentials::{ParseRequest, Parsed, ParsedAuth, PluginAuthParser};
-        use std::sync::atomic::{AtomicBool, Ordering};
-        struct SavingParser {
-            db: Arc<crate::credential_store::CredentialDb>,
-            saved: AtomicBool,
-        }
-        impl PluginAuthParser for SavingParser {
-            fn parse_auths(&self, req: &ParseRequest<'_>) -> Parsed {
-                if !self.saved.swap(true, Ordering::Relaxed) {
-                    self.db.save(req.path, br#"{"type":"acme","token":"new"}"#).unwrap();
-                }
-                Parsed::Handled(vec![ParsedAuth {
-                    provider: "acme".into(),
-                    id: "acme-a".into(),
-                    metadata: serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(req.raw_json)
-                        .unwrap(),
-                    ..Default::default()
-                }])
-            }
-        }
-        let (state, db, root) = state();
-        db.save(&db.auth_dir().join("acme.json"), br#"{"type":"acme","token":"old"}"#)
-            .unwrap();
-        let parser = Arc::new(SavingParser {
-            db: db.clone(),
-            saved: AtomicBool::new(false),
-        });
-        credentials::with_thread_plugin_auth_parser(parser, || {
-            let retry = tokio::sync::Notify::new();
-            reload_with_notify(&state, Some(&retry)).unwrap();
-            assert!(
-                state.rt.store().snapshot().is_empty(),
-                "the changed document must wait for a new parse"
-            );
-            let notified = retry.notified();
-            tokio::pin!(notified);
-            assert!(
-                notified.as_mut().enable(),
-                "a deferred scan did not notify the reload loop"
-            );
-            reload_with_notify(&state, Some(&retry)).unwrap();
-            assert_eq!(state.rt.store().get("acme-a").unwrap().str("token"), Some("new"));
-        });
         drop(state);
         drop(db);
         std::fs::remove_dir_all(root).unwrap();

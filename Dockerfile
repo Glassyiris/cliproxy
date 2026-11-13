@@ -17,7 +17,6 @@
 
 # Toolchains, pinned by version and digest: the size, idle and heap budgets are exact numbers
 # from one compiler and std (bench/budgets.txt). Bumping Rust means re-measuring them.
-FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS go
 FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS node
 
 FROM rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6 AS base
@@ -27,13 +26,11 @@ SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 RUN apt-get update \
  && apt-get install -y --no-install-recommends cmake clang libclang-dev perl python3 jq shellcheck binutils \
  && rm -rf /var/lib/apt/lists/*
-# The plugin tests build Go plugins with cgo; the dashboard builds with Node.
-COPY --from=go /usr/local/go /usr/local/go
+# The dashboard builds with Node.
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
-ENV PATH=/usr/local/go/bin:$PATH GOTOOLCHAIN=local
 RUN rustup component add rustfmt clippy \
  && cargo install --locked cargo-nextest --version 0.9.148
 # Pinned with their checksums in .github/ci/pins.env. Without --features cli, cargo-about
@@ -52,7 +49,7 @@ RUN . /tmp/pins.env \
 RUN useradd --create-home --uid 1000 builder && install -d -o builder -g builder /src
 USER builder
 WORKDIR /src
-ENV CARGO_INCREMENTAL=0 CARGO_TERM_COLOR=always GOFLAGS=-modcacherw
+ENV CARGO_INCREMENTAL=0 CARGO_TERM_COLOR=always
 
 # The dashboard's packages, in their own layer so a source edit does not reinstall them.
 FROM base AS deps
@@ -66,14 +63,13 @@ FROM deps AS dashboard
 COPY --chown=builder:builder . .
 RUN cd ui && npm run check
 
-# The Cargo manifests and lock files, the Go module files, and an empty file for each crate
+# The Cargo manifests and lock files, and an empty file for each crate
 # root cargo looks for, so the fetch below reruns only when one of them changes.
 FROM base AS manifests
 RUN --mount=type=bind,target=/tmp/tree <<'EOF'
 shopt -s nullglob
 cd /tmp/tree
-for f in Cargo.toml Cargo.lock {crates/*,vendor/*,harness/rust}/Cargo.{toml,lock} \
-    crates/cpa-plugin/tests/goplugins/go.{mod,sum}; do
+for f in Cargo.toml Cargo.lock {crates/*,vendor/*,harness/rust}/Cargo.{toml,lock}; do
   if [ -e "$f" ]; then install -D -m 0644 "$f" "/home/builder/manifests/$f"; fi
 done
 for f in {crates/*,vendor/*,harness/rust}/src/{lib,main}.rs; do
@@ -81,15 +77,14 @@ for f in {crates/*,vendor/*,harness/rust}/src/{lib,main}.rs; do
 done
 EOF
 
-# Every crate and Go module the stages below build with, in this layer rather than a cache
+# Every crate the stages below build with, in this layer rather than a cache
 # mount: the Actions layer cache does not keep cache mounts, so a runner that restores this
 # layer from it must find them here to build offline.
 FROM deps AS fetch
 COPY --from=manifests --chown=builder:builder /home/builder/manifests/ ./
 RUN cargo fetch --locked \
  && cargo fetch --locked --manifest-path vendor/gjson/Cargo.toml \
- && cargo fetch --locked --manifest-path harness/rust/Cargo.toml \
- && (cd crates/cpa-plugin/tests/goplugins && go mod download)
+ && cargo fetch --locked --manifest-path harness/rust/Cargo.toml
 
 # The tree with the dashboard build that the binary embeds (crates/cpa-server/build.rs), over
 # the empty crate roots above. Cargo unpacks the fetched crates into registry/src, a cache
@@ -99,7 +94,7 @@ COPY --chown=builder:builder . .
 COPY --from=dashboard --chown=builder:builder /src/ui/dist ui/dist
 # No debug info in test builds: linking about 55 test binaries with full debug info was most
 # of a warm build. Panic messages keep their file and line.
-ENV CARGO_NET_OFFLINE=true CARGO_PROFILE_TEST_DEBUG=0 GOPROXY=off
+ENV CARGO_NET_OFFLINE=true CARGO_PROFILE_TEST_DEBUG=0
 
 # REQUIREMENTS.md against the rule files and the tree (scripts/check-requirements.py), and the
 # check's own tests. It reads files only, so it needs Python and the tree and nothing else:
@@ -134,10 +129,10 @@ EOF
 
 # The workspace tests with no network: a test that tries to reach a real provider fails
 # instead of sending anything. Nextest assigns each test to one of SHARDS shards by a hash
-# of its name (.config/nextest.toml sets the exclusive and setup-script tests); the last
+# of its name (.config/nextest.toml sets the exclusive tests); the last
 # shard also runs the doc tests, the patched gjson in vendor/, which is outside the
 # workspace, and the cache replay script's tests, and the first the media relay and CPU
-# profiler tests. CPA_TEST_NO_SKIP turns a skip for a missing Go toolchain into a failure.
+# profiler tests. CPA_TEST_NO_SKIP turns a skipped media relay IPv6 test into a failure.
 # /home/builder/out holds the list and counts the test-report stage exports for
 # .github/scripts/test-counts.py. CI_COMMIT changes on every commit, so a cached run cannot
 # stand in for a new commit's. Nextest runs one test per CPU; on a large shared machine pass

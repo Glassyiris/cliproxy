@@ -22,16 +22,6 @@ use super::Config;
 use crate::credential::{Credential, Source};
 use crate::gostr::GoStr;
 
-mod plugin_auth;
-use plugin_auth::Ask;
-#[cfg(feature = "test-support")]
-pub use plugin_auth::with_thread_plugin_auth_parser;
-pub use plugin_auth::{
-    ParseRequest, Parsed, ParsedAuth, PluginAuthParser, clean as absolute_clean_path, note_plugin_auth_write,
-    on_plugin_auth_change, plugin_auth_epoch, plugin_auth_parser_active, plugin_save_credentials, preparse_auth_dir,
-    preparse_documents, set_plugin_auth_parser, set_plugin_auth_providers,
-};
-
 const WEIGHT_MAX: i64 = 1_000_000;
 
 fn hex(bytes: &[u8]) -> String {
@@ -473,7 +463,6 @@ impl Draft {
             attributes: self.attrs,
             metadata: self.meta,
             revision: 0,
-            next_refresh_after: None,
         }
     }
 }
@@ -1067,33 +1056,12 @@ pub fn parse_weight(value: &Json) -> Result<i64, String> {
 /// Builds one auth-file credential as Go's `FileSynthesizer` does. `Ok(None)` is a
 /// silently ignored file; `Err` is a skipped file worth a warning. The config (Go's
 /// synthesis context) no longer shapes a file credential: global excluded models apply
-/// at registration (Go b015f208). Like Go's management upload synthesis, this does not
-/// ask plugin auth providers; only [`scan_auth_dir`] does.
+/// at registration (Go b015f208).
 pub fn from_file(_cfg: &Config, auth_dir: &Path, path: &Path, data: &[u8]) -> Result<Option<Credential>, String> {
-    Ok(match file_credentials(None, auth_dir, path, data)? {
-        Some(FileCredentials::One(c)) => Some(*c),
-        Some(FileCredentials::Plugin(_) | FileCredentials::Unapplied(_) | FileCredentials::Deferred) | None => None,
-    })
+    file_credential(auth_dir, path, data)
 }
 
-/// What one auth file synthesizes to.
-enum FileCredentials {
-    One(Box<Credential>),
-    /// What a plugin parsed: possibly none (the plugin suppresses the file) or several.
-    Plugin(Vec<Credential>),
-    /// No cached plugin answer for these bytes yet ([`plugin_auth::Ask::Cached`]).
-    Deferred,
-    /// The answer of the parse whose own `host.auth.save` wrote these bytes: published,
-    /// but the plugin has yet to parse them.
-    Unapplied(Vec<Credential>),
-}
-
-fn file_credentials(
-    parser: Option<Ask<'_>>,
-    auth_dir: &Path,
-    path: &Path,
-    data: &[u8],
-) -> Result<Option<FileCredentials>, String> {
+fn file_credential(auth_dir: &Path, path: &Path, data: &[u8]) -> Result<Option<Credential>, String> {
     if data.is_empty() {
         return Ok(None);
     }
@@ -1111,13 +1079,6 @@ fn file_credentials(
         .unwrap_or_default()
         .trim()
         .go_lower();
-    // Go asks the plugin auth parser before the built-in synthesizer, which a plugin
-    // owning the type (or, without one, any auth provider) replaces.
-    if let Some(parser) = parser
-        && let Some(parsed) = plugin_auth::credentials(parser, &meta, &provider, path, data)
-    {
-        return parsed.map(Some);
-    }
     if provider.is_empty() || provider == "gemini" || provider == "gemini-cli" {
         return Ok(None);
     }
@@ -1225,10 +1186,9 @@ fn file_credentials(
         attributes: attrs,
         metadata: meta,
         revision: 0,
-        next_refresh_after: None,
     };
     cred.refresh_derived();
-    Ok(Some(FileCredentials::One(Box::new(cred))))
+    Ok(Some(cred))
 }
 
 /// Go `buildAuthFromFileData`'s fallback for an uploaded file no synthesizer claims:
@@ -1270,7 +1230,6 @@ pub fn upload_fallback(auth_dir: &Path, path: &Path, data: &[u8]) -> Option<Cred
         attributes,
         metadata: meta,
         revision: 0,
-        next_refresh_after: None,
     })
 }
 
@@ -1490,46 +1449,13 @@ pub struct AuthScan {
     /// `SynthesisContext.IncompleteFiles`); a caller keeps their last good credentials.
     pub incomplete: HashSet<PathBuf>,
     /// The SHA-256 of every file read, so the watcher records what it applied rather than
-    /// what it observed before a later write. Deferred files are left out.
+    /// what it observed before a later write.
     pub read: BTreeMap<PathBuf, [u8; 32]>,
-    /// The files no plugin auth provider has answered for yet ([`preparse_auth_dir`]).
-    /// Go's watcher asks the plugin before anything is published, so a caller keeps a
-    /// file's current credentials and publishes nothing new for it; the watcher reloads
-    /// the file again.
-    pub deferred: HashSet<PathBuf>,
-    /// Files published from the answer of a parse that wrote their current bytes itself
-    /// (`host.auth.save` from inside `auth.parse`): plugins have yet to parse these bytes,
-    /// so the watcher does not record them as applied and parses them on its next tick.
-    pub unapplied: HashSet<PathBuf>,
 }
 
 /// [`from_auth_dir`], with the files it found incomplete and the hashes of what it read.
 /// A file that cannot be read is skipped, as in Go's full scan.
-///
-/// While a plugin offers an auth provider, only answers [`preparse_auth_dir`] cached
-/// are used, so callers may hold locks a plugin waits on; other files are deferred.
 pub fn scan_auth_dir(cfg: &Config) -> AuthScan {
-    scan_with(cfg, plugin_auth::current().map(|_| Ask::Cached))
-}
-
-/// Scans exactly these credential documents, including nested and external paths.
-/// Paths determine provenance; no working files are read. Plugin answers must first
-/// be cached by [`preparse_documents`], as for [`scan_auth_dir`].
-pub fn scan_documents(cfg: &Config, documents: impl IntoIterator<Item = (PathBuf, Vec<u8>)>) -> AuthScan {
-    scan_documents_with(cfg, documents, plugin_auth::current().map(|_| Ask::Cached))
-}
-
-fn scan_documents_with(
-    cfg: &Config,
-    documents: impl IntoIterator<Item = (PathBuf, Vec<u8>)>,
-    parser: Option<Ask<'_>>,
-) -> AuthScan {
-    let mut documents: Vec<_> = documents.into_iter().collect();
-    documents.sort_by(|(a, _), (b, _)| a.cmp(b));
-    scan_in_order(cfg, documents, parser)
-}
-
-fn scan_with(cfg: &Config, parser: Option<Ask<'_>>) -> AuthScan {
     let entries = match std::fs::read_dir(&cfg.auth_dir) {
         Ok(entries) => entries,
         Err(e) => {
@@ -1539,33 +1465,25 @@ fn scan_with(cfg: &Config, parser: Option<Ask<'_>>) -> AuthScan {
             return AuthScan::default();
         }
     };
-    // With a plugin parser, Go's traversal: file-name order (`os.ReadDir`), and the last
-    // auth read under an ID wins. Without one, nothing changes.
-    let (mut plain, mut sorted);
-    let entries: &mut dyn Iterator<Item = std::fs::DirEntry> = if parser.is_some() {
-        let mut all: Vec<_> = entries.flatten().collect();
-        all.sort_by_key(std::fs::DirEntry::file_name);
-        sorted = all.into_iter();
-        &mut sorted
-    } else {
-        plain = entries.flatten();
-        &mut plain
-    };
-    let documents = entries.filter_map(|entry| {
+    let documents = entries.flatten().filter_map(|entry| {
         if !entry.file_name().to_string_lossy().go_lower().ends_with(".json") {
             return None;
         }
         let path = entry.path();
         read_regular(&path).map(|data| (path, data))
     });
-    scan_in_order(cfg, documents, parser)
+    scan_in_order(cfg, documents)
 }
 
-fn scan_in_order(
-    cfg: &Config,
-    documents: impl IntoIterator<Item = (PathBuf, Vec<u8>)>,
-    parser: Option<Ask<'_>>,
-) -> AuthScan {
+/// Scans exactly these credential documents, including nested and external paths.
+/// Paths determine provenance; no working files are read.
+pub fn scan_documents(cfg: &Config, documents: impl IntoIterator<Item = (PathBuf, Vec<u8>)>) -> AuthScan {
+    let mut documents: Vec<_> = documents.into_iter().collect();
+    documents.sort_by(|(a, _), (b, _)| a.cmp(b));
+    scan_in_order(cfg, documents)
+}
+
+fn scan_in_order(cfg: &Config, documents: impl IntoIterator<Item = (PathBuf, Vec<u8>)>) -> AuthScan {
     let mut scan = AuthScan::default();
     for (path, data) in documents {
         scan.read.insert(path.clone(), Sha256::digest(&data).into());
@@ -1573,32 +1491,13 @@ fn scan_in_order(
             scan.incomplete.insert(path);
             continue;
         }
-        match file_credentials(parser, &cfg.auth_dir, &path, &data) {
-            Ok(Some(FileCredentials::One(c))) => scan.credentials.push(*c),
-            Ok(Some(FileCredentials::Plugin(all))) => scan.credentials.extend(all),
-            Ok(Some(FileCredentials::Unapplied(all))) => {
-                scan.credentials.extend(all);
-                scan.unapplied.insert(path);
-            }
-            Ok(Some(FileCredentials::Deferred)) => {
-                scan.read.remove(&path);
-                scan.deferred.insert(path);
-            }
+        match file_credential(&cfg.auth_dir, &path, &data) {
+            Ok(Some(c)) => scan.credentials.push(c),
             Ok(None) => {}
             Err(e) => tracing::warn!(path = %path.display(), error = %e, "skipping auth file"),
         }
     }
     scan.credentials.sort_by(|a, b| a.id.cmp(&b.id));
-    if parser.is_some() {
-        // The sort is stable: of equal IDs, the last read is last.
-        let all = std::mem::take(&mut scan.credentials);
-        for c in all {
-            if scan.credentials.last().is_some_and(|last| last.id == c.id) {
-                scan.credentials.pop();
-            }
-            scan.credentials.push(c);
-        }
-    }
     scan
 }
 
@@ -1829,7 +1728,6 @@ mod tests {
                 attributes: BTreeMap::new(),
                 metadata: meta,
                 revision: 0,
-                next_refresh_after: None,
             };
             let (kind, value) = dynamic::account_info(&c);
             assert_eq!(

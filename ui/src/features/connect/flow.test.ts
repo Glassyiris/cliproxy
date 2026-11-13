@@ -7,8 +7,8 @@ const page = "https://host.example/prefix/management.html#connect";
 
 test("a sign-in link resolves against the page and keeps only http and https", () => {
   assert.equal(
-    signInUrl("./v0/resource/plugins/x/oauth#state=a", page),
-    "https://host.example/prefix/v0/resource/plugins/x/oauth#state=a",
+    signInUrl("./v0/resource/oauth/x#state=a", page),
+    "https://host.example/prefix/v0/resource/oauth/x#state=a",
   );
   assert.equal(signInUrl("/v0/x", page), "https://host.example/v0/x");
   assert.equal(signInUrl("http://auth.example/a", page), "http://auth.example/a");

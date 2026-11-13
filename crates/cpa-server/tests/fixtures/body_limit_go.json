@@ -741,38 +741,6 @@
     "read": 33
   },
   {
-    "name": "management_chunked POST /v8/management/plugins/store/demo/install",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "POST",
-    "path": "/v8/management/plugins/store/demo/install",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 413,
-    "response": "{\"error\":\"invalid_request\",\"message\":\"read install request: http: request body too large\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "management_chunked POST /v0/management/plugin-store/demo/install",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "POST",
-    "path": "/v0/management/plugin-store/demo/install",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 413,
-    "response": "{\"error\":\"invalid_request\",\"message\":\"read install request: http: request body too large\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
     "name": "management_chunked POST /v0/management/api-call",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
@@ -965,38 +933,6 @@
     "read": 33
   },
   {
-    "name": "management_chunked POST /v0/management/plugins/demo/quota",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 413,
-    "response": "{\"error\":\"invalid request body\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "management_chunked POST /v0/management/plugins/demo/quota/reset",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "POST",
-    "path": "/v0/management/plugins/demo/quota/reset",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ2ZXJzaW9uIjoidnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnYifQ==",
-    "chunked": true,
-    "status": 413,
-    "response": "{\"error\":\"http: request body too large\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
     "name": "management_multipart_chunked /v0/management/auth-files",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
@@ -1043,74 +979,6 @@
     "response": "{\"error\":\"file required\"}",
     "content_type": "application/json; charset=utf-8",
     "read": 33
-  },
-  {
-    "name": "plugin_auth_chunked /v1/chat/completions",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 64\naccess:\n  api-keys:\n    - test-key\n",
-    "method": "POST",
-    "path": "/v1/chat/completions",
-    "headers": {
-      "Authorization": "Bearer wrong-key",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcA==",
-    "chunked": true,
-    "plugin_auth": true,
-    "status": 413,
-    "response": "{\"error\":\"http: request body too large\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 65
-  },
-  {
-    "name": "plugin_auth_chunked /v1/realtime/calls",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 64\naccess:\n  api-keys:\n    - test-key\n",
-    "method": "POST",
-    "path": "/v1/realtime/calls",
-    "headers": {
-      "Authorization": "Bearer wrong-key",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcA==",
-    "chunked": true,
-    "plugin_auth": true,
-    "status": 413,
-    "response": "{\"error\":{\"code\":\"request_body_too_large\",\"message\":\"http: request body too large\",\"param\":null,\"type\":\"invalid_request_error\"}}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 65
-  },
-  {
-    "name": "plugin_auth_chunked /v1/live",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 64\naccess:\n  api-keys:\n    - test-key\n",
-    "method": "POST",
-    "path": "/v1/live",
-    "headers": {
-      "Authorization": "Bearer wrong-key",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcA==",
-    "chunked": true,
-    "plugin_auth": true,
-    "status": 413,
-    "response": "{\"error\":\"http: request body too large\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 65
-  },
-  {
-    "name": "plugin_auth_content_length_over_limit",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 64\naccess:\n  api-keys:\n    - test-key\n",
-    "method": "POST",
-    "path": "/v1/realtime/calls",
-    "headers": {
-      "Authorization": "Bearer wrong-key",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcA==",
-    "chunked": false,
-    "plugin_auth": true,
-    "status": 413,
-    "response": "{\"error\":\"http: request body too large\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 0
   },
   {
     "name": "realtime_chunked /v1/realtime/client_secrets",
@@ -1193,10 +1061,10 @@
     "read": 0
   },
   {
-    "name": "json_first_value_within_limit /v0/management/plugins/demo/quota",
+    "name": "json_first_value_within_limit /v0/management/reset-quota",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
+    "path": "/v0/management/reset-quota",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
@@ -1212,7 +1080,7 @@
     "name": "json_first_value scalar_at_limit",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
+    "path": "/v0/management/reset-quota",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
@@ -1228,7 +1096,7 @@
     "name": "json_first_value scalar_before_limit",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
+    "path": "/v0/management/reset-quota",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
@@ -1244,7 +1112,7 @@
     "name": "json_first_value syntax_error_before_limit",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
+    "path": "/v0/management/reset-quota",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
@@ -1260,7 +1128,7 @@
     "name": "json_first_value value_then_data",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
+    "path": "/v0/management/reset-quota",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
@@ -1276,7 +1144,7 @@
     "name": "json_first_value cut_inside_value",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
+    "path": "/v0/management/reset-quota",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
@@ -1413,38 +1281,6 @@
     "chunked": true,
     "status": 400,
     "response": "{\"error\":\"auth_index is required\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "json_first_value_within_limit PATCH /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJlbmFibGVkIjp0cnVlfSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA==",
-    "chunked": true,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 33
-  },
-  {
-    "name": "json_first_value_within_limit DELETE /v0/management/plugins/demo/quota",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 32\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "DELETE",
-    "path": "/v0/management/plugins/demo/quota",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJhdXRoX2luZGV4IjoiMSJ9ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
-    "chunked": true,
-    "status": 404,
-    "response": "{\"error\":\"auth not found\"}",
     "content_type": "application/json; charset=utf-8",
     "read": 33
   },
@@ -1641,10 +1477,10 @@
     "read": 57
   },
   {
-    "name": "json_first_value bad_escape_digit /v0/management/plugins/demo/quota",
+    "name": "json_first_value bad_escape_digit /v0/management/reset-quota",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 4\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
+    "path": "/v0/management/reset-quota",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
@@ -1657,10 +1493,10 @@
     "read": 5
   },
   {
-    "name": "json_first_value nesting_over_go_limit /v0/management/plugins/demo/quota",
+    "name": "json_first_value nesting_over_go_limit /v0/management/reset-quota",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 10001\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
+    "path": "/v0/management/reset-quota",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
@@ -1673,10 +1509,10 @@
     "read": 10002
   },
   {
-    "name": "json_first_value nesting_at_go_limit /v0/management/plugins/demo/quota",
+    "name": "json_first_value nesting_at_go_limit /v0/management/reset-quota",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 10000\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
-    "path": "/v0/management/plugins/demo/quota",
+    "path": "/v0/management/reset-quota",
     "headers": {
       "Authorization": "Bearer mgmt-secret",
       "Content-Type": "application/json"
@@ -1719,86 +1555,6 @@
     "response": "{\"error\":\"name or all=true is required\"}",
     "content_type": "application/json; charset=utf-8",
     "read": 4
-  },
-  {
-    "name": "json_first_value value_then_data /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 17\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJlbmFibGVkIjp0cnVlfXh4",
-    "chunked": true,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 18
-  },
-  {
-    "name": "json_duplicate_key_no_limit /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJlbmFibGVkIjoxLCJlbmFibGVkIjp0cnVlfXg=",
-    "chunked": false,
-    "status": 400,
-    "response": "{\"error\":\"invalid_body\",\"message\":\"enabled is required\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 29
-  },
-  {
-    "name": "json_bind_no_limit value_then_data PATCH /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJlbmFibGVkIjp0cnVlfXh4",
-    "chunked": false,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 18
-  },
-  {
-    "name": "json_bind_no_limit folded_name PATCH /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJFTkFCTEVEIjp0cnVlfQ==",
-    "chunked": false,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 16
-  },
-  {
-    "name": "json_bind_no_limit null_enabled PATCH /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJlbmFibGVkIjp0cnVlLCJlbmFibGVkIjpudWxsfQ==",
-    "chunked": false,
-    "status": 400,
-    "response": "{\"error\":\"invalid_body\",\"message\":\"enabled is required\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 31
   },
   {
     "name": "json_bind_no_limit value_then_data PATCH /v0/management/auth-files/status",
@@ -1993,22 +1749,6 @@
     "read": 48
   },
   {
-    "name": "json_bind_no_limit unknown_huge_number PATCH /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ1bnVzZWQiOjFlNDAwLCJlbmFibGVkIjp0cnVlfQ==",
-    "chunked": false,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 31
-  },
-  {
     "name": "json_bind_no_limit unknown_huge_number POST /v0/management/api-call",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
@@ -2039,22 +1779,6 @@
     "response": "{\"error\":\"auth file not found\"}",
     "content_type": "application/json; charset=utf-8",
     "read": 443
-  },
-  {
-    "name": "json_bind_no_limit unknown_deep_nesting PATCH /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ1bnVzZWQiOltbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV0sImVuYWJsZWQiOnRydWV9",
-    "chunked": false,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 426
   },
   {
     "name": "json_bind_no_limit unknown_deep_nesting POST /v0/management/api-call",
@@ -2089,22 +1813,6 @@
     "read": 47
   },
   {
-    "name": "json_bind_no_limit unknown_invalid_utf8 PATCH /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ1bnVzZWQiOiL//iIsImVuYWJsZWQiOnRydWV9",
-    "chunked": false,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 30
-  },
-  {
     "name": "json_bind_no_limit unknown_invalid_utf8 POST /v0/management/api-call",
     "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
     "method": "POST",
@@ -2135,22 +1843,6 @@
     "response": "{\"error\":\"auth file not found\"}",
     "content_type": "application/json; charset=utf-8",
     "read": 51
-  },
-  {
-    "name": "json_bind_no_limit unknown_lone_surrogate PATCH /v0/management/plugins/demo/enabled",
-    "yaml": "config-version: 8\nserver:\n  max-request-body-bytes: 0\nmanagement:\n  allow-remote: true\n  secret-key: mgmt-secret\n",
-    "method": "PATCH",
-    "path": "/v0/management/plugins/demo/enabled",
-    "headers": {
-      "Authorization": "Bearer mgmt-secret",
-      "Content-Type": "application/json"
-    },
-    "body_b64": "eyJ1bnVzZWQiOiJcdWQ4MDAiLCJlbmFibGVkIjp0cnVlfQ==",
-    "chunked": false,
-    "status": 200,
-    "response": "{\"status\":\"ok\"}",
-    "content_type": "application/json; charset=utf-8",
-    "read": 34
   },
   {
     "name": "json_bind_no_limit unknown_lone_surrogate POST /v0/management/api-call",

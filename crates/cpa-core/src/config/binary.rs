@@ -30,8 +30,6 @@ const UNSUPPORTED_KEY: &str = "a tagged or aliased mapping key in the config fil
 const COLLECTION_KEY: &str = "a mapping or sequence used as a mapping key in the config file is not supported";
 const QUOTED_MERGE_KEY: &str = "a quoted << mapping key in the config file is not supported";
 const REPEATED_ANCHOR: &str = "a YAML anchor name is defined more than once in the config file";
-const PLUGIN_PIN: &str =
-    "a plugin's store.version or store.release-tag in the config file is a !!binary value, which is not supported";
 /// More alias copies of rewritten scalars than a config has; alias chains past it are
 /// refused. Each scalar written in the file counts once and is not limited.
 const MAX_COPIES: usize = 1 << 20;
@@ -60,12 +58,11 @@ pub(super) fn go_base64(text: &[u8]) -> Option<Vec<u8>> {
 /// docs) and binary bytes that are not UTF-8, which a setting cannot hold.
 /// With `literals`, a plain scalar in a [`literal_field`] is its text, as Go's typed
 /// decode reads it into the config; `text` is the value at those keys of the config
-/// (empty for a whole file). See [`Mode`] for what else `mode` changes.
-pub(super) fn decode(text: &str, value: &mut Value, literals: Option<&[&str]>, mode: Mode) -> anyhow::Result<()> {
+/// (empty for a whole file).
+pub(super) fn decode(text: &str, value: &mut Value, literals: Option<&[&str]>) -> anyhow::Result<()> {
     // Without a tag, an anchor, a `<<` key or a collection key, serde_yaml_ng reads the
     // file as yaml.v3 does here.
-    if mode != Mode::Plugins
-        && !text.contains(['!', '&'])
+    if !text.contains(['!', '&'])
         && !needs_walk(value)
         && !literals.is_some_and(|at| scalar_literal_field(value, &mut at.iter().map(|k| Some(*k)).collect()))
     {
@@ -83,18 +80,10 @@ pub(super) fn decode(text: &str, value: &mut Value, literals: Option<&[&str]>, m
         found: Vec::new(),
         copies: 0,
         visits: 0,
-        mode,
     };
     if let Some(root) = walk.events.next() {
         walk.node(root, &mut Vec::new(), false)?;
     }
-    // Go reads a plugin's pin from the raw node (pluginhost `yamlScalarString`), so a
-    // `!!binary` pin, aliased or merged in too, keeps its base64 text there and fails
-    // the version grammar; refused rather than read decoded.
-    ensure!(
-        !walk.found.iter().any(|f| f.kind == Kind::Binary && plugin_pin(&f.keys)),
-        PLUGIN_PIN
-    );
     // yaml.v3 reads any plain scalar into a string field as its text; serde_yaml_ng
     // reads a number or boolean (`1.50`, `0x1F`, `007`, `true`) as that value, whose text
     // differs. The fields of [`literal_field`] take the text.
@@ -192,29 +181,10 @@ fn named<K: AsRef<str>>(keys: &[Option<K>]) -> Vec<Option<&str>> {
 
 /// Whether the scalar at `keys` is a Go string field, which yaml.v3 reads any plain
 /// scalar into as its text. Untyped
-/// data keeps its YAML types: plugin configs, and a payload rule's `params` and
-/// `match`/`not-match` values, which reach requests with them.
+/// data keeps its YAML types: a payload rule's `params` and `match`/`not-match` values,
+/// which reach requests with them.
 fn literal_field<K: AsRef<str>>(keys: &[Option<K>]) -> bool {
     super::schema::is_string(&named(keys))
-}
-
-/// Whether `keys` lead into a `plugins.configs` entry.
-fn plugin_config<K: AsRef<str>>(keys: &[Option<K>]) -> bool {
-    matches!(named(keys).as_slice(), [Some("plugins"), Some("configs"), Some(_), ..])
-}
-
-/// Whether `keys` lead to a plugin's `store.version` or `store.release-tag`.
-fn plugin_pin<K: AsRef<str>>(keys: &[Option<K>]) -> bool {
-    matches!(
-        named(keys).as_slice(),
-        [
-            Some("plugins"),
-            Some("configs"),
-            Some(_),
-            Some("store"),
-            Some("version" | "release-tag")
-        ]
-    )
 }
 
 /// The document's node events, in order, without stream and document markers.
@@ -497,44 +467,6 @@ struct Walk {
     copies: usize,
     /// How many anchor entries aliases visited, [`MAX_VISITS`] at most.
     visits: usize,
-    mode: Mode,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Mode {
-    /// A config file: literals are its string settings.
-    File,
-    /// Literals are the scalars of plugin configs, as Go hands a plugin its raw node,
-    /// tagged [`PLAIN`]: `007` is a string to serde_yaml_ng too, but quoted it is another.
-    Plugins,
-}
-
-/// The tag of a plain scalar's text in [`Mode::Plugins`].
-pub const PLAIN: &str = "!cpa-plain";
-
-/// `text` as a YAML double-quoted scalar that reads back as `text`: line breaks, C0 and
-/// C1 controls, DEL, U+2028, U+2029, U+FEFF, U+FFFE and U+FFFF escaped.
-pub fn double_quoted(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for c in text.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            '\u{2028}' => out.push_str("\\L"),
-            '\u{2029}' => out.push_str("\\P"),
-            '\u{feff}' => out.push_str("\\uFEFF"),
-            '\u{fffe}' => out.push_str("\\uFFFE"),
-            '\u{ffff}' => out.push_str("\\uFFFF"),
-            c if c < ' ' || ('\u{7f}'..='\u{9f}').contains(&c) => out.push_str(&format!("\\x{:02X}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 impl Walk {
@@ -552,36 +484,13 @@ impl Walk {
     /// A literal at `keys`, if it is kept: it is a [`literal_field`], or it is anchored,
     /// so an alias may make it one. Decided here, not over the tree afterwards, so the
     /// cost stays linear in the file and the aliases' copies.
-    /// A literal's value: its text, or in [`Mode::Plugins`] the YAML that writes it as
-    /// Go writes the raw node, tagged [`PLAIN`]: a standard tag stays (`!!float 1.50`),
-    /// and a quoted scalar it tags stays quoted.
-    fn text_value(&self, text: String, tag: Option<&[u8]>, plain: bool) -> Value {
-        if self.mode != Mode::Plugins {
-            return Value::String(text);
-        }
-        let text = match tag.and_then(|t| t.strip_prefix(b"tag:yaml.org,2002:")) {
-            Some(name) => {
-                let name = String::from_utf8_lossy(name);
-                let text = if plain { text } else { double_quoted(&text) };
-                format!("!!{name} {text}")
-            }
-            None => text,
-        };
-        Value::Tagged(Box::new(serde_yaml_ng::value::TaggedValue {
-            tag: serde_yaml_ng::value::Tag::new(PLAIN),
-            value: Value::String(text),
-        }))
-    }
-
     fn literal(&mut self, keys: &[Key], anchored: bool) -> Option<Kind> {
         let at = self.literals.as_ref()?;
         // The items of one list share their keys.
         let field = match &self.last_field {
             Some((last, field)) if last.as_slice() == keys => *field,
             _ => {
-                let field = if self.mode == Mode::Plugins {
-                    plugin_config(keys)
-                } else if at.is_empty() {
+                let field = if at.is_empty() {
                     literal_field(keys)
                 } else {
                     literal_field(&[at.as_slice(), keys].concat())
@@ -606,14 +515,11 @@ impl Walk {
                 let anchored = anchor.is_some() || self.anchored > 0;
                 let literal = match &tag {
                     // yaml.v3 reads a scalar tagged as a number or boolean into a string
-                    // field as its text, as it does an untagged one. A plugin also gets
-                    // a timestamp with its tag, which `any` reads as a time.
-                    Some(tag) => {
-                        matches!(
-                            tag.as_slice(),
-                            b"tag:yaml.org,2002:int" | b"tag:yaml.org,2002:float" | b"tag:yaml.org,2002:bool"
-                        ) || (self.mode == Mode::Plugins && tag.as_slice() == b"tag:yaml.org,2002:timestamp")
-                    }
+                    // field as its text, as it does an untagged one.
+                    Some(tag) => matches!(
+                        tag.as_slice(),
+                        b"tag:yaml.org,2002:int" | b"tag:yaml.org,2002:float" | b"tag:yaml.org,2002:bool"
+                    ),
                     None => plain && !is_null(&value) && !resolves_to_text(&value),
                 };
                 // yaml.v3's layout code matches keys by their node, tag included
@@ -627,7 +533,7 @@ impl Walk {
                             let found = Found {
                                 path: Vec::new(),
                                 keys: Vec::new(),
-                                value: self.text_value(text, None, true),
+                                value: Value::String(text),
                                 kind: Kind::Literal(false),
                             };
                             self.anchors.insert(name.clone(), vec![found]);
@@ -640,7 +546,7 @@ impl Walk {
                         kind
                     } {
                         let text = String::from_utf8(value).ok().context("config YAML is not UTF-8")?;
-                        let value = self.text_value(text, tag.as_deref(), plain);
+                        let value = Value::String(text);
                         self.found.push(Found {
                             path: path.clone(),
                             keys: self.keys.clone(),

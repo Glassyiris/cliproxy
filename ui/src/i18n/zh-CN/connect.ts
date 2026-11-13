@@ -1,7 +1,6 @@
 export default {
   "zh-CN": {
     "connect.providers.unavailable": "此服务器不支持",
-    "connect.providers.what": "插件提供商",
     "connect.providers.notOnServer": "此服务器不支持 {provider} 登录。",
     "connect.start.unsafe": "服务器返回的登录地址不安全。",
     "connect.phase.wait": "等待授权",

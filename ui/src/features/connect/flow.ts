@@ -34,8 +34,8 @@ export const phaseStatus = {
 export const owner = (p: string) => (p === "codex" ? "OpenAI" : label(p));
 
 /**
- * The sign-in link as an absolute URL, resolved against the page so a plugin's relative link keeps
- * the dashboard's path prefix; null for any scheme but http and https.
+ * The sign-in link as an absolute URL, resolved against the page so a relative link keeps the
+ * dashboard's path prefix; null for any scheme but http and https.
  */
 export function signInUrl(raw: string, page: string): string | null {
   let url: URL;
@@ -54,7 +54,7 @@ export const isWebAddress = (value: string) =>
 /** Credentials by name, as they were before the sign-in started. */
 export type Seen = Map<string, Credential>;
 
-// A plugin's provider name need not match its credentials', so only built-ins are matched.
+// Only built-in providers are matched.
 const mine = (p: string, seen: Seen | null, now: Credential[] | null) =>
   seen && now && builtIn.includes(p) ? now.filter((c) => provider(c) === p) : [];
 

@@ -1,7 +1,6 @@
 export default {
   "zh-TW": {
     "connect.providers.unavailable": "此伺服器不支援",
-    "connect.providers.what": "外掛供應商",
     "connect.providers.notOnServer": "此伺服器不支援 {provider} 登入。",
     "connect.start.unsafe": "伺服器傳回的登入網址不安全。",
     "connect.phase.wait": "等待授權",

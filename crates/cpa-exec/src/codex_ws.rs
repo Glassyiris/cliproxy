@@ -812,8 +812,6 @@ struct Turn {
     conn: Arc<Upstream>,
     session: Arc<Session>,
     _turn: Option<OwnedMutexGuard<()>>,
-    /// The observation of the message being read, while it runs.
-    observing: Option<crate::ws_observation::Observation>,
     items: OutputItems,
     saw_delta: bool,
     native: bool,
@@ -838,10 +836,8 @@ struct Turn {
 
 impl Drop for Turn {
     fn drop(&mut self) {
-        // An abandoned turn keeps its session until an observation it started returns,
-        // as Go's executor holds the session lock through the synchronous observer.
-        let conn = self.conn.clone();
-        crate::ws_observation::release_after(self.observing.take(), self._turn.take(), move || conn.deactivate());
+        self.conn.deactivate();
+        drop(self._turn.take());
     }
 }
 
@@ -884,7 +880,7 @@ impl Turn {
             return Frame::Skip;
         }
         self.observe(payload);
-        crate::ws_observation::observe(&mut self.observing, self.wire.ws_response_observation(payload)).await;
+        self.wire.ws_response(payload);
         let raw_len = payload.len();
         let payload = response::restore(payload, self.restore);
         let payload = payload.as_ref();
@@ -1199,8 +1195,7 @@ impl CodexExecutor {
             });
         let guard = session.turn.clone().lock_owned().await;
         let frame = request_frame(body);
-        let wire = crate::codex_capture::Wire::new(req.capture(), view.credential)
-            .with_websocket(req.websocket_emitter("codex", view.credential));
+        let wire = crate::codex_capture::Wire::new(req.capture(), view.credential);
         wire.ws_request(&target.url, &headers, frame.as_bytes());
         let (mut conn, mut handshake) = if exec_session.continuation {
             match session.current().filter(|c| c.target.serves(&target)) {
@@ -1271,7 +1266,6 @@ impl CodexExecutor {
             conn,
             session,
             _turn: Some(guard),
-            observing: None,
             items: OutputItems::default(),
             saw_delta: false,
             native,

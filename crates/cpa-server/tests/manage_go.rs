@@ -5,6 +5,9 @@
 //! Where Go answers an empty 404 because no management key exists, replay expects
 //! cook-router's 403 naming COOK_MANAGEMENT_PASSWORD: a deliberate divergence from Go
 //! (owner ruling 2026-11-13).
+//! Go also sends and exposes `X-CPA-SUPPORT-PLUGIN`; cook-router has no plugins, so replay
+//! drops that header from the recorded answers and from their CORS exposure list: a
+//! deliberate divergence (owner ruling 2026-11-13, plugin removal).
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -92,17 +95,20 @@ fn same_key_order(go: &Value, rs: &Value, at: &str) -> Result<(), String> {
 fn scalar_case_yaml(field: &str, spelling: &str) -> String {
     match field {
         "observability.logs.debug" => format!("config-version: 8\nobservability:\n  logs:\n    debug: {spelling}\n"),
-        "plugins.configs.x.enabled" => {
-            format!("config-version: 8\nplugins:\n  configs:\n    x:\n      enabled: {spelling}\n")
-        }
         _ => format!("config-version: 8\nserver:\n  host: {spelling}\n"),
     }
 }
 
 #[test]
 fn yaml_bool_spellings_and_durations_load_like_go() {
-    let cases = fixture()["yaml_bools"].as_array().unwrap();
-    assert!(cases.len() > 100);
+    // The recording also covers Go's plugin entries, which cook-router does not have.
+    let cases: Vec<&Value> = fixture()["yaml_bools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["field"] != "plugins.configs.x.enabled")
+        .collect();
+    assert_eq!(cases.len(), 78);
     for case in cases {
         let (field, spelling) = (case["field"].as_str().unwrap(), case["spelling"].as_str().unwrap());
         let at = format!("{field}: {spelling}");
@@ -122,30 +128,25 @@ fn yaml_bool_spellings_and_durations_load_like_go() {
         };
         let got = match field {
             "observability.logs.debug" => json!(flag(&["observability", "logs", "debug"])),
-            // Plugin entries stay raw (Go `PluginInstanceConfig.Raw`); Go's typed
-            // `Enabled` decodes the YAML 1.1 spellings from them.
-            "plugins.configs.x.enabled" => {
-                let raw = cfg.document["plugins"]["configs"]["x"]["enabled"].clone();
-                json!(match &raw {
-                    serde_yaml_ng::Value::Bool(b) => *b,
-                    serde_yaml_ng::Value::String(s) => cpa_core::config::go_bool(s).unwrap_or(false),
-                    _ => false,
-                })
-            }
             _ => json!(cfg.host),
         };
         assert_eq!(got, case["value"], "{at}");
     }
 }
 
-/// Go's typed decoding and raw plugin views (`typed_scalars` in the fixture): load
-/// errors match; int fields truncate floats; plugin entries keep their raw scalars in
-/// the live document, from which `go_bool`/`go_int` give Go's typed values.
+/// Go's typed decoding (`typed_scalars` in the fixture): load errors match; int fields
+/// truncate floats.
 #[test]
-fn typed_scalars_and_raw_plugin_entries_load_like_go() {
+fn typed_scalars_load_like_go() {
     let hash = bcrypt::hash("fake-secret", 4).unwrap();
-    let cases = fixture()["typed_scalars"].as_array().unwrap();
-    assert_eq!(cases.len(), 12);
+    // The recording also covers Go's plugin entries, which cook-router does not have.
+    let cases: Vec<&Value> = fixture()["typed_scalars"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| !c["yaml"].as_str().unwrap().contains("plugins:"))
+        .collect();
+    assert_eq!(cases.len(), 5);
     for case in cases {
         let name = case["name"].as_str().unwrap();
         let parsed = Config::parse(&case["yaml"].as_str().unwrap().replace("$HASH", &hash));
@@ -157,26 +158,6 @@ fn typed_scalars_and_raw_plugin_entries_load_like_go() {
         );
         let Ok(cfg) = parsed else { continue };
         assert_eq!(json!(cfg.routing.retry.request_retry), case["request_retry"], "{name}");
-        let Some(raw_view) = case.get("raw_view") else { continue };
-        let entry = cfg.document["plugins"]["configs"].get("x").cloned().unwrap();
-        // Go's raw view of a null entry is `{}`.
-        let raw: Value = match &entry {
-            serde_yaml_ng::Value::Null => json!({}),
-            other => serde_json::to_value(other).unwrap(),
-        };
-        assert_eq!(raw, raw_view["body"], "{name}: raw view");
-        let enabled = entry.get("enabled").and_then(|v| match v {
-            serde_yaml_ng::Value::Bool(b) => Some(*b),
-            serde_yaml_ng::Value::String(s) => cpa_core::config::go_bool(s),
-            _ => None,
-        });
-        let priority = entry.get("priority").and_then(cpa_core::config::go_int);
-        assert_eq!(
-            json!(enabled.unwrap_or(false)),
-            case["enabled"],
-            "{name}: typed enabled"
-        );
-        assert_eq!(json!(priority.unwrap_or(0)), case["priority"], "{name}: typed priority");
     }
 }
 
@@ -658,17 +639,21 @@ mod routes {
                         ("X-CPA-VERSION", "X-Cook-Version"),
                         ("X-CPA-COMMIT", "X-Cook-Commit"),
                         ("X-CPA-BUILD-DATE", "X-Cook-Build-Date"),
-                        ("X-CPA-SUPPORT-PLUGIN", "X-Cook-Support-Plugin"),
                         ("X-CPA-TRACE-ID", "X-Cook-Trace-Id"),
                     ]
                     .iter()
                     .fold(s.to_owned(), |s, (old, new)| s.replace(old, new))
                 };
+                let without_plugin = |s: &str| s.replace(", X-CPA-SUPPORT-PLUGIN", "");
                 let mut want: serde_json::Map<String, Value> = step["resp_headers"]
                     .as_object()
                     .unwrap()
                     .iter()
-                    .map(|(k, v)| (rename(k), v.as_str().map_or(v.clone(), |s| rename(s).into())))
+                    .filter(|(k, _)| k.as_str() != "X-CPA-SUPPORT-PLUGIN")
+                    .map(|(k, v)| {
+                        let v = v.as_str().map_or(v.clone(), |s| rename(&without_plugin(s)).into());
+                        (rename(k), v)
+                    })
                     .collect();
                 if step["path"].as_str().unwrap().starts_with("/admin/v1/") && matches!(status, 401 | 403) {
                     want.insert("Content-Type".into(), "application/json".into());
@@ -681,11 +666,6 @@ mod routes {
                         .any(|m| step["resp_body"].as_str().unwrap().contains(m));
                 if headers.contains_key("X-Cook-Version") && !guard_refused {
                     want.insert("Cache-Control".into(), "no-store".into());
-                }
-                // The goldens come from Go's cgo build, which loads native plugins; this
-                // binary does too, except on Windows.
-                if want.contains_key("X-Cook-Support-Plugin") {
-                    want.insert("X-Cook-Support-Plugin".into(), cpa_plugin::SUPPORT_PLUGIN.into());
                 }
                 assert_eq!(Value::Object(headers), Value::Object(want), "{name}[{i}] headers");
                 compared += 1;
@@ -1000,6 +980,21 @@ mod creds {
                             "{at}: {msg}"
                         );
                         want["error"] = got["error"].clone();
+                    }
+                    // Go lists a credential no executor serves as active; cook-router lists
+                    // it as an error, so it is not mistaken for a usable account.
+                    for file in want
+                        .get_mut("files")
+                        .and_then(Value::as_array_mut)
+                        .into_iter()
+                        .flatten()
+                    {
+                        let provider = file["provider"].as_str().unwrap_or_default();
+                        if file["status"] == "active" && !rt.executors.supports(provider) {
+                            file["status"] = json!("error");
+                            file["unavailable"] = json!(true);
+                            file["status_message"] = json!("unsupported credential type");
+                        }
                     }
                     if req_path == "/observability/usage/api-keys" {
                         // Translate each Go identity to the corresponding live index;

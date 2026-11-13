@@ -1,7 +1,6 @@
 import { createContext, use, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { CredentialList } from "../lib/api/credentials.ts";
-import type { PluginList } from "../lib/api/plugins.ts";
 import { createQuotaChecker } from "../lib/quota.ts";
 import { serverKeys } from "./serverQueries.ts";
 
@@ -10,8 +9,8 @@ const QuotaContext = createContext<QuotaChecker | null>(null);
 
 /**
  * The tab's one quota checker. It lives as long as the signed-in shell, so signing out drops its
- * readings and the 2-minute spacing with the key. It reads accounts and plugins from the shared
- * queries, as they are when a check is about to go out.
+ * readings and the 2-minute spacing with the key. It reads accounts from the shared query, as
+ * they are when a check is about to go out.
  */
 export function QuotaProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -19,7 +18,6 @@ export function QuotaProvider({ children }: { children: ReactNode }) {
     createQuotaChecker({
       credentials: () =>
         queryClient.getQueryData<CredentialList>(serverKeys.credentials)?.files ?? [],
-      plugins: () => queryClient.getQueryData<PluginList>(serverKeys.plugins)?.plugins ?? [],
     }),
   );
   const [version, setVersion] = useState(0);

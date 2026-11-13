@@ -5,7 +5,6 @@ import { readConfig, replaceConfigValue } from "../lib/api/config.ts";
 import { listClientKeys } from "../lib/api/clientKeys.ts";
 import { listCredentials, type Credential, type CredentialList } from "../lib/api/credentials.ts";
 import { apiKeyUsage } from "../lib/api/observability.ts";
-import { listPlugins } from "../lib/api/plugins.ts";
 import { reconcile } from "../lib/compare.ts";
 import { absent, storedValue } from "../lib/configPath.ts";
 import type { Action } from "./useAction.ts";
@@ -14,7 +13,6 @@ export const serverKeys = {
   config: ["server", "config"] as const,
   clientKeys: ["server", "client-keys"] as const,
   credentials: ["server", "credentials"] as const,
-  plugins: ["server", "plugins"] as const,
   apiKeyUsage: ["server", "api-key-usage"] as const,
 };
 
@@ -76,9 +74,6 @@ export const useCredentials = ({ poll }: { poll?: boolean } = {}) =>
     },
     ...polling(poll),
   });
-
-export const usePlugins = () =>
-  useQuery({ queryKey: serverKeys.plugins, queryFn: ({ signal }) => listPlugins(signal) });
 
 export const useApiKeyUsage = ({ poll }: { poll?: boolean } = {}) =>
   useQuery({

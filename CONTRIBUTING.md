@@ -8,7 +8,7 @@ Thanks for helping. Bug reports, fixes and new tests are all welcome.
 
 ## Building and testing
 
-You need Rust (stable), `cmake`, `clang` and `perl` for BoringSSL. Go 1.26 lets the plugin tests run instead of skipping; with `CPA_TEST_NO_SKIP=1`, as in CI, they fail instead.
+You need Rust (stable), `cmake`, `clang` and `perl` for BoringSSL.
 
 ```sh
 cargo fmt --all --check
@@ -63,7 +63,7 @@ A pull request that touches shipped code needs a new fragment: `crates/`, `ui/sr
 
 Pull requests are squash-merged: the pull request title becomes the commit subject on `master`, and GitHub appends the number, as in `fix(ui): keep Overview tiles whole on a phone (#41)`. The description stays on the pull request, so write why there.
 
-- Write the title as `type(scope): subject`. Types: `feat`, `fix`, `refactor`, `test`, `style`, `chore`, `docs`, `deps`, `ci` and `release`. Scopes: `cli` (crates/cook-router), `server`, `exec`, `translate`, `core` (cpa-core and cpa-common), `plugin` (the matching `crates/cpa-*`), `ui`, `docker`, `ci`, `docs`, `deps`, `bench`, `tools` and `release`.
+- Write the title as `type(scope): subject`. Types: `feat`, `fix`, `refactor`, `test`, `style`, `chore`, `docs`, `deps`, `ci` and `release`. Scopes: `cli` (crates/cook-router), `server`, `exec`, `translate`, `core` (cpa-core and cpa-common), `ui`, `docker`, `ci`, `docs`, `deps`, `bench`, `tools` and `release`.
 - The subject is an English imperative phrase starting in lower case, such as `retry a reset Claude stream once`, with no full stop. A first word such as `OAuth` keeps its case.
 - The whole title fits in 72 characters.
 - Commit subjects follow the same grammar. Each commit stands alone; fixups are squashed before pushing, not pushed as `fixup!` commits.

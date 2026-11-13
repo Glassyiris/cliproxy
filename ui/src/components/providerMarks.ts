@@ -88,7 +88,7 @@ const byProvider: Record<string, Mark> = {
   meta: "meta",
 };
 
-/** The mark for a provider id; undefined for one with no mark (OpenAI-compatible, a plugin's). */
+/** The mark for a provider id; undefined for one with no mark (OpenAI-compatible). */
 export const markOf = (provider: string): Mark | undefined =>
   Object.hasOwn(byProvider, provider) ? byProvider[provider] : undefined;
 

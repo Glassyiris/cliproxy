@@ -200,14 +200,6 @@ impl ConfigStore {
             .insert(name, None);
     }
 
-    pub(crate) fn fence_virtual_source(&self, name: String, hash: Option<[u8; 32]>) {
-        self.grant_sources
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .entry(name)
-            .or_insert(hash);
-    }
-
     pub(crate) fn hold_login(&self, grant: crate::management::HeldLogin) {
         // Before the legacy renderer identifies its exact filename, withhold the
         // provider's existing sources. Failure to create a render workspace must
@@ -300,13 +292,6 @@ impl ConfigStore {
             self.withhold_logins(&current, grants.as_slice().iter());
         }
         Ok(())
-    }
-
-    pub(crate) fn hold_virtual(&self, grant: crate::runtime::HeldVirtualGrant) {
-        self.virtual_grants
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(grant);
     }
 
     /// Whether any source is fenced at all, so dispatch checks of unfenced credentials
@@ -485,14 +470,6 @@ impl ConfigStore {
         *self.state.write().unwrap_or_else(PoisonError::into_inner) = retained.state.clone();
         if let Some(view) = &retained.configuration {
             self.dispatch_configuration(view.clone())?;
-        }
-        // Required projections have finished. Reuse this admission, without a
-        // recursive public save; do not drop captures under the result-list lock.
-        let virtual_grants = std::mem::take(&mut *self.virtual_grants.lock().unwrap_or_else(PoisonError::into_inner));
-        for grant in virtual_grants {
-            if let Some(held) = grant.admit(self) {
-                self.hold_virtual(held);
-            }
         }
         if let Some(disk) = &self.disk {
             disk.recovery(false);

@@ -20,7 +20,6 @@ SCOPES = {
     "exec": "upstream provider executors (crates/cpa-exec)",
     "translate": "request and response translation (crates/cpa-translate)",
     "core": "config, credentials, formats, shared helpers (crates/cpa-core, crates/cpa-common)",
-    "plugin": "the native plugin host and plugin store (crates/cpa-plugin)",
     "ui": "the dashboard (ui/)",
     "docker": "the Dockerfile and image",
     "ci": "workflows and CI scripts (.github/)",

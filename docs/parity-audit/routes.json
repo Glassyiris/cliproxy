@@ -77,18 +77,6 @@
   "routed": true,
   "status": 400
  },
- "DELETE /v0/management/plugins/:id": {
-  "body": "{\"error\":\"plugin_not_found\",\"message\":\"plugin not found\"}",
-  "id": "M5-0092",
-  "routed": true,
-  "status": 404
- },
- "DELETE /v0/management/plugins/:id/quota": {
-  "body": "{\"error\":\"auth_index is required\"}",
-  "id": "M5-0099",
-  "routed": true,
-  "status": 400
- },
  "DELETE /v0/management/proxy-url": {
   "body": "{\"status\":\"ok\"}",
   "id": "M5-0119",
@@ -128,18 +116,6 @@
  "DELETE /v8/management/observability/logs": {
   "body": "{\"error\":\"logging to file disabled\"}",
   "id": "M5-0058",
-  "routed": true,
-  "status": 400
- },
- "DELETE /v8/management/plugins/:id": {
-  "body": "{\"error\":\"plugin_not_found\",\"message\":\"plugin not found\"}",
-  "id": "M5-0077",
-  "routed": true,
-  "status": 404
- },
- "DELETE /v8/management/plugins/:id/quota": {
-  "body": "{\"error\":\"auth_index is required\"}",
-  "id": "M5-0082",
   "routed": true,
   "status": 400
  },
@@ -419,30 +395,6 @@
   "routed": true,
   "status": 200
  },
- "GET /v0/management/plugin-store": {
-  "body": "{\"error\":\"plugin_store_registry_failed\",\"message\":\"request https://raw.githubuse",
-  "id": "M5-0090",
-  "routed": true,
-  "status": 502
- },
- "GET /v0/management/plugins": {
-  "body": "{\"plugins_enabled\":false,\"plugins_dir\":\"plugins\",\"plugins\":[]}",
-  "id": "M5-0089",
-  "routed": true,
-  "status": 200
- },
- "GET /v0/management/plugins/:id/config": {
-  "body": "{\"error\":\"plugin_not_found\",\"message\":\"plugin not found\"}",
-  "id": "M5-0094",
-  "routed": true,
-  "status": 404
- },
- "GET /v0/management/plugins/:id/quota": {
-  "body": "{\"error\":\"auth_index is required\"}",
-  "id": "M5-0097",
-  "routed": true,
-  "status": 400
- },
  "GET /v0/management/proxy-url": {
   "body": "{\"proxy-url\":\"\"}",
   "id": "M5-0116",
@@ -458,12 +410,6 @@
  "GET /v0/management/quota-exceeded/switch-project": {
   "body": "{\"switch-project\":false}",
   "id": "M5-0121",
-  "routed": true,
-  "status": 200
- },
- "GET /v0/management/quota/providers": {
-  "body": "{\"providers\":[]}",
-  "id": "M5-0128",
   "routed": true,
   "status": 200
  },
@@ -689,24 +635,6 @@
   "routed": true,
   "status": 200
  },
- "GET /v8/management/plugins": {
-  "body": "{\"plugins_enabled\":false,\"plugins_dir\":\"plugins\",\"plugins\":[]}",
-  "id": "M5-0076",
-  "routed": true,
-  "status": 200
- },
- "GET /v8/management/plugins/:id/quota": {
-  "body": "{\"error\":\"auth_index is required\"}",
-  "id": "M5-0080",
-  "routed": true,
-  "status": 400
- },
- "GET /v8/management/plugins/store": {
-  "body": "{\"error\":\"plugin_store_registry_failed\",\"message\":\"request https://raw.githubuse",
-  "id": "M5-0078",
-  "routed": true,
-  "status": 502
- },
  "GET /v8/management/routing/model-definitions/:channel": {
   "body": "{\"channel\":\"probe\",\"error\":\"unknown channel\"}",
   "id": "M5-0056",
@@ -836,18 +764,6 @@
  "PATCH /v0/management/openai-compatibility": {
   "body": "{\"error\":\"invalid body\"}",
   "id": "M5-0189",
-  "routed": true,
-  "status": 400
- },
- "PATCH /v0/management/plugins/:id/config": {
-  "body": "{\"status\":\"ok\"}",
-  "id": "M5-0096",
-  "routed": true,
-  "status": 200
- },
- "PATCH /v0/management/plugins/:id/enabled": {
-  "body": "{\"error\":\"invalid_body\",\"message\":\"enabled is required\"}",
-  "id": "M5-0093",
   "routed": true,
   "status": 400
  },
@@ -983,33 +899,9 @@
   "routed": true,
   "status": 400
  },
- "POST /v0/management/plugin-store/:id/install": {
-  "body": "{\"error\":\"plugin_store_registry_failed\",\"message\":\"request https://raw.githubuse",
-  "id": "M5-0091",
-  "routed": true,
-  "status": 502
- },
- "POST /v0/management/plugins/:id/quota": {
-  "body": "{\"error\":\"auth_index is required\"}",
-  "id": "M5-0098",
-  "routed": true,
-  "status": 400
- },
- "POST /v0/management/plugins/:id/quota/reset": {
-  "body": "{\"error\":\"auth_index is required\"}",
-  "id": "M5-0100",
-  "routed": true,
-  "status": 400
- },
  "POST /v0/management/quota/fetch": {
   "body": "{\"error\":\"auth_index is required\"}",
   "id": "M5-0129",
-  "routed": true,
-  "status": 400
- },
- "POST /v0/management/quota/reset": {
-  "body": "{\"error\":\"auth_index is required\"}",
-  "id": "M5-0130",
   "routed": true,
   "status": 400
  },
@@ -1229,18 +1121,6 @@
   "routed": false,
   "status": 404
  },
- "POST /v8/management/plugins/:id/quota": {
-  "body": "{\"error\":\"auth_index is required\"}",
-  "id": "M5-0081",
-  "routed": true,
-  "status": 400
- },
- "POST /v8/management/plugins/store/:id/install": {
-  "body": "{\"error\":\"plugin_store_registry_failed\",\"message\":\"request https://raw.githubuse",
-  "id": "M5-0079",
-  "routed": true,
-  "status": 502
- },
  "POST /v8/management/requests/api-call": {
   "body": "{\"error\":\"missing method\"}",
   "id": "M5-0054",
@@ -1360,12 +1240,6 @@
   "id": "M5-0188",
   "routed": true,
   "status": 400
- },
- "PUT /v0/management/plugins/:id/config": {
-  "body": "{\"status\":\"ok\"}",
-  "id": "M5-0095",
-  "routed": true,
-  "status": 200
  },
  "PUT /v0/management/proxy-url": {
   "body": "{\"error\":\"invalid body\"}",

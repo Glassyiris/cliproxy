@@ -122,24 +122,8 @@ impl Prepared {
 }
 
 /// The duplex stream's state: Go's writer and reader goroutines' shared metadata.
-/// An upstream message whose observation is running (Go's reader inside
-/// `EmitWebSocketResponseEvent`): the rest of its handling waits for it.
-struct Observing {
-    observation: futures_util::future::BoxFuture<'static, ()>,
-    payload: String,
-    kind: String,
-    establishing: bool,
-}
-
 pub(super) struct Duplex {
     turn: Turn,
-    /// While set, no further upstream message is read; client input and the writer
-    /// keep going, as Go's writer goroutine does while the reader waits.
-    observing: Option<Observing>,
-    /// A writer-side failure raised while a message was observed. Go's writer only
-    /// records its error; the reader finishes the observer and its message first, then
-    /// reports it. Client input and writes stop meanwhile.
-    failing: Option<ExecError>,
     frames: OwnedMutexGuard<mpsc::Receiver<Bytes>>,
     input: Arc<SteeringInput>,
     /// The bootstrap request: the template for later creates (Go `req`, `opts`).
@@ -240,7 +224,6 @@ fn local(message: &str) -> ExecError {
 
 enum Step {
     Upstream(Option<Read>),
-    Observed,
     Client(Option<Bytes>),
     Writer(Result<Result<(), ExecError>, tokio::task::JoinError>),
 }
@@ -273,8 +256,6 @@ impl Duplex {
         let (out, chunks) = mpsc::channel(1);
         let duplex = Self {
             turn,
-            observing: None,
-            failing: None,
             frames,
             input,
             req,
@@ -317,16 +298,11 @@ impl Duplex {
 
     async fn run(mut self) {
         self.serve().await;
-        // An observation that already started finishes before the turn (and its
-        // session) is released.
-        if let Some(observing) = self.observing.take() {
-            observing.observation.await;
-        }
     }
 
     async fn serve(&mut self) {
         loop {
-            if self.input_ready && !self.done && self.failing.is_none() {
+            if self.input_ready && !self.done {
                 self.progress().await;
             }
             let deliver = !self.outbox.is_empty();
@@ -334,13 +310,11 @@ impl Duplex {
                 return;
             }
             // After progress(): a failure it raised stops client input at once.
-            let live = !self.done && self.failing.is_none();
+            let live = !self.done;
             let writable = self.writes.capacity() > 0;
             let read_client =
                 live && self.input_ready && self.deferred_steer.is_none() && writable && self.outbox.len() < OUTBOX;
             let await_room = live && self.input_ready && !writable && !self.writes.is_closed();
-            let observing = self.observing.is_some();
-            let pending_observation = &mut self.observing;
             let step = tokio::select! {
                 permit = self.out.reserve(), if deliver => match permit {
                     Ok(permit) => {
@@ -350,12 +324,7 @@ impl Duplex {
                     Err(_) => return,
                 },
                 () = self.out.closed(), if !deliver => return,
-                read = self.turn.rx.recv(), if !self.done && !deliver && !observing => Step::Upstream(read),
-                () = async {
-                    if let Some(observing) = pending_observation.as_mut() {
-                        (&mut observing.observation).await;
-                    }
-                }, if observing => Step::Observed,
+                read = self.turn.rx.recv(), if !self.done && !deliver => Step::Upstream(read),
                 frame = self.frames.recv(), if read_client => Step::Client(frame),
                 ended = &mut self.writer, if live => Step::Writer(ended),
                 // The writer freed room: re-check progress and client reads.
@@ -363,22 +332,6 @@ impl Duplex {
             };
             match step {
                 Step::Upstream(read) => self.upstream(read),
-                Step::Observed => {
-                    let Observing {
-                        payload,
-                        kind,
-                        establishing,
-                        ..
-                    } = self.observing.take().expect("an observation finished");
-                    self.observed(&payload, &kind, establishing);
-                    // The deferred failure follows the message, unless the message
-                    // itself ended the stream.
-                    if let Some(error) = self.failing.take()
-                        && !self.done
-                    {
-                        self.fail(error);
-                    }
-                }
                 Step::Client(frame) => self.client(frame).await,
                 Step::Writer(ended) => self.fail(match ended {
                     Ok(Err(error)) => error,
@@ -401,10 +354,6 @@ impl Duplex {
     }
 
     fn fail(&mut self, error: ExecError) {
-        if self.observing.is_some() {
-            self.failing.get_or_insert(error);
-            return;
-        }
         self.outbox.push_back(Err(connection(error)));
         self.done = true;
     }
@@ -442,7 +391,6 @@ impl Duplex {
             self.steer(steer);
         }
         while !self.done
-            && self.failing.is_none()
             && !self.queued_creates.is_empty()
             && self.ready_for_create()
             && self.writes.capacity() > 0
@@ -641,20 +589,11 @@ impl Duplex {
             return;
         }
         self.turn.observe(payload);
-        match self.turn.wire.ws_response_observation(payload) {
-            Some(observation) => {
-                self.observing = Some(Observing {
-                    observation,
-                    payload: payload.to_owned(),
-                    kind,
-                    establishing,
-                });
-            }
-            None => self.observed(payload, &kind, establishing),
-        }
+        self.turn.wire.ws_response(payload);
+        self.observed(payload, &kind, establishing);
     }
 
-    /// The rest of an upstream message's handling, once observers saw it.
+    /// The rest of an upstream message's handling.
     fn observed(&mut self, payload: &str, kind: &str, establishing: bool) {
         // Steering acknowledgements, pending notices and failures are opaque: IDs, input,
         // sequence numbers and event types reach the client byte for byte.

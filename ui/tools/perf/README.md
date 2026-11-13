@@ -60,8 +60,7 @@ same bytes. All buckets shift once, 10 minutes after the server starts. Write ro
 answer like the real ones and keep state in memory. Unknown routes answer an empty 404.
 
 Not faithful: `config.yaml` is kept as text and not parsed back into the JSON config; OAuth sign-in
-never completes; the usage queue returns random events; logs are synthetic; plugin install only
-flips a flag.
+never completes; the usage queue returns random events; logs are synthetic.
 
 ## Metrics
 

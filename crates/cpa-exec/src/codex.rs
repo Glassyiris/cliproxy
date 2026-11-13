@@ -650,70 +650,8 @@ impl CodexExecutor {
 /// `CountTokens` (codex_executor_tokens.go): the request shaped as for Codex, counted
 /// locally with the model's tiktoken encoding; nothing is sent upstream.
 fn count_tokens(req: &ExecRequest, cfg: &Config) -> Result<ExecResponse, ExecError> {
-    use crate::codex_json::{delete, set_bool_if_different, set_str, set_str_if_different};
     let model = request::base_model(&req.model);
-    // Go reads is-compat only from the attempt's binding here (APIKeyModelIsCompat).
-    let is_compat = req.resolved_model.as_ref().is_some_and(|r| r.is_compat());
-    let client = crate::codex_client::Client::new(&req.headers, cfg, "codex", is_compat);
-    let caps = req
-        .resolved_model
-        .as_ref()
-        .map(|r| cpa_common::thinking::ModelCaps::from(&r.info));
-    let ctx = cpa_translate::RequestCtx {
-        model: &model,
-        stream: false,
-        tool_search: false,
-    };
-    let translated = crate::codex_client::translate_request(req.source_format, Format::Codex, &ctx, &req.body, &client)
-        .map_err(|e| ExecError::local(400, FailureScope::Request, e.to_string()))?;
-    // The rule baseline: the translated original, else the translated body before
-    // thinking. Go counts with a failed translation's partial body; this refuses.
-    let original = if req.original_body.is_empty() {
-        translated.body.clone()
-    } else {
-        crate::codex_client::translate_request(req.source_format, Format::Codex, &ctx, &req.original_body, &client)
-            .map_err(|e| ExecError::local(400, FailureScope::Request, e.to_string()))?
-            .body
-    };
-    let body = cpa_common::thinking::apply_request_thinking(&cpa_common::thinking::RequestThinking {
-        body: &translated.body,
-        payload: &req.body,
-        original: &req.original_body,
-        model: &req.model,
-        from: req.source_format.as_str(),
-        to: Format::Codex.as_str(),
-        provider: "codex",
-        resolved: caps.as_ref().map(Some),
-        has_request_transformer: cpa_translate::pair(req.source_format, Format::Codex).is_some(),
-        updates_changed: translated.configuration_updates_changed,
-    })
-    .map_err(|e| ExecError::local(e.status(), FailureScope::Request, e.message))?;
-    let mut body = String::from_utf8_lossy(&body).into_owned();
-    body = set_str_if_different(body, "model", &model);
-    for key in [
-        "previous_response_id",
-        "generate",
-        "prompt_cache_retention",
-        "safety_identifier",
-        "stream_options",
-    ] {
-        body = delete(&body, key);
-    }
-    body = set_bool_if_different(body, "stream", false);
-    if !request::is_native(req) {
-        let instructions = gjson::get(&body, "instructions");
-        if !instructions.exists() || instructions.kind() == gjson::Kind::Null {
-            body = set_str(&body, "instructions", "");
-        }
-    }
-    let body = crate::payload_barrier::Barrier {
-        executor: "codex",
-        model: &model,
-        protocol: Format::Codex.as_str(),
-        root: "",
-        original: &original,
-    }
-    .apply(cfg, req, body.into_bytes());
+    let body = count_tokens_body(req, cfg, &model)?;
     let encoding = crate::codex_tokens::encoding_for_model(&model);
     let count = crate::codex_tokens::count_input_tokens(encoding, &body).map_err(|e| {
         ExecError::local(
@@ -730,6 +668,74 @@ fn count_tokens(req: &ExecRequest, cfg: &Config) -> Result<ExecResponse, ExecErr
         headers: HeaderMap::new(),
         body: ResponseBody::Buffered(Bytes::from(payload)),
     })
+}
+
+/// The body [`count_tokens`] counts: translated for the Codex executor, which keeps
+/// tool `number` schemas (a Codex client's integer normalization applies only to other
+/// executors).
+pub(crate) fn count_tokens_body(req: &ExecRequest, cfg: &Config, model: &str) -> Result<Vec<u8>, ExecError> {
+    use crate::codex_json::{delete, set_bool_if_different, set_str, set_str_if_different};
+    // Go reads is-compat only from the attempt's binding here (APIKeyModelIsCompat).
+    let is_compat = req.resolved_model.as_ref().is_some_and(|r| r.is_compat());
+    let client = crate::codex_client::Client::new(&req.headers, cfg, "codex", is_compat);
+    let caps = req
+        .resolved_model
+        .as_ref()
+        .map(|r| cpa_common::thinking::ModelCaps::from(&r.info));
+    let ctx = cpa_translate::RequestCtx {
+        model,
+        stream: false,
+        tool_search: false,
+    };
+    let translated = crate::codex_client::translate_request(req.source_format, Format::Codex, &ctx, &req.body, &client)
+        .map_err(|e| ExecError::local(400, FailureScope::Request, e.to_string()))?;
+    // The rule baseline: the translated original, else the translated body before
+    // thinking. Go counts with a failed translation's partial body; this refuses.
+    let original = if req.original_body.is_empty() {
+        translated.clone()
+    } else {
+        crate::codex_client::translate_request(req.source_format, Format::Codex, &ctx, &req.original_body, &client)
+            .map_err(|e| ExecError::local(400, FailureScope::Request, e.to_string()))?
+    };
+    let body = cpa_common::thinking::apply_request_thinking(&cpa_common::thinking::RequestThinking {
+        body: &translated,
+        payload: &req.body,
+        original: &req.original_body,
+        model: &req.model,
+        from: req.source_format.as_str(),
+        to: Format::Codex.as_str(),
+        provider: "codex",
+        resolved: caps.as_ref().map(Some),
+        has_request_transformer: cpa_translate::pair(req.source_format, Format::Codex).is_some(),
+        updates_changed: false,
+    })
+    .map_err(|e| ExecError::local(e.status(), FailureScope::Request, e.message))?;
+    let mut body = String::from_utf8_lossy(&body).into_owned();
+    body = set_str_if_different(body, "model", model);
+    for key in [
+        "previous_response_id",
+        "generate",
+        "prompt_cache_retention",
+        "safety_identifier",
+        "stream_options",
+    ] {
+        body = delete(&body, key);
+    }
+    body = set_bool_if_different(body, "stream", false);
+    if !request::is_native(req) {
+        let instructions = gjson::get(&body, "instructions");
+        if !instructions.exists() || instructions.kind() == gjson::Kind::Null {
+            body = set_str(&body, "instructions", "");
+        }
+    }
+    Ok(crate::payload_barrier::Barrier {
+        executor: "codex",
+        model,
+        protocol: Format::Codex.as_str(),
+        root: "",
+        original: &original,
+    }
+    .apply(cfg, req, body.into_bytes()))
 }
 
 /// Go reads at most 32 MiB of an Alpha Search response, whatever its status.
@@ -920,7 +926,7 @@ fn translate_stream(req: &ExecRequest, translated: &str, upstream: ExecStream) -
         translated_request: translated.as_bytes(),
         tool_search: false,
     };
-    let translator = crate::translate::stream(pair, &ctx, req);
+    let translator = (pair.stream)(&ctx);
     let original = if req.original_body.is_empty() {
         req.body.clone()
     } else {
