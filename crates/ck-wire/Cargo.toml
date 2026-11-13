@@ -1,0 +1,29 @@
+[package]
+name = "ck-wire"
+description = "Part of cook-router: provider-neutral request helpers shared by translators and executors"
+version.workspace = true
+publish.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+exclude.workspace = true
+keywords = ["llm", "proxy", "cook-router"]
+categories.workspace = true
+
+[dependencies]
+ck-core.workspace = true
+http.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+base64 = "0.22"
+sha2 = "0.10"
+memchr = "2"
+# Go's shortest float digits: Ryū's half-to-even tie rule (json.rs `shortest`).
+ryu = "1.0.23"
+# The idle signal (idle.rs).
+tokio.workspace = true
+
+[dev-dependencies]
+flate2 = "1"

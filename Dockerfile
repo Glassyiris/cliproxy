@@ -86,7 +86,7 @@ RUN cargo fetch --locked \
  && cargo fetch --locked --manifest-path vendor/gjson/Cargo.toml \
  && cargo fetch --locked --manifest-path harness/rust/Cargo.toml
 
-# The tree with the dashboard build that the binary embeds (crates/cpa-server/build.rs), over
+# The tree with the dashboard build that the binary embeds (crates/ck-server/build.rs), over
 # the empty crate roots above. Cargo unpacks the fetched crates into registry/src, a cache
 # mount in each stage below, so the unpacked sources stay out of the layers.
 FROM fetch AS source
@@ -117,7 +117,8 @@ RUN --mount=type=cache,id=cook-router-cargo-src-check,target=/usr/local/cargo/re
     --mount=type=cache,id=cook-router-target-check,target=/src/target,uid=1000,gid=1000 <<'EOF'
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo clippy -p cpa-server --all-targets --features media-relay,pprof --locked -- -D warnings
+cargo clippy -p ck-server --all-targets --features media-relay,pprof --locked -- -D warnings
+python3 -I tools/check-crate-deps.py
 cargo check --locked --manifest-path harness/rust/Cargo.toml --target-dir target
 actionlint -version
 # Every workflow by name: without .git in the context, actionlint finds no project.
@@ -156,7 +157,7 @@ if [ "$SHARD" = "$SHARDS" ]; then
   python3 bench/test-claude-cache-replay.py 2>&1 | tee -a "$out/test.log"
 fi
 if [ "$SHARD" = 1 ]; then
-  cargo nextest run -p cpa-server --features media-relay,pprof --lib --locked --profile ci $threads
+  cargo nextest run -p ck-server --features media-relay,pprof --lib --locked --profile ci $threads
 fi
 python3 .github/scripts/test-counts.py shard "$SHARD" "$out/nextest-list.json" "$out/test.log" > "$out/counts-$SHARD.json"
 cat "$out/counts-$SHARD.json"
@@ -170,12 +171,12 @@ FROM source AS build
 ARG BUILD_JOBS
 RUN --mount=type=cache,id=cook-router-cargo-src-release,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
     --mount=type=cache,id=cook-router-target-release,target=/src/target,uid=1000,gid=1000 <<'EOF'
-if cargo tree --locked -p cook-router --edges normal --prefix none | grep -E '^(pprof|backtrace) v'; then
+if cargo tree --locked -p cooker --edges normal --prefix none | grep -E '^(pprof|backtrace) v'; then
   echo 'Release binaries must exclude CPU profiling and symbol resolution'
   exit 1
 fi
-cargo build --release --locked -p cook-router ${BUILD_JOBS:+--jobs "$BUILD_JOBS"}
-install -D -m 0755 target/release/cook-router /home/builder/out/cook-router
+cargo build --release --locked -p cooker ${BUILD_JOBS:+--jobs "$BUILD_JOBS"}
+install -D -m 0755 target/release/cooker /home/builder/out/cook-router
 EOF
 
 # Bytes and counts against bench/budgets.txt, never elapsed time, with no network and nothing

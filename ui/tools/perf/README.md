@@ -50,7 +50,7 @@ The mock alone: `node tools/mock/server.mjs --port 8317 --accounts 1000 --seed 1
 
 ## What the mock serves
 
-Every route the dashboard calls, with response shapes taken from `crates/cpa-server/src/management/`
+Every route the dashboard calls, with response shapes taken from `crates/ck-server/src/management/`
 and the fields the dashboard's `src/lib/` modules read. `X-Cook-Version: cook-router-mock` makes the UI
 treat it as cook-router. Accounts spread over claude, codex, gemini, kimi, antigravity, xai, devin
 and vertex, with twenty `recent_requests` buckets each, about 5% disabled, 5% cooling, 2% signed

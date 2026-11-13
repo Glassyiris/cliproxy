@@ -33,7 +33,7 @@ class Paths(unittest.TestCase):
                 self.assertEqual(lanes(path), set())
 
     def test_markdown_inside_shipped_paths_is_not_documentation(self):
-        self.assertEqual(lanes("crates/cpa-server/README.md"), RUST)
+        self.assertEqual(lanes("crates/ck-server/README.md"), RUST)
         self.assertEqual(lanes("vendor/README.md"), RUST)
         self.assertEqual(lanes("ui/DESIGN.md"), {"dashboard"})
         self.assertEqual(lanes("bench/results/x.md"), {"test", "perf"})
@@ -41,8 +41,8 @@ class Paths(unittest.TestCase):
 
     def test_rule_files_and_the_requirements_check_run_no_lane(self):
         for path in ("AGENTS.md", "CLAUDE.md", "REQUIREMENTS.md", "REVIEW.md",
-                     ".github/AGENTS.md", "crates/AGENTS.md", "crates/cpa-server/AGENTS.md",
-                     "crates/cpa-server/src/CLAUDE.md", "ui/AGENTS.md", "ui/src/AGENTS.md",
+                     ".github/AGENTS.md", "crates/ck-server/AGENTS.md",
+                     "crates/ck-server/src/CLAUDE.md", "ui/AGENTS.md", "ui/src/AGENTS.md",
                      "scripts/check-requirements.py", "scripts/test_check_requirements.py"):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), set())
@@ -50,10 +50,14 @@ class Paths(unittest.TestCase):
         self.assertEqual(lanes("vendor/gjson/AGENTS.md"), RUST)
         # Only the exact names: a near miss, another script or a nested REQUIREMENTS.md is
         # not covered.
-        self.assertEqual(lanes("crates/cpa-server/AGENTS.md.bak"), RUST)
+        self.assertEqual(lanes("crates/ck-server/AGENTS.md.bak"), RUST)
         self.assertEqual(lanes("crates/REQUIREMENTS.md"), RUST)
         self.assertEqual(lanes("ui/MY-AGENTS.md"), {"dashboard"})
         self.assertEqual(lanes("scripts/other.py"), ALL)
+
+    def test_crate_dependency_table_runs_the_check_lane(self):
+        # tools/check-crate-deps.py reads the table in crates/AGENTS.md.
+        self.assertEqual(lanes("crates/AGENTS.md"), {"check"})
 
     def test_other_workflows_reach_actionlint(self):
         for path in (".github/workflows/release.yml", ".github/workflows/changes.yml"):
@@ -84,9 +88,9 @@ class Paths(unittest.TestCase):
         self.assertEqual(lanes("ui/DESIGN.md", "ui/scripts/measure.mjs"), {"dashboard"})
 
     def test_rust(self):
-        for path in ("crates/cpa-server/src/main.rs", "crates/cpa-server/build.rs",
-                     "crates/cpa-server/LICENSE", ".config/nextest.toml", "clippy.toml",
-                     "rustfmt.toml", "rust-toolchain.toml", "crates/cook-router/Cargo.toml",
+        for path in ("crates/ck-server/src/main.rs", "crates/ck-server/build.rs",
+                     "crates/ck-server/LICENSE", ".config/nextest.toml", "clippy.toml",
+                     "rustfmt.toml", "rust-toolchain.toml", "crates/cooker/Cargo.toml",
                      "Cargo.toml", "Cargo.lock", "vendor/gjson.patch", "vendor/gjson/src/lib.rs"):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), RUST)
@@ -97,14 +101,14 @@ class Paths(unittest.TestCase):
                 self.assertEqual(lanes(path), {"check"})
 
     def test_test_only_rust_skips_the_release_gates(self):
-        for path in ("crates/cpa-server/tests/management.rs",
-                     "crates/cpa-exec/tests/fixtures/gemini_go.json",
-                     "crates/cpa-exec/tests/reference/xai/main.go",
-                     "crates/cpa-server/examples/x.rs", "crates/cpa-core/benches/b.rs"):
+        for path in ("crates/ck-server/tests/management.rs",
+                     "crates/ck-exec/tests/fixtures/gemini_go.json",
+                     "crates/ck-exec/tests/reference/xai/main.go",
+                     "crates/ck-server/examples/x.rs", "crates/ck-core/benches/b.rs"):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), {"check", "test"})
         # A source file next to them still runs the gates.
-        self.assertEqual(lanes("crates/cpa-server/tests/a.rs", "crates/cpa-server/src/a.rs"), RUST)
+        self.assertEqual(lanes("crates/ck-server/tests/a.rs", "crates/ck-server/src/a.rs"), RUST)
 
     def test_harness_and_bench(self):
         self.assertEqual(lanes("harness/rust/src/main.rs"), {"check"})

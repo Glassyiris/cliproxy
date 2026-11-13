@@ -1,4 +1,4 @@
-//! Only test wiring. Mirrors crates/cook-router/src/main.rs (config, credential synthesis,
+//! Only test wiring. Mirrors crates/cooker/src/main.rs (config, credential synthesis,
 //! auto-refresh, routes, management, CORS and the access log) except the listener and
 //! two hooks: the ephemeral test CA replaces the trust store, and the logical
 //! first-party hosts are dialed at 127.0.0.3. The executor still builds its production
@@ -9,9 +9,9 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
-use cpa_exec::Executors;
-use cpa_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL, Hooks};
-use cpa_server::Runtime;
+use ck_exec::Executors;
+use ck_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL, Hooks};
+use ck_server::Runtime;
 use wreq::tls::trust::CertStore;
 
 #[tokio::main]
@@ -19,14 +19,14 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     anyhow::ensure!(args.len() == 4, "usage: driver CONFIG TEST_CA CREDENTIALS");
     let config_path = Path::new(&args[1]);
-    let store = Arc::new(cpa_server::testing::config_store(&config_path.with_extension("db"))?);
+    let store = Arc::new(ck_server::testing::config_store(&config_path.with_extension("db"))?);
     store.import_yaml(&std::fs::read_to_string(config_path)?, "harness", "fixture")?;
     let mut config = store.load().map_err(|e| anyhow::anyhow!("{e}"))?.config;
-    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone())?;
-    cpa_server::testing::seed_credentials(&db, Path::new(&args[3]));
+    let db = ck_server::credential_store::CredentialDb::initialize(store.clone())?;
+    ck_server::testing::seed_credentials(&db, Path::new(&args[3]));
     config.auth_dir = db.auth_dir();
     let mut credentials = db.scan(&config)?.credentials;
-    credentials.extend(cpa_core::config::credentials::from_config(&config));
+    credentials.extend(ck_core::config::credentials::from_config(&config));
     let upstream: SocketAddr = "127.0.0.3:443".parse()?;
     let hooks = Hooks {
         trust: Some(CertStore::from_pem_stack(std::fs::read(&args[2])?)?),
@@ -44,16 +44,16 @@ async fn main() -> anyhow::Result<()> {
     };
     let listener = tokio::net::TcpListener::bind((config.host.as_str(), config.port)).await?;
     let rt = Arc::new(Runtime::new(config, credentials, executors, db));
-    cpa_server::install_registry(&rt);
+    ck_server::install_registry(&rt);
     rt.start_auto_refresh();
     let management =
-        cpa_server::management::Management::with_options(rt.clone(), store, cpa_server::management::Options::default());
-    let watcher = cpa_server::watching::start(&management);
-    let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()))
-        .layer(axum::middleware::from_fn(cpa_server::management::cors));
-    let app = cpa_server::observability::router(&rt, app);
-    // The production listener (crates/cook-router uses the same call), plain HTTP.
-    let served = cpa_server::listener::serve_with_resp(listener, app, None, Some(management)).await;
+        ck_server::management::Management::with_options(rt.clone(), store, ck_server::management::Options::default());
+    let watcher = ck_server::watching::start(&management);
+    let app = ck_server::app(rt.clone(), ck_server::management::router(management.clone()))
+        .layer(axum::middleware::from_fn(ck_server::management::cors));
+    let app = ck_server::observability::router(&rt, app);
+    // The production listener (crates/cooker uses the same call), plain HTTP.
+    let served = ck_server::listener::serve_with_resp(listener, app, None, Some(management)).await;
     watcher.shutdown().await?;
     rt.shutdown_codex_refreshes().await;
     served?;

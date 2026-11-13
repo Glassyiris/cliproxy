@@ -326,7 +326,7 @@ Claude accounts ignore `HTTPS_PROXY` and `HTTP_PROXY`. Without an explicit proxy
 `cmdline` returns NUL-separated arguments and `symbol` accepts program counters in
 the raw query or a POST body, separated by `+`. Go runtime profiles return plain-text
 `501` answers. CPU `profile?seconds=30` requires a Unix build with
-`cargo build --release -p cook-router --features cpa-server/pprof` and returns a pprof
+`cargo build --release -p cooker --features ck-server/pprof` and returns a pprof
 protobuf. Default builds, published release binaries and Docker images exclude the
 profiler and symbol resolver. Their `symbol` route consumes POST bodies but returns
 only `num_symbols: 1`, without resolving any names, including shared-library names.

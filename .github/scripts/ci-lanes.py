@@ -49,6 +49,9 @@ RULES = (
     # stage their tests.
     (r"\.github/scripts/(pr-title|test_pr_title)\.py|tools/(changelog|test_changelog)\.py",
      frozenset({"check"})),
+    # The dependency table that tools/check-crate-deps.py reads; the check stage runs the gate
+    # and the tools tests.
+    (r"crates/AGENTS\.md", frozenset({"check"})),
     # The agent rule files and the requirements check over them; the requirements job builds
     # the requirements stage, the check and its tests, on every run. AGENTS.md and CLAUDE.md
     # at any depth, except under vendor (vendored source), which keeps the rules below. No
@@ -63,7 +66,7 @@ RULES = (
     # measures them again. .gitignore does not filter the Docker build context.
     (r"[^/]+\.md|LICENSE[^/]*|NOTICE|CODEOWNERS|docs/.*|changes/.*|\.coderabbit\.yaml|\.gitignore", NONE),
     # What the dashboard build is made of. Its output is embedded into the binary
-    # (crates/cpa-server/build.rs), so the tests, the gates and THIRD-PARTY-NOTICES (the npm
+    # (crates/ck-server/build.rs), so the tests, the gates and THIRD-PARTY-NOTICES (the npm
     # packages the bundle pulls in) all depend on it.
     (r"ui/(src|public|tools)/.*|ui/(index\.html|package(-lock)?\.json|vite\.config\.ts|tsconfig[^/]*\.json)",
      ALL),

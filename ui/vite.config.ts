@@ -35,6 +35,6 @@ export default defineConfig({
     cors: false,
     proxy: { "/v8": backend, "/admin": backend, "/v1": backend, "/healthz": backend },
   },
-  // The Rust binary embeds ui/dist at compile time (crates/cpa-server/build.rs).
+  // The Rust binary embeds ui/dist at compile time (crates/ck-server/build.rs).
   build: { target: "es2022", sourcemap: false, outDir: "dist" },
 });

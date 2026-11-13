@@ -321,7 +321,7 @@ and plugin-defined routes.
 ```sh
 python3 docs/parity-audit/verify_reference.py /path/to/CLIProxyAPI
 python3 -m unittest discover -s docs/parity-audit -p 'test_*.py'
-unshare -Urn sh -c 'ip link set lo up; python3 docs/parity-audit/probe.py "$PWD/target/debug/cook-router"'
+unshare -Urn sh -c 'ip link set lo up; python3 docs/parity-audit/probe.py "$PWD/target/debug/cooker"'
 python3 docs/parity-audit/audit.py
 sha256sum README.md docs/PARITY.md docs/parity-audit/status.md > /tmp/parity-summary.sha256
 python3 docs/parity-audit/audit.py

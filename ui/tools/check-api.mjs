@@ -2,7 +2,7 @@
 // router registers under /v8/management and /admin/v1. Fails when the registry names a route the server
 // lacks, or the server has a route that is neither in the registry nor allowlisted with a
 // reason in tools/api-allowlist.json. The keyless routes in `publicRoutes` must each appear as a
-// `.route("<path>", get(..))` in crates/cpa-server/src/lib.rs; the server's other public routes
+// `.route("<path>", get(..))` in crates/ck-server/src/lib.rs; the server's other public routes
 // (the proxy itself) have no dashboard caller and are not compared.
 //
 // The router is read by evaluating the small subset of Rust that `fn router` is written in:
@@ -15,8 +15,8 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const ui = fileURLToPath(new URL("..", import.meta.url));
-const rustFile = fileURLToPath(new URL("../../crates/cpa-server/src/management.rs", import.meta.url));
-const libFile = fileURLToPath(new URL("../../crates/cpa-server/src/lib.rs", import.meta.url));
+const rustFile = fileURLToPath(new URL("../../crates/ck-server/src/management.rs", import.meta.url));
+const libFile = fileURLToPath(new URL("../../crates/ck-server/src/lib.rs", import.meta.url));
 const allowFile = fileURLToPath(new URL("./api-allowlist.json", import.meta.url));
 const PREFIX = "/v8/management";
 const ADMIN_PREFIX = "/admin/v1";

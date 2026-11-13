@@ -7,12 +7,12 @@ Read `docs/STATE-AND-CONCURRENCY.md` for changes to ownership, persistence, publ
 
 Current crate responsibilities:
 
-- `crates/cpa-core`: legacy config import, runtime projection and credential formats. No networking.
-- `crates/cpa-common`: provider-neutral, Go-exact helpers shared by translators and executors.
-- `crates/cpa-translate`: format translation between the Anthropic, OpenAI and Gemini APIs.
-- `crates/cpa-exec`: one module per upstream provider (wire format, auth headers, HTTP client profile).
-- `crates/cpa-server`: axum routes, client auth, credential selection, management API.
-- `crates/cook-router`: the binary.
+- `crates/ck-core`: legacy config import, runtime projection and credential formats. No networking.
+- `crates/ck-wire`: provider-neutral, Go-exact helpers shared by translators and executors.
+- `crates/ck-translate`: format translation between the Anthropic, OpenAI and Gemini APIs.
+- `crates/ck-exec`: one module per upstream provider (wire format, auth headers, HTTP client profile).
+- `crates/ck-server`: axum routes, client auth, credential selection, management API.
+- `crates/cooker`: the binary.
 
 A workspace reorganization updates this list in the same PR.
 
@@ -23,7 +23,7 @@ A workspace reorganization updates this list in the same PR.
 - The internal stream is stored in memory-mapped files, never in heap buffers. Like operating-system paging, the files are divided into fixed-size blocks, so a position is a block number and an offset; stages hold only the key positions of a stream, not copies of its data or a pointer per block. Stream files hold request content, so they are private to the process user and removed when the request ends.
 - Non-SSE payloads (images, audio, video, realtime) travel in the same stream as custom data in fixed chunks of at most 50 KB, flushed within 100 ms.
 - A rewrite replaces the old code in the same change. Do not keep old and new paths side by side, adapters to the old form or unreachable legacy code.
-- Case mapping and case-insensitive comparison use `cpa_core::gostr::GoStr`: `go_lower`, `go_upper`, `go_eq_fold`, matching Go's `strings.ToLower`, `strings.ToUpper` and `strings.EqualFold`. `clippy.toml` disallows Rust's full `str::to_lowercase` and `str::to_uppercase` mappings. Use `eq_ignore_ascii_case` only for ASCII-defined inputs such as headers and protocol tokens, or explicitly ASCII comparisons. An ASCII literal alone is insufficient: Go folding also matches `ſ` with `s` and the Kelvin sign with `k`.
+- Case mapping and case-insensitive comparison use `ck_core::gostr::GoStr`: `go_lower`, `go_upper`, `go_eq_fold`, matching Go's `strings.ToLower`, `strings.ToUpper` and `strings.EqualFold`. `clippy.toml` disallows Rust's full `str::to_lowercase` and `str::to_uppercase` mappings. Use `eq_ignore_ascii_case` only for ASCII-defined inputs such as headers and protocol tokens, or explicitly ASCII comparisons. An ASCII literal alone is insufficient: Go folding also matches `ſ` with `s` and the Kelvin sign with `k`.
 
 ### Compatibility
 
@@ -35,7 +35,7 @@ A workspace reorganization updates this list in the same PR.
 ### Logging
 
 - Use one log format and meaningful debug, info, warn and error levels. Expected cases are not errors; failures are not silently swallowed.
-- Apply root Secrets rules. Upstream request and response capture goes through `crates/cpa-server/src/request_logging.rs`. It redacts `Cookie` and `Set-Cookie`, URL credentials and short keys, and spools large sections to disk. Do not format or log captured bytes elsewhere.
+- Apply root Secrets rules. Upstream request and response capture goes through `crates/ck-server/src/request_logging.rs`. It redacts `Cookie` and `Set-Cookie`, URL credentials and short keys, and spools large sections to disk. Do not format or log captured bytes elsewhere.
 
 ### Security (if present)
 
@@ -83,15 +83,15 @@ Money clauses apply only where billing or a ledger exists.
 ### Performance
 
 - Watch storage, CPU and memory against the baseline; add no unnecessary dependencies.
-- Keep request preparation and config loading linear in input size. Walk JSON or YAML once instead of rescanning from the start for each element; use path-based JSON edits as in `crates/cpa-exec/src/claude/signals.rs`.
+- Keep request preparation and config loading linear in input size. Walk JSON or YAML once instead of rescanning from the start for each element; use path-based JSON edits as in `crates/ck-exec/src/claude/signals.rs`.
 - Prompt-cache changes preserve request semantics and stable prefixes, and show cache-read and cache-write usage for warm, changed-context and idle continuations before merge. Never add inference keepalive pings. `bench/claude-cache-live.sh` performs this proof by hand against a live Claude login, subject to root live-upstream approval.
 
 ### Verification
 
 - Use isolated VMs or network namespaces with disposable data when needed. Verify storage behaviour against a real private database; builds and unit tests alone do not prove it.
 - Tests use local mock upstreams and never send traffic to real provider accounts. Give every test a private SQLite database and a private `auth-dir` for its credential files.
-- Build test runtimes with `cpa_server::testing::runtime`. `cpa_server::testing` compiles only in tests and with the `testing` feature enabled by dev-dependencies and harnesses.
-- The full suite is slow and memory-heavy because of BoringSSL and release linking. During iteration run the affected crate or filter, for example `cargo test -p cpa-exec kimi`. CI runs fmt, clippy with warnings denied and the full suite. On shared or small machines use `CARGO_BUILD_JOBS=2 nice -n 19`.
+- Build test runtimes with `ck_server::testing::runtime`. `ck_server::testing` compiles only in tests and with the `testing` feature enabled by dev-dependencies and harnesses.
+- The full suite is slow and memory-heavy because of BoringSSL and release linking. During iteration run the affected crate or filter, for example `cargo test -p ck-exec kimi`. CI runs fmt, clippy with warnings denied and the full suite. On shared or small machines use `CARGO_BUILD_JOBS=2 nice -n 19`.
 - Go comparison tests run fully only in CI's network-denied namespace. For local Linux differential checks use `./harness/run`; see `harness/README.md`.
 
 ### Cargo workspace layout
@@ -101,6 +101,18 @@ Money clauses apply only where billing or a ledger exists.
 3. Put new management API code in the crate that owns management routes. Set boundaries from callers, not speculative interfaces. Keep provider execution separate from translation and organize executors by provider.
 4. Begin a new crate's `lib.rs` with its responsibility, allowed dependencies and prohibited work. Update architecture documentation before adding a crate.
 5. Record allowed dependency directions in one table and check actual workspace metadata against it in CI. Prove the check fails on a forbidden edge.
+
+   Allowed dependency directions. `tools/check-crate-deps.py` compares every normal, build and dev edge between workspace crates, whatever its feature or target condition, with this table; a crate may also name itself as a dev dependency for its test features.
+
+   | Crate | May depend on |
+   | --- | --- |
+   | `ck-core` | none |
+   | `ck-wire` | `ck-core` |
+   | `ck-translate` | `ck-core`, `ck-wire` |
+   | `ck-exec` | `ck-core`, `ck-wire`, `ck-translate` |
+   | `ck-server` | `ck-core`, `ck-wire`, `ck-translate`, `ck-exec` |
+   | `cooker` | `ck-core`, `ck-wire`, `ck-translate`, `ck-exec`, `ck-server` |
+
 6. Keep unit tests beside modules and crate integration tests in `crates/<name>/tests/`. Keep Go recordings and fixtures excluded from published packages with `exclude = ["tests/"]`.
 
 ### Management API contract

@@ -8,7 +8,7 @@
 # Its output, the measured values, is shown even when it passes, so a change can update
 # the budgets from the log.
 [[profile.default.overrides]]
-filter = 'binary_id(cpa-server::alloc_budget)'
+filter = 'binary_id(ck-server::alloc_budget)'
 threads-required = 'num-test-threads'
 priority = 100
 success-output = 'final'
@@ -17,12 +17,12 @@ success-output = 'final'
 # too, right after the heap gate, so other tests cannot starve their workloads.
 [[profile.default.overrides]]
 filter = '''
-    binary_id(cpa-server::duplex_dispatch)
-    | (binary_id(cpa-exec) & (test(/^codex_ws::tests::duplex::/)
+    binary_id(ck-server::duplex_dispatch)
+    | (binary_id(ck-exec) & (test(/^codex_ws::tests::duplex::/)
         | test(=codex_live::tests::redact_sdp_scans_many_markers_in_one_pass)
         | test(=antigravity_request::tests::tool_schemas_are_cleaned_in_one_pass)))
-    | (binary_id(cpa-server) & test(/^websocket::tests::/))
-    | (binary_id(cpa-server) & test(=pprof::tests::pprof_cpu_profile_is_decodable_and_exclusive))
+    | (binary_id(ck-server) & test(/^websocket::tests::/))
+    | (binary_id(ck-server) & test(=pprof::tests::pprof_cpu_profile_is_decodable_and_exclusive))
 '''
 threads-required = 'num-test-threads'
 priority = 90
@@ -31,10 +31,10 @@ priority = 90
 # left running alone at the end.
 [[profile.default.overrides]]
 filter = '''
-    binary_id(cpa-translate::golden) | binary_id(cpa-server::legacy_go)
-    | binary_id(cpa-server::media_go) | binary_id(cpa-server::quota_trust)
-    | binary_id(cpa-server::manage_go) | binary_id(cpa-common::gemini_schema)
-    | binary_id(cpa-server::body_limit_go)
+    binary_id(ck-translate::golden) | binary_id(ck-server::legacy_go)
+    | binary_id(ck-server::media_go) | binary_id(ck-server::quota_trust)
+    | binary_id(ck-server::manage_go) | binary_id(ck-wire::gemini_schema)
+    | binary_id(ck-server::body_limit_go)
 '''
 priority = 40
 

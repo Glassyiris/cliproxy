@@ -157,10 +157,10 @@ def rust_entries():
     about = os.environ.get("CARGO_ABOUT") or shutil.which("cargo-about")
     if not about:
         sys.exit("cargo-about not found: cargo install cargo-about --locked --features cli")
-    run(["cargo", "fetch", "--locked", "--manifest-path", ROOT / "crates/cook-router/Cargo.toml"])
+    run(["cargo", "fetch", "--locked", "--manifest-path", ROOT / "crates/cooker/Cargo.toml"])
     out = run(
         [about, "generate", "--locked", "--offline", "--format", "json",
-         "--config", ROOT / "about.toml", "--manifest-path", ROOT / "crates/cook-router/Cargo.toml"],
+         "--config", ROOT / "about.toml", "--manifest-path", ROOT / "crates/cooker/Cargo.toml"],
         cwd=ROOT,
     ).stdout
     data = json.loads(out)

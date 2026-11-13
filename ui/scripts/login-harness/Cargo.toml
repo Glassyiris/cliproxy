@@ -11,6 +11,6 @@ publish = false
 anyhow = "1"
 axum = "0.8.9"
 tokio = { version = "1.53", features = ["full"] }
-cpa-core = { path = "../../../crates/cpa-core" }
-cpa-exec = { path = "../../../crates/cpa-exec" }
-cpa-server = { path = "../../../crates/cpa-server", features = ["testing"] }
+ck-core = { path = "../../../crates/ck-core" }
+ck-exec = { path = "../../../crates/ck-exec" }
+ck-server = { path = "../../../crates/ck-server", features = ["testing"] }

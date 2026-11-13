@@ -5,7 +5,7 @@
 //
 // --release none answers the release check as the server does for a repository with no release yet.
 //
-// Response shapes follow crates/cpa-server/src/management/*.rs. State lives in memory: write routes
+// Response shapes follow crates/ck-server/src/management/*.rs. State lives in memory: write routes
 // answer like the real server and change what the next read returns. GET /credentials changes about
 // 5% of the accounts per call (request counts, last-used bucket) so the dashboard sees live traffic;
 // every other account serialises to identical bytes. Unknown routes answer an empty 404.
@@ -882,7 +882,7 @@ const server = http.createServer((req, res) => {
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
       const auth = req.headers.authorization || "";
       const given = /^bearer /i.test(auth) ? auth.slice(7) : "";
-      // The dashboard session, as the server does it (crates/cpa-server/src/management/session.rs):
+      // The dashboard session, as the server does it (crates/ck-server/src/management/session.rs):
       // the key is exchanged for a random id in `cook_router_session`; cookie requests need the
       // dashboard header; sign-out revokes the id on the server.
       const id = /(?:^|;\s*)cook_router_session=([^;]+)/.exec(req.headers.cookie || "")?.[1];

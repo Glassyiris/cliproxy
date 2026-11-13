@@ -58,13 +58,13 @@ Build the dashboard first, then the binary:
 git clone https://github.com/prep-cook/cook-router.git
 cd cook-router
 (cd ui && npm ci && npm run build)
-cargo build --release -p cook-router
-./target/release/cook-router --version
+cargo build --release -p cooker
+./target/release/cooker --version
 ```
 
 The dashboard in `ui/dist` is not committed, so the binary build needs it built first. To skip Node and Rust, build the image with `docker build`. To change the dashboard, see [ui/README.md](../ui/README.md).
 
-The WebRTC media relay is an optional feature and is not part of the Docker image. To include it, build with `cargo build --release -p cook-router --features cpa-server/media-relay`.
+The WebRTC media relay is an optional feature and is not part of the Docker image. To include it, build with `cargo build --release -p cooker --features ck-server/media-relay`.
 
 ## First run from source
 

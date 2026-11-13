@@ -1,5 +1,5 @@
 # Performance budgets, checked by bench/gate.sh (size, idle) and by
-# crates/cpa-server/tests/alloc_budget.rs (heap per request) on GitHub-hosted runners.
+# crates/ck-server/tests/alloc_budget.rs (heap per request) on GitHub-hosted runners.
 #
 #   <key> <value> <tolerance %>
 #

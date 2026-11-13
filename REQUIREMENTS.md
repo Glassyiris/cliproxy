@@ -61,7 +61,7 @@ UI scale/layout values remain in `ui/DESIGN.md` and code limits in `ui/CONVENTIO
 | Duplicate linked crate versions | 11 crates, zero tolerance; source: bench/budgets.txt deps.x86_64-unknown-linux-gnu.duplicate_crates | | bench/gate.sh size |
 | Linux idle | With 1 and 2000 credentials: 3 wakeups, 1 CPU tick, 6 threads; RSS 33500 and 85800 KB with 10% tolerance, measured in the Dockerfile perf stage; source: bench/budgets.txt idle.linux | | bench/gate.sh idle |
 | Field-mix soak peak | 173072 KB with 20% tolerance; source: bench/budgets.txt soak.field.peak_hwm_kb | | bench/soak.sh |
-| Request heap budgets | Per-route peak bytes, allocations and held bytes with keyed tolerances in bench/budgets.txt alloc.* | | crates/cpa-server/tests/alloc_budget.rs through nextest |
+| Request heap budgets | Per-route peak bytes, allocations and held bytes with keyed tolerances in bench/budgets.txt alloc.* | | crates/ck-server/tests/alloc_budget.rs through nextest |
 | Dashboard npm run check wall time | 90 s local, 5 min CI | 5.8 s (2026-11-08, shell and System page; host/load not recorded) | ui/tools/check-all.mjs enforces 90 s, including in CI. The 5 min CI figure is the recorded target; the dashboard job's workflow timeout is 30 min (`.github/workflows/ci.yml`) |
 | Accounts, 1000 accounts: load to all rows painted | ≤ baseline | | ui/tools/perf/run.mjs; before-release comparison |
 | One 10 s poll on Accounts, main thread | ≤ baseline | | ui/tools/perf/run.mjs; before-release comparison |
@@ -70,7 +70,7 @@ UI scale/layout values remain in `ui/DESIGN.md` and code limits in `ui/CONVENTIO
 | Select all, main thread | ≤ baseline | | ui/tools/perf/run.mjs; before-release comparison |
 | Contrast, project targets | Body ≥ 10:1; secondary and status text ≥ 5:1 | Moon dark: body 11.86, lowest 3.94; Main dark: body 13.39, lowest 3.16; Dawn light, both palettes: body 8.69, lowest 2.86 (browser, 1440 px, en; host/date not recorded); Exceptions lists misses | Browser measurement, by hand |
 | Contrast, WCAG AA | Normal text 4.5:1; large text, UI components and focus indicators 3:1 | Neutral and optional-palette measurements under Exceptions; optional palettes have an owner exception | Browser measurement, by hand |
-| Dashboard session lifetime | Default session 7 days; remember-this-device 30 days | Owner setting, 2026-11-13 | `SHORT` and `LONG` in crates/cpa-server/src/management/session.rs; `dashboard_session_cookie_signs_in_reads_and_signs_out` in crates/cpa-server/tests/management.rs |
+| Dashboard session lifetime | Default session 7 days; remember-this-device 30 days | Owner setting, 2026-11-13 | `SHORT` and `LONG` in crates/ck-server/src/management/session.rs; `dashboard_session_cookie_signs_in_reads_and_signs_out` in crates/ck-server/tests/management.rs |
 
 Historical source evidence: `bench/budgets.txt` records dated compiler/runner measurements and tolerances; `ui/REQUIREMENTS.md` retains historical dashboard measurements. Dates, hosts and load are stated only where recorded.
 
@@ -121,7 +121,7 @@ Names exactly match `###` headings and tags. Gate commands cover existing mechan
 | crates/AGENTS.md: Admin panel (if present) | | | |
 | crates/AGENTS.md: Performance | `bench/gate.sh size x86_64-unknown-linux-gnu "${CARGO_TARGET_DIR:-target}/release/cook-router"`; `cargo nextest run --workspace --locked` | `REVIEW.md`, Review guidelines; linear preparation and prompt-cache live proof remain review | |
 | crates/AGENTS.md: Verification | `cargo nextest run --workspace --locked` | `REVIEW.md`, Every finding has evidence and Review guidelines; isolation follows ci.yml setup | |
-| crates/AGENTS.md: Cargo workspace layout | | | |
+| crates/AGENTS.md: Cargo workspace layout | `python3 -I tools/check-crate-deps.py` | `REVIEW.md`, Review guidelines; naming, test placement and `lib.rs` headers reviewed | |
 | crates/AGENTS.md: Management API contract | | `REVIEW.md`, "Checking against the rules"; mechanical coverage under Management response schemas | |
 | crates/AGENTS.md: OpenAPI drift | | | |
 | crates/AGENTS.md: Management response schemas | | | |
@@ -234,7 +234,6 @@ Every incomplete Commands, Numbers or Enforcement row has one entry below. Due d
 | Enforcement: crates/AGENTS.md#management-cross-site | management/access.rs permits wildcard CORS and authenticates without the required Host/cross-site checks | Security PR: reject cross-site requests before key comparison; use a real-browser gate to prove Host validation, Origin/Sec-Fetch-Site rejection and no loopback ban | 2026-12-08 |
 | Enforcement: crates/AGENTS.md#money-idempotent | No money operations; tagged exclusion needs approval | Resolve decision 8 and record quoted approval before marking inapplicable | 2026-12-01 |
 | Enforcement: crates/AGENTS.md#ledger | No ledger; tagged exclusion needs approval | Resolve decision 8 and record quoted approval before marking inapplicable | 2026-12-01 |
-| Enforcement: crates/AGENTS.md: Cargo workspace layout | No dependency-direction table gate | An owner settles boundaries; add metadata/table comparison and a planted forbidden edge; publication question is decision 7 | 2026-12-08 |
 | Enforcement: crates/AGENTS.md: Admin panel (if present) | Runtime-setting/page mapping is manual; API-only classification awaits decision 12 | Resolve decision 12; compare runtime settings with pages and ui/tools/api-allowlist.json in a merge gate; plant an unmapped setting; meanwhile review under REVIEW.md, Checking against the rules | 2026-12-22 |
 | Enforcement: crates/AGENTS.md: OpenAPI drift | Rust-generated schema and dashboard type drift gate absent | Generate both from Rust types, regenerate in CI and reject differences | 2026-12-22 |
 | Enforcement: crates/AGENTS.md: Management response schemas | Actual-response schema/header/example coverage gate absent | Cover every operation and response status, envelopes/links, filters, authority-specific preconditions and atomic failures, request ids and removed routes including fallbacks; plant field-shape and required-header violations | 2026-12-22 |

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Route probe for the parity audit: starts the cook-router binary on a throwaway config with
+"""Route probe for the parity audit: starts the cooker binary on a throwaway config with
 no upstream credentials and requests every method/path checklist.md lists. Unrouted
 method/path pairs get the empty 404/405 axum and gin give; anything else is routed.
 
@@ -12,7 +12,7 @@ management for the requests after it. A 5 s timeout counts as routed (a handler 
 running). Nothing leaves localhost: no upstream credential exists. Run it with external
 network denied all the same.
 
-Usage: cargo build -p cook-router && python3 docs/parity-audit/probe.py [target/debug/cook-router]
+Usage: cargo build -p cooker && python3 docs/parity-audit/probe.py [target/debug/cooker]
 Writes docs/parity-audit/routes.json.
 """
 
@@ -92,7 +92,7 @@ class Server:
 
 
 def main():
-    binary = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "target", "debug", "cook-router")
+    binary = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "target", "debug", "cooker")
     result = {}
 
     def record(server, item, method, path):

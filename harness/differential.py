@@ -375,7 +375,7 @@ def run_case(root, output, upstream, case):
             if side == "go":
                 command = [str(root / "harness/.cache/go-reference"), "-config", str(config), "-local-model"]
             else:
-                command = [str(root / "harness/rust/target/debug/cpa-differential-driver"),
+                command = [str(root / "harness/rust/target/debug/ck-differential-driver"),
                            str(config), str(output / "certs/ca.pem"), str(auth_dir)]
             log = (working / "process.log").open("wb")
             handles.append(log)

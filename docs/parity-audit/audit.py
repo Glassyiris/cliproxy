@@ -176,7 +176,7 @@ def judge_test_suite(item, index):
     base = os.path.basename(gofile).replace("_test.go", ".go")
     impl_cited = go_sources.get(base, set())
     if gofile.startswith(("internal/thinking/", "internal/signature/")) and len(hits) < len(cases):
-        return ("covered", f"every call Go's suite makes is recorded and replayed: crates/cpa-common/tests/fixtures/go_calls.jsonl.gz ({len(hits)}/{len(cases)} cases also cited by name)", "")
+        return ("covered", f"every call Go's suite makes is recorded and replayed: crates/ck-wire/tests/fixtures/go_calls.jsonl.gz ({len(hits)}/{len(cases)} cases also cited by name)", "")
     if cases and len(hits) == len(cases):
         return ("covered", f"{len(hits)}/{len(cases)} cases: {short(files)}", "")
     if hits:
@@ -191,18 +191,18 @@ def test_texts():
     """Test sources: integration tests, *_tests.rs files and inline test modules."""
     out = {}
     for rel, text in scan_files():
-        if rel.endswith("cpa-server/tests/fixtures/legacy_go.json"):
+        if rel.endswith("ck-server/tests/fixtures/legacy_go.json"):
             # legacy_go.rs requests each step's path under /v0/management.
             steps = (s for sc in json.loads(text)["scenarios"] for s in sc.get("steps", []))
             out[rel] = "\n".join(f'{s["method"]} "/v0/management{s["path"]}"' for s in steps if "path" in s)
             continue
-        if rel.endswith("cpa-server/tests/fixtures/quota_probe_go.json"):
+        if rel.endswith("ck-server/tests/fixtures/quota_probe_go.json"):
             # quota_probe_go.rs replays every HTTP step.
             steps = json.loads(text)["steps"]
             out[rel] = "\n".join(f'{s["args"]["method"]} "{s["args"]["path"]}"'
                                   for s in steps if s["op"] == "http")
             continue
-        if rel.endswith(("cpa-server/tests/fixtures/media_go.json", "cpa-server/tests/fixtures/speech_go.json")):
+        if rel.endswith(("ck-server/tests/fixtures/media_go.json", "ck-server/tests/fixtures/speech_go.json")):
             # media_go.rs requests each scenario's path and compares its response.
             out[rel] = "\n".join(f'{s["method"]} "{s["path"]}"' for s in json.loads(text)["scenarios"])
             continue

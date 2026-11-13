@@ -243,7 +243,7 @@ base64 image, two proxy workers, and an unrelated 10 ms SSE stream. Run alternat
 off/on pairs at least five times, for both workloads and both transport modes:
 
 ```sh
-cargo build --release -p cpa-server --example claude_latency --locked
+cargo build --release -p ck-server --example claude_latency --locked
 for workload in text media; do
   size=1000000; media=0
   if [ "$workload" = media ]; then size=30000000; media=1; fi
