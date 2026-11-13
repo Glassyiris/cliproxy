@@ -650,7 +650,7 @@ impl Shared {
         let (down_tx, down_rx) = mpsc::channel(QUEUE);
         let (up_tx, up_rx) = mpsc::channel(QUEUE);
         Arc::new(Self {
-            id: crate::dispatch::request_id(),
+            id: crate::inference::dispatch::request_id(),
             route,
             forwarding_logged: AtomicBool::new(false),
             closed: AtomicBool::new(false),

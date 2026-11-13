@@ -1,5 +1,5 @@
 //! Devin model resolution (helps/devin_models.go). The catalog updater lives in
-//! `ck_server::model_updater`.
+//! `ck_server::inference::model_updater`.
 //!
 //! A client model (`devin/swe-2`, `glm-5-2(max)`, `claude-sonnet-4.5`) and its requested
 //! effort become the upstream `chat_model_uid` (`swe-2-high`, `glm-5-2-max`,

@@ -12,7 +12,7 @@ use ck_core::credential::Credential;
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
 use ck_server::runtime::AttemptStats;
-use ck_server::scheduler::Policy;
+use ck_server::scheduling::scheduler::Policy;
 use ck_server::{Runtime, router};
 use serde_json::Value;
 

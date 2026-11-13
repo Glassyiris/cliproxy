@@ -14,9 +14,9 @@ use ck_core::config::Config;
 use ck_exec::Executors;
 use ck_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL};
 use ck_server::Runtime;
-use ck_server::config_store::ConfigStore;
-use ck_server::credential_store::CredentialDb;
-use ck_server::listener::bind;
+use ck_server::net::listener::bind;
+use ck_server::store::config_store::ConfigStore;
+use ck_server::store::credential_store::CredentialDb;
 use clap::{ArgAction, Parser};
 
 /// Same strings as the management `X-Ck-*` headers.
@@ -405,7 +405,7 @@ async fn wait_for_cloud_deploy() {
 }
 
 fn main() -> anyhow::Result<()> {
-    ck_server::logging::init();
+    ck_server::observability::logging::init();
     let raw: Vec<String> = std::env::args().collect();
     if config_cli::is_command(&raw[1..]) {
         return config_cli::execute(raw);
@@ -425,7 +425,7 @@ fn main() -> anyhow::Result<()> {
     // Next, relative to that directory, so every line from here on reaches the file:
     // sizing the runtime can warn.
     if let Some(path) = &args.log_file {
-        ck_server::logging::set_log_file(path.clone()).context("open process log")?;
+        ck_server::observability::logging::set_log_file(path.clone()).context("open process log")?;
     }
     // Discovery does not read .env.
     let discover_mode = args.discover || args.discover_json;
@@ -593,7 +593,7 @@ async fn run(args: Args, loaded: Option<(Arc<ConfigStore>, Config)>) -> anyhow::
     let config_present = !cloud || cloud_config_present(&config_store, &config);
     let backend = initialize_credentials(config_store.clone(), &mut config)?;
     // Go ConfigureLogOutput and SetLogLevel, before any login command.
-    ck_server::logging::configure(&config);
+    ck_server::observability::logging::configure(&config);
     tracing::info!(commit = COMMIT, built = BUILD_DATE, "{VERSION}");
     if command_mode(&args) {
         return command(&args, &config, backend).await.map(|_| ());
@@ -792,7 +792,7 @@ async fn standalone_tui(
     password: String,
     local_model: bool,
 ) {
-    let hook = ck_server::logging::capture(2000);
+    let hook = ck_server::observability::logging::capture(2000);
     let (quiet, out): (Option<QuietStdio>, Box<dyn io::Write + Send>) = match QuietStdio::start() {
         Ok((guard, tty)) => (Some(guard), Box::new(tty)),
         Err(_) => (None, Box::new(io::stdout())),
@@ -837,7 +837,7 @@ async fn standalone_tui(
     // Restores stdout and stderr on Unix; outside Unix nothing was redirected.
     #[cfg_attr(not(unix), allow(clippy::drop_non_drop))]
     drop(quiet);
-    ck_server::logging::release();
+    ck_server::observability::logging::release();
     if let Err(e) = result {
         eprintln!("TUI error: {e}");
     }
@@ -860,7 +860,7 @@ fn login_save(backend: Arc<CredentialDb>) -> (ck_exec::login_store::LoginSave, A
         let committed = (|| -> anyhow::Result<()> {
             let mut paths = paths
                 .iter()
-                .map(|path| ck_server::credential_store::credential_path_key(path))
+                .map(|path| ck_server::store::credential_store::credential_path_key(path))
                 .collect::<io::Result<Vec<_>>>()?;
             paths.sort();
             paths.dedup();
@@ -952,8 +952,8 @@ fn online_siwc_target(target: &str, sources: &tui::CredentialSources) -> anyhow:
             sources.auth_dir.is_absolute(),
             "use a managed filename on this client platform"
         );
-        let path = ck_server::credential_store::credential_path_key(supplied)?;
-        let root = ck_server::credential_store::credential_path_key(&sources.auth_dir)?;
+        let path = ck_server::store::credential_store::credential_path_key(supplied)?;
+        let root = ck_server::store::credential_store::credential_path_key(&sources.auth_dir)?;
         anyhow::ensure!(
             path.parent() == Some(root.as_path()),
             "SIWC target must belong to the running owner's managed directory"
@@ -1299,14 +1299,14 @@ fn standalone_base_url((addr, tls): (SocketAddr, bool)) -> Result<String, String
 }
 
 /// The served routes.
-fn app(rt: &Arc<Runtime>, management: &Arc<ck_server::management::Management>) -> axum::Router {
-    let app = ck_server::app(rt.clone(), ck_server::management::router(management.clone()));
-    let app = ck_server::safe_mode::router(rt, app);
+fn app(rt: &Arc<Runtime>, management: &Arc<ck_server::management::api::Management>) -> axum::Router {
+    let app = ck_server::app(rt.clone(), ck_server::management::api::router(management.clone()));
+    let app = ck_server::net::safe_mode::router(rt, app);
     // Go applies its CORS middleware to every route, not only management.
-    let app = app.layer(axum::middleware::from_fn(ck_server::management::cors));
-    let app = ck_server::request_logging::router(management, app);
-    let app = ck_server::body_limit::layer(rt, app);
-    ck_server::observability::router(rt, app)
+    let app = app.layer(axum::middleware::from_fn(ck_server::management::api::cors));
+    let app = ck_server::observability::request_logging::router(management, app);
+    let app = ck_server::http::body_limit::layer(rt, app);
+    ck_server::observability::api::router(rt, app)
 }
 
 /// `listening` (standalone TUI only) receives the bound address and whether TLS is on.
@@ -1332,7 +1332,7 @@ async fn serve(
         bind(&config.host, config.port).with_context(|| format!("binding {}:{}", config.host, config.port))?;
     let listener = tokio::net::TcpListener::from_std(listener)?;
     // Go `Server.Start`: TLS is validated after the listener is open.
-    let tls = ck_server::listener::tls_acceptor(&config)?;
+    let tls = ck_server::net::listener::tls_acceptor(&config)?;
     tracing::info!(addr = %listener.local_addr()?, tls = tls.is_some(), "listening");
     let standalone = listening.is_some();
     if let Some(listening) = listening {
@@ -1354,28 +1354,28 @@ async fn serve(
     rt.store().note_loaded(&read);
     rt.set_local_model(local_model);
     // Go `misc.StartAntigravityVersionUpdater` and `startModelCatalogUpdaters`.
-    ck_server::model_updater::start(&rt);
+    ck_server::inference::model_updater::start(&rt);
     // Model router benchmarks (cooker only); idle without `artificial-analysis.api-key`.
-    ck_server::aa::start(&rt);
+    ck_server::inference::aa::start(&rt);
     // Translators and thinking validation read model capabilities through the global
     // overlay; without it they see only the static catalog.
     ck_server::install_registry(&rt);
     rt.start_auto_refresh();
-    let options = ck_server::management::Options {
+    let options = ck_server::management::api::Options {
         local_password: password,
         standalone,
         ..Default::default()
     };
-    let management = ck_server::management::Management::with_options(rt.clone(), config_store, options);
-    let pprof = ck_server::pprof::Server::start(&rt);
-    let credential_notifications = ck_server::watching::start(&management);
+    let management = ck_server::management::api::Management::with_options(rt.clone(), config_store, options);
+    let pprof = ck_server::observability::pprof::Server::start(&rt);
+    let credential_notifications = ck_server::management::watching::start(&management);
     // The served transport decides `tls=`: HTTPS exactly when server.tls loaded.
     let advertiser = discovery::advertise::Advertiser::spawn(rt.subscribe_config(), tls.is_some());
     let app = app(&rt, &management);
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     let app = heap_trim::layer(app);
     // Go's listener also serves the Redis protocol (usage queue) to management clients.
-    let mut server = Box::pin(ck_server::listener::serve_with_resp(
+    let mut server = Box::pin(ck_server::net::listener::serve_with_resp(
         listener,
         app,
         tls,
@@ -1417,7 +1417,7 @@ async fn serve(
     let persistence = rt.finish_shutdown().await;
     // Settlement can retry a pending configuration, which reconfigures logging; the
     // process-wide log directory cleaner is stopped and joined only after it.
-    if let Err(error) = tokio::task::spawn_blocking(ck_server::logging::stop_cleaner).await {
+    if let Err(error) = tokio::task::spawn_blocking(ck_server::observability::logging::stop_cleaner).await {
         tracing::error!("log directory cleaner did not stop: {error}");
     }
     notifications?;
@@ -1482,10 +1482,10 @@ mod tests {
             },
             db.clone(),
         ));
-        let state = ck_server::management::Management::with_options(
+        let state = ck_server::management::api::Management::with_options(
             rt.clone(),
             store.clone(),
-            ck_server::management::Options {
+            ck_server::management::api::Options {
                 management_password: Some("device-fixture-key".into()),
                 ..Default::default()
             },
@@ -1515,7 +1515,7 @@ mod tests {
         let first = Arc::new(AtomicBool::new(true));
         let ready = reply_ready.clone();
         let release = reply_release.clone();
-        let app = ck_server::management::router(state.clone())
+        let app = ck_server::management::api::router(state.clone())
             .route("/mock/usercode", axum::routing::post(|| async { axum::Json(serde_json::json!({
                 "device_auth_id":"loopback", "usercode":"FAKE-CODE", "interval":"1"})) }))
             .route("/mock/device", axum::routing::post(|| async { axum::Json(serde_json::json!({
@@ -2614,7 +2614,7 @@ mod tests {
                 google: Default::default(),
             };
             let rt = Arc::new(ck_server::testing::runtime(config.clone(), Vec::new(), executors));
-            let options = ck_server::management::Options {
+            let options = ck_server::management::api::Options {
                 // CK_MANAGEMENT_PASSWORD; with no config secret it alone decides availability.
                 management_password: Some(if enabled {
                     "fake-management-only".into()
@@ -2625,7 +2625,7 @@ mod tests {
                 log_dir: Some(dir.join("logs")),
                 ..Default::default()
             };
-            let management = ck_server::management::Management::with_options(rt.clone(), store.clone(), options);
+            let management = ck_server::management::api::Management::with_options(rt.clone(), store.clone(), options);
             let mut request = axum::http::Request::post("/v8/management/oauth/siwc/bind")
                 .header("content-type", "application/json")
                 .extension(axum::extract::ConnectInfo(SocketAddr::from((

@@ -221,7 +221,7 @@ pub(crate) fn refusal(headers: &HeaderMap, uri: &Uri, trusted_proxy: bool) -> Op
 /// HTTPS as the browser sees it: this listener's own TLS, or a trusted proxy's
 /// `X-Forwarded-Proto: https`. An untrusted peer's forwarding headers are ignored.
 fn https(req: &axum::http::request::Parts, trusted_proxy: bool) -> bool {
-    req.extensions.get::<crate::listener::Tls>().is_some()
+    req.extensions.get::<crate::net::listener::Tls>().is_some()
         || trusted_proxy
             && forwarded(&req.headers, "X-Forwarded-Proto").is_some_and(|p| p.eq_ignore_ascii_case("https"))
 }
@@ -479,7 +479,7 @@ mod tests {
                 req.headers_mut().insert("x-forwarded-proto", proto.parse().unwrap());
             }
             if tls {
-                req.extensions_mut().insert(crate::listener::Tls);
+                req.extensions_mut().insert(crate::net::listener::Tls);
             }
             req.into_parts().0
         };

@@ -100,7 +100,7 @@ fn bad_handshake() -> Response {
 /// Everything a WebSocket route receives.
 pub(super) struct Inbound {
     rt: Arc<Runtime>,
-    owner: Option<Extension<crate::listener::ConnectionWork>>,
+    owner: Option<Extension<crate::net::listener::ConnectionWork>>,
     live: Arc<Live>,
     principal: Principal,
     headers: HeaderMap,
@@ -110,7 +110,7 @@ pub(super) struct Inbound {
 /// `GET /v1/live/{call_id}`.
 pub(super) async fn live_sideband(
     State(rt): State<Arc<Runtime>>,
-    owner: Option<Extension<crate::listener::ConnectionWork>>,
+    owner: Option<Extension<crate::net::listener::ConnectionWork>>,
     Extension(live): Extension<Arc<Live>>,
     Extension(principal): Extension<Principal>,
     path: Result<Path<String>, PathRejection>,
@@ -131,7 +131,7 @@ pub(super) async fn live_sideband(
 /// `GET /v1/realtime/calls/{call_id}`.
 pub(super) async fn calls_sideband(
     State(rt): State<Arc<Runtime>>,
-    owner: Option<Extension<crate::listener::ConnectionWork>>,
+    owner: Option<Extension<crate::net::listener::ConnectionWork>>,
     Extension(live): Extension<Arc<Live>>,
     Extension(principal): Extension<Principal>,
     path: Result<Path<String>, PathRejection>,
@@ -153,7 +153,7 @@ pub(super) async fn calls_sideband(
 /// else a standard Realtime session.
 pub(super) async fn realtime(
     State(rt): State<Arc<Runtime>>,
-    owner: Option<Extension<crate::listener::ConnectionWork>>,
+    owner: Option<Extension<crate::net::listener::ConnectionWork>>,
     Extension(live): Extension<Arc<Live>>,
     Extension(principal): Extension<Principal>,
     OriginalUri(uri): OriginalUri,
@@ -161,7 +161,7 @@ pub(super) async fn realtime(
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
     let query = |name| {
-        crate::access::query_get(uri.query().unwrap_or_default(), name)
+        crate::net::access::query_get(uri.query().unwrap_or_default(), name)
             .map(|v| String::from_utf8_lossy(&v).trim().to_owned())
             .unwrap_or_default()
     };
@@ -421,7 +421,7 @@ fn dial_failed(error: DialError, other: impl FnOnce(u16) -> Response) -> Respons
 fn upgrade<F, Fut>(
     ws: WebSocketUpgrade,
     upstream: LiveSocket,
-    owner: Option<Extension<crate::listener::ConnectionWork>>,
+    owner: Option<Extension<crate::net::listener::ConnectionWork>>,
     run: F,
 ) -> Response
 where
@@ -436,7 +436,7 @@ where
     }
     let upstream = upstream.socket;
     let work = owner.as_ref().map(|Extension(owner)| owner.work.clone());
-    crate::listener::websocket(ws, owner, move |downstream| async move {
+    crate::net::listener::websocket(ws, owner, move |downstream| async move {
         let relay = relay(downstream, upstream);
         let task = match work {
             Some(work) => work.spawn(relay),

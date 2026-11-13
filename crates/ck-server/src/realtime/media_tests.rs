@@ -16,7 +16,7 @@ use webrtc::peer_connection::{
 };
 
 use super::*;
-use crate::realtime::relay::{Limiter, MediaRelay, Route};
+use crate::realtime::api::relay::{Limiter, MediaRelay, Route};
 
 #[test]
 fn public_remote_ips_match_go() {
@@ -336,7 +336,7 @@ fn ice_urls_get_go_default_ports() {
     assert_eq!(ice_url("stun:[2001:db8::1]"), "stun:[2001:db8::1]:3478");
     assert_eq!(ice_url("stun:[2001:db8::1]:5000"), "stun:[2001:db8::1]:5000");
     let config = RelayConfig {
-        ice_servers: vec![crate::realtime::relay::IceServer {
+        ice_servers: vec![crate::realtime::api::relay::IceServer {
             urls: vec![
                 "turn:a.example?transport=tcp".into(),
                 "turns:b.example".into(),
@@ -422,7 +422,7 @@ async fn cancelled_setup_frees_ports_and_slot() {
                 max_sessions: 1,
                 udp_port_min: port,
                 udp_port_max: port + 1,
-                ice_servers: vec![crate::realtime::relay::IceServer {
+                ice_servers: vec![crate::realtime::api::relay::IceServer {
                     urls: vec![format!("stun:{}", silent.local_addr().unwrap())],
                     ..Default::default()
                 }],
@@ -893,7 +893,7 @@ async fn a_silent_stun_server_does_not_fail_the_call() {
     let config = RelayConfig {
         enabled: true,
         max_sessions: 1,
-        ice_servers: vec![crate::realtime::relay::IceServer {
+        ice_servers: vec![crate::realtime::api::relay::IceServer {
             urls: vec![format!("stun:{}", silent.local_addr().unwrap())],
             ..Default::default()
         }],

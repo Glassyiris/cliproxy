@@ -208,7 +208,7 @@ mod tests {
         ));
         let state = Management::with_options(
             rt.clone(),
-            Arc::new(crate::config_store::ConfigStore::memory_with(
+            Arc::new(crate::store::config_store::ConfigStore::memory_with(
                 &ck_core::config::yaml_string(&rt.config().document).unwrap(),
             )),
             super::super::Options {

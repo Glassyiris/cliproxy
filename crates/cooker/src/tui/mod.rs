@@ -32,7 +32,7 @@ mod style;
 mod sys;
 mod widgets;
 
-pub use ck_server::logging::LogHook;
+pub use ck_server::observability::logging::LogHook;
 pub use client::{Client, CredentialSource, CredentialSources, Object};
 
 /// Bubble Tea `tea.Cmd`: work whose result comes back as a message.

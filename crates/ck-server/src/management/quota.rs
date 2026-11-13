@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use super::Management;
 
 fn map_json(status: StatusCode, value: &Value) -> Response {
-    go_json(status, crate::gojson::sorted(value).into_bytes())
+    go_json(status, crate::http::gojson::sorted(value).into_bytes())
 }
 
 fn go_json(status: StatusCode, body: Vec<u8>) -> Response {
@@ -138,7 +138,7 @@ fn credential(state: &Management, index: &str) -> Option<Arc<Credential>> {
 /// `POST /v0/management/quota/fetch` (Go `FetchCredentialQuota`).
 pub(crate) async fn fetch(
     State(state): State<Arc<Management>>,
-    crate::body_limit::FirstJson(body): crate::body_limit::FirstJson,
+    crate::http::body_limit::FirstJson(body): crate::http::body_limit::FirstJson,
 ) -> Response {
     let Some(body) = QuotaBody::decode(&body) else {
         return fail(StatusCode::BAD_REQUEST, "invalid request body");

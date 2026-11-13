@@ -63,7 +63,7 @@ async fn service_catalog_startup_and_config_reload() {
 
     // Startup reads the configured source (a test runtime still reads explicit ones).
     let rt = runtime([&general, &codex, &first_path]);
-    ck_server::model_updater::start(&rt);
+    ck_server::inference::model_updater::start(&rt);
     await_devin(first).await;
 
     // A published config with another source switches to it.
@@ -75,7 +75,7 @@ async fn service_catalog_startup_and_config_reload() {
     drop(rt);
     std::fs::write(&second_path, first).unwrap();
     let rt = runtime([&general, &codex, &second_path]);
-    ck_server::model_updater::start(&rt);
+    ck_server::inference::model_updater::start(&rt);
     await_devin(first).await;
 
     // Restore the embedded catalog for anything else in this process.
@@ -101,7 +101,7 @@ async fn commits_reconfigure_in_order_and_invalid_sources_are_rejected() {
     std::fs::write(&a, &d0).unwrap();
     std::fs::write(&b, &d2).unwrap();
     let rt = runtime([&general, &codex, &a]);
-    ck_server::model_updater::start(&rt);
+    ck_server::inference::model_updater::start(&rt);
     await_devin(&d0).await;
 
     std::fs::write(&a, &d1).unwrap();

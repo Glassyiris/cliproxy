@@ -227,7 +227,7 @@ fn issue(
         out.push(b'}');
         out
     };
-    let mut response = crate::respond::gin_json(200, String::from_utf8_lossy(&body).into_owned());
+    let mut response = crate::http::respond::gin_json(200, String::from_utf8_lossy(&body).into_owned());
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

@@ -1,59 +1,18 @@
 //! HTTP surface: routes and client-key auth over an axum-independent [`runtime`].
 
-pub mod aa;
-mod access;
-mod affinity;
-pub mod body_limit;
-pub mod capabilities;
-mod classify;
-mod claude;
-mod codex_alpha;
-mod codex_models;
-mod config_diff;
-pub mod config_store;
-pub mod cooldown_store;
-pub mod credential_store;
-pub mod dispatch;
-mod error_events;
-mod errors;
-mod gemini;
-mod gojson;
-mod images;
-pub mod keepalive;
-pub mod lcp;
-pub mod listener;
-pub mod logging;
+pub mod http;
+pub mod inference;
 pub mod management;
-mod model_router;
-pub mod model_updater;
-mod models;
+pub mod net;
 pub mod observability;
-mod openai;
-pub mod pprof;
-pub mod provider_policy;
-mod realtime;
-mod refresh;
-pub mod registry;
-mod relay;
-pub mod request_logging;
-mod resp;
-mod respond;
+pub mod realtime;
+#[path = "runtime/runtime.rs"]
 pub mod runtime;
-pub mod safe_mode;
-mod sanitize;
-pub mod scheduler;
-mod session;
-mod speech;
+pub mod scheduling;
+pub mod store;
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub mod testing;
-pub mod usage;
-mod usage_record;
-mod videos;
-pub mod watching;
-mod websocket;
-mod websocket_requests;
-mod websocket_tools;
 
 use std::sync::Arc;
 
@@ -62,6 +21,13 @@ use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Router, middleware};
+
+use http::{gojson, respond};
+use inference::{claude, codex_alpha, gemini, images, models, openai, speech, videos};
+use net::access;
+use observability::request_logging;
+use realtime::{relay, websocket};
+use scheduling::registry;
 
 pub use runtime::Runtime;
 
@@ -132,7 +98,7 @@ fn api(rt: Arc<Runtime>) -> Router {
         .route("/callback", get(devin_callback))
         .route("/devin/callback", get(devin_callback))
         .merge(v1)
-        .merge(realtime::routes(&rt))
+        .merge(realtime::api::routes(&rt))
         .merge(relay::routes(&rt))
         // Matched API routes only: management answers its own HEADs.
         .route_layer(middleware::from_fn(head_only_healthz))

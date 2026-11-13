@@ -3,9 +3,9 @@ use ck_core::config::Config;
 use ck_core::gostr::GoStr;
 use ck_exec::Executors;
 use ck_exec::claude::ClaudeExecutor;
-use ck_server::credential_store::CredentialDb;
-use ck_server::management::Management;
-use ck_server::{Runtime, management, watching};
+use ck_server::management::api::{self as management, Management};
+use ck_server::store::credential_store::CredentialDb;
+use ck_server::{Runtime, management::watching};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -187,7 +187,7 @@ impl Drop for Fixture {
 
 #[tokio::test]
 async fn authorized_credential_reads_and_cooldown_views_need_no_storage() {
-    use ck_server::cooldown_store::{Backend, Record};
+    use ck_server::store::cooldown_store::{Backend, Record};
     let raw = b"{ \"type\": \"claude\", \"access_token\": \"test-only\", \"opaque\": [1,2] }\n";
     let f = Fixture::from_yaml("credential-memory", |auth, hash| {
         std::fs::write(auth.join("raw.json"), raw).unwrap();
@@ -2239,7 +2239,7 @@ async fn latest_version_keeps_tls_verification_through_proxy() {
     tls.set_private_key(&key).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = listener.local_addr().unwrap();
-    let tls_server = tokio::spawn(ck_server::listener::serve(
+    let tls_server = tokio::spawn(ck_server::net::listener::serve(
         listener,
         axum::Router::new().fallback(|| async {
             (

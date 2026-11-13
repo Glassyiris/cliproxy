@@ -22,8 +22,8 @@ use ck_wire::json::GoValue;
 use serde_json::{Map, Value, json};
 
 use super::{Management, json as respond, multipart};
-use crate::body_limit::FirstJson;
 use crate::runtime::{Commit, PatchError};
+use crate::{http::body_limit::FirstJson, store::config_store};
 
 /// `url.ParseQuery` pairs in order: names and values decoded, malformed pairs skipped.
 pub(super) struct Query(Vec<(String, String)>);
@@ -350,7 +350,7 @@ fn expiry_from(meta: &Map<String, Value>) -> Option<SystemTime> {
 }
 
 /// Go `newCooldownView` over the scheduler's cooldown state.
-fn cooldown_view(cd: &crate::scheduler::CooldownState) -> Value {
+fn cooldown_view(cd: &crate::scheduling::scheduler::CooldownState) -> Value {
     let retry_at = SystemTime::now() + cd.remaining;
     let seconds = cd.remaining.as_secs() + u64::from(cd.remaining.subsec_nanos() > 0);
     let credential_quota = cd.model.is_empty() && cd.quota;
@@ -568,7 +568,7 @@ fn entry(state: &Management, c: &Credential, v8: bool) -> Option<BTreeMap<&'stat
     if !account.is_empty() {
         // An API-key credential's account is the key itself; reveal goes through export.
         let account = if account_type == "api_key" {
-            crate::config_store::resources::SECRET.into()
+            crate::store::config_store::resources::SECRET.into()
         } else {
             account
         };
@@ -1024,7 +1024,7 @@ pub(crate) async fn upload(
     uri: Uri,
     RawQuery(raw): RawQuery,
     headers: HeaderMap,
-    read: crate::body_limit::Read,
+    read: crate::http::body_limit::Read,
 ) -> Response {
     let content_type = headers
         .get(header::CONTENT_TYPE)
@@ -1225,8 +1225,8 @@ pub(crate) async fn delete(
     let body = match body {
         Ok(body) => body,
         Err(_) if matches!(q.first("all"), "true" | "1" | "*") || !q.first("name").is_empty() => Bytes::new(),
-        Err(rejection) if crate::body_limit::is_too_large(&rejection) => {
-            return fail(StatusCode::PAYLOAD_TOO_LARGE, crate::body_limit::MESSAGE);
+        Err(rejection) if crate::http::body_limit::is_too_large(&rejection) => {
+            return fail(StatusCode::PAYLOAD_TOO_LARGE, crate::http::body_limit::MESSAGE);
         }
         Err(_) => return fail(StatusCode::BAD_REQUEST, "failed to read body"),
     };
@@ -1447,8 +1447,8 @@ fn toggle_config_key(
         // Locate the key in the document being edited, which may be newer than the
         // published config (another process committed since the last poll).
         let json = serde_json::to_value(ck_core::config::AsJson(doc.value())).map_err(|e| Some(e.to_string()))?;
-        let resources = crate::config_store::resources::split(&json, &[]).map_err(|e| Some(e.to_string()))?;
-        let (current, _) = crate::config_store::resources::config(&resources).map_err(|e| Some(e.to_string()))?;
+        let resources = crate::store::config_store::resources::split(&json, &[]).map_err(|e| Some(e.to_string()))?;
+        let (current, _) = config_store::resources::config(&resources).map_err(|e| Some(e.to_string()))?;
         let Some(credentials::KeyLocation {
             family,
             group: g,
@@ -1668,7 +1668,7 @@ pub(crate) async fn fields(State(state): State<Arc<Management>>, body: Result<Fi
     // first JSON value, a later duplicate key replacing an earlier one; null is an
     // empty map. Each value is then decoded into `any`, numbers kept as written.
     let invalid = || fail(StatusCode::BAD_REQUEST, "invalid request body");
-    let Some(doc) = crate::body_limit::whole_first_value(&body).and_then(GoValue::parse) else {
+    let Some(doc) = crate::http::body_limit::whole_first_value(&body).and_then(GoValue::parse) else {
         return invalid();
     };
     let req = match doc.into_object() {
@@ -2289,7 +2289,7 @@ pub(super) fn save_granted_bytes(
     state: &Management,
     target: &Credential,
     bytes: Vec<u8>,
-    command: &mut Option<crate::credential_store::CredentialCommand<'_>>,
+    command: &mut Option<crate::store::credential_store::CredentialCommand<'_>>,
 ) -> Result<(), PatchError> {
     if !command.as_ref().is_some_and(|command| command.is_grant()) {
         return Err(PatchError::Io("consumed-grant admission required".into()));
@@ -2308,7 +2308,7 @@ fn commit_bytes(
     state: &Management,
     target: &Credential,
     commit: Commit,
-    admitted: Option<&mut Option<crate::credential_store::CredentialCommand<'_>>>,
+    admitted: Option<&mut Option<crate::store::credential_store::CredentialCommand<'_>>>,
 ) -> Result<(), PatchError> {
     let Some(path) = path_of(target).map(Path::to_path_buf) else {
         return Err(PatchError::ConfigBacked);
@@ -2456,12 +2456,12 @@ fn dynamic_definitions(state: &Management, channel: &str) -> Vec<Value> {
 /// `GetAuthFileModels`.
 fn models_for(state: &Management, c: &Credential) -> Vec<Value> {
     let cfg = state.rt.config();
-    let aliases = crate::registry::global_aliases(&cfg);
+    let aliases = crate::scheduling::registry::global_aliases(&cfg);
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
     let mut seen = std::collections::HashSet::new();
-    crate::registry::models_for(&cfg, &aliases, c, now)
+    crate::scheduling::registry::models_for(&cfg, &aliases, c, now)
         .into_iter()
         .filter(|m| !m.id.is_empty() && seen.insert(m.id.clone()))
         .map(|m| {
@@ -2669,7 +2669,7 @@ mod tests {
         for (file, body) in files {
             std::fs::write(dir.join(file), body).unwrap();
         }
-        let store = Arc::new(crate::config_store::ConfigStore::memory_with(""));
+        let store = Arc::new(crate::store::config_store::ConfigStore::memory_with(""));
         let mut cfg = store.load().unwrap().config;
         cfg.auth_dir = dir.clone();
         let mut scan = credentials::scan_auth_dir(&cfg);
@@ -2696,11 +2696,15 @@ mod tests {
         (Management::new(rt, store), materialized)
     }
 
-    fn sqlite_management() -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>, PathBuf) {
+    fn sqlite_management() -> (
+        Arc<Management>,
+        Arc<crate::store::credential_store::CredentialDb>,
+        PathBuf,
+    ) {
         let root = std::env::temp_dir().join(format!("cooker-management-sqlite-{}", uuid::Uuid::new_v4()));
         let config = Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap());
         config.import_yaml("oauth: {}\n", "test", "").unwrap();
-        let db = crate::credential_store::CredentialDb::initialize(config.clone()).unwrap();
+        let db = crate::store::credential_store::CredentialDb::initialize(config.clone()).unwrap();
         db.save(
             &db.auth_dir().join("a.json"),
             br#"{"type":"claude","access_token":"old","extra_field":{"keep":true}}"#,
@@ -2870,14 +2874,14 @@ mod tests {
         drop(db);
         std::fs::remove_dir_all(&cache).unwrap();
         let store = Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
+        let db = crate::store::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         assert_eq!(std::fs::read(&auth).unwrap(), bytes);
         std::fs::remove_file(&auth).unwrap();
         db.delete(&auth).unwrap();
         drop(db);
         drop(store);
         std::fs::remove_dir_all(&cache).unwrap();
-        let db = crate::credential_store::CredentialDb::initialize(Arc::new(
+        let db = crate::store::credential_store::CredentialDb::initialize(Arc::new(
             crate::testing::config_store(&root.join("cooker.db")).unwrap(),
         ))
         .unwrap();
@@ -2992,7 +2996,7 @@ mod tests {
                 "",
             )
             .unwrap();
-        crate::watching::reload(&state).unwrap();
+        crate::management::watching::reload(&state).unwrap();
         let id = state
             .rt
             .store()
@@ -3359,7 +3363,7 @@ mod tests {
         exact("a.json");
         let saved = std::fs::read(dir.join("a.json")).unwrap();
         std::fs::write(dir.join("a.json"), b"").unwrap();
-        crate::watching::reload(&state).unwrap();
+        crate::management::watching::reload(&state).unwrap();
         std::fs::write(dir.join("a.json"), &saved).unwrap();
         disable("a.json");
         assert_eq!(std::fs::read_to_string(dir.join("a.json")).unwrap(), want);

@@ -1,4 +1,4 @@
-//! `/admin/v1`: the config as resources ([`crate::config_store`]).
+//! `/admin/v1`: the config as resources ([`crate::store::config_store`]).
 //!
 //! - `GET /r/{kind}`, `GET|PUT|PATCH|DELETE /r/{kind}/{id}`: resources, with strong
 //!   revision ETags. `If-Match` requires a matching revision (or existence with `*`);
@@ -33,7 +33,7 @@ use serde_json::{Value as Json, json};
 use sha2::{Digest as _, Sha256};
 
 use super::Management;
-use crate::config_store::{CommitError, Committed, Kind, Op, Precondition, Resource, resources};
+use crate::store::config_store::{CommitError, Committed, Kind, Op, Precondition, Resource, resources};
 
 const ACTOR: &str = "admin-api";
 /// A whole-store import may be larger than an individual resource (limited by SQL).
@@ -400,7 +400,7 @@ impl FromRequest<Arc<Management>> for LimitedBody {
         let mut bytes = bytes::BytesMut::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| {
-                if crate::body_limit::is_too_large(&e) {
+                if crate::http::body_limit::is_too_large(&e) {
                     AdminError::new(state, 413, "body_too_large", "request body exceeds the limit")
                 } else {
                     AdminError::new(state, 400, "invalid_body", "could not read request body")

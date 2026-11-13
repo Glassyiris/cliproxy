@@ -35,7 +35,7 @@ A workspace reorganization updates this list in the same PR.
 ### Logging
 
 - Use one log format and meaningful debug, info, warn and error levels. Expected cases are not errors; failures are not silently swallowed.
-- Apply root Secrets rules. Upstream request and response capture goes through `crates/ck-server/src/request_logging.rs`. It redacts `Cookie` and `Set-Cookie`, URL credentials and short keys, and spools large sections to disk. Do not format or log captured bytes elsewhere.
+- Apply root Secrets rules. Upstream request and response capture goes through `crates/ck-server/src/observability/request_logging.rs`. It redacts `Cookie` and `Set-Cookie`, URL credentials and short keys, and spools large sections to disk. Do not format or log captured bytes elsewhere.
 
 ### Security (if present)
 

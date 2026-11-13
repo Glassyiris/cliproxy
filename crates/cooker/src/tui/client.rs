@@ -464,7 +464,7 @@ impl Client {
                 .pointer("/providers/codex/signin-with-chatgpt-identifier")
                 .cloned()
         });
-        let mut document = ck_server::config_store::resources::export_json(0, &[], false);
+        let mut document = ck_server::store::config_store::resources::export_json(0, &[], false);
         let resources = document["resources"].as_array_mut().expect("export envelope");
         if let Some(spec) = requests {
             resources.push(serde_json::json!({"kind": "setting", "id": "requests", "spec": spec}));
@@ -477,9 +477,9 @@ impl Client {
     }
 
     fn compile(document: Value) -> Result<ck_core::config::Config, String> {
-        let resources = ck_server::config_store::resources::import_json(&document.to_string())
+        let resources = ck_server::store::config_store::resources::import_json(&document.to_string())
             .map_err(|_| "invalid owner configuration export".to_owned())?;
-        ck_server::config_store::resources::config(&resources)
+        ck_server::store::config_store::resources::config(&resources)
             .map(|(config, _)| config)
             .map_err(|_| "invalid owner configuration".to_owned())
     }
@@ -1270,7 +1270,7 @@ mod tests {
                 "direct owner receipt",
             )
             .unwrap();
-        let db = ck_server::credential_store::CredentialDb::initialize(store.clone()).unwrap();
+        let db = ck_server::store::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         let mut config = store.load().unwrap().config;
         config.auth_dir = db.auth_dir();
         let rt = Arc::new(ck_server::testing::runtime_with_db(
@@ -1285,10 +1285,10 @@ mod tests {
             },
             db,
         ));
-        let state = ck_server::management::Management::with_options(
+        let state = ck_server::management::api::Management::with_options(
             rt.clone(),
             store.clone(),
-            ck_server::management::Options {
+            ck_server::management::api::Options {
                 local_password: "fake-owner-key".into(),
                 standalone: true,
                 update_check_disabled: Some(true),
@@ -1296,7 +1296,7 @@ mod tests {
             },
         );
         let seen = Arc::new(AtomicUsize::new(0));
-        let app = ck_server::management::router(state.clone()).layer(axum::middleware::from_fn({
+        let app = ck_server::management::api::router(state.clone()).layer(axum::middleware::from_fn({
             let seen = seen.clone();
             move |request: axum::extract::Request, next: axum::middleware::Next| {
                 seen.fetch_add(1, Ordering::SeqCst);
@@ -1305,7 +1305,7 @@ mod tests {
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        let owner = tokio::spawn(ck_server::listener::serve_with_resp(
+        let owner = tokio::spawn(ck_server::net::listener::serve_with_resp(
             listener,
             app,
             None,

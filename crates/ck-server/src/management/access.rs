@@ -484,7 +484,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("access-purge-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let config = std::sync::Arc::new(crate::testing::config_store(&root.join("config.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(config.clone()).unwrap();
+        let db = crate::store::credential_store::CredentialDb::initialize(config.clone()).unwrap();
         let mut cfg = config.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let rt = std::sync::Arc::new(crate::testing::runtime_with_db(
@@ -521,7 +521,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("access-no-route-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let config = std::sync::Arc::new(crate::testing::config_store(&root.join("config.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(config.clone()).unwrap();
+        let db = crate::store::credential_store::CredentialDb::initialize(config.clone()).unwrap();
         let mut cfg = config.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let rt = std::sync::Arc::new(crate::testing::runtime_with_db(

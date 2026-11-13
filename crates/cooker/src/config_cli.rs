@@ -4,7 +4,7 @@ use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use ck_server::config_store::{ConfigStore, resources};
+use ck_server::store::config_store::{ConfigStore, resources};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -114,7 +114,7 @@ fn existing(db: &Path) -> anyhow::Result<ConfigStore> {
     match ConfigStore::open_existing(db) {
         // A running owner keeps publishing complete single-file snapshots: reading one
         // is not a competing mutation.
-        Err(error) if error.is::<ck_server::config_store::AlreadyOwned>() => ConfigStore::open_published(db),
+        Err(error) if error.is::<ck_server::store::config_store::AlreadyOwned>() => ConfigStore::open_published(db),
         result => result,
     }
 }
@@ -131,7 +131,7 @@ pub fn execute(args: Vec<String>) -> anyhow::Result<()> {
     }
     crate::dotenv::load_from_working_dir();
     if let Some(path) = &cli.log_file {
-        ck_server::logging::set_log_file(path.clone()).context("open process log")?;
+        ck_server::observability::logging::set_log_file(path.clone()).context("open process log")?;
     }
     run(cli)
 }

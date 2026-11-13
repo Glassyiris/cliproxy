@@ -215,40 +215,40 @@ macro_rules! go_struct {
             $( $(#[$fmeta])* pub $field: $ty, )*
         }
 
-        impl $crate::management::quota_probe::gojson::GoJson for $name {
+        impl $crate::management::api::quota_probe::gojson::GoJson for $name {
             const GO_TYPE: &'static str = $go_type;
             fn encode(&self, out: &mut Vec<u8>) {
-                let mut w = $crate::management::quota_probe::gojson::ObjWriter::begin(out);
-                $crate::management::quota_probe::gojson::GoStruct::encode_fields(self, &mut w);
+                let mut w = $crate::management::api::quota_probe::gojson::ObjWriter::begin(out);
+                $crate::management::api::quota_probe::gojson::GoStruct::encode_fields(self, &mut w);
                 w.end();
             }
-            fn decode_into(&mut self, v: &$crate::management::quota_probe::gojson::Node) -> Result<(), $crate::management::quota_probe::gojson::DecodeError> {
-                $crate::management::quota_probe::gojson::decode_struct_into(self, v)
+            fn decode_into(&mut self, v: &$crate::management::api::quota_probe::gojson::Node) -> Result<(), $crate::management::api::quota_probe::gojson::DecodeError> {
+                $crate::management::api::quota_probe::gojson::decode_struct_into(self, v)
             }
             fn is_empty(&self) -> bool {
                 false
             }
         }
 
-        impl $crate::management::quota_probe::gojson::GoStruct for $name {
+        impl $crate::management::api::quota_probe::gojson::GoStruct for $name {
             #[allow(unused_variables)]
-            fn encode_fields(&self, w: &mut $crate::management::quota_probe::gojson::ObjWriter<'_>) {
-                $( w.field($wire, &self.$field, $crate::management::quota_probe::gojson::go_struct!(@omit $($omit)?)); )*
+            fn encode_fields(&self, w: &mut $crate::management::api::quota_probe::gojson::ObjWriter<'_>) {
+                $( w.field($wire, &self.$field, $crate::management::api::quota_probe::gojson::go_struct!(@omit $($omit)?)); )*
             }
             #[allow(unused_variables)]
             fn decode_field(
                 &mut self,
                 key: &str,
-                v: &$crate::management::quota_probe::gojson::Node,
-            ) -> Option<Result<(), $crate::management::quota_probe::gojson::DecodeError>> {
+                v: &$crate::management::api::quota_probe::gojson::Node,
+            ) -> Option<Result<(), $crate::management::api::quota_probe::gojson::DecodeError>> {
                 $(
                     if key == $wire {
-                        return Some($crate::management::quota_probe::gojson::decode_field_value(&mut self.$field, v, $go_type, $wire));
+                        return Some($crate::management::api::quota_probe::gojson::decode_field_value(&mut self.$field, v, $go_type, $wire));
                     }
                 )*
                 $(
                     if key.eq_ignore_ascii_case($wire) {
-                        return Some($crate::management::quota_probe::gojson::decode_field_value(&mut self.$field, v, $go_type, $wire));
+                        return Some($crate::management::api::quota_probe::gojson::decode_field_value(&mut self.$field, v, $go_type, $wire));
                     }
                 )*
                 None

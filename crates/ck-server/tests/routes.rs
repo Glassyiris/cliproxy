@@ -1122,7 +1122,7 @@ async fn response_framing_follows_go_net_http() {
 async fn route_path_uses_gin_templates() {
     use axum::extract::{MatchedPath, OriginalUri};
     let echo = |m: Option<MatchedPath>, OriginalUri(uri): OriginalUri| async move {
-        ck_server::dispatch::route_path(m.as_ref(), &uri)
+        ck_server::inference::dispatch::route_path(m.as_ref(), &uri)
     };
     let app = axum::Router::new()
         .route("/v1beta/models/{*action}", axum::routing::post(echo))
@@ -1285,7 +1285,7 @@ async fn responses_route_prepares_codex_orphan_delegation() {
 async fn session_turns_honour_pin_callback_and_session() {
     use ck_core::exec::{Caller, ExecSession, Operation};
     use ck_core::format::Format;
-    use ck_server::dispatch::{self, Call, SessionTurn};
+    use ck_server::inference::dispatch::{self, Call, SessionTurn};
     let p = proxy(
         "",
         vec![

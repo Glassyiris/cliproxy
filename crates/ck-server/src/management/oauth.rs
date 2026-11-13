@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 
 use super::auth_files::{Query, fail, reply};
 use super::{Management, json as respond};
-use crate::runtime::OAuthDelivery as Delivery;
+use crate::{runtime::OAuthDelivery as Delivery, store::config_store};
 
 const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
 /// Go `oauthCompletedSessionTTL`, for a binding failed by a file change. A completed
@@ -474,7 +474,7 @@ pub(crate) async fn import(
     State(state): State<Arc<Management>>,
     RawQuery(raw): RawQuery,
     headers: HeaderMap,
-    read: crate::body_limit::Read,
+    read: crate::http::body_limit::Read,
 ) -> Response {
     let query = Query::parse(raw);
     match query.first("provider").trim().go_lower().as_str() {
@@ -490,7 +490,7 @@ async fn import_vertex(
     state: Arc<Management>,
     query: &Query,
     headers: &HeaderMap,
-    read: crate::body_limit::Read,
+    read: crate::http::body_limit::Read,
 ) -> Response {
     use super::multipart::Failed;
     use ck_exec::vertex_auth::{UploadError, import_upload};
@@ -632,13 +632,13 @@ pub(crate) fn login_render_error(error: String) -> anyhow::Error {
 }
 
 type LoginRenderer =
-    dyn Fn(&crate::config_store::State) -> anyhow::Result<Vec<(PathBuf, Option<Vec<u8>>)>> + Send + Sync;
+    dyn Fn(&crate::store::config_store::State) -> anyhow::Result<Vec<(PathBuf, Option<Vec<u8>>)>> + Send + Sync;
 
 /// The returned provider value stays captured here until complete bytes reach the
 /// pending candidate. Cache repair and legacy merge failures can then be retried
 /// without exchanging another grant.
 pub(crate) struct HeldLogin {
-    backend: std::sync::Weak<crate::credential_store::CredentialDb>,
+    backend: std::sync::Weak<crate::store::credential_store::CredentialDb>,
     // Issued while pending; UI expiry/cancellation cannot un-consume the result.
     _session: Arc<()>,
     pub(crate) provider: String,
@@ -649,8 +649,8 @@ pub(crate) struct HeldLogin {
 impl HeldLogin {
     pub(crate) fn finish(
         &self,
-        current: &crate::config_store::State,
-        pending: &mut Option<crate::config_store::Pending>,
+        current: &crate::store::config_store::State,
+        pending: &mut Option<crate::store::config_store::Pending>,
     ) -> anyhow::Result<()> {
         let backend = self
             .backend
@@ -660,7 +660,7 @@ impl HeldLogin {
         backend.retain_login(documents, pending)
     }
 
-    pub(crate) fn reject(&self, current: &crate::config_store::State, store: &crate::config_store::ConfigStore) {
+    pub(crate) fn reject(&self, current: &config_store::State, store: &config_store::ConfigStore) {
         store.reject_login_sources(
             current,
             &self.destinations.lock().unwrap_or_else(PoisonError::into_inner),
@@ -1682,10 +1682,10 @@ pub(crate) async fn callback_get(
 pub(crate) async fn callback_post(
     State(state): State<Arc<Management>>,
     uri: axum::http::Uri,
-    body: Result<crate::body_limit::FirstJson, axum::extract::rejection::BytesRejection>,
+    body: Result<crate::http::body_limit::FirstJson, axum::extract::rejection::BytesRejection>,
 ) -> Response {
     let body = match body {
-        Ok(crate::body_limit::FirstJson(body)) => body,
+        Ok(crate::http::body_limit::FirstJson(body)) => body,
         Err(rejection) => return status_error(super::read_status(&rejection), "invalid body"),
     };
     let v8 = uri.path().starts_with("/v8/");
@@ -1799,11 +1799,17 @@ fn redirect_query(raw: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn sqlite_state(label: &str) -> (PathBuf, Arc<Management>, Arc<crate::credential_store::CredentialDb>) {
+    fn sqlite_state(
+        label: &str,
+    ) -> (
+        PathBuf,
+        Arc<Management>,
+        Arc<crate::store::credential_store::CredentialDb>,
+    ) {
         let root = std::env::temp_dir().join(format!("oauth-{label}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let config = Arc::new(crate::testing::config_store(&root.join("config.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(config.clone()).unwrap();
+        let db = crate::store::credential_store::CredentialDb::initialize(config.clone()).unwrap();
         let mut cfg = config.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let rt = Arc::new(crate::testing::runtime_with_db(
@@ -1917,7 +1923,7 @@ mod tests {
         std::fs::remove_dir(&published).unwrap();
         std::fs::rename(root.join("old.db"), &published).unwrap();
         let resumed = Arc::new(crate::testing::config_store(&published).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(resumed.clone()).unwrap();
+        let db = crate::store::credential_store::CredentialDb::initialize(resumed.clone()).unwrap();
         assert_eq!(db.read(&path).unwrap().unwrap(), raw);
         drop(db);
         drop(resumed);
@@ -2463,7 +2469,7 @@ mod tests {
                 |dir, name, save| {
                     let path = dir.join(&name);
                     save_login(Some(&save), std::slice::from_ref(&path), || {
-                        crate::credential_store::atomic_write(&path,&serde_json::to_vec(&serde_json::json!({
+                        crate::store::credential_store::atomic_write(&path,&serde_json::to_vec(&serde_json::json!({
                         "type":"codex","access_token":format!("grant-{name}"),"refresh_token":format!("refresh-{name}")
                     })).unwrap())?;
                         Ok(path.clone())

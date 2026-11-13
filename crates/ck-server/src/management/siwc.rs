@@ -227,7 +227,7 @@ fn resolve_working_file(state: &Management, path: &Path) -> Option<(PathBuf, Map
 /// Go `StartSIWCBind`: `POST /v8/management/oauth/siwc/bind {"name": ...}`.
 pub(crate) async fn bind(
     State(state): State<Arc<Management>>,
-    crate::body_limit::FirstJson(body): crate::body_limit::FirstJson,
+    crate::http::body_limit::FirstJson(body): crate::http::body_limit::FirstJson,
 ) -> Response {
     // gin `ShouldBindJSON` into `struct{ Name string }`: the first JSON value; members
     // apply in order, the name matched under case folding; null leaves it empty.
@@ -599,7 +599,11 @@ fn write_binding(
             return Err(invalid("target is no longer a file-backed Codex OAuth credential"));
         }
         let path = path_of(&current).ok_or_else(|| invalid("target is not file-backed"))?;
-        if crate::credential_store::credential_path_key(path).ok().as_deref() != Some(flow.path.as_path()) {
+        if crate::store::credential_store::credential_path_key(path)
+            .ok()
+            .as_deref()
+            != Some(flow.path.as_path())
+        {
             return Err(invalid("backing file changed"));
         }
         let disk = command
@@ -686,7 +690,7 @@ pub(super) fn summary(c: &Credential, entry: &mut std::collections::BTreeMap<&'s
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::body_limit::FirstJson;
+    use crate::http::body_limit::FirstJson;
 
     /// Go `StartSIWCBind` holds its commit gate from the lookup through registration: a
     /// bind waiting on `disk` has read nothing yet, so a replacement made under the lock
@@ -987,7 +991,7 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("siwc-pre-cache-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir(&dir).unwrap();
             let owner = Arc::new(crate::testing::config_store(&dir.join("state.db")).unwrap());
-            let backend = crate::credential_store::CredentialDb::initialize(owner.clone()).unwrap();
+            let backend = crate::store::credential_store::CredentialDb::initialize(owner.clone()).unwrap();
             let file = backend.auth_dir().join("codex.json");
             backend.save(&file, codex_file("old").as_bytes()).unwrap();
             let mut cfg = owner.load().unwrap().config;
@@ -1133,7 +1137,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("codex.json");
         std::fs::write(&file, codex_file("old")).unwrap();
-        let store = Arc::new(crate::config_store::ConfigStore::memory_with(""));
+        let store = Arc::new(crate::store::config_store::ConfigStore::memory_with(""));
         let mut cfg = store.load().unwrap().config;
         cfg.auth_dir = dir.clone();
         let rt = Arc::new(crate::testing::runtime(
@@ -1150,7 +1154,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
         let dir = rt.config().auth_dir.clone();
         let file = dir.join("codex.json");
-        let options = crate::management::Options {
+        let options = crate::management::api::Options {
             login_base,
             ..Default::default()
         };

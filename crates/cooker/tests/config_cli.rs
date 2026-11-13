@@ -101,7 +101,7 @@ fn import_validate_export_and_backup_share_the_selected_database() {
 }
 
 struct OnlineOwner {
-    store: std::sync::Arc<ck_server::config_store::ConfigStore>,
+    store: std::sync::Arc<ck_server::store::config_store::ConfigStore>,
     runtime: std::sync::Arc<ck_server::Runtime>,
     base: String,
     server: tokio::task::JoinHandle<()>,
@@ -114,7 +114,7 @@ impl OnlineOwner {
     async fn start(dir: &Path, database: &Path) -> Self {
         let store = std::sync::Arc::new(ck_server::testing::config_store(database).unwrap());
         let mut cfg = store.load().unwrap().config;
-        let db = ck_server::credential_store::CredentialDb::initialize(store.clone()).unwrap();
+        let db = ck_server::store::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         cfg.auth_dir = db.auth_dir();
         let runtime = std::sync::Arc::new(ck_server::testing::runtime_with_db(
             cfg,
@@ -128,10 +128,10 @@ impl OnlineOwner {
             },
             db,
         ));
-        let management = ck_server::management::Management::with_options(
+        let management = ck_server::management::api::Management::with_options(
             runtime.clone(),
             store.clone(),
-            ck_server::management::Options {
+            ck_server::management::api::Options {
                 management_password: Some(MANAGEMENT_KEY.into()),
                 log_dir: Some(dir.join("logs")),
                 ..Default::default()
@@ -141,7 +141,7 @@ impl OnlineOwner {
         let base = format!("http://{}", listener.local_addr().unwrap());
         let batch_requests = std::sync::Arc::new(tokio::sync::Notify::new());
         let observed = batch_requests.clone();
-        let app = ck_server::management::router(management).layer(axum::middleware::from_fn(
+        let app = ck_server::management::api::router(management).layer(axum::middleware::from_fn(
             move |request: axum::extract::Request, next: axum::middleware::Next| {
                 let observed = observed.clone();
                 async move {
@@ -235,7 +235,7 @@ async fn online_vertex_import_stages_privately_and_never_falls_back_on_one_worke
     let copy = dir.join("portable.db");
     std::fs::copy(owner.store.path().unwrap(), &copy).unwrap();
     let cold = std::sync::Arc::new(ck_server::testing::config_store(&copy).unwrap());
-    let restored = ck_server::credential_store::CredentialDb::initialize(cold.clone()).unwrap();
+    let restored = ck_server::store::credential_store::CredentialDb::initialize(cold.clone()).unwrap();
     assert_eq!(
         restored.read(&restored.auth_dir().join(name)).unwrap().unwrap(),
         expected
@@ -533,7 +533,7 @@ async fn a_live_owner_allows_snapshot_reads_and_refuses_offline_logins() {
     let output = success(cli(&dir, &["--db", "service.db", "--vertex-import", "account.json"]));
     assert!(output.contains("Vertex credentials imported:"));
     let store = std::sync::Arc::new(ck_server::testing::config_store(&dir.join("service.db")).unwrap());
-    let restored = ck_server::credential_store::CredentialDb::initialize(store.clone()).unwrap();
+    let restored = ck_server::store::credential_store::CredentialDb::initialize(store.clone()).unwrap();
     assert_eq!(
         restored.read(&restored.auth_dir().join(name)).unwrap().unwrap(),
         expected.as_str().unwrap().as_bytes()

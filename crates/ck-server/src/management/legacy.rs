@@ -41,7 +41,7 @@ pub(crate) async fn vertex_import(
     state: State<Arc<Management>>,
     RawQuery(raw): RawQuery,
     headers: axum::http::HeaderMap,
-    read: crate::body_limit::Read,
+    read: crate::http::body_limit::Read,
 ) -> Response {
     // A `provider` in the query does not matter: the route names it.
     let query = match raw.filter(|r| !r.is_empty()) {

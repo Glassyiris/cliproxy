@@ -9,7 +9,7 @@ use axum::extract::rejection::BytesRejection;
 use ck_core::gostr::GoStr;
 use ck_wire::gostr::quote;
 
-use crate::body_limit::Read;
+use crate::http::body_limit::Read;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 
@@ -60,7 +60,7 @@ pub(crate) enum Failed {
 /// usually the parse error of the truncated line.
 pub(crate) fn body(read: Read, content_type: &str) -> Result<Bytes, Failed> {
     match read.body {
-        Err(rejection) if crate::body_limit::is_too_large(&rejection) => {
+        Err(rejection) if crate::http::body_limit::is_too_large(&rejection) => {
             let mut hit_limit = false;
             match read_form(content_type, &read.prefix, &mut hit_limit, true) {
                 Ok(_) => Ok(read.prefix),
@@ -369,7 +369,7 @@ impl<'a> Reader<'a, '_> {
             return eof.to_owned();
         }
         *self.hit_limit = true;
-        crate::body_limit::MESSAGE.to_owned()
+        crate::http::body_limit::MESSAGE.to_owned()
     }
 
     /// `textproto.Reader.readLineSlice`: one line without its "\n" or "\r\n";

@@ -33,7 +33,11 @@ pub(super) async fn read_limited(body: Body, limit: usize) -> Result<Vec<u8>, Re
     let mut out = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| {
-            let status = if crate::body_limit::is_too_large(&e) { 413 } else { 400 };
+            let status = if crate::http::body_limit::is_too_large(&e) {
+                413
+            } else {
+                400
+            };
             ReadError::Read(e.to_string(), status)
         })?;
         if out.len() + chunk.len() > limit {
@@ -230,7 +234,7 @@ pub(super) async fn call(
     let realtime = uri.path().starts_with("/v1/realtime");
     let fail = |status, message: &str| live_error(realtime, status, message);
     // Offers and answers carry ICE credentials; the request log keeps them out.
-    if let Some(log) = crate::request_logging::current() {
+    if let Some(log) = crate::observability::request_logging::current() {
         log.redact_sdp();
     }
     let body = match read_limited(body, live::MAX_BODY).await {
@@ -410,7 +414,7 @@ pub(super) async fn call(
 
 /// This request's upstream capture, when request logging runs for it.
 fn request_capture() -> CaptureSink {
-    crate::request_logging::current()
+    crate::observability::request_logging::current()
         .map(|log| log.capture_sink())
         .unwrap_or_default()
 }

@@ -28,17 +28,17 @@ reviews:
         - Check that SQLite remains the sole durable authority for configuration and OAuth credentials: YAML is a one-time import, config writes use /admin/v1 resources and atomic revisions, and configuration restore cannot restore revoked credentials. Preserve OAuth-only import scope.
         - Check that request preparation and config loading stay linear in input size: flag code that rescans a JSON body or YAML document for each element.
         - Check that tests use local mock upstreams, a private SQLite database and a private auth-dir for legacy imports, and cannot reach the network, real databases or ~/.cli-proxy-api.
-    - path: "{crates/ck-exec/src/claude.rs,crates/ck-exec/src/claude/**,crates/ck-translate/src/*claude*.rs,crates/ck-server/src/claude.rs,crates/ck-wire/src/cache.rs,crates/ck-wire/src/signature/claude*.rs}"
+    - path: "{crates/ck-exec/src/claude.rs,crates/ck-exec/src/claude/**,crates/ck-translate/src/*claude*.rs,crates/ck-server/src/inference/claude.rs,crates/ck-wire/src/cache.rs,crates/ck-wire/src/signature/claude*.rs}"
       instructions: |
         - Check every change to the bytes sent to Claude upstream: system blocks, tool order and definitions, message content, cache_control placement, headers and beta flags, field order and whitespace. Any change before the last cache breakpoint invalidates prompt caching for existing sessions; flag it unless the PR description states it.
         - Check that bodies that pass through are forwarded byte for byte and not re-serialized.
         - Check that no keepalive or other extra inference request is added.
-    - path: "{crates/ck-core/src/credential.rs,crates/ck-core/src/config.rs,crates/ck-core/src/config/**,crates/ck-server/src/management.rs,crates/ck-server/src/management/**,crates/ck-server/src/config_store.rs,crates/ck-server/src/config_store/**,crates/ck-server/src/credential_store.rs,crates/**/*auth*.rs,crates/**/*oauth*.rs,crates/**/*login*.rs,crates/**/*tokens*.rs,crates/**/*siwc*.rs,crates/ck-server/src/realtime/secrets.rs}"
+    - path: "{crates/ck-core/src/credential.rs,crates/ck-core/src/config.rs,crates/ck-core/src/config/**,crates/ck-server/src/management/management.rs,crates/ck-server/src/management/**,crates/ck-server/src/store/config_store.rs,crates/ck-server/src/store/config_store/**,crates/ck-server/src/store/credential_store.rs,crates/**/*auth*.rs,crates/**/*oauth*.rs,crates/**/*login*.rs,crates/**/*tokens*.rs,crates/**/*siwc*.rs,crates/ck-server/src/realtime/secrets.rs}"
       instructions: |
         - Check that credentials and client keys never reach logs or the wrong side. Ordinary /admin/v1 reads, revisions, effective config, credential-list API-key account values and per-key usage must stay masked; explicit secret exports, credential downloads and usage queue/RESP records retain their documented plaintext access.
         - Check that SQLite config commits and credential writes are atomic and safe against concurrent writers, runtime publication and token refresh. Credential state must remain separate from config revisions, and retained secrets must not move to a changed destination without plaintext re-entry.
         - Check that refresh-token rotation is serialized across processes sharing a database, so a refresh token is never spent twice.
-    - path: "{crates/**/*refresh*.rs,crates/**/watching.rs,crates/**/runtime.rs,crates/**/*siwc*.rs,crates/ck-server/src/cooldown_store.rs,crates/ck-server/src/management.rs}"
+    - path: "{crates/**/*refresh*.rs,crates/**/watching.rs,crates/**/runtime.rs,crates/**/*siwc*.rs,crates/ck-server/src/store/cooldown_store.rs,crates/ck-server/src/management/management.rs}"
       instructions: |
         - Check lock, refresh and reload code for races and deadlocks: lock order, locks held across an await or blocking I/O, waits that shutdown cannot cancel, and state read before a lock and used after it.
         - Check that a config reload or credential change during a request cannot mix two snapshots in one request.

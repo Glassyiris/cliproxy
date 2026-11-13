@@ -78,12 +78,12 @@ async fn start(dir: &Path, upstream_url: &str) -> String {
             google: Default::default(),
         },
     ));
-    let management = crate::management::Management::with_options(
+    let management = crate::management::api::Management::with_options(
         rt.clone(),
-        Arc::new(crate::config_store::ConfigStore::memory_with(
+        Arc::new(crate::store::config_store::ConfigStore::memory_with(
             &ck_core::config::yaml_string(&rt.config().document).unwrap(),
         )),
-        crate::management::Options {
+        crate::management::api::Options {
             log_dir: Some(dir.to_owned()),
             management_password: Some(String::new()),
             ..Default::default()
@@ -92,7 +92,7 @@ async fn start(dir: &Path, upstream_url: &str) -> String {
     let app = axum::Router::new()
         .merge(routes_with(&rt, Arc::new(Live::default())))
         .with_state(rt);
-    serve(crate::request_logging::router(&management, app)).await
+    serve(crate::observability::request_logging::router(&management, app)).await
 }
 
 /// The log whose text contains `marker`, once completely written (it ends with the
