@@ -648,7 +648,7 @@ Phase B's `ck-stream::Store` owns retention and a joined maintenance thread. `Wr
 
 Current storage choices are 21-frame initial/growth extents, 4,096 mapped header slots, 64 MiB cgroup heap headroom and the existing 1 MiB event/metadata defaults. These remain provisional until the storage gate measurements are accepted. Metadata accounting includes allocated frame/index capacity and reader entries. A `ManualClock` makes expiry deterministic; physical decay still belongs to the one-second runtime tick.
 
-Retained event entries store two logical byte coordinates and type/correlation indexes. Generation comes from the stream, and sequence comes from the index position; neither is duplicated in each entry. Index/table growth is geometric within the metadata ceiling, and leases reconstruct public `Record` views without copying payload bytes.
+Retained event indexes coalesce consecutive records only when length, stride, type, correlation and the next start coordinate match. Each run preserves individual sequence numbers and exact record boundaries; lookup uses binary search, and partial request/scratch release can trim a run. Variable records remain separately indexed and bounded. Index/table growth is geometric within the unchanged metadata ceiling; leases reconstruct public `Record` views without copying payload bytes.
 
 Reads update per-stream timestamps under shared retention ownership. Eviction and expiry take exclusive ownership and refresh stale queue heads before selecting a victim; readers do not mutate the global ordered queue. A pinned victim permits another allocation attempt only after invalidation actually releases a frame.
 

@@ -37,7 +37,7 @@ The total-cap row acquires an active lease after every frame append and retains 
 
 ## Default metadata constraint
 
-`Writer::append` retains two byte coordinates and type/correlation indexes per record; generation and sequence are derived. The production default metadata limit is 1 MiB. The 32/250 MiB workloads with 64-byte records exceed this ceiling before filling their byte quota. The benchmark records the failing byte offset and production counters, returns nonzero and still attempts subsequent rows. It never raises `max_metadata_bytes`, releases response prefixes or substitutes another pool to make those rows run.
+The production default metadata limit remains 1 MiB. Consecutive records with identical length, stride, type and correlation share a bounded run index; heterogeneous records still consume individual entries. The heap comparator retains individual coordinate/type/correlation entries. Both backends retain identical 50,000-byte payload frames and complete-record semantics. If either workload fails, the benchmark records the byte offset and counters, returns nonzero and still attempts subsequent rows. It never raises `max_metadata_bytes`, releases response prefixes or substitutes another pool to make a row run.
 
 ## Narrow verification
 

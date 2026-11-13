@@ -17,24 +17,46 @@ pub(crate) struct Frame {
     retained: bool,
 }
 
-// Generation belongs to Stream and sequence to the queue; neither is duplicated per record.
+// A run represents exact record boundaries, not a byte range including padding.
 #[derive(Clone, Copy)]
 pub(crate) struct Index {
     start: u64,
-    end: u64,
+    sequence: u64,
+    next_sequence: u64,
+    len: u64,
+    stride: u64,
     kind: u32,
     correlation: u32,
 }
 
 impl Index {
-    fn record(self, generation: u64, sequence: u64) -> Record {
-        Record {
+    fn extends(&self, next: &Self) -> bool {
+        self.next_sequence == next.sequence
+            && self.len == next.len
+            && self.stride == next.stride
+            && self.kind == next.kind
+            && self.correlation == next.correlation
+            && (self.next_sequence - self.sequence)
+                .checked_mul(self.stride)
+                .and_then(|offset| self.start.checked_add(offset))
+                == Some(next.start)
+    }
+
+    fn record(self, generation: u64, sequence: u64) -> Option<Record> {
+        if !(self.sequence..self.next_sequence).contains(&sequence) {
+            return None;
+        }
+        let start = (sequence - self.sequence)
+            .checked_mul(self.stride)?
+            .checked_add(self.start)?;
+        let end = start.checked_add(self.len)?;
+        Some(Record {
             sequence,
-            start: Position::at(generation, self.start),
-            end: Position::at(generation, self.end),
+            start: Position::at(generation, start),
+            end: Position::at(generation, end),
             kind: self.kind,
             correlation: self.correlation,
-        }
+        })
     }
 }
 
@@ -57,6 +79,7 @@ pub(crate) struct State {
     base_frame: u64,
     records: VecDeque<Index>,
     base_sequence: u64,
+    next_sequence: u64,
     end: u64,
     terminal: Option<Terminal>,
     gone: bool,
@@ -87,6 +110,7 @@ impl Stream {
                 base_frame: 0,
                 records: VecDeque::new(),
                 base_sequence: 0,
+                next_sequence: 0,
                 end: 0,
                 terminal: None,
                 gone: false,
@@ -189,17 +213,18 @@ impl Writer {
         if matches!(result, Err(Error::StorageExhausted | Error::Io(_))) {
             self.stream.finish(Terminal::StorageExhausted);
         }
-        let (record, old_count) = result?;
+        let (record, index, old_count) = result?;
         Ok(Reservation {
             writer: self,
             record,
+            index,
             old_count,
             written: 0,
             committed: false,
         })
     }
 
-    fn reserve(&self, len: usize, aligned: bool, kind: u32, correlation: u32) -> Result<(Record, usize), Error> {
+    fn reserve(&self, len: usize, aligned: bool, kind: u32, correlation: u32) -> Result<(Record, Index, usize), Error> {
         if len == 0 || len > self.inner.limits.max_event_bytes || (aligned && len > FRAME_BYTES) {
             return Err(Error::StorageExhausted);
         }
@@ -211,7 +236,11 @@ impl Writer {
             return Err(Error::Closed);
         }
         let start = if aligned {
-            state.end.div_ceil(FRAME_BYTES as u64) * FRAME_BYTES as u64
+            state
+                .end
+                .div_ceil(FRAME_BYTES as u64)
+                .checked_mul(FRAME_BYTES as u64)
+                .ok_or(Error::StorageExhausted)?
         } else {
             state.end
         };
@@ -227,13 +256,23 @@ impl Writer {
             return Err(Error::StorageExhausted);
         }
         let record = Record {
-            sequence: state.base_sequence + state.records.len() as u64,
+            sequence: state.next_sequence,
             start: Position::at(self.id(), start),
             end: Position::at(self.id(), end),
             kind,
             correlation,
         };
-        let records = state.records.len() + 1;
+        let index = Index {
+            start,
+            sequence: record.sequence,
+            next_sequence: record.sequence.checked_add(1).ok_or(Error::StorageExhausted)?,
+            len: len as u64,
+            stride: if aligned { FRAME_BYTES as u64 } else { len as u64 },
+            kind,
+            correlation,
+        };
+        let extends = state.records.back().is_some_and(|last| last.extends(&index));
+        let records = state.records.len() + usize::from(!extends);
         let reader_bytes = state.readers * READER_BYTES;
         let frame_budget = self
             .inner
@@ -273,7 +312,7 @@ impl Writer {
                 retained: true,
             });
         }
-        Ok((record, old_count))
+        Ok((record, index, old_count))
     }
 
     fn rollback(&self, old_count: usize) {
@@ -303,9 +342,22 @@ impl Writer {
         if end > state.end {
             return Err(Error::InvalidPosition);
         }
-        while state.records.front().is_some_and(|record| record.end <= end) {
-            state.records.pop_front();
-            state.base_sequence += 1;
+        while let Some(run) = state.records.front_mut() {
+            let first_end = run.start + run.len;
+            if end < first_end {
+                break;
+            }
+            let removed = ((end - first_end) / run.stride + 1).min(run.next_sequence - run.sequence);
+            if removed == run.next_sequence - run.sequence {
+                state.base_sequence = run.next_sequence;
+                state.records.pop_front();
+            } else {
+                // Retained records were checked at append; this advances within that run.
+                run.start += removed * run.stride;
+                run.sequence += removed;
+                state.base_sequence = run.sequence;
+                break;
+            }
         }
         let boundary = state.records.front().map_or(position.frame, |record| {
             position.frame.min(record.start / FRAME_BYTES as u64)
@@ -337,6 +389,7 @@ impl Drop for Writer {
 pub struct Reservation<'a> {
     writer: &'a mut Writer,
     record: Record,
+    index: Index,
     old_count: usize,
     written: usize,
     committed: bool,
@@ -386,12 +439,12 @@ impl Reservation<'_> {
         if state.terminal.is_some() {
             return Err(Error::Closed);
         }
-        state.records.push_back(Index {
-            start: self.record.start.byte(stream.id)?,
-            end: self.record.end.byte(stream.id)?,
-            kind: self.record.kind,
-            correlation: self.record.correlation,
-        });
+        if let Some(last) = state.records.back_mut().filter(|last| last.extends(&self.index)) {
+            last.next_sequence = self.index.next_sequence;
+        } else {
+            state.records.push_back(self.index);
+        }
+        state.next_sequence = self.index.next_sequence;
         state.end = self.record.end.byte(stream.id)?;
         stream
             .pool
@@ -438,7 +491,7 @@ impl Reader {
             if state.gone || after < state.base_sequence {
                 return Err(Error::Gone);
             }
-            if after > state.base_sequence + state.records.len() as u64 {
+            if after > state.next_sequence {
                 return Err(Error::InvalidPosition);
             }
             if Stream::metadata(&state) + READER_BYTES > stream.limits.max_metadata_bytes {
@@ -467,10 +520,13 @@ impl Reader {
             }
             // The header is the publication authority; state supplies complete-record boundaries.
             let committed = stream.pool.header(stream.slot).committed.load(Ordering::Acquire);
-            if let Some(record) = state.records.get((self.next - state.base_sequence) as usize).copied()
-                && record.end <= committed
+            let index = state.records.partition_point(|run| run.next_sequence <= self.next);
+            if let Some(record) = state
+                .records
+                .get(index)
+                .and_then(|run| run.record(stream.id, self.next))
+                && record.end.byte(stream.id).is_ok_and(|end| end <= committed)
             {
-                let record = record.record(stream.id, self.next);
                 for number in record.start.frame..=last_frame(record) {
                     let index = (number - state.base_frame) as usize;
                     if state.frames[index].pool.is_none() {
