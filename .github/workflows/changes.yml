@@ -2,7 +2,10 @@
 # shipped code (rules: changes/README.md), and checks the pull request title, which becomes
 # the squash commit's subject (CONTRIBUTING.md). It reruns when a label or the title
 # changes, so adding `no-changelog` or fixing the title clears a failure without a new
-# push. Kept apart from ci.yml so neither restarts the build and test jobs.
+# push. Kept apart from ci.yml so neither restarts the build and test jobs. Both read the
+# pull request (its title, labels and the history back to the merge base), which a Docker
+# build does not see, so they run here; the tests of both scripts run in the Dockerfile's
+# check stage.
 name: Changes
 
 on:
@@ -25,8 +28,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Run the parser tests
-        run: python3 -I -m unittest discover -s tools
       - name: Validate fragments and require one for shipped paths
         run: python3 -I tools/changelog.py check
 
@@ -35,8 +36,6 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Run the title checker's tests
-        run: python3 -I -m unittest discover -s .github/scripts -p 'test_pr_title.py'
       - name: Check the pull request title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}

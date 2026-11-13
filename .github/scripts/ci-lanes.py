@@ -16,14 +16,11 @@ selects every lane, so a new top-level file or directory runs everything until a
 says otherwise. A pull request is read as GitHub's test merge commit against its first
 parent, the base branch tip: exactly what merging would change.
 
-Lanes and the jobs they run:
-  dashboard  dashboard checks and the committed-build comparison
-  tests      the two Linux test shards and the test counts
-  lint       fmt, clippy, the harness check and the media relay tests
-  windows    clippy and the file writer tests on Windows
-  perf       the size gate and both idle gates on the release binary
-  workflows  actionlint over every workflow
-  notices    THIRD-PARTY-NOTICES against the dependency set
+Lanes and the jobs they run, each building the Dockerfile stage of the same name:
+  dashboard  the dashboard's checks and build
+  check      fmt, clippy, actionlint, THIRD-PARTY-NOTICES, the harness build, script tests
+  test       the two test shards and the test counts
+  perf       the size and idle gates on the release binary, the image smoke test and size
 """
 import json
 import os
@@ -32,69 +29,61 @@ import subprocess
 import sys
 import urllib.request
 
-LANES = ("dashboard", "tests", "lint", "windows", "perf", "workflows", "notices")
+LANES = ("dashboard", "check", "test", "perf")
 ALL = frozenset(LANES)
 NONE = frozenset()
 # Everything that compiles the workspace.
-RUST = frozenset({"tests", "lint", "windows", "perf"})
+RUST = frozenset({"check", "test", "perf"})
 
 # (pattern for the whole path, lanes); the first match wins.
 RULES = (
-    # The size report's renderer: report.yml runs the default branch's copy after CI, and
-    # the changes job runs its tests on every run, so no lane needs it.
-    (r"\.github/ci/report/.*", NONE),
-    # This workflow, its pins and this selector: a change here can alter any lane.
-    (r"\.github/workflows/ci\.yml|\.github/ci/.*|\.github/scripts/(ci-lanes|test_ci_lanes)\.py", ALL),
-    # Build tools for the Linux jobs that compile (idle.yml and install.yml use it too
-    # and run on their own path filters).
-    (r"\.github/scripts/apt-install\.sh", frozenset({"tests", "lint", "perf"})),
-    (r"\.github/scripts/test-counts\.py", frozenset({"tests"})),
-    # The other workflows run on their own path filters; here only actionlint reads them.
-    (r"\.github/workflows/[^/]+", frozenset({"workflows"})),
-    # The pull request title check; changes.yml runs it and its tests.
-    (r"\.github/scripts/(pr-title|test_pr_title)\.py", NONE),
+    # This workflow, its pins, this selector and the Dockerfile that defines every stage: a
+    # change here can alter any lane.
+    (r"\.github/workflows/ci\.yml|\.github/ci/.*|\.github/scripts/(ci-lanes|test_ci_lanes)\.py"
+     r"|Dockerfile|\.dockerignore", ALL),
+    (r"\.github/scripts/test-counts\.py", frozenset({"test"})),
+    # The other workflows run on their own triggers; here only actionlint reads them.
+    (r"\.github/workflows/[^/]+", frozenset({"check"})),
+    # The pull request title check and the changelog tool; changes.yml runs them, the check
+    # stage their tests.
+    (r"\.github/scripts/(pr-title|test_pr_title)\.py|tools/(changelog|test_changelog)\.py",
+     frozenset({"check"})),
     # The agent rule files and the requirements check over them; the changes job runs the
     # check and its tests on every run. AGENTS.md and CLAUDE.md at any depth, except under
     # ui/dist (embedded into the binary) and vendor (vendored source), which keep the rules
     # below. No job builds or reads these files otherwise.
     (r"scripts/(check-requirements|test_check_requirements)\.py|REQUIREMENTS\.md|REVIEW\.md"
      r"|(?!ui/dist/|vendor/)([^/]+/)*(AGENTS|CLAUDE)\.md", NONE),
-    # Installers workflow (install.yml) only.
-    (r"\.github/scripts/(test-installers\.py|installer-fixture\.rs)", NONE),
     # Repository metadata that no job reads.
     (r"\.github/(ISSUE_TEMPLATE/.*|PULL_REQUEST_TEMPLATE/.*|pull_request_template[^/]*"
      r"|CODEOWNERS|dependabot\.yml|[^/]+\.md)", NONE),
-    # Documentation. README.md, LICENSE, LICENSE-MIT and NOTICE also go into the archive the
-    # size gate measures; their compressed bytes are far inside its 2% tolerance, and every
-    # push to master measures them again.
-    (r"[^/]+\.md|LICENSE[^/]*|NOTICE|CODEOWNERS|docs/.*|changes/.*|\.coderabbit\.yaml", NONE),
-    # Installers, packaging and the image: install.yml, homebrew.yml and docker.yml.
-    (r"install\.(sh|ps1)|packaging/.*|Dockerfile|\.dockerignore", NONE),
-    # The dashboard job compares ui/dist with `git status`, which .gitignore can hide.
-    (r"\.gitignore", frozenset({"dashboard"})),
-    # crates/cpa-server/build.rs embeds ui/dist into the binary. The bytes change what the
-    # size and idle gates measure, and the server tests serve those assets. Clippy and the
-    # harness are not affected: the generated asset table has the same code for any file
-    # set, so fmt, clippy (Linux and Windows) and the media relay tests see no change.
-    (r"ui/dist/.*", frozenset({"dashboard", "tests", "perf"})),
-    # THIRD-PARTY-NOTICES lists the npm packages the bundle pulls in, so the manifests, the
-    # build config and the source (a new import can add a package) can each make it stale.
-    (r"ui/(package(-lock)?\.json|vite\.config\.ts|tools/.*|src/.*)", frozenset({"dashboard", "notices"})),
+    # Documentation. LICENSE, LICENSE-MIT and NOTICE also go into the image the size gate
+    # measures; their compressed bytes are far inside its tolerance, and every push to master
+    # measures them again. .gitignore does not filter the Docker build context.
+    (r"[^/]+\.md|LICENSE[^/]*|NOTICE|CODEOWNERS|docs/.*|changes/.*|\.coderabbit\.yaml|\.gitignore", NONE),
+    # The stages embed the dashboard stage's build, not the committed copy, which only the
+    # dashboard stage compares with its build.
+    (r"ui/dist/.*", frozenset({"dashboard"})),
+    # What the dashboard build is made of. Its output is embedded into the binary
+    # (crates/cpa-server/build.rs), so the tests, the gates and THIRD-PARTY-NOTICES (the npm
+    # packages the bundle pulls in) all depend on it.
+    (r"ui/(src|public|tools)/.*|ui/(index\.html|package(-lock)?\.json|vite\.config\.ts|tsconfig[^/]*\.json)",
+     ALL),
     (r"ui/.*", frozenset({"dashboard"})),
     # Integration tests, examples and benches are test and clippy targets only; nothing
     # under them reaches the release binary (src/ includes fixtures from tests/ only in
     # #[cfg(test)] code), so the size and idle gates are not affected.
-    (r"crates/[^/]+/(tests|examples|benches)/.*", frozenset({"tests", "lint", "windows"})),
-    # The dependency set, which THIRD-PARTY-NOTICES lists (tools/third-party-notices.py).
-    (r"Cargo\.(toml|lock)|crates/[^/]+/Cargo\.toml|vendor/.*", RUST | {"notices"}),
-    (r"about\.toml|tools/third-party-notices\.py|THIRD-PARTY-NOTICES", frozenset({"notices"})),
+    (r"crates/[^/]+/(tests|examples|benches)/.*", frozenset({"check", "test"})),
+    # The dependency set, which THIRD-PARTY-NOTICES lists (checked in the check stage).
+    (r"Cargo\.(toml|lock)|crates/[^/]+/Cargo\.toml|vendor/.*", RUST),
+    (r"about\.toml|tools/third-party-notices\.py|THIRD-PARTY-NOTICES", frozenset({"check"})),
     (r"crates/.*|\.config/.*|\.cargo/.*|clippy\.toml|rustfmt\.toml"
      r"|rust-toolchain(\.toml)?", RUST),
-    # harness/rust is checked by the lint job only.
-    (r"harness/.*", frozenset({"lint"})),
+    # harness/rust is built by the check stage only.
+    (r"harness/.*", frozenset({"check"})),
     # budgets.txt holds the heap gate's numbers (a test) and the size and idle budgets; the
     # gate scripts and the cache replay script (run by test shard 2) live here too.
-    (r"bench/.*", frozenset({"tests", "perf"})),
+    (r"bench/.*", frozenset({"test", "perf"})),
 )
 _COMPILED = tuple((re.compile(pattern, re.DOTALL), lanes) for pattern, lanes in RULES)
 

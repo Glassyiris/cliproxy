@@ -1,18 +1,19 @@
-# Formatting, lints, the full test suite and the harness build, clippy and the file writer
-# tests on Windows, the Linux size and idle gates, the dashboard's checks, actionlint, the
-# THIRD-PARTY-NOTICES check and the requirements check (REQUIREMENTS.md, in the changes job).
+# Every check is a stage of the Dockerfile, and each job builds one of them with
+# `docker buildx build --target <stage>`, the same command as locally: the dashboard's checks,
+# fmt/clippy/actionlint/notices/harness and the script tests (check), the workspace tests in
+# two shards (test), and the size and idle gates on the release binary followed by the image's
+# smoke test and size gate (perf). The lanes job runs the requirements check (REQUIREMENTS.md).
 # Every push to master, every manual run and the call from release.yml (so a tagged release
 # runs the same checks before it builds anything) run all of them. A pull request runs the
 # lanes its changed paths can affect (.github/scripts/ci-lanes.py, which lists the rules);
-# the label ci:full, followed by a re-run, runs every lane. The ci-ok job passes when every selected lane passed
-# and every other lane was skipped, so it is the one check to require.
-# One run per change: pushes to master, and pull requests through `pull_request` only. A
-# branch push used to start a second run of every job for the same commit. Runs are
-# grouped per pull request (or per ref outside one), and a newer push cancels the older
+# the label ci:full, followed by a re-run, runs every lane. The ci-ok job passes when every
+# selected lane passed and every other lane was skipped. master requires no check for now.
+# One run per change: pushes to master, and pull requests through `pull_request` only. Runs
+# are grouped per pull request (or per ref outside one), and a newer push cancels the older
 # run.
-# The only artifacts are the size report's metrics (ci-report-*, .github/ci/report), and
-# only pull requests and pushes to master upload them: release.yml calls this workflow and
-# publishes the build artifacts of its run.
+# Layer caches live in the Actions cache, one scope per stage, written by pushes to master
+# only. Cargo's target directories are BuildKit cache mounts, which the Actions cache does not
+# keep, so each run compiles the workspace again.
 name: CI
 
 on:
@@ -32,13 +33,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-ci
   cancel-in-progress: true
 
-env:
-  CARGO_TERM_COLOR: always
-  # One exact compiler for every job: the size and allocation budgets are exact numbers
-  # from one compiler and std. Bumping it means re-measuring bench/budgets.txt.
-  RUST_TOOLCHAIN: "1.99.0"
-  CARGO_INCREMENTAL: "0"
-
 jobs:
   # Which lanes this run needs. Its own tests run first, so a pull request that changes the
   # rules is selected by rules that pass them. If this job fails, every lane runs and ci-ok
@@ -54,12 +48,9 @@ jobs:
     outputs:
       lanes: ${{ steps.select.outputs.lanes }}
       dashboard: ${{ steps.select.outputs.dashboard }}
-      tests: ${{ steps.select.outputs.tests }}
-      lint: ${{ steps.select.outputs.lint }}
-      windows: ${{ steps.select.outputs.windows }}
+      check: ${{ steps.select.outputs.check }}
+      test: ${{ steps.select.outputs.test }}
       perf: ${{ steps.select.outputs.perf }}
-      workflows: ${{ steps.select.outputs.workflows }}
-      notices: ${{ steps.select.outputs.notices }}
     steps:
       # The test merge commit and its first parent, the base branch tip.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,9 +58,6 @@ jobs:
           fetch-depth: 2
       - name: Selector tests
         run: python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes*.py'
-      # The size report's renderer (report.yml runs master's copy after each pull request run).
-      - name: Size report renderer tests
-        run: python3 -I -m unittest discover -s .github/ci/report -p 'test_render.py'
       # REQUIREMENTS.md against the rule files: every rule group has a filled Enforcement
       # row, and no deferral has expired. It reads files only and takes under a second, so
       # it runs here on every run instead of in a lane; ci-ok fails when it does.
@@ -83,120 +71,88 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/ci-lanes.py
 
+  dashboard:
+    name: dashboard
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.dashboard == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: dashboard
+          cache-from: type=gha,scope=dashboard
+          cache-to: ${{ github.ref == 'refs/heads/master' && 'type=gha,mode=max,scope=dashboard' || '' }}
+
+  check:
+    name: fmt, clippy, actionlint, notices, harness
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.check == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: check
+          cache-from: type=gha,scope=check
+          cache-to: ${{ github.ref == 'refs/heads/master' && 'type=gha,mode=max,scope=check' || '' }}
+
   # The workspace tests in two shards on two runners, each building the tests itself
   # (building once and copying the binaries took longer than building again). Nextest
   # assigns every test to exactly one shard by a hash of its name; the counts job below
   # checks that the shards together ran every test that `cargo nextest list` lists.
-  linux:
-    name: tests (Linux, shard ${{ matrix.shard }} of 2)
+  test:
+    name: tests (shard ${{ matrix.shard }} of 2)
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.tests == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.test == 'true') }}
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    # Each shard sets only its own output; an empty output does not replace another
-    # leg's value. Outputs rather than artifacts, because release.yml calls this
-    # workflow and publishes the artifacts of its run.
+    # Each shard sets only its own output; an empty output does not replace another leg's
+    # value. Outputs rather than artifacts, because release.yml calls this workflow.
     outputs:
       counts-1: ${{ steps.counts.outputs.counts-1 }}
       counts-2: ${{ steps.counts.outputs.counts-2 }}
-    env:
-      # No debug info in test builds: linking about 55 test binaries with full debug info
-      # was most of a warm build (18 GB in target/debug/deps). Panic messages keep their
-      # file and line. Only for this job and the next: rust-cache keys its caches on
-      # CARGO_* variables, and the perf and Windows jobs keep theirs.
-      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build tools
-        # BoringSSL (through btls-sys) needs cmake, clang and perl; bindgen needs libclang.
-        # The script bounds a stalled mirror download (it says how).
-        run: .github/scripts/apt-install.sh cmake clang libclang-dev perl
-      - name: Rust
-        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal && rustup default "$RUST_TOOLCHAIN"
-      # rust-cache hashes the member manifests but not the root one, whose profile
-      # sections change every test build. Their hash, and not the whole file's (a version
-      # bump would miss every cache), goes into the key.
-      - name: Profile key
-        id: profile
-        run: echo "hash=$(awk '/^\[/ { p = /^\[profile/ } p' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-      # Both shards build the same tests, so they share one cache and shard 1 saves it.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # test-report holds the shard's nextest list, log and counts; the test stage fails the
+      # build when a test fails or the shard did not run exactly its partition.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          key: ${{ steps.profile.outputs.hash }}
-          save-if: ${{ github.ref == 'refs/heads/master' && matrix.shard == 1 }}
-      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
-        with:
-          tool: cargo-nextest@0.9.148
-      # The plugin tests build Go plugins (cgo, c-shared) from this module. Without Go 1.26
-      # they would skip; CPA_TEST_NO_SKIP below turns that skip into a failure.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: crates/cpa-plugin/tests/goplugins/go.mod
-          cache-dependency-path: crates/cpa-plugin/tests/goplugins/go.sum
-      - name: Fetch dependencies
-        run: |
-          cargo fetch --locked
-          cargo fetch --locked --manifest-path vendor/gjson/Cargo.toml
-          cd crates/cpa-plugin/tests/goplugins && go mod download
-      - name: Test, with external network denied
-        # A loopback-only network namespace, as the project's merge gates use, so a test
-        # that tries to reach a real provider fails instead of sending anything. The tests
-        # run as the runner user inside it, so file-permission tests behave as usual.
-        # Nextest runs the test binaries in parallel; .config/nextest.toml runs the memory
-        # gate (crates/cpa-server/tests/alloc_budget.rs) and the tests with wall-clock
-        # bounds alone. Nextest skips doc tests, so cargo test runs those, then the tests
-        # of the patched gjson in vendor/, which is outside the workspace.
-        # CPA_TEST_NO_SKIP makes a test that would skip for a missing Go toolchain fail
-        # instead: a passing test's output is captured, so a printed skip
-        # line never reaches the log. The doc tests, the gjson tests and the cache replay
-        # script's tests run in shard 2, which has less nextest work. The nextest list of
-        # this shard's partition goes to the counts job.
-        env:
-          SHARD: ${{ matrix.shard }}
-        run: |
-          partition="--partition hash:$SHARD/2"
-          tests="
-            cargo nextest run --workspace --locked --profile ci $partition 2>&1 | tee test.log
-            cargo nextest list --workspace --locked --profile ci $partition --message-format json > nextest-list.json
-          "
-          if [ "$SHARD" = 2 ]; then
-            tests+='
-              cargo test --workspace --doc --locked 2>&1 | tee -a test.log
-              cargo test --locked --manifest-path vendor/gjson/Cargo.toml --target-dir target 2>&1 | tee -a test.log
-              python3 bench/test-claude-cache-replay.py 2>&1 | tee -a test.log
-            '
-          fi
-          # shellcheck disable=SC2016 # $1 to $3 belong to the inner shell
-          sudo env "PATH=$PATH" "HOME=$HOME" \
-            "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}" "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
-            "GOMODCACHE=$(go env GOMODCACHE)" "GOCACHE=$(go env GOCACHE)" \
-            CPA_TEST_NO_SKIP=1 \
-            CARGO_NET_OFFLINE=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0 \
-            "CARGO_PROFILE_TEST_DEBUG=$CARGO_PROFILE_TEST_DEBUG" \
-            GOTOOLCHAIN=local GOPROXY=off \
-            unshare --net -- sh -c 'ip link set lo up && exec setpriv --reuid="$1" --regid="$2" --init-groups -- bash -eo pipefail -c "$3"' \
-            sh "$(id -u)" "$(id -g)" "$tests"
+          context: .
+          target: test-report
+          build-args: |
+            SHARD=${{ matrix.shard }}
+            SHARDS=2
+            CI_COMMIT=${{ github.sha }}
+          outputs: type=local,dest=${{ runner.temp }}/test-report
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=test
+          cache-to: ${{ github.ref == 'refs/heads/master' && matrix.shard == 1 && 'type=gha,mode=max,scope=test' || '' }}
       - name: Test counts
         id: counts
-        # Fails unless nextest ran exactly the tests the list assigns to this shard.
         env:
           SHARD: ${{ matrix.shard }}
-        run: |
-          counts=$(python3 .github/scripts/test-counts.py shard "$SHARD" nextest-list.json test.log)
-          echo "$counts"
-          echo "counts-$SHARD=$counts" >> "$GITHUB_OUTPUT"
+        run: echo "counts-$SHARD=$(cat "$RUNNER_TEMP/test-report/counts-$SHARD.json")" >> "$GITHUB_OUTPUT"
 
   # The whole suite's counts: nextest's tests from both shards, which must add up to every
   # test in the list that is not ignored, and cargo test's result lines; nextest's ignored
   # tests count as ignored.
   test-counts:
-    name: test counts (Linux)
-    needs: linux
-    if: ${{ !cancelled() && needs.linux.result == 'success' }}
+    name: test counts
+    needs: test
+    if: ${{ !cancelled() && needs.test.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -205,304 +161,48 @@ jobs:
           sparse-checkout: .github/scripts
       - name: Test counts
         env:
-          COUNTS_1: ${{ needs.linux.outputs.counts-1 }}
-          COUNTS_2: ${{ needs.linux.outputs.counts-2 }}
+          COUNTS_1: ${{ needs.test.outputs.counts-1 }}
+          COUNTS_2: ${{ needs.test.outputs.counts-2 }}
         run: |
           printf '%s\n' "$COUNTS_1" > counts-1.json
           printf '%s\n' "$COUNTS_2" > counts-2.json
           python3 .github/scripts/test-counts.py total counts-1.json counts-2.json
 
-  # Everything that does not need the test build: formatting, clippy over every target,
-  # the harness, and the Codex Live media relay tests, which build cpa-server with its
-  # optional media-relay feature. In parallel with the tests above.
-  lint:
-    name: fmt, clippy, harness and media relay tests (Linux)
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.lint == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    env:
-      CARGO_PROFILE_TEST_DEBUG: "0"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build tools
-        run: .github/scripts/apt-install.sh cmake clang libclang-dev perl
-      - name: Rust
-        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt,clippy && rustup default "$RUST_TOOLCHAIN"
-      # Keyed on the profile sections, as in the tests job: the media relay tests are a
-      # test build.
-      - name: Profile key
-        id: profile
-        run: echo "hash=$(awk '/^\[/ { p = /^\[profile/ } p' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          key: ${{ steps.profile.outputs.hash }}
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
-        with:
-          tool: cargo-nextest@0.9.148
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Fetch dependencies
-        run: |
-          cargo fetch --locked
-          cargo fetch --locked --manifest-path harness/rust/Cargo.toml
-      - name: Clippy
-        env:
-          CARGO_NET_OFFLINE: "true"
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Profiler excluded from default normal dependencies
-        run: |
-          cargo tree --locked -p cook-router --edges normal --prefix none > default-dependencies.txt
-          if grep -qE '^(pprof|backtrace) v' default-dependencies.txt; then
-            echo '::error::CPU profiler and symbol resolver must remain opt-in'
-            exit 1
-          fi
-      - name: Harness
-        env:
-          CARGO_NET_OFFLINE: "true"
-        run: cargo check --locked --manifest-path harness/rust/Cargo.toml --target-dir target
-      - name: Media relay and CPU profiler tests, with external network denied
-        # The same loopback-only namespace as the tests above. All of cpa-server's unit
-        # tests run with the feature on, the 25 behind it included.
-        run: |
-          # shellcheck disable=SC2016 # $1 and $2 belong to the inner shell
-          sudo env "PATH=$PATH" "HOME=$HOME" \
-            "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}" "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
-            CPA_TEST_NO_SKIP=1 CARGO_NET_OFFLINE=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0 \
-            "CARGO_PROFILE_TEST_DEBUG=$CARGO_PROFILE_TEST_DEBUG" \
-            unshare --net -- sh -c 'ip link set lo up && exec setpriv --reuid="$1" --regid="$2" --init-groups -- cargo nextest run -p cpa-server --features media-relay,pprof --lib --locked --profile ci' \
-            sh "$(id -u)" "$(id -g)"
-
-  # The Rust binary embeds the committed ui/dist (crates/cpa-server/build.rs), so a source
-  # change without a rebuild would ship a stale dashboard. This job runs the dashboard's own
-  # gates, rebuilds, and fails when the rebuild differs from what is committed. The build is
-  # byte-for-byte reproducible.
-  dashboard:
-    name: dashboard (checks and committed build)
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.dashboard == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - name: Install and check
-        working-directory: ui
-        run: |
-          npm ci
-          npm run check
-      # The bundle sizes and ceilings for the size report comment, also when a gate above
-      # failed. size.mjs needs no packages; it exits 1 over a ceiling, which the check above
-      # already reports.
-      - name: Size report
-        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
-        working-directory: ui
-        run: |
-          mkdir -p "$RUNNER_TEMP/ci-report"
-          node tools/size.mjs --json "$RUNNER_TEMP/ci-report/dashboard.json" || [ $? -eq 1 ]
-      - name: Upload the size report
-        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ci-report-dashboard
-          path: ${{ runner.temp }}/ci-report/dashboard.json
-          if-no-files-found: ignore
-          retention-days: 90
-      - name: Rebuild
-        working-directory: ui
-        run: npm run build
-      # status, not diff: a new or removed file under ui/dist counts as well.
-      - name: Committed build matches the source
-        run: |
-          if [ -n "$(git status --porcelain -- ui/dist)" ]; then
-            git status --short -- ui/dist
-            echo '::error::ui/dist is stale; run npm run build in ui and commit the result'
-            exit 1
-          fi
-
+  # The size gate and both idle gates run one after another in the perf stage, so no build
+  # competes with an idle window. The image is built from the same binary, then started once
+  # and measured against its size budget.
   perf:
-    name: ${{ matrix.gates }} (Linux)
+    name: size and idle gates, image
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.perf == 'true') }}
-    # The release builds use Ubuntu 22.04 too, so the sizes compare with theirs, and its
-    # unprivileged user namespaces give bench/idle.sh a loopback-only network. The two
-    # idle gates run on separate runners, so neither waits out the other's 60 s window;
-    # each still has its machine to itself. Both build the same release binary: the
-    # build is about 340 s, nearly all of it the workspace crates one after another
-    # (codegen-units = 1, thin LTO), and a gate job that waited for one shared build would
-    # finish later than these two building side by side.
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { gates: "size and idle gates, 1 auth file", auth-files: 1 }
-          - { gates: "idle gate, 2,000 auth files", auth-files: 2000 }
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build tools
-        run: .github/scripts/apt-install.sh cmake clang libclang-dev perl
-      - name: Rust
-        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal && rustup default "$RUST_TOOLCHAIN"
-      # Both entries share one cache; one of them saves it.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/master' && matrix.auth-files == 1 }}
-      - name: Build
-        run: |
-          cargo tree --locked -p cook-router --edges normal --prefix none > size-dependencies.txt
-          if grep -qE '^(pprof|backtrace) v' size-dependencies.txt; then
-            echo '::error::Size-gate binaries must exclude CPU profiling and symbol resolution'
-            exit 1
-          fi
-          cargo build --release --locked -p cook-router
-      # Bytes and counts against bench/budgets.txt, never elapsed time. GATE_REPORT collects
-      # every measurement and its ceiling for the size report comment.
-      - name: Size
-        if: matrix.auth-files == 1
-        env:
-          GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
-        run: |
-          name=cook-router-ci-x86_64-unknown-linux-gnu
-          mkdir -p "$name" && cp target/release/cook-router README.md LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES "$name/"
-          tar -czf "$name.tar.gz" "$name"
-          bench/gate.sh size x86_64-unknown-linux-gnu target/release/cook-router "$name.tar.gz"
-      - name: Idle
-        env:
-          AUTH_FILES: ${{ matrix.auth-files }}
-          GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
-        run: bench/gate.sh idle linux target/release/cook-router "$AUTH_FILES"
-      # Also after a failed gate; nothing when the build failed before any gate ran.
-      - name: Size report
-        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
-        env:
-          LANE: perf-${{ matrix.auth-files }}
-          GATE_REPORT: ${{ runner.temp }}/gate-report.jsonl
-        run: |
-          [ -f "$GATE_REPORT" ] || exit 0
-          mkdir -p "$RUNNER_TEMP/ci-report"
-          jq -s --arg lane "$LANE" '{schema_version: 1, lane: $lane, metrics: .}' "$GATE_REPORT" \
-            > "$RUNNER_TEMP/ci-report/$LANE.json"
-      - name: Upload the size report
-        if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ci-report-perf-${{ matrix.auth-files }}
-          path: ${{ runner.temp }}/ci-report/perf-${{ matrix.auth-files }}.json
-          if-no-files-found: ignore
-          retention-days: 90
-
-  # Clippy over every target (tests, examples, benches) with warnings as errors, so code
-  # that only builds on Windows, test-only code included, is held to the Linux rules.
-  # Checking only, no codegen or link, so it stays a few minutes on a warm cache.
-  windows:
-    name: clippy (Windows)
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.windows == 'true') }}
-    runs-on: windows-2025
-    timeout-minutes: 60
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # btls-sys keeps BoringSSL's assembly on a native MSVC build, and BoringSSL assembles
-      # x86_64 Windows code with NASM, which the image lacks. bindgen needs libclang.
-      - name: NASM and libclang
-        run: |
-          choco install nasm --no-progress -y
-          printf '%s\n' 'C:\Program Files\NASM' >> "$GITHUB_PATH"
-          printf 'LIBCLANG_PATH=%s\n' 'C:\Program Files\LLVM\bin' >> "$GITHUB_ENV"
-      - name: Rust
-        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy --target x86_64-pc-windows-msvc && rustup default "$RUST_TOOLCHAIN"
-      # Keyed on the profile sections, as in the tests job: the file writer tests are a
-      # test build.
-      - name: Profile key
-        id: profile
-        run: echo "hash=$(awk '/^\[/ { p = /^\[profile/ } p' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          key: ${{ steps.profile.outputs.hash }}
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked --target x86_64-pc-windows-msvc -- -D warnings
-      # The credential and config file writers on Windows, against loopback mocks only.
-      - name: File writer tests
-        run: |
-          cargo test --locked --target x86_64-pc-windows-msvc -p cpa-exec --lib -- \
-            browser_login_writes_go_file a_busy_port_is_go_port_in_use existing_file_keeps_user_fields codex_siwc_bind::
-          cargo test --locked --target x86_64-pc-windows-msvc -p cpa-server --lib credential_store
-
-  # actionlint, with shellcheck over the run scripts (the runner image has shellcheck), on
-  # every workflow. Pinned in .github/ci/pins.env and checked against its SHA-256.
-  workflows:
-    name: actionlint
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.workflows == 'true') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: actionlint
-        run: |
-          # shellcheck source=/dev/null
-          . .github/ci/pins.env
-          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$archive" \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
-          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" -version
-          "$RUNNER_TEMP/actionlint"
-
-  # The one check to require. It passes when the lane selection succeeded, every selected
-  # lane's jobs succeeded and every other lane's jobs were skipped; a docs-only pull
-  # request selects none and passes on the selection alone.
-  # THIRD-PARTY-NOTICES must list the dependency set and license texts the binary ships:
-  # tools/third-party-notices.py regenerates it from cargo-about and the dashboard build and
-  # fails on any difference. cargo-about is pinned in .github/ci/pins.env and cached.
-  notices:
-    name: third-party notices
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.notices == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Size and idle gates
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - name: Read the cargo-about pin
-        id: pin
-        run: |
-          . .github/ci/pins.env
-          echo "version=$CARGO_ABOUT_VERSION" >> "$GITHUB_OUTPUT"
-      - name: Cache cargo-about
-        id: about
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+          context: .
+          target: perf
+          build-args: CI_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=perf
+          cache-to: ${{ github.ref == 'refs/heads/master' && 'type=gha,mode=max,scope=perf' || '' }}
+      - name: Image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          path: ~/.cargo-about
-          key: cargo-about-${{ steps.pin.outputs.version }}-${{ runner.os }}
-      # Without --features cli, cargo-about installs no binary and still exits 0.
-      - name: Install cargo-about
-        if: steps.about.outputs.cache-hit != 'true'
-        run: cargo install cargo-about --version "${{ steps.pin.outputs.version }}" --locked --features cli --root ~/.cargo-about
-      - name: Install the dashboard's packages
-        working-directory: ui
-        run: npm ci
-      - name: THIRD-PARTY-NOTICES matches the dependencies
-        run: CARGO_ABOUT="$HOME/.cargo-about/bin/cargo-about" python3 -I tools/third-party-notices.py --check
+          context: .
+          target: runtime
+          load: true
+          tags: cook-router:ci
+          cache-from: type=gha,scope=perf
+      - name: Smoke test
+        run: docker run --rm cook-router:ci --version
+      - name: Image size gate
+        run: bench/gate.sh image cook-router:ci
 
   ci-ok:
-    needs: [changes, linux, test-counts, lint, dashboard, perf, windows, workflows, notices]
+    needs: [changes, dashboard, check, test, test-counts, perf]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -514,9 +214,8 @@ jobs:
           python3 - <<'PY'
           import json, os, sys
           needs = json.loads(os.environ["NEEDS"])
-          jobs = {"dashboard": ["dashboard"], "tests": ["linux", "test-counts"], "lint": ["lint"],
-                  "windows": ["windows"], "perf": ["perf"], "workflows": ["workflows"],
-                  "notices": ["notices"]}
+          jobs = {"dashboard": ["dashboard"], "check": ["check"], "test": ["test", "test-counts"],
+                  "perf": ["perf"]}
           ok = needs["changes"]["result"] == "success"
           selected = set(json.loads(needs["changes"]["outputs"].get("lanes") or "null") or []) if ok else set()
           rows = [f"| changes | lane selection | {needs['changes']['result']} | success |"]

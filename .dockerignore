@@ -1,7 +1,10 @@
+# Everything the stages in Dockerfile read is the tree minus build output, local packages and
+# documentation; harness/ stays, because the check stage builds its Rust half.
 target
 .git
 .amp
-harness
 docs
-ui/node_modules
+openspec
+**/node_modules
 **/*.log
+**/__pycache__
