@@ -653,6 +653,8 @@ Current storage choices are 21-frame initial/growth extents, 4,096 mapped header
 
 Retained event indexes coalesce consecutive records only when length, stride, type, correlation and the next start coordinate match. Each run preserves individual sequence numbers and exact record boundaries; lookup uses binary search, and partial request/scratch release can trim a run. Variable records remain separately indexed and bounded. Index/table growth is geometric within the unchanged metadata ceiling; leases reconstruct public `Record` views without copying payload bytes.
 
+Reservation input errors (`len == 0`, above `max_event_bytes`, or an aligned record larger than one frame) return `InvalidRecord` without changing the published prefix or terminating the writer. Frame/metadata exhaustion and failed backing reservations remain terminal storage failures; operator-facing I/O errors preserve their OS cause.
+
 Reads update per-stream timestamps under shared retention ownership. Eviction and expiry take exclusive ownership and refresh stale queue heads before selecting a victim; readers do not mutate the global ordered queue. A pinned victim permits another allocation attempt only after invalidation actually releases a frame.
 
 Owner ruling (D2, 2026-11-14): a slow consumer never pauses upstream reads. The stream keeps collecting into the cache queue and the gateway relays at the client's pace. Only `max_frames` and the pool bound that backlog, and it expires and is evicted like every other entry.

@@ -202,6 +202,7 @@ impl Writer {
 
     /// Reserve the whole record before writing. `aligned` excludes tail padding from the record.
     /// The caller's codec must finish its framing before committing this reservation.
+    /// Invalid length/alignment is rejected without terminating the stream; storage failures are terminal.
     pub fn begin_record(
         &mut self,
         len: usize,
@@ -226,7 +227,7 @@ impl Writer {
 
     fn reserve(&self, len: usize, aligned: bool, kind: u32, correlation: u32) -> Result<(Record, Index, usize), Error> {
         if len == 0 || len > self.inner.limits.max_event_bytes || (aligned && len > FRAME_BYTES) {
-            return Err(Error::StorageExhausted);
+            return Err(Error::InvalidRecord);
         }
         let mut state = self.stream.state.lock().unwrap();
         if state.gone {

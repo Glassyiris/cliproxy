@@ -46,6 +46,7 @@ pub enum Error {
     Gone,
     StorageExhausted,
     InvalidPosition,
+    InvalidRecord,
     IncompleteRecord,
     Closed,
     Io(std::io::Error),
@@ -57,9 +58,10 @@ impl std::fmt::Display for Error {
             Self::Gone => f.write_str("stream.gone"),
             Self::StorageExhausted => f.write_str("stream.storage_exhausted"),
             Self::InvalidPosition => f.write_str("invalid stream position"),
+            Self::InvalidRecord => f.write_str("invalid record length or alignment"),
             Self::IncompleteRecord => f.write_str("record reservation is not completely written"),
             Self::Closed => f.write_str("stream is terminal"),
-            Self::Io(error) => write!(f, "stream.storage_exhausted: {error}"),
+            Self::Io(error) => write!(f, "stream storage I/O error: {error}"),
         }
     }
 }

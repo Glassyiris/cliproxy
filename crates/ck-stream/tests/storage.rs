@@ -296,3 +296,27 @@ fn one_mib_of_small_records_replays_with_default_metadata_budget() {
     }
     terminal(&mut reader, Terminal::Done);
 }
+
+#[test]
+fn invalid_record_parameters_do_not_terminate_a_valid_prefix() {
+    let (_dir, store, _) = store(8);
+    let mut writer = store.create().unwrap();
+    writer.append(b"prefix").unwrap();
+    let mut reader = store.reader(writer.id(), 0).unwrap();
+    drop(lease(&mut reader));
+    for (length, aligned) in [(0, false), (4 * FRAME_BYTES + 1, false), (FRAME_BYTES + 1, true)] {
+        assert!(matches!(
+            writer.begin_record(length, aligned, 0, 0),
+            Err(Error::InvalidRecord)
+        ));
+        assert!(matches!(reader.try_next(), Poll::Pending));
+    }
+    writer.append(b"suffix").unwrap();
+    writer.finish(Terminal::Done);
+    let read = lease(&mut reader);
+    assert_eq!(read.chunk(read.record().start).unwrap(), b"suffix");
+    let mut replay = store.reader(writer.id(), 0).unwrap();
+    let read = lease(&mut replay);
+    assert_eq!(read.chunk(read.record().start).unwrap(), b"prefix");
+    terminal(&mut reader, Terminal::Done);
+}
