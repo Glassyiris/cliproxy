@@ -159,7 +159,6 @@ impl Client {
         let session = ExecSession {
             id: self.session.clone(),
             continuation: false,
-            lease: None,
         };
         let cfg = Config::parse(config).unwrap();
         let response = self
@@ -1445,7 +1444,6 @@ async fn siwc_creates_and_steers_drop_configuration_updates() {
     let session = ExecSession {
         id: client.session.clone(),
         continuation: false,
-        lease: None,
     };
     let response = client
         .executor

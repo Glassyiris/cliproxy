@@ -608,16 +608,10 @@ func yamlBoolCases() []yamlBoolCase {
 		"observability.logs.debug":                      "config-version: 8\nobservability:\n  logs:\n    debug: %s\n",
 		"plugins.configs.x.enabled":                     "config-version: 8\nplugins:\n  configs:\n    x:\n      enabled: %s\n",
 		"server.host":                                   "config-version: 8\nserver:\n  host: %s\n",
-		"credentials.concurrency.cpa-heartbeat-timeout": "config-version: 8\ncredentials:\n  concurrency:\n    cpa-heartbeat-timeout: %s\n",
 	}
-	durations := []string{"3s", `"250ms"`, "1h2m3.5s", "0", "0s", "-1s", "5", "banana", "1d", `""`, "~", "yes"}
 	var out []yamlBoolCase
-	for _, field := range []string{"observability.logs.debug", "plugins.configs.x.enabled", "server.host", "credentials.concurrency.cpa-heartbeat-timeout"} {
-		list := spellings
-		if strings.HasPrefix(field, "credentials.") {
-			list = durations
-		}
-		for _, spelling := range list {
+	for _, field := range []string{"observability.logs.debug", "plugins.configs.x.enabled", "server.host"} {
+		for _, spelling := range spellings {
 			cfg, errLoad := loadText(dir, fmt.Sprintf(templates[field], spelling))
 			c := yamlBoolCase{Spelling: spelling, Field: field, Error: errLoad != nil}
 			if errLoad == nil {
@@ -630,8 +624,6 @@ func yamlBoolCases() []yamlBoolCase {
 					}
 				case "server.host":
 					c.Value = cfg.Host
-				default:
-					c.Value = cfg.CredentialConcurrency.CPAHeartbeatTimeout.String()
 				}
 			}
 			out = append(out, c)
@@ -1069,14 +1061,6 @@ func main() {
 		"trusted-proxies: ['']", "trusted-proxies: [' 127.0.0.1']", "trusted-proxies: [nonsense]",
 		"trusted-proxies: [10.0.0.0/33]", "trusted-proxies: ['::1/129']", "trusted-proxies: [fe80::1%eth0]",
 		"server: {trusted-proxies: [127.0.0.1, '::1', 10.0.0.0/8]}", "trusted-proxies: [01.2.3.4]",
-		"credentials: {in-flight: {snapshot-interval: 0s}}", "credentials: {in-flight: {stale-after: 5s}}",
-		"credentials: {in-flight: {staging-retention: x}}", "credentials: {in-flight: {max-part-bytes: 1023}}",
-		"credentials: {in-flight: {max-revision-bytes: 100}}", "credentials: {in-flight: {max-part-count: 63}}",
-		"credentials: {in-flight: {max-aggregate-groups: 0}}", "credentials: {in-flight: {max-details: -1}}",
-		"credentials: {in-flight: {max-string-bytes: 257}}", "credentials: {in-flight: {snapshot-interval: 1.5s, stale-after: 4.5s}}",
-		"credentials: {in-flight: {snapshot-interval: 2, stale-after: 10s}}", "credential-in-flight: {max-details: -1}",
-		"credentials: {in-flight: {snapshot-interval: null, stale-after: 1h1m0.5s}}", "credentials: {in-flight: {snapshot-interval: .5us}}",
-		"credentials: {in-flight: {snapshot-interval: '-1s'}}", "credentials: {in-flight: {snapshot-interval: 1d}}",
 		"oauth: {providers: {codex: {live-media-relay: {enabled: true, max-sessions: -1}}}}",
 		"oauth: {providers: {codex: {live-media-relay: {enabled: true, public-ip: nonsense}}}}",
 		"oauth: {providers: {codex: {live-media-relay: {enabled: true, public-ip: ' 2001:db8::1 '}}}}",
@@ -1341,7 +1325,6 @@ func configScenarios() []configScenario {
 	turn := "config-version: 8\nmanagement:\n  secret-key: '$HASH'\noauth:\n  providers:\n    codex:\n      live-media-relay:\n        ice-servers:\n          - {urls: ['turn:a.example.invalid'], username: fake-user-a, credential: fake-cred-a}\n          - {urls: ['turn:b.example.invalid'], username: fake-user-b, credential: fake-cred-b}\n"
 	nonDefaults := "config-version: 8\nmanagement:\n  secret-key: '$HASH'\n  panel-github-repository: fake/panel\n" +
 		"server:\n  host: 127.0.0.1\n  port: 9999\n  discovery:\n    service-type: _x._tcp\n" +
-		"credentials:\n  in-flight:\n    snapshot-interval: 3s\n    stale-after: 20s\n    staging-retention: 2m\n    max-part-bytes: 524288\n    max-part-count: 63\n    max-revision-bytes: 16777215\n    max-aggregate-groups: 99\n    max-details: 9\n    max-string-bytes: 255\n  concurrency:\n    max-limit: 5\n    busy-retry-min: 1s\n" +
 		"oauth:\n  providers:\n    aistudio:\n      ws-auth: false\n  excluded-models:\n    claude: [opus-x]\n    gemini: [b]\n  model-alias:\n    claude:\n      - {name: a, alias: b}\n" +
 		"observability:\n  logs:\n    error-logs-max-files: 3\n  usage:\n    redis-usage-queue-retention-seconds: 30\n  pprof:\n    addr: 127.0.0.1:1\n" +
 		"multimedia:\n  disable-image-generation: chat\nrouting:\n  retry:\n    request-retry: 4\n"
@@ -1353,17 +1336,6 @@ func configScenarios() []configScenario {
 			put("/config/observability/pprof/addr", `null`),
 			put("/config/management/panel-github-repository", `null`),
 			put("/config/server/discovery/service-type", `null`),
-			put("/config/credentials/in-flight/snapshot-interval", `null`),
-			put("/config/credentials/in-flight/max-part-bytes", `null`),
-			put("/config/credentials/in-flight/stale-after", `null`),
-			put("/config/credentials/in-flight/staging-retention", `null`),
-			put("/config/credentials/in-flight/max-part-count", `null`),
-			put("/config/credentials/in-flight/max-revision-bytes", `null`),
-			put("/config/credentials/in-flight/max-aggregate-groups", `null`),
-			put("/config/credentials/in-flight/max-details", `null`),
-			put("/config/credentials/in-flight/max-string-bytes", `null`),
-			put("/config/credentials/concurrency/max-limit", `null`),
-			put("/config/credentials/concurrency/busy-retry-min", `null`),
 			put("/config/multimedia/disable-image-generation", `null`),
 			put("/config/routing/retry/request-retry", `null`),
 			put("/config/server/host", `null`),
@@ -1394,7 +1366,6 @@ func configScenarios() []configScenario {
 			put("/config/server/port", `"bad"`),
 			put("/config/access", `null`),
 			put("/config/oauth/providers/codex/unknown", `true`),
-			put("/config/credentials/concurrency/lifecycle-config-revision", `5`),
 			put("/config/plugins/auth-revision", `1`),
 			put("/config/access/api-keys/0", `"x"`),
 			put("/config/routing/strategy/x", `"x"`),

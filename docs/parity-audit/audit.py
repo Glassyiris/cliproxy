@@ -136,9 +136,7 @@ def owner_for(text):
         ("pluginhost", "plugins"),
         ("plugin", "plugins"),
         ("internal/tui", "tui"),
-        ("internal/home", "home"),
         ("managementasset", "dashboard"),
-        ("internal/store", "home"),
         ("discovery", "tui"),
         ("cmd/", "tui"),
     ]
@@ -250,7 +248,7 @@ FAMILY_OWNER = {"claude": "claude", "codex": "codex", "gemini": "google", "inter
                 "aistudio": "google", "antigravity": "google", "vertex": "google", "xai": "openai-xai",
                 "devin": "device-providers"}
 SECTION_OWNER = [("management.", "manage"), ("config-version", "manage"), ("plugins.", "plugins"),
-                 ("server.discovery", "tui"), ("credentials.", "home"),
+                 ("server.discovery", "tui"),
                  ("client.codex", "codex"), ("multimedia.", "openai-xai")]
 CONFIG_ONLY = ("config/schema.rs", "config/document.rs", "config/validate.rs", "config/generate_schema.py")
 

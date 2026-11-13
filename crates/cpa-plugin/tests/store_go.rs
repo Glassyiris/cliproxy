@@ -19,7 +19,7 @@ use bytes::Bytes;
 use cpa_plugin::gojson::{self, GoJson};
 use cpa_plugin::store::{
     self, AuthConfig, Client, Doer, DoerResponse, GitHubRateLimiter, Headers, InstallOptions, InstallResult, Manifest,
-    Plugin, PluginSyncResponse, Release, Source, StoreError,
+    Plugin, Release, Source, StoreError,
 };
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
@@ -384,11 +384,6 @@ async fn replay(op: &str, args: &Value, installs: &mut Installs) -> Value {
         }
         "client" => run_client(args).await,
         "install" => installs.run(args).await,
-        "home_sync_validate" => {
-            let response: PluginSyncResponse = gojson::from_slice(str_of(args, "body").as_bytes()).unwrap();
-            let now = chrono::DateTime::parse_from_rfc3339(&str_of(args, "now")).unwrap();
-            plain(response.validate(now), |()| Value::Null)
-        }
         other => panic!("unknown op {other}"),
     }
 }

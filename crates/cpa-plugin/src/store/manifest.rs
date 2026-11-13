@@ -1,5 +1,5 @@
 //! Store manifests (internal/pluginstore/manifest.go): what an installed plugin
-//! records under `plugins.configs.<id>.store`, and the Home sync manifests.
+//! records under `plugins.configs.<id>.store`.
 
 use cpa_core::gostr::GoStr;
 use serde_yaml_ng::{Mapping, Value as Yaml};

@@ -99,7 +99,7 @@ pub fn reload(state: &Management) -> Result<(), ReloadError> {
 fn reload_with_notify(state: &Management, plugin_auth: Option<&tokio::sync::Notify>) -> Result<(), ReloadError> {
     // Plugin callbacks may save credentials or wait on the async runtime. Never parse
     // while holding `disk` or the store's reconciliation gate.
-    if !state.rt.store().is_home() && credentials::plugin_auth_parser_active() {
+    if credentials::plugin_auth_parser_active() {
         let db = state.rt.store().credential_backend();
         if let Err(error) = db.preparse(&state.rt.config()) {
             tracing::error!("credential database: preparsing source documents failed: {error:#}");

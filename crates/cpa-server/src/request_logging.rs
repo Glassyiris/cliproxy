@@ -1207,44 +1207,12 @@ impl Record {
                 }
             }
         }
-        if enabled && let Some(home) = self.state.rt.remote_dispatch() {
-            if home.available() {
-                let mut content = Vec::new();
-                if self.format(&mut content, decompress_error).is_ok() {
-                    let mut payload = serde_json::Map::new();
-                    let mut headers: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-                    for (name, value) in &self.headers {
-                        headers
-                            .entry(header_name(name.as_str()))
-                            .or_default()
-                            .push(String::from_utf8_lossy(value.as_bytes()).into_owned());
-                    }
-                    if !headers.is_empty() {
-                        payload.insert("headers".into(), serde_json::to_value(headers).unwrap());
-                    }
-                    if !self.id.trim().is_empty() {
-                        payload.insert("request_id".into(), self.id.trim().into());
-                    }
-                    if !content.is_empty() {
-                        payload.insert(
-                            "request_log".into(),
-                            String::from_utf8_lossy(&content).into_owned().into(),
-                        );
-                    }
-                    if let Err(error) = home
-                        .request_log(crate::gojson::sorted(&payload.into()).into_bytes())
-                        .await
-                    {
-                        tracing::warn!("failed to forward request log to home: {error}");
-                    }
-                }
-            }
-            return;
-        }
         let max = setting(&config, "error-logs-max-files")
             .and_then(serde_yaml_ng::Value::as_i64)
             .unwrap_or(10);
         let max = if max < 0 { 10 } else { max };
+        #[cfg(test)]
+        held_delivery(&self.state.dir).await;
         let _ = self
             .state
             .work
@@ -1676,6 +1644,24 @@ async fn decode(raw: Vec<u8>, headers: &HeaderMap, request: bool, limit: Option<
     (body, None)
 }
 
+/// Log directories whose final delivery waits for its gate, so a test can hold a log
+/// write while it checks what must not wait for it.
+#[cfg(test)]
+pub(crate) static HELD_DELIVERIES: Mutex<Vec<(PathBuf, Arc<tokio::sync::Notify>)>> = Mutex::new(Vec::new());
+
+#[cfg(test)]
+async fn held_delivery(dir: &Path) {
+    let gate = HELD_DELIVERIES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(held, _)| held == dir)
+        .map(|(_, gate)| gate.clone());
+    if let Some(gate) = gate {
+        gate.notified().await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1879,94 +1865,6 @@ mod tests {
         }
     }
 
-    struct HomeLogs {
-        available: bool,
-        logs: Mutex<Vec<Vec<u8>>>,
-        gate: Option<Arc<(tokio::sync::Notify, tokio::sync::Notify)>>,
-    }
-    impl crate::remote::RemoteDispatch for HomeLogs {
-        fn available(&self) -> bool {
-            self.available
-        }
-        fn dispatch(
-            &self,
-            _: crate::remote::RemoteRequest,
-        ) -> futures_util::future::BoxFuture<'_, Result<crate::remote::RemoteGrant, crate::remote::RemoteError>>
-        {
-            Box::pin(async { panic!("no dispatch") })
-        }
-        fn models(
-            &self,
-            _: Vec<(String, String)>,
-            _: Vec<(String, String)>,
-        ) -> futures_util::future::BoxFuture<'_, Result<Vec<u8>, crate::remote::ModelsError>> {
-            Box::pin(async { Err(crate::remote::ModelsError::Unavailable) })
-        }
-        fn request_log(&self, payload: Vec<u8>) -> futures_util::future::BoxFuture<'_, Result<(), String>> {
-            Box::pin(async move {
-                if let Some(gate) = &self.gate {
-                    gate.0.notify_one();
-                    gate.1.notified().await;
-                }
-                self.logs.lock().unwrap().push(payload);
-                Ok(())
-            })
-        }
-    }
-
-    #[tokio::test]
-    async fn home_forwards_full_logs_but_forced_errors_remain_local() {
-        for (enabled, available) in [(true, true), (true, false), (false, true)] {
-            let dir = scratch();
-            let state = management(&dir, enabled, false);
-            let home = Arc::new(HomeLogs {
-                available,
-                logs: Mutex::new(Vec::new()),
-                gate: None,
-            });
-            state.rt.set_remote_dispatch(Some(home.clone()));
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let app = axum::Router::new().fallback(move |axum::Extension(log): axum::Extension<RequestLog>| {
-                let _ = tx.send(log);
-                async { (StatusCode::INTERNAL_SERVER_ERROR, "fixture error") }
-            });
-            let mut app = router(&state, app);
-            let mut request = HttpRequest::builder()
-                .method("POST")
-                .uri("/fixture")
-                .header("authorization", "Bearer 1234567890")
-                .body(Body::empty())
-                .unwrap();
-            request.extensions_mut().insert(RequestId("fixture-request-id".into()));
-            let response = app.call(request).await.unwrap();
-            axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-            // The handler ran inside `app.call`, so its log is already queued.
-            let log = rx.try_recv().expect("handler sent its RequestLog");
-            // The log is finalized in a spawned task after the body ends: forwarded to
-            // Home, or written on the blocking pool. Wait for that task, not a fixed time,
-            // so the counts below are final.
-            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-            while !log.1.done.load(Ordering::Acquire) {
-                assert!(tokio::time::Instant::now() < deadline, "request log never finalized");
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            let captured = home.logs.lock().unwrap();
-            assert_eq!(captured.len(), usize::from(enabled && available));
-            assert_eq!(logs(&dir).len(), usize::from(!enabled));
-            if let Some(payload) = captured.first() {
-                let payload: serde_json::Value = serde_json::from_slice(payload).unwrap();
-                assert_eq!(payload["request_id"], "fixture-request-id");
-                assert_eq!(payload["headers"]["Authorization"][0], "Bearer 1234567890");
-                let content = payload["request_log"].as_str().unwrap();
-                assert!(content.contains("Authorization: Bearer 1234...7890"));
-                assert!(content.contains(
-                    "=== RESPONSE ===\nStatus: 500\nContent-Type: text/plain; charset=utf-8\n\nfixture error\n"
-                ));
-            }
-            std::fs::remove_dir_all(dir).unwrap();
-        }
-    }
-
     #[tokio::test]
     async fn served_composition_captures_before_head_stripping_and_length_inference() {
         let dir = scratch();
@@ -2022,13 +1920,6 @@ mod tests {
     async fn cancelling_websocket_close_does_not_cancel_final_delivery() {
         let dir = scratch();
         let state = management(&dir, true, false);
-        let gate = Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
-        let home = Arc::new(HomeLogs {
-            available: true,
-            logs: Mutex::new(Vec::new()),
-            gate: Some(gate.clone()),
-        });
-        state.rt.set_remote_dispatch(Some(home.clone()));
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         let app = axum::Router::new().fallback(move |axum::Extension(log): axum::Extension<RequestLog>| {
             let tx = tx.clone();
@@ -2053,10 +1944,11 @@ mod tests {
         socket
             .append_part(b"Timestamp: fixture\nEvent: websocket.disconnect\nbye\n")
             .unwrap();
-        let caller = tokio::spawn(socket.close());
-        gate.0.notified().await;
-        caller.abort();
-        gate.1.notify_one();
+        // The first poll hands the delivery to the work pool; dropping the caller then
+        // cancels only the wait for it.
+        let mut caller = Box::pin(socket.close());
+        assert!(futures_util::poll!(&mut caller).is_pending());
+        drop(caller);
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while !log.1.done.load(Ordering::Acquire) {
                 tokio::task::yield_now().await;
@@ -2064,8 +1956,7 @@ mod tests {
         })
         .await
         .unwrap();
-        assert_eq!(home.logs.lock().unwrap().len(), 1);
-        assert!(logs(&dir).is_empty());
+        assert_eq!(logs(&dir).len(), 1);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

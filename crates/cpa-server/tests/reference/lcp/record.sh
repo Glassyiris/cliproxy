@@ -26,7 +26,8 @@ LCP_TRACE=$tmp/trace.jsonl GOFLAGS=-mod=mod go test -count=1 -p 1 -parallel 1 -o
   -run 'Merkle|Canonical|FastTurn|LookupSession|LCP|SessionAffinity|NormalizeCanonical' \
   ./sdk/cliproxy/session/ ./sdk/cliproxy/auth/
 # Records carry a "test<TAB>" prefix: a stable sort by test keeps each test's own call
-# order and hides the order the tests ran in.
+# order and hides the order the tests ran in. Home dispatch tests are dropped: Home
+# mode is removed.
 tab=$(printf '\t')
-LC_ALL=C sort -s -t "$tab" -k1,1 "$tmp/trace.jsonl" | cut -f2- > "$tmp/sorted.jsonl"
+LC_ALL=C sort -s -t "$tab" -k1,1 "$tmp/trace.jsonl" | grep -v "^auth\.TestHome" | cut -f2- > "$tmp/sorted.jsonl"
 zstd -19 -q -f "$tmp/sorted.jsonl" -o "$out"

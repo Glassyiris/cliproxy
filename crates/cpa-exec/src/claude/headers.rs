@@ -178,7 +178,7 @@ fn preserves_caller(cli_fingerprint: bool, confirmed: bool) -> bool {
 
 /// Whether [`build`] reads `cached_session_id`: only past the caller-preserving
 /// return, and only without an explicit session. Go looks the cached ID up there, so
-/// a passthrough request never touches the session cache or Home KV.
+/// a passthrough request never touches the session cache.
 pub(crate) fn needs_cached_session(cli_fingerprint: bool, confirmed: bool, session_id: &str) -> bool {
     !preserves_caller(cli_fingerprint, confirmed) && session_id.trim().is_empty()
 }

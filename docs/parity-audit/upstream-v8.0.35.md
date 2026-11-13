@@ -17,7 +17,7 @@ Columns:
 | Claude: prompt cache and prompt shaping | 10 | 6 | 0 | 0 | 1 | 3 |
 | Claude: thread continuation | 4 | 4 | 0 | 0 | 0 | 0 |
 | Claude: rate limits and error answers | 2 | 2 | 0 | 0 | 0 | 0 |
-| Claude: other executor work | 13 | 5 | 8 | 0 | 0 | 0 |
+| Claude: other executor work | 13 | 5 | 7 | 1 | 0 | 0 |
 | Claude: Responses tool_search | 13 | 13 | 0 | 0 | 0 | 0 |
 | Translation to and from Claude | 17 | 14 | 3 | 0 | 0 | 0 |
 | Payload rules | 1 | 1 | 0 | 0 | 0 | 0 |
@@ -26,20 +26,20 @@ Columns:
 | xAI | 8 | 3 | 4 | 0 | 1 | 0 |
 | OpenAI-compatible and Responses translation | 6 | 3 | 3 | 0 | 0 | 0 |
 | Devin and Meta | 8 | 0 | 8 | 0 | 0 | 0 |
-| Credentials, selection and cooldowns | 22 | 9 | 11 | 0 | 2 | 0 |
-| Model registry and catalogs | 11 | 9 | 1 | 0 | 1 | 0 |
+| Credentials, selection and cooldowns | 22 | 9 | 11 | 1 | 1 | 0 |
+| Model registry and catalogs | 11 | 8 | 1 | 1 | 1 | 0 |
 | Config and Management API | 15 | 11 | 4 | 0 | 0 | 0 |
 | Plugins | 12 | 0 | 12 | 0 | 0 | 0 |
-| Server, handlers and streaming | 12 | 4 | 8 | 0 | 0 | 0 |
+| Server, handlers and streaming | 12 | 2 | 8 | 2 | 0 | 0 |
 | Usage and logging | 3 | 2 | 1 | 0 | 0 | 0 |
 | Antigravity | 25 | 15 | 10 | 0 | 0 | 0 |
 | Docs and assets | 20 | 0 | 0 | 0 | 20 | 0 |
 | Go tests only | 7 | 0 | 0 | 0 | 7 | 0 |
 | Merge commits | 32 | 0 | 0 | 0 | 32 | 0 |
 | Reasoning signature carriage | 8 | 0 | 8 | 0 | 0 | 0 |
-| **All** | **288** | **136** | **84** | **0** | **65** | **3** |
+| **All** | **288** | **133** | **83** | **5** | **64** | **3** |
 
-Suggested order: credential epochs, watcher reconciliation and cooldown fencing first; SIWC security and v8 config concurrency next; plugin model/auth wiring and Home integration alongside them. Port the shared schema cleaner and reasoning-signature carriage series together, then Codex SSE/tool history, Gemini/Vertex tools and OpenAPI models, and the remaining providers. Keep the Antigravity entitlement/probe series (7e857c37, 9521fe29, ad381435, 091ff27f) together. Keep the Claude payload barrier (868e137), Responses tool_search series and deferred-tool cache fix (97ba1e89) together; verify stable prefixes before changing cache semantics. Finish the remaining Claude thinking/date/web-search cache work and catalogs, then SDK, discovery and non-visible performance parity. Sizes are Go diff sizes, not priorities or Rust effort estimates.
+Suggested order: credential epochs, watcher reconciliation and cooldown fencing first; SIWC security and v8 config concurrency next; plugin model/auth wiring alongside them. Port the shared schema cleaner and reasoning-signature carriage series together, then Codex SSE/tool history, Gemini/Vertex tools and OpenAPI models, and the remaining providers. Keep the Antigravity entitlement/probe series (7e857c37, 9521fe29, ad381435, 091ff27f) together. Keep the Claude payload barrier (868e137), Responses tool_search series and deferred-tool cache fix (97ba1e89) together; verify stable prefixes before changing cache semantics. Finish the remaining Claude thinking/date/web-search cache work and catalogs, then SDK, discovery and non-visible performance parity. Sizes are Go diff sizes, not priorities or Rust effort estimates.
 
 ## Claude: prompt cache and prompt shaping
 
@@ -86,9 +86,9 @@ Suggested order: credential epochs, watcher reconciliation and cooldown fencing 
 | [`e13bc9a1`](https://github.com/router-for-me/CLIProxyAPI/commit/e13bc9a1) | feat(claude): synthesize adaptive thinking block binding for preserved-thinking models | yes | to port | S (+22 −10) | synthesize adaptive thinking block binding for preserved-thinking models |
 | [`ad9e456d`](https://github.com/router-for-me/CLIProxyAPI/commit/ad9e456d) | feat(claude): support `between_tools` thinking disable type and adaptive fallbacks | yes | to port | M (+188 −57) | support `between_tools` thinking disable type and adaptive fallbacks |
 | [`db1bab01`](https://github.com/router-for-me/CLIProxyAPI/commit/db1bab01) | feat(runtime): narrow Claude per-minute rate-limit cooldown when short Retry-After is present | yes | ported here | M (+103 −2) | per-minute 429 narrowing; replays Go-recorded vectors (`tests/fixtures/claude_ratelimit_go.json`) |
-| [`9d453bc0`](https://github.com/router-for-me/CLIProxyAPI/commit/9d453bc0) | feat(cache): add Claude web search result caching and restoration for sessions | yes | to port | L (+508 −0) | session web-search result restoration and cache configuration; ab9c06b4 adds Home persistence |
+| [`9d453bc0`](https://github.com/router-for-me/CLIProxyAPI/commit/9d453bc0) | feat(cache): add Claude web search result caching and restoration for sessions | yes | to port | L (+508 −0) | session web-search result restoration and cache configuration |
 | [`084b9ca7`](https://github.com/router-for-me/CLIProxyAPI/commit/084b9ca7) | feat(claude): strip Claude Code identity on API keys with cloak mode never or uncloak | yes | to port | M (+139 −12) | cloak never/uncloak must remove Claude Code identity, not merely disable injected cloaking |
-| [`ab9c06b4`](https://github.com/router-for-me/CLIProxyAPI/commit/ab9c06b4) | feat(cache): add Home KV support to Claude web search result cache | yes | to port | M (+106 −17) | add Home KV support to Claude web search result cache |
+| [`ab9c06b4`](https://github.com/router-for-me/CLIProxyAPI/commit/ab9c06b4) | feat(cache): add Home KV support to Claude web search result cache | yes | not applicable | M (+106 −17) | Home mode was removed on 2026-11-13 |
 
 ## Claude: Responses tool_search
 
@@ -233,7 +233,7 @@ Suggested order: credential epochs, watcher reconciliation and cooldown fencing 
 | [`6920ed5d`](https://github.com/router-for-me/CLIProxyAPI/commit/6920ed5d) | fix(cook-router): propagate credential version and registration epoch in execution results | no | to port | M (+80 −18) | partly covered: an outcome is recorded only while the credential still has the revision it ran with, so a late failure from a replaced or re-created credential never cools the new one. Difference: any edit changes the revision, so an outcome that lands after a metadata-only edit is dropped, where Go applies it (its `CredentialVersion` moves only with the tokens). Applying it can move a Claude session, so that waits for the post-replay set |
 | [`935aa6e3`](https://github.com/router-for-me/CLIProxyAPI/commit/935aa6e3) | fix(cook-router): prevent in-flight token refresh from overwriting concurrently updated credentials | yes | ported here | S (+6 −0) | a refresh that lands after the tokens were saved is dropped and answers with them; another edit is merged with it like Go `mergeAuthContent`, with the Codex outer tokens gated as one partition; Go's registration-epoch and credential-version guards are not ported |
 | [`7c2133e2`](https://github.com/router-for-me/CLIProxyAPI/commit/7c2133e2) | fix(cook-router): reconcile concurrent auth updates during batch model registration | no | to port | S (+39 −8) | partly covered: Rust's registry is a cache derived from the config and credential set and rebuilt on the next use after the store epoch moves (`Runtime::registry`); test added for that sequential invalidation. It is weaker than Go's fence: a build that took its snapshot before a concurrent update still returns that registry and calls `models_registered` with it, which starts the Antigravity capability probes; only the next use rebuilds. Plugin catalogs already feed credential registrations (`append_plugin_models`); plugin model discovery (`model.for_auth`) is not ported |
-| [`4a8ecf5c`](https://github.com/router-for-me/CLIProxyAPI/commit/4a8ecf5c) | fix(auth): skip local filtering for home dispatch | yes | nothing to port | S (+7 −2) | Rust's Home path (`dispatch.rs`, Go `executeHomeOnce`) already takes Home's model without consulting local cooldowns; only local picks are filtered |
+| [`4a8ecf5c`](https://github.com/router-for-me/CLIProxyAPI/commit/4a8ecf5c) | fix(auth): skip local filtering for home dispatch | yes | not applicable | S (+7 −2) | Home mode was removed on 2026-11-13 |
 | [`5dbd92a0`](https://github.com/router-for-me/CLIProxyAPI/commit/5dbd92a0) | fix(auth): preserve upstream error cooldown on canceled stream contexts | yes | to port | S (+39 −4) | partly covered: a Codex WebSocket error leaves the turn's stream in the same poll that reports the lost socket (test added). A cancellation while an executor has cooldown headers but is still awaiting the error body still discards the cooldown; Go keeps it through `recordCanceledUpstreamCooldown`. Claude awaits a 429 body before classifying it, so the fix waits for the post-replay set |
 | [`7a687f42`](https://github.com/router-for-me/CLIProxyAPI/commit/7a687f42) | feat(routing): support session-affinity-rebind-on option | yes | to port | L (+297 −19) | `session-affinity-rebind-on` |
 | [`56eee6a4`](https://github.com/router-for-me/CLIProxyAPI/commit/56eee6a4) | fix(cook-router): treat HTTP/2 closed connection errors as transient lifecycle drops | yes | ported here | S (+11 −4) | the classifier came with #73; replays its statusless Go cases (no cooldown, a retry round) |
@@ -254,7 +254,7 @@ Suggested order: credential epochs, watcher reconciliation and cooldown fencing 
 | Commit | Subject | User-visible | This PR | Size | Notes |
 |---|---|---|---|---|---|
 | [`1672be5d`](https://github.com/router-for-me/CLIProxyAPI/commit/1672be5d) | feat(registry): support custom model catalog sources and dynamic reload | yes | ported here | L (+361 −287) | custom model catalog sources and reload (#180) |
-| [`01e28567`](https://github.com/router-for-me/CLIProxyAPI/commit/01e28567) | fix(registry): disable Devin catalog for home builds | yes | ported here | S (+3 −1) | no Devin catalog in Home builds (#180) |
+| [`01e28567`](https://github.com/router-for-me/CLIProxyAPI/commit/01e28567) | fix(registry): disable Devin catalog for home builds | yes | not applicable | S (+3 −1) | Home mode was removed on 2026-11-13 |
 | [`18b6cc8a`](https://github.com/router-for-me/CLIProxyAPI/commit/18b6cc8a) | refactor(registry): use model getters for Devin and Meta | no | nothing to port | S (+2 −3) | Go refactor |
 | [`bbcd5734`](https://github.com/router-for-me/CLIProxyAPI/commit/bbcd5734) | fix(registry): treat credential_quota as quota cooldown in model availability | yes | to port | S (+23 −13) | `credential_quota` counts as a quota cooldown in availability |
 | [`4c159069`](https://github.com/router-for-me/CLIProxyAPI/commit/4c159069) | feat(registry): add muse-wonder-1.0 models | yes | ported here | M (+62 −0) | ported: the Meta section carries `muse-wonder-1.0` and its contributor variant (catalog synced to v8.0.35) |
@@ -316,8 +316,8 @@ Suggested order: credential epochs, watcher reconciliation and cooldown fencing 
 | [`81573f04`](https://github.com/router-for-me/CLIProxyAPI/commit/81573f04) | fix(server): prevent data races during concurrent config access and reloads | no | to port | M (+146 −62) | Go handler config race fix; verify request-pinned configuration in Rust |
 | [`4f2e5270`](https://github.com/router-for-me/CLIProxyAPI/commit/4f2e5270) | feat(runtime): detect upstream stream truncation across executors and proxy handlers | yes | to port | L (+341 −45) | partly ported: the OpenAI-compatible executor fails a Claude client's stream that ends without `[DONE]` and without a non-blank `finish_reason`, and both of its end-of-stream failures keep the usage seen so far; the Gemini and Vertex executors fail a Claude client's stream with 502 `upstream stream closed before finishReason` when no line carried a non-blank `finishReason` or `blockReason`, keeping the usage; Kimi ends a stream on a read error before the synthetic `[DONE]` and keeps the usage (Go-recorded cases in the `openai_compat`, `gemini` and `vertex` v8.0.35 recordings and `kimi/chat-stream-read-error*.json`). Not ported: the Claude executor's `message_stop` check, the Claude handler's `claudeSSEStreamState`, which need the live cache check, and the Claude handler's 409 error type `conflict_error` (`claudeErrorTypeFromStatus`), queued with them. Rust already detected transport truncation before |
 | [`294ed097`](https://github.com/router-for-me/CLIProxyAPI/commit/294ed097) | feat(discovery): add robust mDNS host conflict resolution and IP binding fallback | yes | to port | L (+2531 −44) | add robust mDNS host conflict resolution and IP binding fallback |
-| [`07feedf7`](https://github.com/router-for-me/CLIProxyAPI/commit/07feedf7) | fix(api): allow empty home model catalog | yes | ported here | S (+10 −3) | a Home catalog with no model records lists no models (200) instead of a 502; a null payload or section, or records without a usable ID, still answer 502 |
-| [`4d34502f`](https://github.com/router-for-me/CLIProxyAPI/commit/4d34502f) | fix(api): reject home models error envelopes | yes | ported here | S (+4 −0) | a Home catalog with an `error` key of any shape is an error, never a model list: 401 for the `no_credentials` and `invalid_credential` envelopes, 502 for every other |
+| [`07feedf7`](https://github.com/router-for-me/CLIProxyAPI/commit/07feedf7) | fix(api): allow empty home model catalog | yes | not applicable | S (+10 −3) | Home mode was removed on 2026-11-13 |
+| [`4d34502f`](https://github.com/router-for-me/CLIProxyAPI/commit/4d34502f) | fix(api): reject home models error envelopes | yes | not applicable | S (+4 −0) | Home mode was removed on 2026-11-13 |
 
 ## Usage and logging
 

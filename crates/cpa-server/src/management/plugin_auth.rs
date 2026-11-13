@@ -58,9 +58,6 @@ impl AuthManager for PluginAuthManager {
             .0
             .upgrade()
             .ok_or_else(|| std::io::Error::other("auth manager unavailable"))?;
-        if state.rt.store().is_home() {
-            return Err(std::io::Error::other("credential reads unavailable in Home mode"));
-        }
         super::auth_files::read_file(&state, path)
     }
 
@@ -105,9 +102,6 @@ impl ScopedSave {
     pub(super) fn issue(state: &Arc<Management>, job: cpa_plugin::hostauth::AuthSaveJob) -> Option<Self> {
         use cpa_plugin::hostauth::AuthSaveJob;
         let operation = state.enter()?;
-        if state.rt.store().is_home() {
-            return None;
-        }
         let provider = match &job {
             AuthSaveJob::LoginStart { provider }
             | AuthSaveJob::LoginPoll { provider, .. }
@@ -322,9 +316,6 @@ fn save_auths(
     write: &mut dyn FnMut() -> Result<(), String>,
     granted: Option<(&ScopedSave, &std::sync::atomic::AtomicBool, &[u8])>,
 ) -> Result<(), String> {
-    if state.rt.store().is_home() {
-        return Err("credential saves unavailable in Home mode".into());
-    }
     let _disk = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
     let path = match &auths {
         SavedAuths::BuiltIn(auth) => PathBuf::from(auth.attributes.get("path").cloned().unwrap_or_default()),
@@ -582,42 +573,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-
-    #[test]
-    fn home_mode_rejects_credential_saves_before_writing() {
-        let work = cpa_plugin::testing::scratch(&std::env::temp_dir(), "plugin-home-save");
-        let store = Arc::new(crate::config_store::ConfigStore::memory_with(&format!(
-            "oauth: {{auth-dir: {}}}\n",
-            work.display()
-        )));
-        let rt = Arc::new(crate::Runtime::home(
-            store.load().unwrap().config,
-            Vec::new(),
-            cpa_exec::Executors {
-                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
-                codex: Default::default(),
-                devices: Default::default(),
-                openai: Default::default(),
-                google: Default::default(),
-            },
-        ));
-        rt.deny_external.store(true, std::sync::atomic::Ordering::Relaxed);
-        let state = Management::new(rt, store);
-        let manager = PluginAuthManager(Arc::downgrade(&state));
-        let path = work.join("saved.json");
-        let result = manager.save(
-            SavedAuths::Written {
-                path: path.clone(),
-                data: b"{}".to_vec(),
-            },
-            &mut || panic!("Home mode must reject before invoking the credential writer"),
-        );
-        assert_eq!(result.unwrap_err(), "credential saves unavailable in Home mode");
-        assert!(!path.exists());
-        assert!(state.rt.store().snapshot().is_empty());
-        drop(state);
-        std::fs::remove_dir_all(work).unwrap();
-    }
 
     #[test]
     fn written_saves_are_durable_and_sql_failures_do_not_publish() {

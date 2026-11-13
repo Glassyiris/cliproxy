@@ -152,7 +152,6 @@ struct Proxy {
     url: String,
     seen: Arc<Seen>,
     rt: Arc<Runtime>,
-    upstream: String,
 }
 
 async fn proxy(config: &str, credentials: Vec<Credential>) -> Proxy {
@@ -172,12 +171,7 @@ async fn proxy(config: &str, credentials: Vec<Credential>) -> Proxy {
     };
     let rt = Arc::new(cpa_server::testing::runtime(config, credentials, executors));
     let url = serve(router(rt.clone())).await;
-    Proxy {
-        url,
-        seen,
-        rt,
-        upstream: upstream_url,
-    }
+    Proxy { url, seen, rt }
 }
 
 async fn post(url: &str, path: &str, body: &str) -> (u16, wreq::header::HeaderMap, String) {
@@ -1247,88 +1241,6 @@ async fn usage_queue_records_every_attempt() {
     assert!(pop().is_empty());
 }
 
-/// Home picks in order, each with the client key Home authenticated.
-struct Picks(Mutex<Vec<(Credential, &'static str)>>);
-
-impl cpa_server::remote::RemoteDispatch for Picks {
-    fn available(&self) -> bool {
-        true
-    }
-
-    fn dispatch(
-        &self,
-        _: cpa_server::remote::RemoteRequest,
-    ) -> futures_util::future::BoxFuture<'_, Result<cpa_server::remote::RemoteGrant, cpa_server::remote::RemoteError>>
-    {
-        let (credential, key) = self.0.lock().unwrap().remove(0);
-        Box::pin(async move {
-            Ok(cpa_server::remote::RemoteGrant {
-                credential,
-                end: Box::new(|| None),
-                cancel: None,
-                request_retry: None,
-                user_api_key: key.into(),
-                private: Default::default(),
-            })
-        })
-    }
-
-    fn models(
-        &self,
-        _: Vec<(String, String)>,
-        _: Vec<(String, String)>,
-    ) -> futures_util::future::BoxFuture<'_, Result<Vec<u8>, cpa_server::remote::ModelsError>> {
-        unreachable!("no model lists")
-    }
-}
-
-/// Go's count_tokens handler runs on `GetContextWithCancel(.., context.Background())`,
-/// which drops the access middleware's usage key, so its Home 401 records carry the key
-/// Home authenticated (gin `userApiKey`), even over a client key the middleware
-/// accepted; a later pick without one keeps it.
-#[tokio::test]
-async fn count_tokens_home_401s_record_the_home_client_key() {
-    let p = proxy("", vec![]).await;
-    let cfg = Config::parse("observability: {usage: {usage-statistics-enabled: true}}\n").unwrap();
-    p.rt.usage_queue().configure(true, &cfg);
-    // Kimi counts tokens upstream (Go `countTokensUpstream`).
-    let pick = |id: &str, token: &str| {
-        let metadata = serde_json::json!({"type": "kimi", "access_token": token});
-        let mut c = Credential::from_file(
-            Path::new("/fake"),
-            &Path::new("/fake").join(id),
-            metadata.as_object().unwrap().clone(),
-        )
-        .unwrap();
-        for (k, v) in [
-            (cpa_core::config::credentials::HOME_AUTH_INDEX, format!("idx-{id}")),
-            ("base_url", p.upstream.clone()),
-            (cpa_server::remote::UPSTREAM_MODEL, "kimi-up".to_owned()),
-        ] {
-            c.attributes.insert(k.into(), v);
-        }
-        c
-    };
-    p.rt.set_remote_dispatch(Some(Arc::new(Picks(Mutex::new(vec![
-        (pick("a.json", "fake-unauth"), "home-client"),
-        (pick("b.json", "fake-unauth"), ""),
-        (pick("c.json", "fake-ok"), ""),
-    ])))));
-    let body = r#"{"model":"kimi-x","messages":[{"role":"user","content":"hi"}]}"#;
-    let (status, _, text) = post(&p.url, "/v1/messages/count_tokens", body).await;
-    assert_eq!(status, 200, "{text}");
-    assert_eq!(p.seen.requests.lock().unwrap().len(), 3, "three upstream attempts");
-    let keys: Vec<(String, Value)> =
-        p.rt.usage_queue()
-            .pop_oldest(10)
-            .iter()
-            .map(|r| serde_json::from_slice::<Value>(r).unwrap())
-            .map(|r| (r["api_key"].as_str().unwrap().to_owned(), r["executor_type"].clone()))
-            .collect();
-    let want = ("home-client".to_owned(), Value::from("home-result"));
-    assert_eq!(keys, [want.clone(), want]);
-}
-
 /// Go's Responses handler applies `prepareCodexOrphanDelegation` before dispatch, so the
 /// rewrite reaches every provider (here Claude). Input and rewritten text come from
 /// Go's `RewriteCodexOrphanDelegationInput` golden (cpa-common codex_client_go.json).
@@ -1396,11 +1308,9 @@ async fn session_turns_honour_pin_callback_and_session() {
             session: ExecSession {
                 id: "ws-1".into(),
                 continuation,
-                lease: None,
             },
             pinned: pinned.map(str::to_owned),
             on_selected: Some(Box::new(move |c| seen.lock().unwrap().push(c.id.clone()))),
-            home: None,
         })
     };
     let call = |turn| Call {

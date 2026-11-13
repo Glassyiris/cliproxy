@@ -42,7 +42,6 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use cpa_common::gostr::GoStr;
 use cpa_core::config::Config;
 use cpa_core::credential::Credential;
 use cpa_core::exec::{Caller, ExecError, ExecSession, ExecStream, Operation};
@@ -141,8 +140,8 @@ impl Sink {
     /// The connection's end: the deferred `appendWebsocketTimelineDisconnect`, the socket
     /// closed at once (a pending close reply gets `TERMINAL_WRITE`, gorilla's bounded
     /// control write), the reader finished so its interrupt diagnostics are in, and only
-    /// then the timeline's delivery, which can wait on disk or Home forwarding (Go closes
-    /// TCP before its deferred log write).
+    /// then the timeline's delivery, which can wait on disk (Go closes TCP before its
+    /// deferred log write).
     async fn finish(mut self, client: Client) {
         if let Some(reason) = self.terminated.take() {
             self.event("disconnect", reason.as_bytes());
@@ -296,8 +295,8 @@ struct Connection {
     pending_prewarm: String,
     pending_calls: Vec<String>,
     pinned: String,
-    /// Upstream credential affinity per provider: (credential id, model key).
-    pinned_by_provider: HashMap<String, (String, String)>,
+    /// Upstream credential affinity per provider: the credential id.
+    pinned_by_provider: HashMap<String, String>,
     passthrough_model: String,
     mode: Mode,
     upstream_auth: String,
@@ -312,8 +311,6 @@ struct Connection {
     /// The upgrade request's WebSocket timeline, detached before the 101 (None when
     /// request logging is off).
     timeline: Option<crate::request_logging::WebsocketLog>,
-    /// The Home pick the session's pooled upstream socket keeps between turns.
-    home: Arc<crate::home_session::SessionHome>,
     /// Lets the reader end the HTTP turn in flight (`responsesLocalInterrupt`).
     local: Arc<LocalInterrupt>,
 }
@@ -486,7 +483,6 @@ impl Drop for LocalTurn<'_> {
 struct Control {
     rt: Arc<Runtime>,
     session: String,
-    home: Arc<crate::home_session::SessionHome>,
     local: Arc<LocalInterrupt>,
     writer: Writer,
     timeline: Timeline,
@@ -529,9 +525,9 @@ impl Control {
                 "response.interrupt requires response_id".into(),
             ));
         }
-        // `WithWebsocketAuthCheck`: a Home credential lives on this session only.
-        let (rt, home) = (&self.rt, &self.home);
-        let enabled = |id: &str| session_auth(rt, home, id).is_some_and(|(credential, _)| !credential.disabled);
+        // `WithWebsocketAuthCheck`.
+        let rt = &self.rt;
+        let enabled = |id: &str| session_auth(rt, id).is_some_and(|credential| !credential.disabled);
         self.rt
             .executors
             .codex
@@ -562,22 +558,12 @@ impl Control {
     }
 }
 
-/// Go `sessionAuthByIDWithSource`: the store's current view first, then a Home
-/// credential the session kept (with its availability snapshot).
-fn session_auth(
-    rt: &Runtime,
-    home: &crate::home_session::SessionHome,
-    id: &str,
-) -> Option<(Arc<Credential>, Option<Arc<crate::remote::Availability>>)> {
+/// Go `sessionAuthByIDWithSource`: the store's current view.
+fn session_auth(rt: &Runtime, id: &str) -> Option<Arc<Credential>> {
     if id.is_empty() {
         return None;
     }
-    match rt.store().get(id) {
-        Some(credential) => Some((credential, None)),
-        None => home
-            .auth(id)
-            .map(|(credential, availability)| (credential, Some(availability))),
-    }
+    rt.store().get(id)
 }
 
 /// A turn's stream once its first event arrived.
@@ -641,7 +627,6 @@ impl Connection {
             capture: Default::default(),
             request_id: None,
             timeline: None,
-            home: Arc::default(),
             local: Arc::default(),
         }
     }
@@ -659,7 +644,6 @@ impl Connection {
             Control {
                 rt: self.rt.clone(),
                 session: self.session.clone(),
-                home: self.home.clone(),
                 local: self.local.clone(),
                 writer: sink.inner.clone(),
                 timeline: sink.timeline.clone(),
@@ -720,8 +704,6 @@ impl Connection {
         // The reader holds the other half: stop it so the socket closes.
         client.stop();
         self.rt.executors.close_session(&self.session);
-        // The kept Home pick ends with the connection, before timeline delivery can wait.
-        self.home.close();
         sink.finish(client).await;
     }
 
@@ -923,7 +905,7 @@ impl Connection {
         if self.mode == Mode::Websocket {
             self.upstream_auth.clone_from(&ctx.last_attempted);
             if !ctx.last_attempted.is_empty() {
-                self.remember_pin(&ctx.last_attempted, &model);
+                self.remember_pin(&ctx.last_attempted);
             }
             self.passthrough_model = model;
             self.last_request.clear();
@@ -941,13 +923,7 @@ impl Connection {
     }
 
     fn credential(&self, id: &str) -> Option<Arc<Credential>> {
-        self.session_credential(id).map(|(credential, _)| credential)
-    }
-
-    /// Go `sessionAuthByIDWithSource`: the store's current view first, then a Home
-    /// credential this session kept (the flag).
-    fn session_credential(&self, id: &str) -> Option<(Arc<Credential>, Option<Arc<crate::remote::Availability>>)> {
-        session_auth(&self.rt, &self.home, id)
+        session_auth(&self.rt, id)
     }
 
     /// `responsesWebsocketProviderSetForModel`: providers that registered the model
@@ -1016,39 +992,23 @@ impl Connection {
         !available.is_empty() && available.iter().all(|c| self.rt.executors.session_upstream(c))
     }
 
-    /// `responsesWebsocketPinnedAuthMatchesModel`. A Home credential (`home` holds the
-    /// model key it was pinned for) is in no local registry or scheduler: its snapshot
-    /// decides availability, and it matches while pinned for the same model key.
+    /// `responsesWebsocketPinnedAuthMatchesModel`.
     /// ponytail: provider membership reads `provider_key`, which honours a `provider_key`
-    /// attribute; Go lower-cases `auth.Provider`. They agree for Codex and xAI snapshots.
-    fn pin_matches(
-        &self,
-        credential: &Credential,
-        model: &str,
-        home: Option<(&str, &crate::remote::Availability)>,
-    ) -> bool {
+    /// attribute; Go lower-cases `auth.Provider`. They agree for Codex and xAI.
+    fn pin_matches(&self, credential: &Credential, model: &str) -> bool {
         let (providers, key) = self.providers(model);
-        if !providers.contains(&provider_key(credential)) {
-            return false;
-        }
-        match home {
-            Some((pinned_key, snapshot)) => {
-                crate::remote::available_for_model(credential, snapshot, &key, SystemTime::now())
-                    && pinned_key.trim().go_eq_fold(key.trim())
-            }
-            None => self.usable(credential, &key) && self.rt.registry().client_supports(&credential.id, &key),
-        }
+        providers.contains(&provider_key(credential))
+            && self.usable(credential, &key)
+            && self.rt.registry().client_supports(&credential.id, &key)
     }
 
     /// Drops a pin whose credential no longer serves the model, or restores the pin
     /// remembered for the model's only provider.
     fn revalidate_pin(&mut self, model: &str) {
-        let keep = self.session_credential(&self.pinned).is_some_and(|(pinned, home)| {
+        let keep = self.credential(&self.pinned).is_some_and(|pinned| {
             self.pinned_by_provider
                 .get(&provider_key(&pinned))
-                .is_some_and(|(id, key)| {
-                    *id == self.pinned && self.pin_matches(&pinned, model, home.as_deref().map(|a| (key.as_str(), a)))
-                })
+                .is_some_and(|id| *id == self.pinned && self.pin_matches(&pinned, model))
         });
         if !keep {
             self.pinned.clear();
@@ -1058,12 +1018,8 @@ impl Connection {
         }
         if let [provider] = self.providers(model).0.as_slice() {
             let remembered = self.pinned_by_provider.get(provider).cloned();
-            match remembered.and_then(|(id, key)| self.session_credential(&id).map(|c| (id, key, c))) {
-                Some((id, key, (c, home)))
-                    if self.pin_matches(&c, model, home.as_deref().map(|a| (key.as_str(), a))) =>
-                {
-                    self.pinned = id
-                }
+            match remembered.and_then(|id| self.credential(&id).map(|c| (id, c))) {
+                Some((id, c)) if self.pin_matches(&c, model) => self.pinned = id,
                 _ => {
                     self.pinned_by_provider.remove(provider);
                 }
@@ -1072,15 +1028,14 @@ impl Connection {
     }
 
     /// `rememberPinnedAuth`.
-    fn remember_pin(&mut self, id: &str, model: &str) {
+    fn remember_pin(&mut self, id: &str) {
         let Some(credential) = self.credential(id) else {
             return;
         };
         self.pinned = id.to_owned();
         let provider = provider_key(&credential);
         if !provider.is_empty() {
-            let key = self.providers(model).1;
-            self.pinned_by_provider.insert(provider, (id.to_owned(), key));
+            self.pinned_by_provider.insert(provider, id.to_owned());
         }
     }
 
@@ -1144,11 +1099,9 @@ impl Connection {
             session: ExecSession {
                 id: self.session.clone(),
                 continuation: ctx.native && ctx.requires_current,
-                lease: None,
             },
             pinned: (!self.pinned.is_empty()).then(|| self.pinned.clone()),
             on_selected: Some(on_selected),
-            home: Some(self.home.clone()),
         });
         let call = dispatch::Call {
             entry: Format::OpenAIResponse,

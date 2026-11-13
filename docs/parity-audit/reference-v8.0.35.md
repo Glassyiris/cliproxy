@@ -11,18 +11,18 @@ and counts as a historical report.
 
 All 1,687 existing IDs remain. New IDs append to each milestone's range, with
 additions grouped separately so concurrent porting branches can retain their IDs.
-The checklist now has 1,951 items:
+The checklist now has 1,877 items:
 
 | Kind | Added | Current total |
 |---|---:|---:|
-| Go test-suite files | 227 | 989 |
-| Configuration leaves | 28 | 436 |
+| Go test-suite files | 224 | 945 |
+| Configuration leaves | 28 | 415 |
 | Public routes | 3 | 77 |
 | Management routes | 1 | 186 |
 | Plugin RPC methods | 1 | 62 |
 | Plugin data contracts | 3 | 31 |
-| CLI flags | 1 | 34 |
-| **All additions** | **264** | |
+| CLI flags | 1 | 32 |
+| **All additions** | **261** | |
 
 The new routes are `GET /v1/models/*model`, `POST /v1/audio/speech`,
 `POST /v1/tts`, and `POST /v8/management/oauth/siwc/bind`. The probe gets an empty
@@ -184,12 +184,6 @@ the current audit owner.
 - `TestAntigravityCapabilityProbe_HardTimeout`
 - `TestAntigravityCapabilityProbe_ConcurrentBaseURLs`
 
-#### home (1 declaration)
-
-`M4-0491`, `sdk/cliproxy/service_executionregistry_test.go`:
-
-- `TestHomeConfigWorkerCancelsBlockedAntigravityModelRefreshBeforePublish`
-
 #### manage (3 declarations)
 
 `M4-0380`, `internal/watcher/synthesizer/file_test.go`:
@@ -265,7 +259,6 @@ Shared config gaps follow their provider rather than the Go config file's owner.
 | codex | 64 / 0 | 82 / 11 |
 | device-providers | 20 / 0 | 28 / 2 |
 | google | 36 / 0 | 80 / 4 |
-| home | 25 / 0 | 27 / 0 |
 | manage | 130 / 0 | 148 / 5 |
 | observe | 1 / 12 | 1 / 12 |
 | openai-xai | 27 / 1 | 31 / 6 |

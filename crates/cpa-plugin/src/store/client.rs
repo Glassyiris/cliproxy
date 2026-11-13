@@ -4,7 +4,6 @@
 
 use cpa_core::gostr::GoStr;
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -12,7 +11,7 @@ use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use sha2::{Digest, Sha256};
 
-use super::auth::{self, AuthConfig, Headers, ResolvedAuthConfig};
+use super::auth::{self, AuthConfig, Headers};
 use super::rate_limit::{GitHubRateLimiter, RateLimitError, github_rate_limit_key};
 use super::registry::{
     Artifact, DEFAULT_REGISTRY_URL, INSTALL_TYPE_DIRECT, InstallPlan, Plugin, Registry, github_repository_parts,
@@ -127,8 +126,6 @@ pub struct Client {
     pub registry_url: String,
     pub user_agent: String,
     pub auth: Vec<AuthConfig>,
-    pub resolved_auth: Vec<ResolvedAuthConfig>,
-    pub resolved_auth_expires_at: Option<SystemTime>,
     prepared: Option<Prepared>,
 }
 
@@ -141,8 +138,6 @@ impl Client {
             registry_url: String::new(),
             user_agent: String::new(),
             auth: Vec::new(),
-            resolved_auth: Vec::new(),
-            resolved_auth_expires_at: None,
             prepared: None,
         }
     }
@@ -246,10 +241,7 @@ impl Client {
         if api_url.is_empty() {
             return false;
         }
-        match auth::matching_resolved_auth_config(&self.resolved_auth, api_url, REQUEST_KIND_ARTIFACT) {
-            Some(item) => auth::resolved_auth_configured(item),
-            None => auth::auth_configured(&self.auth, api_url, REQUEST_KIND_ARTIFACT),
-        }
+        auth::auth_configured(&self.auth, api_url, REQUEST_KIND_ARTIFACT)
     }
 
     /// Go `DownloadArtifact`: bounded by the declared size.
@@ -275,13 +267,6 @@ impl Client {
     /// credentials for it.
     fn auth_headers(&self, request_url: &str, kind: &str) -> Result<(Headers, bool), String> {
         auth::validate_request_url(&self.auth, request_url, kind)?;
-        auth::validate_resolved_auth_expiry(
-            &self.resolved_auth,
-            self.resolved_auth_expires_at,
-            SystemTime::now(),
-            request_url,
-            kind,
-        )?;
         if let Some(prepared) = &self.prepared
             && prepared.request_url == request_url
             && prepared.kind == kind
@@ -289,7 +274,7 @@ impl Client {
             return Ok((prepared.headers.clone(), prepared.authenticated));
         }
         let mut headers = Headers::new();
-        let authenticated = auth::apply_auth(&mut headers, &self.resolved_auth, &self.auth, request_url, kind)?;
+        let authenticated = auth::apply_auth(&mut headers, &self.auth, request_url, kind)?;
         Ok((headers, authenticated))
     }
 

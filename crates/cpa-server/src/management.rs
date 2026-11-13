@@ -249,77 +249,73 @@ impl Management {
             log_zone,
             plugin_store,
         });
-        // Home has a mutually exclusive remote authority even though it wraps a
-        // Management handler. Only local persistent runtimes bind this owner.
-        if !state.rt.store().is_home() {
-            let weak = Arc::downgrade(&state);
-            let notify_owner = weak.clone();
-            let notify = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let installed = notify.clone();
-            // Retain the original transition input until this whole adapter completes.
-            // Runtime.config can advance before a fallible derived-install tail.
-            let progress = Mutex::new(None::<(u64, String, Arc<Config>, bool)>);
-            let (installation, notification) = state
-                .config
-                .install_configuration_and_notify(
-                    move |view| {
-                        if let Some(state) = weak.upgrade() {
-                            state.config.pin_configuration_owner(state.clone());
-                            let previous = {
-                                let mut progress = progress.lock().unwrap_or_else(PoisonError::into_inner);
-                                if !progress
-                                    .as_ref()
-                                    .is_some_and(|(rev, digest, _, _)| *rev == view.revision && *digest == view.digest)
-                                {
-                                    *progress = Some((view.revision, view.digest.clone(), state.rt.config(), false));
-                                }
-                                let (_, _, previous, completed) = progress.as_ref().unwrap();
-                                if *completed {
-                                    return Ok(());
-                                }
-                                previous.clone()
-                            };
-                            state
-                                .rt
-                                .bind_configuration(|| state.accept_configuration(&view, previous));
-                            progress
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .as_mut()
-                                .unwrap()
-                                .3 = true;
-                            if view.change == crate::config_store::ConfigurationChange::Committed {
-                                installed.store(true, std::sync::atomic::Ordering::Release);
+        let weak = Arc::downgrade(&state);
+        let notify_owner = weak.clone();
+        let notify = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let installed = notify.clone();
+        // Retain the original transition input until this whole adapter completes.
+        // Runtime.config can advance before a fallible derived-install tail.
+        let progress = Mutex::new(None::<(u64, String, Arc<Config>, bool)>);
+        let (installation, notification) = state
+            .config
+            .install_configuration_and_notify(
+                move |view| {
+                    if let Some(state) = weak.upgrade() {
+                        state.config.pin_configuration_owner(state.clone());
+                        let previous = {
+                            let mut progress = progress.lock().unwrap_or_else(PoisonError::into_inner);
+                            if !progress
+                                .as_ref()
+                                .is_some_and(|(rev, digest, _, _)| *rev == view.revision && *digest == view.digest)
+                            {
+                                *progress = Some((view.revision, view.digest.clone(), state.rt.config(), false));
                             }
-                        }
-                        Ok(())
-                    },
-                    move |view| {
-                        // The initial view is announced once its installation succeeded
-                        // (registration fails otherwise), so subscribers leave the
-                        // pre-binding configuration.
-                        let announce = match view.change {
-                            crate::config_store::ConfigurationChange::Initial => true,
-                            crate::config_store::ConfigurationChange::Committed => {
-                                notify.swap(false, std::sync::atomic::Ordering::AcqRel)
+                            let (_, _, previous, completed) = progress.as_ref().unwrap();
+                            if *completed {
+                                return Ok(());
                             }
+                            previous.clone()
                         };
-                        if announce && let Some(state) = notify_owner.upgrade() {
-                            // Runtime observers are ordinary success notifications too:
-                            // never announce success while another required adapter failed.
-                            state.config.pin_configuration_owner(state.clone());
-                            state.rt.service_configuration_installed();
+                        state
+                            .rt
+                            .bind_configuration(|| state.accept_configuration(&view, previous));
+                        progress
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .as_mut()
+                            .unwrap()
+                            .3 = true;
+                        if view.change == crate::config_store::ConfigurationChange::Committed {
+                            installed.store(true, std::sync::atomic::Ordering::Release);
                         }
-                        Ok(())
-                    },
-                )
-                .expect("validated configuration initial view");
-            state
-                .configuration_subscription
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .extend([installation, notification]);
-        }
+                    }
+                    Ok(())
+                },
+                move |view| {
+                    // The initial view is announced once its installation succeeded
+                    // (registration fails otherwise), so subscribers leave the
+                    // pre-binding configuration.
+                    let announce = match view.change {
+                        crate::config_store::ConfigurationChange::Initial => true,
+                        crate::config_store::ConfigurationChange::Committed => {
+                            notify.swap(false, std::sync::atomic::Ordering::AcqRel)
+                        }
+                    };
+                    if announce && let Some(state) = notify_owner.upgrade() {
+                        // Runtime observers are ordinary success notifications too:
+                        // never announce success while another required adapter failed.
+                        state.config.pin_configuration_owner(state.clone());
+                        state.rt.service_configuration_installed();
+                    }
+                    Ok(())
+                },
+            )
+            .expect("validated configuration initial view");
+        state
+            .configuration_subscription
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend([installation, notification]);
         oauth::install_callback_sink(&state);
         access::start_purge(&state);
         plugin_auth::attach(&state);
@@ -328,16 +324,11 @@ impl Management {
 
     /// Credentials always load from SQLite's materialized working folder.
     pub(crate) fn lock_auth_dir(&self, cfg: &mut Config) {
-        if !self.rt.store().is_home() {
-            cfg.auth_dir = self.rt.store().credential_backend().auth_dir();
-        }
+        cfg.auth_dir = self.rt.store().credential_backend().auth_dir();
     }
 
     /// Deletes a canonical document before acknowledging its removal.
     pub(crate) fn store_delete(&self, path: &std::path::Path) -> Result<(), String> {
-        if self.rt.store().is_home() {
-            return Err("Home owns its credentials remotely".into());
-        }
         self.rt
             .store()
             .credential_backend()
@@ -466,9 +457,6 @@ impl Management {
     /// Reads canonical documents; a failed scan keeps loaded file credentials while
     /// allowing the config itself to take effect.
     pub(crate) fn scan_credentials(&self, cfg: &Config) -> credentials::AuthScan {
-        if self.rt.store().is_home() {
-            return credentials::AuthScan::default();
-        }
         self.rt.store().credential_backend().scan(cfg).unwrap_or_else(|error| {
             tracing::error!("credential database: reading credentials failed, keeping the loaded ones: {error:#}");
             let credentials = self

@@ -21,9 +21,6 @@
 //! tokenless failures where Go's `TrackFailure` or apply_patch hooks publish them. Go 6fecc6e has no Vertex delegation to
 //! this executor: `claudeCCHUpstreamVertex` has no caller, so CCH signing stays
 //! Anthropic-only.
-//!
-//! In Home mode, device profiles come from Home KV (`profile::resolve_required`) and
-//! so do credential identities (`crate::oauth`); request logs belong to the server.
 
 mod alias;
 mod betas;
@@ -32,8 +29,6 @@ mod compaction;
 mod detect;
 mod headers;
 mod identity;
-#[cfg(test)]
-pub(crate) mod kv_test;
 mod profile;
 mod replay;
 mod session;
@@ -354,29 +349,19 @@ impl ClaudeExecutor {
             is_compat: ctx.is_compat,
             oauth_token: ctx.oauth_token,
         };
-        let scope = replay::prepare(&self.replay, &gate, &mut req).await;
+        let scope = replay::prepare(&self.replay, &gate, &mut req);
         let result = self.generate_with(ctx, req, scope.as_ref()).await;
         match (result, scope) {
             // wrapClaudeThinkingReplayStream wraps the stream ExecuteStream returns,
-            // after translation; the response waits for the cache writes it caused.
+            // after translation.
             (Ok(mut response), Some(scope)) => {
-                let writes = scope.writes.clone();
                 match response.body {
-                    ResponseBody::Stream(events) => {
-                        response.body = ResponseBody::Stream(writes.gate(scope.wrap(events)));
-                    }
-                    body => {
-                        response.body = body;
-                        writes.settle().await;
-                    }
+                    ResponseBody::Stream(events) => response.body = ResponseBody::Stream(scope.wrap(events)),
+                    body => response.body = body,
                 }
                 Ok(response)
             }
-            (Err(error), Some(scope)) => {
-                scope.writes.settle().await;
-                Err(error)
-            }
-            (result, None) => result,
+            (result, _) => result,
         }
     }
 
@@ -1575,16 +1560,14 @@ impl<'a> Ctx<'a> {
                 body = cloak::strip_ttl(body);
             }
             if !self.cli_profile && needs_fake_user_id(&body) {
-                // Go `injectFakeUserID`: Home KV in Home mode, and its errors fail the
-                // request.
+                // Go `injectFakeUserID`.
                 let user_id = if cache_user_id {
-                    session::cached_user_id_required(&self.api_key).await
+                    session::cached_user_id(&self.api_key, || {
+                        cloak::fake_user_id(&session::cached_session_id(&self.api_key))
+                    })
                 } else {
-                    session::cached_session_id_required(&self.api_key)
-                        .await
-                        .map(|session| cloak::fake_user_id(&session))
+                    cloak::fake_user_id(&session::cached_session_id(&self.api_key))
                 };
-                let user_id = user_id.map_err(|e| ExecError::local(500, FailureScope::Transport, e))?;
                 body = rawjson::set_str(&body, "metadata.user_id", &user_id);
             }
             cloaked = true;
@@ -1884,22 +1867,13 @@ impl<'a> Ctx<'a> {
         if self.cli_profile || cloak {
             profile::note_refused(self.credential, &req.headers, &self.settings);
         }
-        // Go: stabilizeDeviceProfile && confirmedClaudeCode, and the error (Home KV
-        // unreachable in Home mode) fails the request before it is sent.
-        let device_profile = if self.settings.header_defaults.stabilize_device_profile && confirmed {
-            let profile = profile::resolve_required(&self.credential.id, &self.api_key, &req.headers, &self.settings)
-                .await
-                .map_err(|e| ExecError::local(500, FailureScope::Transport, e))?;
-            Some(profile)
-        } else {
-            None
-        };
+        // Go: stabilizeDeviceProfile && confirmedClaudeCode.
+        let device_profile = (self.settings.header_defaults.stabilize_device_profile && confirmed)
+            .then(|| profile::resolve(&self.credential.id, &self.api_key, &req.headers, &self.settings));
         // Go `applyClaudeHeaders`, after the device profile and the passthrough
         // return: without a session, the key's cached session ID.
         let cached_session_id = if headers::needs_cached_session(self.cli_profile || cloak, confirmed, session_id) {
-            session::cached_session_id_required(&self.api_key)
-                .await
-                .map_err(|e| ExecError::local(500, FailureScope::Transport, e))?
+            session::cached_session_id(&self.api_key)
         } else {
             String::new()
         };

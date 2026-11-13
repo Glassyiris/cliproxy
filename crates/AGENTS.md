@@ -12,7 +12,7 @@ Current crate responsibilities:
 - `crates/cpa-translate`: format translation between the Anthropic, OpenAI and Gemini APIs.
 - `crates/cpa-exec`: one module per upstream provider (wire format, auth headers, HTTP client profile).
 - `crates/cpa-server`: axum routes, client auth, credential selection, management API.
-- `crates/cpa-plugin`, `crates/cpa-home`: the plugin host and Home mode.
+- `crates/cpa-plugin`: the plugin host.
 - `crates/cook-router`: the binary.
 
 A workspace reorganization updates this list in the same PR.

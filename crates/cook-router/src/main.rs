@@ -1,8 +1,6 @@
 mod config_cli;
 mod discovery;
 mod dotenv;
-mod home;
-mod home_plugins;
 mod plugin_cli;
 mod tui;
 
@@ -21,7 +19,6 @@ use cpa_server::Runtime;
 use cpa_server::config_store::ConfigStore;
 use cpa_server::credential_store::CredentialDb;
 use cpa_server::listener::bind;
-use cpa_server::runtime::CredentialAuthority;
 
 /// Same strings as the management `X-CPA-*` headers.
 const VERSION: &str = concat!("cook-router-", env!("CARGO_PKG_VERSION"));
@@ -122,12 +119,6 @@ struct Args {
     /// Management password accepted from loopback clients only.
     #[arg(long, hide = true, default_value = "")]
     password: String,
-    /// Home control plane JWT for mTLS certificate bootstrap and connection
-    #[arg(long, default_value = "")]
-    home_jwt: String,
-    /// Disable Home CLUSTER NODES discovery and keep using the configured -home-jwt address
-    #[arg(long)]
-    home_disable_cluster_discovery: bool,
     /// Start with terminal management UI
     #[arg(long)]
     tui: bool,
@@ -316,7 +307,7 @@ fn go_parse_bool(v: &str) -> Option<bool> {
 /// Go `argvEnablesBoolFlag`: a pre-parse scan (stops at the first non-flag) used to
 /// keep stdout clean for `--discover-json`.
 fn argv_enables_bool_flag(args: &[String], name: &str) -> bool {
-    const BOOL_FLAGS: [&str; 16] = [
+    const BOOL_FLAGS: [&str; 15] = [
         "codex-login",
         "codex-device-login",
         "claude-login",
@@ -329,7 +320,6 @@ fn argv_enables_bool_flag(args: &[String], name: &str) -> bool {
         "meta-login",
         "discover",
         "discover-json",
-        "home-disable-cluster-discovery",
         "tui",
         "standalone",
         "local-model",
@@ -636,7 +626,7 @@ fn db_path(flag: &str, config_file: &Path) -> PathBuf {
 }
 
 /// Opens the one config authority and imports YAML only before its first revision.
-/// Cloud and Home may initialize an empty config when the import file is absent or
+/// Cloud may initialize an empty config when the import file is absent or
 /// blank (Go `LoadConfigOptional`). A missing import fails before a new database file
 /// is created.
 fn load_config(db: &Path, config_file: &Path, optional: bool) -> anyhow::Result<(Arc<ConfigStore>, Config)> {
@@ -686,27 +676,6 @@ fn reject_remote_store(env: &dyn Fn(&str) -> Option<String>) -> anyhow::Result<(
         "PGSTORE/OBJECTSTORE/GITSTORE live storage is no longer supported. Export the old config with the previous release and import it with cook-router --db PATH config import FILE, migrate auths, then remove the remote-store environment variables. SQLite is the durable authority; mount a persistent volume for --db or COOK_DB in ephemeral containers. Remote data has not been changed."
     );
     Ok(())
-}
-
-/// Home owns runtime settings; only explicitly configured local listener settings
-/// replace its listener. The bootstrap's normalized Home port remains the default.
-fn home_listener_config(remote: Config, local: &Config) -> anyhow::Result<Config> {
-    let mut doc = remote.document.clone();
-    if let Some(server) = local.document.get("server") {
-        for key in ["host", "port", "tls"] {
-            if let Some(value) = server.get(key) {
-                doc["server"][key] = value.clone();
-            }
-        }
-    }
-    if let Some(value) = local.document.get("worker-threads") {
-        doc["worker-threads"] = value.clone();
-    }
-    let text = cpa_core::config::yaml_string(&doc)?;
-    let base = Config::parse(&text)?;
-    let mut config = home::overlay(text.as_bytes(), Some(&base))?;
-    config.plugin_configs = remote.plugin_configs;
-    Ok(config)
 }
 
 /// Go's cloud-deploy check, of the config database.
@@ -823,10 +792,6 @@ fn main() -> anyhow::Result<()> {
         PathBuf::from(&config_flag)
     };
     let db = db_path(&db_flag, &config_file);
-    let home = prescan_value(&raw[1..], "home-jwt").is_some_and(|v| !v.trim().is_empty())
-        || ["HOME_JWT", "home_jwt"]
-            .iter()
-            .any(|k| std::env::var(k).is_ok_and(|v| !v.trim().is_empty()));
     let remote_client = go_flags(&Args::command(), raw.clone(), &())
         .ok()
         .and_then(|flags| Args::try_parse_from(flags).ok())
@@ -836,7 +801,7 @@ fn main() -> anyhow::Result<()> {
     let loaded = if discover_mode || remote_client {
         None
     } else {
-        let optional = home || std::env::var("DEPLOY").is_ok_and(|v| v == "cloud");
+        let optional = std::env::var("DEPLOY").is_ok_and(|v| v == "cloud");
         let loaded =
             reject_remote_store(&|key| std::env::var(key).ok()).and_then(|()| load_config(&db, &config_file, optional));
         // Like a failure inside `run`: the process log keeps why startup stopped.
@@ -1009,7 +974,7 @@ async fn run(
     loaded: Option<(Arc<ConfigStore>, Config)>,
 ) -> anyhow::Result<()> {
     // An explicit remote URL makes `-tui` a pure management client: it needs no local
-    // config, store or Home bootstrap (Go loads them first and can fail or wait there).
+    // config or store (Go loads them first and can fail or wait there).
     // Login, import and plugin flags still run first, as in Go.
     if args.tui
         && !args.standalone
@@ -1020,52 +985,17 @@ async fn run(
         remote_tui(args.management_base_url.trim().to_owned(), args.password).await;
         return Ok(());
     }
-    let home_jwt = [
-        args.home_jwt.clone(),
-        std::env::var("HOME_JWT").unwrap_or_default(),
-        std::env::var("home_jwt").unwrap_or_default(),
-    ];
-    // Go: the flag, else HOME_JWT / home_jwt.
-    let home_jwt = home_jwt
-        .iter()
-        .map(|v| v.trim())
-        .find(|v| !v.is_empty())
-        .map(str::to_owned);
-    let (config_store, local_config) = loaded.context("local config was not initialized")?;
+    let (config_store, mut config) = loaded.context("local config was not initialized")?;
     let cloud = std::env::var("DEPLOY").is_ok_and(|v| v == "cloud");
-    let (mut config, home_config, home_plugins) = match &home_jwt {
-        Some(jwt) => {
-            let (home_config, config, home_plugins) =
-                home::bootstrap(jwt, args.home_disable_cluster_discovery, &plugins)
-                    .await
-                    .map_err(anyhow::Error::msg)?;
-            (
-                home_listener_config(config, &local_config)?,
-                Some(home_config),
-                Some(home_plugins),
-            )
-        }
-        None => (local_config, None, None),
-    };
-    let config_present = match &home_config {
-        // Go: `configFileExists = cfg.Port != 0` for a config loaded from Home.
-        Some(_) => !cloud || config.port != 0,
-        None => !cloud || cloud_config_present(&config_store, &config),
-    };
-    let backend = initialize_credentials(config_store.clone(), &mut config, home_config.is_some())?;
+    let config_present = !cloud || cloud_config_present(&config_store, &config);
+    let backend = initialize_credentials(config_store.clone(), &mut config)?;
     plugin_cli::attach_credentials(&plugins, backend.clone());
     // Go ConfigureLogOutput and SetLogLevel, before any login command.
     cpa_server::logging::configure(&config);
     tracing::info!("{}", banner());
-    // Go: the loaded config reaches the plugins (and Home learns which of its plugins
-    // loaded), and a plugin flag hands the run to the plugins that own it.
+    // Go: the loaded config reaches the plugins, and a plugin flag hands the run to
+    // the plugins that own it.
     plugins.apply_config(Arc::new(config.clone())).await;
-    if let Some(home_plugins) = home_plugins
-        && let Err(line) = home_plugins.finish(&plugins).await
-    {
-        tracing::error!("{line}");
-        return Ok(());
-    }
     if let Some(code) = plugin_cli::execute(&plugins, &builtin, &backend).await {
         if code != 0 {
             std::process::exit(code);
@@ -1073,10 +1003,7 @@ async fn run(
         return Ok(());
     }
     if command_mode(&args) {
-        let CredentialAuthority::Local(db) = backend else {
-            anyhow::bail!(plugin_cli::HOME_CREDENTIAL_ERROR);
-        };
-        return command(&args, &config, db).await.map(|_| ());
+        return command(&args, &config, backend).await.map(|_| ());
     }
     if !config_present {
         wait_for_cloud_deploy().await;
@@ -1087,16 +1014,7 @@ async fn run(
     }
     if args.tui {
         if args.standalone {
-            standalone_tui(
-                config,
-                config_store,
-                backend,
-                args.password,
-                args.local_model,
-                home_config,
-                plugins,
-            )
-            .await;
+            standalone_tui(config, config_store, backend, args.password, args.local_model, plugins).await;
         } else {
             let base = resolve_management_base_url(&args.management_base_url, &config);
             remote_tui(base, args.password).await;
@@ -1114,7 +1032,6 @@ async fn run(
         backend,
         args.password,
         args.local_model,
-        home_config,
         plugins,
         shutdown_signal(),
         None,
@@ -1279,10 +1196,9 @@ impl QuietStdio {
 async fn standalone_tui(
     config: Config,
     config_store: Arc<ConfigStore>,
-    backend: CredentialAuthority,
+    backend: Arc<CredentialDb>,
     password: String,
     local_model: bool,
-    home_config: Option<cpa_home::HomeConfig>,
     plugins: cpa_plugin::Host,
 ) {
     let hook = cpa_server::logging::capture(2000);
@@ -1309,7 +1225,6 @@ async fn standalone_tui(
         backend,
         password.clone(),
         local_model,
-        home_config,
         plugins,
         shutdown,
         Some(listening),
@@ -1342,17 +1257,10 @@ async fn standalone_tui(
     }
 }
 
-fn initialize_credentials(
-    store: Arc<ConfigStore>,
-    config: &mut Config,
-    home: bool,
-) -> anyhow::Result<CredentialAuthority> {
-    if home {
-        return Ok(CredentialAuthority::Home);
-    }
+fn initialize_credentials(store: Arc<ConfigStore>, config: &mut Config) -> anyhow::Result<Arc<CredentialDb>> {
     let backend = CredentialDb::initialize(store, &config.auth_dir)?;
     config.auth_dir = backend.auth_dir();
-    Ok(CredentialAuthority::Local(backend))
+    Ok(backend)
 }
 
 fn login_save(backend: Arc<CredentialDb>) -> (cpa_exec::login_store::LoginSave, Arc<std::sync::Mutex<Option<String>>>) {
@@ -1899,18 +1807,10 @@ fn ensure_auth_dir(dir: &Path) -> anyhow::Result<()> {
     }
 }
 
-/// The served routes. In Home mode the config comes from Home and every management
-/// route answers 404 (Go `managementAvailable`), so the Management API is not mounted.
-fn app(rt: &Arc<Runtime>, management: &Arc<cpa_server::management::Management>, home: bool) -> axum::Router {
-    let app = if home {
-        cpa_server::router(rt.clone()).layer(axum::middleware::from_fn_with_state(
-            rt.clone(),
-            cpa_server::remote::gate,
-        ))
-    } else {
-        let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()));
-        cpa_server::safe_mode::router(rt, app)
-    };
+/// The served routes.
+fn app(rt: &Arc<Runtime>, management: &Arc<cpa_server::management::Management>) -> axum::Router {
+    let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()));
+    let app = cpa_server::safe_mode::router(rt, app);
     // Go applies its CORS middleware to every route, not only management.
     let app = app.layer(axum::middleware::from_fn(cpa_server::management::cors));
     let app = cpa_server::request_logging::router(management, app);
@@ -1923,33 +1823,24 @@ fn app(rt: &Arc<Runtime>, management: &Arc<cpa_server::management::Management>, 
 async fn serve(
     config: Config,
     config_store: Arc<ConfigStore>,
-    backend: CredentialAuthority,
+    backend: Arc<CredentialDb>,
     password: String,
     local_model: bool,
-    home_config: Option<cpa_home::HomeConfig>,
     plugins: cpa_plugin::Host,
     shutdown: impl std::future::Future<Output = ()>,
     listening: Option<tokio::sync::oneshot::Sender<(SocketAddr, bool)>>,
 ) -> anyhow::Result<()> {
-    if config.api_keys.is_empty() && home_config.is_none() {
+    if config.api_keys.is_empty() {
         tracing::warn!("access.api-keys is empty: the proxy API is open to anyone who can reach it");
     }
-    // Go `ensureAuthDir`: outside Home mode a missing auth-dir is created, so the
-    // watcher has a folder to watch for the first login.
-    if home_config.is_none() {
-        ensure_auth_dir(&config.auth_dir)?;
-    }
-    // Auth-dir files and config API keys, synthesized as Go's watcher does. Home mode
-    // runs on credentials Home dispatches per request.
-    let (credentials, read) = match &backend {
-        CredentialAuthority::Home => Default::default(),
-        CredentialAuthority::Local(db) => {
-            let scan = db.scan(&config)?;
-            let mut all = scan.credentials;
-            all.extend(cpa_core::config::credentials::from_config(&config));
-            (all, scan.read)
-        }
-    };
+    // Go `ensureAuthDir`: a missing auth-dir is created, so the watcher has a folder
+    // to watch for the first login.
+    ensure_auth_dir(&config.auth_dir)?;
+    // Auth-dir files and config API keys, synthesized as Go's watcher does.
+    let scan = backend.scan(&config)?;
+    let mut credentials = scan.credentials;
+    credentials.extend(cpa_core::config::credentials::from_config(&config));
+    let read = scan.read;
     tracing::info!(credentials = credentials.len(), "credentials loaded");
     let listener =
         bind(&config.host, config.port).with_context(|| format!("binding {}:{}", config.host, config.port))?;
@@ -1968,33 +1859,18 @@ async fn serve(
         openai: Default::default(),
         google: Default::default(),
     };
-    let rt = match backend {
-        CredentialAuthority::Home => Runtime::home(config, credentials, executors),
-        CredentialAuthority::Local(db) => {
-            #[cfg(test)]
-            let runtime = cpa_server::testing::runtime_with_db(config, credentials, executors, db);
-            #[cfg(not(test))]
-            let runtime = Runtime::new(config, credentials, executors, db);
-            runtime
-        }
-    };
+    #[cfg(test)]
+    let rt = cpa_server::testing::runtime_with_db(config, credentials, executors, backend);
+    #[cfg(not(test))]
+    let rt = Runtime::new(config, credentials, executors, backend);
     let rt = Arc::new(rt.with_plugin_host(plugins));
     // What each file credential was loaded from, for Go-exact management saves.
     rt.store().note_loaded(&read);
     rt.set_local_model(local_model);
     // Go `misc.StartAntigravityVersionUpdater` and `startModelCatalogUpdaters`.
-    cpa_server::model_updater::start(&rt, home_config.is_some());
+    cpa_server::model_updater::start(&rt);
     // Model router benchmarks (cook-router only); idle without `artificial-analysis.api-key`.
-    if home_config.is_none() {
-        cpa_server::aa::start(&rt);
-    }
-    let home = home_config.map(|home_config| {
-        let dispatcher = Arc::new(home::Dispatcher::new(&rt));
-        rt.set_remote_dispatch(Some(dispatcher.clone()));
-        let shutdown = tokio_util::sync::CancellationToken::new();
-        let task = home::spawn_subscriber(home_config, rt.clone(), dispatcher, shutdown.clone());
-        (shutdown, task)
-    });
+    cpa_server::aa::start(&rt);
     // Translators and thinking validation read model capabilities through the global
     // overlay; without it they see only the static catalog.
     cpa_server::install_registry(&rt);
@@ -2005,46 +1881,23 @@ async fn serve(
         ..Default::default()
     };
     let management = cpa_server::management::Management::with_options(rt.clone(), config_store, options);
-    if home.is_some() {
-        // Go enables the usage queue in Home mode whatever the management secret
-        // (`redisqueue.SetEnabled(... || cfg.Home.Enabled)`); the forwarder drains it.
-        rt.usage_queue().configure(true, &rt.config());
-    }
     // Go applies the plugin config before serving; later publishes resync the host.
     cpa_server::plugins::start(&rt).await;
-    if home.is_none() {
-        cpa_server::plugins::reload_plugin_auth_files(&rt).await;
-    }
+    cpa_server::plugins::reload_plugin_auth_files(&rt).await;
     let pprof = cpa_server::pprof::Server::start(&rt);
-    // Home mode: the config comes from Home, and management answers 404 (Go
-    // `managementAvailable`).
-    let credential_notifications = home.is_none().then(|| cpa_server::watching::start(&management));
+    let credential_notifications = cpa_server::watching::start(&management);
     // The served transport decides `tls=`: HTTPS exactly when server.tls loaded.
     let advertiser = discovery::advertise::Advertiser::spawn(rt.subscribe_config(), tls.is_some());
-    let app = app(&rt, &management, home.is_some());
+    let app = app(&rt, &management);
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     let app = heap_trim::layer(app);
-    // Go's listener also serves the Redis protocol (usage queue) to management clients;
-    // in Home mode it answers "ERR redis usage output disabled in home mode".
+    // Go's listener also serves the Redis protocol (usage queue) to management clients.
     let mut server = Box::pin(cpa_server::listener::serve_with_resp(
         listener,
         app,
         tls,
         Some(management.clone()),
     ));
-    let mut home = home;
-    // Go `cancelServiceRun`: a Home subscriber that stops on its own (an unsafe drain or
-    // an unsettled dispatch) stops the service; executions it could not drain end with
-    // the process instead of running on unaccounted.
-    let home_stopped = async {
-        match home.as_mut() {
-            Some((_, task)) => {
-                let _ = task.await;
-            }
-            None => std::future::pending::<()>().await,
-        }
-    };
-    let mut home_failed = false;
     let mut server_done = false;
     let served = tokio::select! {
         r = &mut server => {
@@ -2052,25 +1905,13 @@ async fn serve(
             r.map_err(anyhow::Error::from)
         },
         _ = shutdown => Ok(()),
-        _ = home_stopped => {
-            home_failed = true;
-            Err(anyhow::anyhow!("home subscriber stopped; shutting down"))
-        }
     };
     management.begin_shutdown();
     rt.begin_shutdown();
-    if let Some(task) = &credential_notifications {
-        task.stop();
-    }
-    // Keep Go's Home/pprof/discovery drain order, but stop configuration and grant
+    credential_notifications.stop();
+    // Keep Go's pprof/discovery drain order, but stop configuration and grant
     // admission before producers can race the final persistence drain.
     let cleanup = async {
-        if let Some((shutdown, task)) = home
-            && !home_failed
-        {
-            shutdown.cancel();
-            let _ = task.await;
-        }
         pprof.shutdown().await;
         advertiser.shutdown().await;
     };
@@ -2086,10 +1927,10 @@ async fn serve(
     // Server.Stop closes the HTTP server without draining (http.Server.Close).
     drop(server);
     management.shutdown().await;
-    let notifications = match credential_notifications {
-        Some(task) => task.shutdown().await.context("settle credential notification work"),
-        None => Ok(()),
-    };
+    let notifications = credential_notifications
+        .shutdown()
+        .await
+        .context("settle credential notification work");
     let persistence = rt.finish_shutdown().await;
     // Settlement can retry a pending configuration, which reconfigures logging; the
     // process-wide log directory cleaner is stopped and joined only after it.
@@ -2922,22 +2763,6 @@ mod tests {
     }
 
     #[test]
-    fn credential_initialization_skips_home() {
-        // Home must return before touching credentials, even when legacy files exist.
-        let root = credential_test_dir();
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("legacy.json"), b"{\"secret\":true}").unwrap();
-        let mut config = Config::parse("").unwrap();
-        config.auth_dir = root.clone();
-        assert!(matches!(
-            initialize_credentials(Arc::new(ConfigStore::memory()), &mut config, true).unwrap(),
-            CredentialAuthority::Home
-        ));
-        assert_eq!(config.auth_dir, root);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn cli_changes_and_claude_legacy_deletion_survive_reopen() {
         let root = credential_test_dir();
         let legacy = root.join("legacy");
@@ -2946,14 +2771,8 @@ mod tests {
         let path = root.join("cook.db");
         let mut config = Config::parse("").unwrap();
         config.auth_dir = legacy.clone();
-        let CredentialAuthority::Local(db) = initialize_credentials(
-            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
-            &mut config,
-            false,
-        )
-        .unwrap() else {
-            panic!("local credentials expected");
-        };
+        let db =
+            initialize_credentials(Arc::new(cpa_server::testing::config_store(&path).unwrap()), &mut config).unwrap();
         assert_eq!(config.auth_dir, db.auth_dir());
         let canonical = config.auth_dir.join("claude-new.json");
         let bytes = b"{\"type\":\"claude\",\"access_token\":\"new\",\"unknown\":[1,2]}";
@@ -3186,9 +3005,6 @@ mod tests {
             "p",
             "-siwc-bind",
             "codex-a.json",
-            "-home-jwt",
-            "j",
-            "-home-disable-cluster-discovery",
             "-tui",
             "-standalone",
             "-management-base-url",
@@ -3203,7 +3019,7 @@ mod tests {
         ]))
         .unwrap();
         assert!(args.discover && args.discover_json && args.tui && args.standalone && args.local_model);
-        assert!(args.antigravity_login && args.devin_login && args.home_disable_cluster_discovery);
+        assert!(args.antigravity_login && args.devin_login);
         assert_eq!(args.discover_timeout, -2);
         assert_eq!(csv_flags(&args.discover_include), ["eth0", "en0", "wl*"]);
         assert_eq!(args.management_base_url, "https://x");
@@ -3397,7 +3213,7 @@ mod tests {
             )
             .unwrap();
         let mut config = store.load().unwrap().config;
-        let backend = initialize_credentials(store.clone(), &mut config, false).unwrap();
+        let backend = initialize_credentials(store.clone(), &mut config).unwrap();
         let workspace = cpa_server::testing::working_directory(&store).unwrap();
         let armed = Arc::new(AtomicBool::new(false));
         let (entered, started) = tokio::sync::oneshot::channel();
@@ -3427,7 +3243,6 @@ mod tests {
             backend,
             "fake-driver-password".into(),
             true,
-            None,
             cpa_plugin::Host::default(),
             async {
                 let _ = stopped.await;
@@ -3532,7 +3347,7 @@ mod tests {
             )
             .unwrap();
         let mut config = store.load().unwrap().config;
-        let backend = initialize_credentials(store.clone(), &mut config, false).unwrap();
+        let backend = initialize_credentials(store.clone(), &mut config).unwrap();
         assert!(config.management.secret_key.is_empty());
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let (listening, listener) = tokio::sync::oneshot::channel();
@@ -3542,7 +3357,6 @@ mod tests {
             backend,
             "fake-tui-password".into(),
             true,
-            None,
             cpa_plugin::Host::default(),
             async {
                 let _ = stopped.await;
@@ -3559,7 +3373,7 @@ mod tests {
 
     /// Go `TestSIWCManagementRouteAccessControl`: the v8 SIWC bind route answers its
     /// own validation once authorized, 401 without the key, and 404 when management is
-    /// disabled or the node runs in Home mode.
+    /// disabled.
     #[tokio::test]
     async fn siwc_bind_route_follows_management_availability() {
         use tower::ServiceExt as _;
@@ -3570,11 +3384,10 @@ mod tests {
             dir.join("auth").display()
         )));
         let config = store.load().unwrap().config;
-        for (name, enabled, home, authorized, want) in [
-            ("authorized invalid target", true, false, true, 400),
-            ("missing management key", true, false, false, 401),
-            ("management disabled", false, false, true, 404),
-            ("home disabled local API", true, true, true, 404),
+        for (name, enabled, authorized, want) in [
+            ("authorized invalid target", true, true, 400),
+            ("missing management key", true, false, 401),
+            ("management disabled", false, true, 404),
         ] {
             let executors = Executors {
                 claude: ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
@@ -3605,7 +3418,7 @@ mod tests {
             if authorized {
                 request = request.header("authorization", "Bearer fake-management-only");
             }
-            let response = app(&rt, &management, home)
+            let response = app(&rt, &management)
                 .oneshot(request.body(axum::body::Body::from("{}")).unwrap())
                 .await
                 .unwrap();
@@ -3657,26 +3470,6 @@ mod tests {
             "a valid YAML file cannot mask a bad DB"
         );
         std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn local_home_listener_overrides_preserve_remote_runtime_ownership() {
-        let remote = home::overlay(b"port: 0\nrequest-retry: 7\napi-keys: [remote-key]\n", None).unwrap();
-        let default_port = remote.port;
-        assert_ne!(default_port, 0);
-        let empty = Config::parse("").unwrap();
-        assert_eq!(home_listener_config(remote.clone(), &empty).unwrap().port, default_port);
-        let local = Config::parse("host: 127.0.0.1\nport: 9345\ntls:\n  enable: true\n  cert: local.crt\n  key: local.key\nworker-threads: 3\nrequest-retry: 99\napi-keys: [local-key]\n").unwrap();
-        let merged = home_listener_config(remote, &local).unwrap();
-        assert_eq!(merged.host, "127.0.0.1");
-        assert_eq!(merged.port, 9345);
-        assert_eq!(merged.document["server"]["tls"], local.document["server"]["tls"]);
-        assert_eq!(merged.document["worker-threads"], local.document["worker-threads"]);
-        assert_eq!(merged.document["routing"]["retry"]["request-retry"].as_i64(), Some(7));
-        assert!(merged.api_keys.is_empty());
-        let updated = home::overlay(b"port: 9999\nhost: 0.0.0.0\n", Some(&merged)).unwrap();
-        assert_eq!(updated.host, "127.0.0.1");
-        assert_eq!(updated.port, 9345);
     }
 
     #[test]

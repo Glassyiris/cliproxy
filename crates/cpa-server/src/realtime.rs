@@ -15,9 +15,6 @@
 //! group (plain `{"error": msg}`), realtime call and sideband routes also accept
 //! ephemeral keys, and the rest take configured keys only with OpenAI-style errors.
 //!
-//! In Home mode every selection is a Home pick (Go `SelectHomeAuthByKind`); a stored call
-//! keeps its pick until the call ends, and its sideband and hangup run on it.
-//!
 //! Request logs capture the live call and hangup upstream exchanges at Go's
 //! `helps.Record*` call sites. The sockets are GET requests, which Go never logs.
 //!
@@ -30,8 +27,6 @@ mod calls;
 mod capture_tests;
 #[cfg(feature = "media-relay")]
 mod dialer;
-#[cfg(test)]
-mod home_tests;
 mod http;
 #[cfg(feature = "media-relay")]
 mod media;
@@ -266,10 +261,7 @@ impl Rejection {
 
 /// `selectOAuth`: `SelectAuthByKind(codex, "", oauth)`, optionally pinned to one
 /// credential (`PinnedAuthMetadataKey`). Session affinity follows the request's session
-/// identity. The lease records no outcome (Go marks none for live traffic). In Home mode
-/// it is `SelectHomeAuthByKind(codex, model, oauth)`, a pick of the given `kind`, and
-/// also yields the client key Home authenticated (empty locally).
-#[allow(clippy::too_many_arguments)]
+/// identity. The lease records no outcome (Go marks none for live traffic).
 async fn select_oauth(
     rt: &Arc<Runtime>,
     cfg: &Config,
@@ -277,45 +269,7 @@ async fn select_oauth(
     headers: &HeaderMap,
     body: &[u8],
     execution_session: Option<&str>,
-    model: &str,
-    kind: &'static str,
-) -> Result<(Lease, String), Rejection> {
-    if let Some(remote) = rt.remote_dispatch() {
-        let (primary, parent, fork) = session_hierarchy(headers, body, execution_session);
-        let bound = |s: String| (!s.is_empty()).then(|| cpa_common::session::bound_session_identity(&s));
-        let selection = Selection {
-            provider: "codex".into(),
-            model: model.trim().to_owned(),
-            session: bound(primary),
-            session_parent: bound(parent),
-            session_fork: fork,
-            ..Selection::default()
-        };
-        let request = crate::remote::RemoteRequest {
-            model: selection.model.clone(),
-            session_id: selection.session.clone().unwrap_or_default(),
-            parent_session_id: selection.session_parent.clone().unwrap_or_default(),
-            headers: crate::remote::home_headers(headers, None),
-            count: 1,
-            retry_round: 0,
-            excluded: Vec::new(),
-            pinned: pinned.unwrap_or_default().trim().to_owned(),
-            request_id: crate::observability::current_request_id().unwrap_or_default(),
-            kind,
-            credential_policy: String::new(),
-        };
-        let accept = |c: &Credential| {
-            crate::remote::selection_provider(c) == "codex"
-                && cpa_core::registry::dynamic::auth_kind(c) == Some("oauth")
-        };
-        return crate::remote::select(rt, remote.as_ref(), selection, request, accept)
-            .await
-            .map_err(|refused| Rejection {
-                status: refused.status,
-                text: refused.text,
-                retry_after: refused.retry_after,
-            });
-    }
+) -> Result<Lease, Rejection> {
     let policy = rt.policy();
     let exclude = rt
         .store()
@@ -412,61 +366,6 @@ async fn select_oauth(
                 retry_after: None,
             },
         })
-        .map(|lease| (lease, String::new()))
-}
-
-/// Go `ReportHomeUnauthorized(ctx, selected, "codex", model, body)` from a live handler,
-/// whose context holds the request ID, the session hierarchy (Home's canonical session
-/// replaces it on the record), the authenticated principal and the client key this
-/// request's own Home pick returned (`home_key`; empty when it made none).
-fn report_unauthorized(
-    rt: &Runtime,
-    principal: &Principal,
-    home_key: &str,
-    credential: &Credential,
-    model: &str,
-    body: &[u8],
-    session: (String, String),
-) {
-    let (session_id, parent_session_id) = session;
-    let facts = crate::usage_record::Facts {
-        client: crate::usage_record::Client {
-            parent_session_id: if parent_session_id == session_id {
-                String::new()
-            } else {
-                parent_session_id
-            },
-            session_id,
-            request_id: crate::observability::current_request_id().unwrap_or_default(),
-            api_key: crate::usage_record::home_unauthorized_key(&principal.key, home_key),
-            access_provider: principal.provider.clone(),
-            ..Default::default()
-        },
-        format: cpa_core::format::Format::OpenAIResponse,
-        alias: String::new(),
-        reasoning_effort: String::new(),
-        service_tier: "default".into(),
-        generate: false,
-        stream: false,
-        clock: Default::default(),
-        prompt_prefix_hash: String::new(),
-        attempts: Default::default(),
-    };
-    crate::usage_record::publish_home_unauthorized(
-        rt,
-        &facts,
-        credential,
-        "codex",
-        model,
-        &String::from_utf8_lossy(body),
-    );
-}
-
-/// Resolves when Home drains `lease`; never for a local lease.
-fn drained(lease: Option<&Lease>) -> futures_util::future::BoxFuture<'static, ()> {
-    lease
-        .and_then(Lease::remote_cancelled)
-        .unwrap_or_else(|| Box::pin(std::future::pending()))
 }
 
 /// The request's session and its parent (`EnrichContextWithSessionHierarchy`): the
@@ -482,12 +381,6 @@ fn session_hierarchy(headers: &HeaderMap, body: &[u8], execution_session: Option
     }
     let (primary, parent) = cpa_common::session::session_ids(headers, body, &meta);
     (primary, parent, fork)
-}
-
-/// The request's session and its parent, for records.
-fn session_ids(headers: &HeaderMap, body: &[u8]) -> (String, String) {
-    let (primary, parent, _) = session_hierarchy(headers, body, None);
-    (primary, parent)
 }
 
 /// The session a call remembers.

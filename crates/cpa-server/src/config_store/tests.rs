@@ -704,50 +704,63 @@ fn revision_checked_dashboard_plugin_toggle_keeps_opaque_nodes_and_payload_bytes
     assert_eq!(store.head().unwrap(), after.rev);
 }
 
+/// The removed Home settings (the `home` section, the credential settings and the plugin
+/// auth revision) are unknown keys: YAML import and management writes refuse them in every
+/// spelling and publish no revision.
 #[test]
-fn revision_counters_are_ordinary_settings_on_write_import_and_restore() {
+fn removed_home_settings_are_rejected_without_a_revision() {
     let store = ConfigStore::memory();
     store.import_yaml("server: {port: 9001}\n", "t", "").unwrap();
-    let old = store.state_at(1).unwrap();
-    store
-        .commit(
-            &[
-                Op::Set {
-                    path: "credentials/concurrency/lifecycle-config-revision".into(),
-                    value: json!(5),
-                    expect: None,
-                },
-                Op::Set {
-                    path: "credentials/concurrency/observation-barrier-revision".into(),
-                    value: json!(7),
-                    expect: None,
-                },
-                put("setting", "plugins", json!({"auth-revision": 9})),
-            ],
-            "t",
-            "",
-            false,
-        )
-        .unwrap();
-    let cfg = store.load().unwrap().config;
-    assert_eq!(
-        cfg.document["credentials"]["concurrency"]["lifecycle-config-revision"].as_u64(),
-        Some(5)
-    );
-    assert_eq!(
-        cfg.document["credentials"]["concurrency"]["observation-barrier-revision"].as_u64(),
-        Some(7)
-    );
-    assert_eq!(cfg.document["plugins"]["auth-revision"].as_u64(), Some(9));
-    store.replace(old, "restore", "", false).unwrap();
-    let cfg = store.load().unwrap().config;
-    assert!(cfg.document.get("credentials").is_none());
-    assert!(cfg.document.get("plugins").is_none());
-    store.import_yaml("plugins: {auth-revision: 10}\n", "api", "").unwrap();
-    assert_eq!(
-        store.load().unwrap().config.document["plugins"]["auth-revision"].as_u64(),
-        Some(10)
-    );
+    let head = store.head().unwrap();
+    for yaml in [
+        "credentials: {concurrency: {max-limit: 5}}",
+        "credentials: {in-flight: {max-details: 9}}",
+        "credentials: {concurrency: {}}",
+        "credentials: {in-flight: null}",
+        "credential-concurrency: {max-limit: 5}",
+        "credential-in-flight: {max-details: 9}",
+        "credential-concurrency: {}",
+        "credential-in-flight: null",
+        "home: {enabled: true}",
+        "home: {enabled: false}",
+        "home: {}",
+        "home: null",
+        "plugins: {auth-revision: 10}",
+        "plugins: {auth-revision: null}",
+    ] {
+        assert!(store.import_yaml(&format!("{yaml}\n"), "t", "").is_err(), "{yaml}");
+        assert_eq!(store.head().unwrap(), head, "{yaml}");
+    }
+    for (setting, spec) in [
+        ("credentials", json!({"concurrency": {"max-limit": 5}})),
+        ("credentials", json!({"in-flight": {"max-details": 9}})),
+        ("credentials", json!({"concurrency": {}})),
+        ("credentials", json!({"in-flight": null})),
+        ("home", json!({"enabled": true})),
+        ("home", json!({})),
+        ("plugins", json!({"auth-revision": 9})),
+    ] {
+        assert!(
+            store
+                .commit(&[put("setting", setting, spec.clone())], "t", "", false)
+                .is_err(),
+            "{setting}: {spec}"
+        );
+        assert_eq!(store.head().unwrap(), head, "{setting}: {spec}");
+    }
+    for (path, value) in [
+        ("home/enabled", json!(true)),
+        ("home", json!({"enabled": true})),
+        ("plugins/auth-revision", json!(9)),
+    ] {
+        let op = Op::Set {
+            path: path.into(),
+            value: value.clone(),
+            expect: None,
+        };
+        assert!(store.commit(&[op], "t", "", false).is_err(), "{path}: {value}");
+        assert_eq!(store.head().unwrap(), head, "{path}: {value}");
+    }
 }
 
 #[test]

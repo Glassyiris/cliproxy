@@ -80,6 +80,9 @@ source = (reference / "internal/config/config_v8.go").read_text()
 prefixes = source.split("prefixes := []configPath{", 1)[1].split("var out", 1)[0]
 for old, current in re.findall(r'\{"([^"]+)", "([^"]+)"\}', prefixes):
     put(current, take(old))
+# Home mode's credential lease settings and plugin auth revision were removed with Home mode.
+schema["fields"].pop("credentials")
+schema["fields"]["plugins"]["fields"].pop("auth-revision")
 # Client aliases are removed, not part of the canonical writable schema.
 schema["fields"]["oauth"]["fields"]["providers"]["fields"]["codex"]["fields"].pop("optimize-multi-agent-v2", None)
 families = source.split("var v8KeyFamilies = []configPath{", 1)[1].split("func buildV8Paths", 1)[0]

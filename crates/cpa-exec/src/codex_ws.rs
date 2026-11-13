@@ -18,9 +18,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use cpa_core::config::Config;
 use cpa_core::credential::Credential;
-use cpa_core::exec::{
-    ExecError, ExecRequest, ExecResponse, ExecSession, ExecStream, FailureScope, ResponseBody, SessionLease,
-};
+use cpa_core::exec::{ExecError, ExecRequest, ExecResponse, ExecSession, ExecStream, FailureScope, ResponseBody};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use gjson::Kind;
@@ -189,9 +187,6 @@ pub(crate) struct Upstream {
     /// The last request that touched the `collaboration` namespace on this socket renamed
     /// it (`multiAgentV2OptimizedConn`): later continuations restore upstream names too.
     multi_agent: std::sync::atomic::AtomicBool,
-    /// The Home pick this socket keeps (Go `session.lifecycle`); `true` once the socket
-    /// shut down, after which no pick binds.
-    lease: Mutex<(bool, Option<SessionLease>)>,
     write: WriteLimit,
 }
 
@@ -205,7 +200,6 @@ impl Upstream {
             link: Mutex::default(),
             reader: Mutex::default(),
             multi_agent: Default::default(),
-            lease: Mutex::default(),
         })
     }
 
@@ -279,69 +273,12 @@ impl Upstream {
         }
     }
 
-    /// Go `bindExecutionLifecycle`: the socket keeps the attempt's Home pick until it is
-    /// invalidated, replaced or closed, and Home draining the pick invalidates the
-    /// socket. A pick bound earlier ends (`target_replaced`).
-    pub(crate) fn bind(
-        self: &Arc<Self>,
-        session: &Arc<Session>,
-        lease: Option<&SessionLease>,
-    ) -> Result<(), ExecError> {
-        let Some(lease) = lease else { return Ok(()) };
-        if self
-            .lease
-            .lock()
-            .expect("lease")
-            .1
-            .as_ref()
-            .is_some_and(|l| l.same(lease))
-        {
-            return Ok(());
-        }
-        let (weak_session, weak_conn) = (Arc::downgrade(session), Arc::downgrade(self));
-        let close = Box::new(move || {
-            if let (Some(session), Some(conn)) = (weak_session.upgrade(), weak_conn.upgrade()) {
-                session.invalidate(
-                    &conn,
-                    &transport("codex websockets executor: execution lifecycle ended"),
-                    false,
-                );
-            }
-        });
-        let unbound = || transport("codex websockets executor: websocket connection closed during lifecycle bind");
-        if !lease.0.retain(close) {
-            session.invalidate(self, &unbound(), false);
-            return Err(unbound());
-        }
-        let previous = {
-            let mut slot = self.lease.lock().expect("lease");
-            if slot.0 {
-                drop(slot);
-                lease.0.end();
-                return Err(unbound());
-            }
-            slot.1.replace(lease.clone())
-        };
-        if let Some(previous) = previous {
-            previous.0.end();
-        }
-        Ok(())
-    }
-
-    /// Stops the reader and closes the socket, ending the Home pick it kept. Idempotent.
+    /// Stops the reader and closes the socket. Idempotent.
     pub(crate) fn shutdown(self: &Arc<Self>) {
         if let Some(reader) = self.reader.lock().expect("reader handle").take() {
             reader.abort();
         }
         self.deactivate();
-        let lease = {
-            let mut slot = self.lease.lock().expect("lease");
-            slot.0 = true;
-            slot.1.take()
-        };
-        if let Some(lease) = lease {
-            lease.0.end();
-        }
         let this = self.clone();
         tokio::spawn(async move {
             let _ = tokio::time::timeout(Duration::from_secs(1), async {
@@ -783,8 +720,8 @@ pub(super) struct Replay {
 
 impl Replay {
     /// `applyCodexReasoningReplayCacheRequired`: cached turns inserted into `body`.
-    async fn apply(cache: &Arc<crate::codex_replay::Cache>, req: &ExecRequest, body: String) -> (String, Self) {
-        let (body, scope) = crate::codex_replay::apply(cache, req, body).await;
+    fn apply(cache: &Arc<crate::codex_replay::Cache>, req: &ExecRequest, body: String) -> (String, Self) {
+        let (body, scope) = crate::codex_replay::apply(cache, req, body);
         let replay = Self {
             cache: cache.clone(),
             scope,
@@ -1242,7 +1179,7 @@ impl CodexExecutor {
             conflict,
             finalize,
         } = request::shape(&req, view, settings, Call::Websocket)?;
-        let (body, replay) = Replay::apply(&self.replay, &req, body).await;
+        let (body, replay) = Replay::apply(&self.replay, &req, body);
         let (body, cache) = request::prompt_cache(&req, body, Some(&exec_session.id), true);
         let body = turn_body(view, &req, settings, &finalize, body);
         crate::codex::report_request(&req, cpa_core::format::Format::Codex, &body);
@@ -1281,7 +1218,6 @@ impl CodexExecutor {
             )
             .await?
         };
-        conn.bind(&session, exec_session.lease.as_ref())?;
         if let Some(handshake) = &handshake {
             wire.ws_handshake(101, handshake);
         }
@@ -1311,7 +1247,6 @@ impl CodexExecutor {
                     return Err(error);
                 }
             };
-            fresh.bind(&session, exec_session.lease.as_ref())?;
             rx = fresh.activate();
             restore = fresh.restores(optimized, conflict);
             wire.ws_request(&target.url, &headers, frame.as_bytes());
@@ -1360,23 +1295,15 @@ impl CodexExecutor {
                 body: ResponseBody::Stream(stream),
             });
         }
-        // The response waits for the Home replay writes it caused, as on HTTP.
-        let writes = turn.replay.scope.writes.clone();
         let stream = if settings.bootstrap_buffering {
-            match bootstrap(turn, settings.bootstrap_timeout, started).await {
-                Ok(stream) => stream,
-                Err(error) => {
-                    writes.settle().await;
-                    return Err(error);
-                }
-            }
+            bootstrap(turn, settings.bootstrap_timeout, started).await?
         } else {
             rest(turn)
         };
         Ok(ExecResponse {
             status: 200,
             headers: handshake.unwrap_or_default(),
-            body: ResponseBody::Stream(writes.gate(stream)),
+            body: ResponseBody::Stream(stream),
         })
     }
 }

@@ -180,16 +180,10 @@ fn disable_cooling_override(credential: &Credential) -> Option<bool> {
     })
 }
 
-/// `antigravityCoolingDisabled` (QuotaCooldownDisabledForAuthWithConfig): Home owns
-/// cooldowns, then the credential's override, then `disable-cooling`.
+/// `antigravityCoolingDisabled` (QuotaCooldownDisabledForAuthWithConfig): the
+/// credential's override, then `disable-cooling`.
 fn cooling_disabled(credential: &Credential, cfg: &Config) -> bool {
-    let home = cfg
-        .document
-        .get("home")
-        .and_then(|h| h.get("enabled"))
-        .and_then(serde_yaml_ng::Value::as_bool)
-        .unwrap_or(false);
-    home || disable_cooling_override(credential).unwrap_or(cfg.routing.cooldown.disable_cooling)
+    disable_cooling_override(credential).unwrap_or(cfg.routing.cooldown.disable_cooling)
 }
 
 /// `antigravityShortCooldownKey`: empty when the credential or model has no name.

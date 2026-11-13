@@ -318,42 +318,35 @@ static CATALOGS: LazyLock<[Arc<Updater>; 3]> = LazyLock::new(|| {
 });
 
 /// Go `effectiveCatalogSources` over `[catalog, codex-catalog, devin-catalog]`: an
-/// empty source is `embed` under `--local-model`, and Home mode disables models.json and
-/// the Devin catalog whatever their source.
-pub(crate) fn effective_sources(sources: &[String; 3], local: bool, home: bool) -> [String; 3] {
-    let mut effective = sources
+/// empty source is `embed` under `--local-model`.
+pub(crate) fn effective_sources(sources: &[String; 3], local: bool) -> [String; 3] {
+    sources
         .clone()
-        .map(|s| if s.is_empty() && local { EMBED.to_owned() } else { s });
-    if home {
-        effective[0] = DISABLED.to_owned();
-        effective[2] = DISABLED.to_owned();
-    }
-    effective
+        .map(|s| if s.is_empty() && local { EMBED.to_owned() } else { s })
 }
 
 #[derive(Clone, Copy)]
 struct Policy {
     local: bool,
-    home: bool,
     /// A test runtime: the empty source never downloads (see [`test_runtime`]).
     deny_default: bool,
 }
 
 /// Go `configureCatalogs` for sources the config load already validated. At startup the
-/// empty Codex and Devin sources wait outside Home mode.
+/// empty Codex and Devin sources wait.
 fn configure(updaters: &[Arc<Updater>; 3], lifetime: &Lifetime, sources: &[String; 3], policy: Policy, startup: bool) {
     // Go `UpdateModelCatalogSources`: nothing after shutdown.
     if lifetime.token.is_cancelled() {
         return;
     }
-    let effective = effective_sources(sources, policy.local, policy.home);
+    let effective = effective_sources(sources, policy.local);
     for (index, (updater, source)) in updaters.iter().zip(effective).enumerate() {
         let source = if policy.deny_default && source.is_empty() {
             DISABLED.to_owned()
         } else {
             source
         };
-        let lazy = startup && !policy.home && index > 0 && source.is_empty();
+        let lazy = startup && index > 0 && source.is_empty();
         updater.configure(lifetime, &source, lazy);
     }
 }
@@ -390,23 +383,16 @@ impl Session {
 /// config commit configures them again ([`Runtime::publish_config_and_policy`]). Call
 /// once per runtime. Cost while no Codex, Devin or Antigravity credential exists: one
 /// parked task that looks at the credentials' providers after each change to the set.
-/// In Home mode the local store stays empty, so every updater starts at once, as in Go.
-pub fn start(rt: &Arc<Runtime>, home_enabled: bool) {
+pub fn start(rt: &Arc<Runtime>) {
     let deny_default = test_runtime(rt);
     let policy = Policy {
         local: rt.local_model(),
-        home: home_enabled,
         deny_default,
     };
     rt.start_catalogs(Session {
         lifetime: Lifetime::new(),
         policy,
     });
-    if home_enabled {
-        tracing::info!(
-            "Home mode: models.json and Devin catalog updates disabled; Codex client model list follows Home model IDs"
-        );
-    }
     if deny_default {
         return;
     }
@@ -417,12 +403,6 @@ pub fn start(rt: &Arc<Runtime>, home_enabled: bool) {
         // The client version Antigravity requests carry; Go refreshes it whatever the plan.
         (cpa_exec::antigravity::PROVIDER, cpa_exec::antigravity_version::start),
     ];
-    if home_enabled {
-        for (_, start) in wanted {
-            start();
-        }
-        return;
-    }
     let weak = Arc::downgrade(rt);
     let mut changes = rt.store().subscribe();
     tokio::spawn(async move {
@@ -509,30 +489,22 @@ mod tests {
     fn effective_sources_match_go() {
         let url = "https://example.com/catalog.json";
         for local in [false, true] {
-            for home in [false, true] {
-                for mask in 0..8 {
-                    let sources: [String; 3] = std::array::from_fn(|i| {
-                        if mask & (1 << i) != 0 {
-                            url.to_owned()
-                        } else {
-                            String::new()
-                        }
-                    });
-                    let got = effective_sources(&sources, local, home);
-                    for (index, given) in sources.iter().enumerate() {
-                        let mut want = if given.is_empty() && local {
-                            EMBED
-                        } else {
-                            given.as_str()
-                        };
-                        if home && index != 1 {
-                            want = DISABLED;
-                        }
-                        assert_eq!(
-                            got[index], want,
-                            "local={local} home={home} mask={mask} catalog={index}"
-                        );
+            for mask in 0..8 {
+                let sources: [String; 3] = std::array::from_fn(|i| {
+                    if mask & (1 << i) != 0 {
+                        url.to_owned()
+                    } else {
+                        String::new()
                     }
+                });
+                let got = effective_sources(&sources, local);
+                for (index, given) in sources.iter().enumerate() {
+                    let want = if given.is_empty() && local {
+                        EMBED
+                    } else {
+                        given.as_str()
+                    };
+                    assert_eq!(got[index], want, "local={local} mask={mask} catalog={index}");
                 }
             }
         }
@@ -837,8 +809,8 @@ mod tests {
         assert!(!logs.contains("SECRET"), "{logs}");
     }
 
-    /// Go TestCatalogPolicyHotReload, then the lazy default: at startup outside Home the
-    /// empty Codex and Devin sources wait for a wake, and a reload that changes one starts
+    /// Go TestCatalogPolicyHotReload, then the lazy default: at startup the empty Codex
+    /// and Devin sources wait for a wake, and a reload that changes one starts
     /// it at once.
     #[tokio::test]
     async fn policy_follows_reloads_and_lifetimes() {
@@ -847,39 +819,19 @@ mod tests {
         let (devin, mut devin_rx) = echo();
         let updaters = [general.clone(), codex.clone(), devin.clone()];
         let sources = |g: &str, c: &str, d: &str| [g.to_owned(), c.to_owned(), d.to_owned()];
-        let policy = |local, home| Policy {
+        let policy = |local| Policy {
             local,
-            home,
             deny_default: false,
         };
         let lifetime = Lifetime::new();
         let (url, codex_url) = ("https://example.com/general", "https://example.com/codex");
-        configure(&updaters, &lifetime, &sources(url, "", ""), policy(true, false), true);
+        configure(&updaters, &lifetime, &sources(url, "", ""), policy(true), true);
         assert_eq!(next(&mut general_rx).await, url);
         assert_eq!(next(&mut codex_rx).await, EMBED);
         assert_eq!(next(&mut devin_rx).await, EMBED);
-        configure(
-            &updaters,
-            &lifetime,
-            &sources("", codex_url, ""),
-            policy(true, false),
-            false,
-        );
+        configure(&updaters, &lifetime, &sources("", codex_url, ""), policy(true), false);
         assert_eq!(next(&mut general_rx).await, EMBED);
         assert_eq!(next(&mut codex_rx).await, codex_url);
-        let ignored = "https://example.com/ignored";
-        configure(
-            &updaters,
-            &lifetime,
-            &sources(ignored, "", ""),
-            policy(true, true),
-            false,
-        );
-        assert_eq!(next(&mut codex_rx).await, EMBED);
-        assert_eq!((source(&general), source(&devin)), (DISABLED.into(), DISABLED.into()));
-        configure(&updaters, &lifetime, &sources("", "", ""), policy(true, false), false);
-        assert_eq!(next(&mut general_rx).await, EMBED);
-        assert_eq!(next(&mut devin_rx).await, EMBED);
 
         // Shutdown fences reloads; a new lifetime restarts the same sources.
         lifetime.token.cancel();
@@ -888,48 +840,32 @@ mod tests {
             &updaters,
             &lifetime,
             &sources("", "https://example.com/stopped", ""),
-            policy(true, false),
+            policy(true),
             false,
         );
         assert_eq!(generation(&codex), stopped, "reload after shutdown restarted a reader");
         let lifetime = Lifetime::new();
-        configure(
-            &updaters,
-            &lifetime,
-            &sources(ignored, "", ""),
-            policy(true, true),
-            true,
-        );
+        configure(&updaters, &lifetime, &sources(url, "", ""), policy(true), true);
+        assert_eq!(next(&mut general_rx).await, url);
         assert_eq!(next(&mut codex_rx).await, EMBED);
-        assert_eq!(source(&general), DISABLED);
+        assert_eq!(next(&mut devin_rx).await, EMBED);
 
         // The default source: models.json starts, Codex and Devin wait.
         let lifetime = Lifetime::new();
-        configure(&updaters, &lifetime, &sources("", "", ""), policy(false, false), true);
+        configure(&updaters, &lifetime, &sources("", "", ""), policy(false), true);
         assert_eq!(next(&mut general_rx).await, "");
-        configure(&updaters, &lifetime, &sources("", "", ""), policy(false, false), false);
+        configure(&updaters, &lifetime, &sources("", "", ""), policy(false), false);
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(codex_rx.try_recv().is_err() && devin_rx.try_recv().is_err());
         codex.wake();
         assert_eq!(next(&mut codex_rx).await, "");
         let devin_url = "https://example.com/devin";
-        configure(
-            &updaters,
-            &lifetime,
-            &sources("", "", devin_url),
-            policy(false, false),
-            false,
-        );
+        configure(&updaters, &lifetime, &sources("", "", devin_url), policy(false), false);
         assert_eq!(next(&mut devin_rx).await, devin_url);
-        // In Home mode the Codex default starts at launch.
-        let lifetime = Lifetime::new();
-        configure(&updaters, &lifetime, &sources("", "", ""), policy(false, true), true);
-        assert_eq!(next(&mut codex_rx).await, "");
     }
 
     /// A test runtime downloads no default catalog, through either entry point: the
-    /// startup plan (Home mode starts every updater at once) or a Codex client asking
-    /// for its catalog.
+    /// startup plan or a Codex client asking for its catalog.
     #[tokio::test]
     async fn test_runtimes_start_no_default_download() {
         let executors = cpa_exec::Executors {
@@ -942,8 +878,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cpa-updater-{}", uuid::Uuid::new_v4()));
         let cfg = cpa_core::config::Config::parse(&format!("auth-dir: {}\n", dir.display())).unwrap();
         let rt = Arc::new(crate::testing::runtime(cfg, Vec::new(), executors));
-        start(&rt, false);
-        start(&rt, true);
+        start(&rt);
         let _ = crate::codex_models::response(&rt, "0.130.0");
         for updater in CATALOGS.iter() {
             assert_eq!(source(updater), DISABLED);

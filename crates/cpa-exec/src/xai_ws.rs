@@ -1138,7 +1138,7 @@ impl XaiExecutor {
         }
         let mut prepared = crate::xai::before_reporter(
             &req.usage,
-            request::prepare(&req, cfg, true, Format::Codex, &self.replay, true).await,
+            request::prepare(&req, cfg, true, Format::Codex, &self.replay, true),
         )?;
         let previous = text(&gj::get(&req.body, "previous_response_id")).trim().to_owned();
         if !previous.is_empty() {
@@ -1196,7 +1196,6 @@ impl XaiExecutor {
         if let Some(handshake) = &handshake {
             capture.handshake(handshake);
         }
-        conn.bind(&session, exec_session.lease.as_ref())?;
         req.usage.round_trip_started();
         let mut rx = conn.activate();
         if let Err(error) = conn.send(message.clone()).await {
@@ -1228,7 +1227,6 @@ impl XaiExecutor {
             if let Some(handshake) = &fresh_handshake {
                 capture.handshake(handshake);
             }
-            fresh.bind(&session, exec_session.lease.as_ref())?;
             req.usage.round_trip_started();
             rx = fresh.activate();
             if let Err(error) = fresh.send(message).await {
@@ -1273,7 +1271,7 @@ impl XaiExecutor {
         Ok(ExecResponse {
             status: 200,
             headers: handshake.unwrap_or_default(),
-            body: ResponseBody::Stream(prepared.replay_scope.writes.gate(stream)),
+            body: ResponseBody::Stream(stream),
         })
     }
 

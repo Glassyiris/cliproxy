@@ -20,7 +20,6 @@ clap.workspace = true
 cpa-common.workspace = true
 cpa-core.workspace = true
 cpa-exec.workspace = true
-cpa-home.workspace = true
 cpa-plugin.workspace = true
 cpa-server.workspace = true
 getrandom = "0.3"
@@ -48,4 +47,3 @@ wreq.workspace = true
 [dev-dependencies]
 cpa-plugin = { workspace = true, features = ["test-support"] }
 cpa-server = { workspace = true, features = ["testing"] }
-cpa-home = { workspace = true, features = ["fake"] }

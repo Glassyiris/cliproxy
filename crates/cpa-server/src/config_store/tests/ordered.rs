@@ -519,56 +519,6 @@ fn resume_publishes_an_unacknowledged_checkpoint_before_initial_delivery() {
 }
 
 #[test]
-fn management_wrapper_does_not_bind_homes_remote_configuration_authority() {
-    let local = Arc::new(ConfigStore::memory_with(
-        "routing: {strategy: fill-first}\nmanagement: {secret-key: local-only}\n",
-    ));
-    let home = Arc::new(crate::Runtime::home(
-        Config::parse("routing: {strategy: round-robin}\n").unwrap(),
-        vec![],
-        executors(),
-    ));
-    home.deny_external.store(true, std::sync::atomic::Ordering::Relaxed);
-    let mut changes = home.subscribe_config();
-    let management = crate::management::Management::with_options(
-        home.clone(),
-        local.clone(),
-        crate::management::Options {
-            management_password: Some(String::new()),
-            ..Default::default()
-        },
-    );
-    assert_eq!(
-        home.config().routing.strategy,
-        "round-robin",
-        "local initial view must not replace Home"
-    );
-    assert!(
-        !management.routes_enabled(),
-        "a local store's secret cannot enable Home management"
-    );
-    assert!(changes.try_next().is_none());
-    assert!(home.publish_config(Config::parse("routing: {strategy: wrr}\n").unwrap()));
-    assert_eq!(home.config().routing.strategy, "wrr");
-    assert_eq!(
-        home.policy().strategy,
-        crate::management::policy(&home.config()).strategy
-    );
-    assert!(changes.try_next().is_some());
-    let mut changes = home.subscribe_config();
-    local
-        .import_yaml(
-            "routing: {strategy: fill-first}\nserver: {port: 8119}\n",
-            "test",
-            "local command",
-        )
-        .unwrap();
-    assert_eq!(home.config().routing.strategy, "wrr");
-    assert!(changes.try_next().is_none());
-    assert!(!management.routes_enabled());
-}
-
-#[test]
 fn required_runtime_views_precede_even_preexisting_change_subscribers() {
     let store = Arc::new(ConfigStore::memory_with("routing: {strategy: round-robin}\n"));
     let rt = Arc::new(crate::testing::runtime(
