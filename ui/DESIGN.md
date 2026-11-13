@@ -144,13 +144,8 @@ Each tab and dialog hosts a feature page from `src/features/` through a thin hos
 
 - One hash form: `#<route>[/<arg>][?<query>]`. A tab is `?view=<tab>` (the first tab has none); a
   dialog is `?open=<dialog>`; a filter is its own key (`#accounts?show=<reason>`, which Accounts
-  reads). Logs keeps its own `?tab=`, which is why the route tab is `view`.
-- Old hashes land through `redirect()` in `src/lib/hash.ts`, which replaces the entry in place:
-  `#providers` → `#accounts?view=providers`, `#keys` → `#clients`, `#use` → `#clients?open=use`,
-  `#usage` → `#activity`, `#logs` → `#activity?view=logs`, `#payload` → `#models?view=payload`,
-  `#config` and `#configuration` → `#settings`, `#plugins/<name>` → `#settings?open=plugins&plugin=<name>`,
-  `#credentials` and `#quotas` → `#accounts`; `#connect`, `#oauth` and `#system` open the connect
-  or About dialog over the page shown before (Overview when there is none).
+  reads). Logs keeps its own `?tab=`, which is why the route tab is `view`. A hash that names no
+  route opens the first page; there are no redirects from older hashes.
 - A hosted dialog is `PageDialog` on the `form-wizard-dialog` frame, 800 wide, not the template's
   620: the hosted pages were laid out for a reading width (`roles.content.formWidth`). Closing it
   drops its own query keys, so the next opening starts clean.

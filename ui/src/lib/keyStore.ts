@@ -1,23 +1,9 @@
 // The dashboard stores no key: after sign-in the server's HttpOnly session cookie authenticates
 // every request, and no script can read it. This module carries the sign-out to the other tabs,
-// which share that cookie, and deletes the key older dashboards stored.
+// which share that cookie.
 
 const CHANNEL = "cook-router.session";
 const SIGNED_OUT = "signed-out";
-/** Where dashboards before the session cookie kept the raw key. */
-const LEGACY_KEY = "cliproxy.managementKey";
-
-/** Delete the key an older dashboard stored, so an upgrade leaves no copy in the browser profile. */
-export function dropLegacyKey() {
-  for (const store of ["localStorage", "sessionStorage"] as const) {
-    try {
-      globalThis[store].removeItem(LEGACY_KEY);
-    } catch {
-      // Blocked storage: this page could not have written the key there either.
-    }
-  }
-}
-
 function channel(): BroadcastChannel | null {
   try {
     return new BroadcastChannel(CHANNEL);

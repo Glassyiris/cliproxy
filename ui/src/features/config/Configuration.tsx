@@ -9,7 +9,7 @@
 // - The group is `?section=` in the hash, so Back and reload keep it; the template keeps it in state.
 // - Icons are lucide, not heroicons; the "Professional hosting tools" list and the info cards are
 //   omitted because cook-router has no counterpart.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileCode, KeyRound, Globe, Route, ScrollText, Send } from "lucide-react";
 import { Button } from "@astryxdesign/core/Button";
@@ -17,12 +17,11 @@ import { Divider } from "@astryxdesign/core/Divider";
 import { Icon, type IconProps } from "@astryxdesign/core/Icon";
 import { VStack } from "@astryxdesign/core/Layout";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { Text } from "@astryxdesign/core/Text";
 import { icons } from "../../components/icons.ts";
 import { PageFrame } from "../../app/PageFrame.tsx";
 import { serverKeys, useConfig } from "../../app/serverQueries.ts";
 import { useAction } from "../../app/useAction.ts";
-import { useHashParams, useHashRoute, useUnsavedChanges } from "../../app/useHashRoute.ts";
+import { useHashParams, useUnsavedChanges } from "../../app/useHashRoute.ts";
 import { ReadError } from "../../components/ReadError.tsx";
 import { hinted } from "../../i18n/config.ts";
 import { replaceConfigValues, type Config } from "../../lib/api/config.ts";
@@ -175,18 +174,10 @@ function useDraft(config: Config | undefined) {
   };
 }
 
-/**
- * The open group, `?section=` in the hash; the first by default. An old `#config/<section>`
- * link lands on Advanced with that section's editor open (`?key=`).
- */
+/** The open group, `?section=` in the hash; the first by default. */
 function useGroup() {
   const [params, setParams] = useHashParams();
-  const legacy = useHashRoute().arg;
-  useEffect(() => {
-    if (legacy)
-      location.replace(`#settings?${new URLSearchParams({ section: "advanced", key: legacy })}`);
-  }, [legacy]);
-  const group: Group = isGroup(params.section) ? params.section : legacy ? "advanced" : groups[0];
+  const group: Group = isGroup(params.section) ? params.section : groups[0];
   const select = (next: Group) => setParams({ section: next }, "push");
   return { group, select };
 }
@@ -201,19 +192,10 @@ export default function Configuration() {
     draft.reset();
   };
   const { action, save } = useSaveChanges(close);
-  const version = config.data?.["config-version"];
 
   return (
     <PageFrame
       title={t("app.nav.config")}
-      meta={
-        config.data &&
-        !version && (
-          <Text type="supporting" color="secondary">
-            {t("config.page.legacy")}
-          </Text>
-        )
-      }
       actions={
         <Button
           label={t("config.save.button")}

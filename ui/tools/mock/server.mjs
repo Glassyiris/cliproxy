@@ -12,7 +12,7 @@
 // GET /v1/models answers a client key from access.api-keys as the proxy does, for the Use page's test.
 import http from "node:http";
 import { parseArgs, isDeepStrictEqual } from "node:util";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 const { values: opt } = parseArgs({
   options: {
@@ -523,6 +523,8 @@ const storeCatalog = [
   { id: "model-lab", name: "Model Lab", description: "Extra model definitions.", version: "2.0.3" },
 ];
 const sessions = new Map();
+/** Live dashboard session ids. */
+const dashboardSessions = new Set();
 
 /** Per-provider usage payloads a quota check parses (src/core.ts quotaWindows). */
 function usagePayload(url) {
@@ -952,8 +954,35 @@ const server = http.createServer((req, res) => {
       const headers = { "X-CPA-VERSION": VERSION, "X-CPA-COMMIT": "0000000", "X-CPA-BUILD-DATE": BUILD_DATE, "Cache-Control": "no-store", "X-Cook-Revision": String(configVersion), "X-Cook-Published-Revision": String(configVersion) };
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
       const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || String(req.headers["x-management-key"] || "");
-      if (!given) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"missing management key"}');
-      if (given !== KEY) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"invalid management key"}');
+      // The dashboard session, as the server does it (crates/cpa-server/src/management/session.rs):
+      // the key is exchanged for a random id in `cook_router_session`; cookie requests need the
+      // dashboard header; sign-out revokes the id on the server.
+      const id = /(?:^|;\s*)cook_router_session=([^;]+)/.exec(req.headers.cookie || "")?.[1];
+      const cookie = id !== undefined && dashboardSessions.has(id);
+      const dashboard = req.headers["x-cook-dashboard"] === "1";
+      if (url.pathname === `${PREFIX}/session`) {
+        if (req.method !== "POST" && !dashboard) return (status = 403), send(403, headers, "");
+        if (req.method === "GET") return (status = cookie ? 204 : 401), send(status, headers, "");
+        if (req.method === "DELETE") {
+          if (id !== undefined) dashboardSessions.delete(id);
+          return (status = 204), send(204, { ...headers, "Set-Cookie": "cook_router_session=; Path=/; Max-Age=0" }, "");
+        }
+        if (given !== KEY) return (status = 401), send(401, headers, "");
+        let body;
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+        } catch {
+          return (status = 400), send(400, headers, "");
+        }
+        const fresh = randomBytes(32).toString("base64url");
+        dashboardSessions.add(fresh);
+        const age = body.remember ? 30 * 86400 : 7 * 86400;
+        const path = typeof body.path === "string" && body.path.startsWith("/") ? body.path : "/";
+        return (status = 204), send(204, { ...headers, "Set-Cookie": `cook_router_session=${fresh}; Path=${path}; Max-Age=${age}; HttpOnly; SameSite=Strict` }, "");
+      }
+      if (!given && cookie && !dashboard) return (status = 403), send(403, headers, "");
+      if (!given && !cookie) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"missing management key"}');
+      if (given && given !== KEY) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"invalid management key"}');
       for (const r of routes) {
         if (r.method !== req.method) continue;
         const m = r.re.exec(url.pathname);

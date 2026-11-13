@@ -62,7 +62,6 @@ export const dynamicKeys = [
 export default {
   en: {
     "config.page.what": "the configuration",
-    "config.page.legacy": "Legacy layout, migrated on first save",
     "config.save.button": "Save changes",
     "config.save.none": "No changes to save.",
     "config.review.title": "Review changes",

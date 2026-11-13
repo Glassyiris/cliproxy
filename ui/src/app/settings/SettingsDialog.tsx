@@ -252,7 +252,7 @@ function SettingsDialog({
 
 /**
  * The side nav's settings button and the dialog it opens; closing returns focus to it. `?open=about`
- * (where `#system` lands) opens it on About.
+ * opens it on About.
  */
 export function SettingsButton() {
   const [isOpen, setOpen] = useState(false);

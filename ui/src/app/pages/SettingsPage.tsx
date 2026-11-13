@@ -10,7 +10,7 @@ import { useDialogParam } from "./PageDialog.tsx";
 
 /**
  * The server configuration; Plugins opens over it from the header. Its store and its open plugin
- * are query keys (src/lib/hash.ts), and the open plugin is the dialog's route argument.
+ * are query keys, and the open plugin is the dialog's route argument.
  */
 export default function SettingsPage() {
   const plugins = useDialogParam("plugins", ["plugin", "store"]);

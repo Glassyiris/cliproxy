@@ -7,7 +7,7 @@
 // - One height for every step, PageDialog's (layout.pageDialog), as the template's fixed-height
 //   rule asks: the header and footer stay put and only the step's body scrolls.
 // - The tool and the key live in the hash (`tool`, `key`), so a key row opens the dialog with its
-//   key and old `#use?tool=` links land on their tool; the step stays component state.
+//   key and a `?tool=` link lands on its tool; the step stays component state.
 // - The last step's primary action is Done, which closes: the result is the test banner, and there
 //   is nothing to submit.
 // - The key and model pair stacks on phones: the template's horizontal pair has no narrow case,

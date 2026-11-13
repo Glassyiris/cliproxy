@@ -40,7 +40,7 @@ function page(source: Chunk<{ default: ComponentType }>) {
 }
 
 // The pages; the first route is the landing page. A route's pages are `?view=` of it and dialogs
-// are `?open=`. Old hashes land there (src/lib/hash.ts). The side nav groups them in `navSections`.
+// are `?open=`. The side nav groups them in `navSections`.
 export const routes: readonly PageRoute[] = [
   {
     id: "overview",
@@ -134,12 +134,12 @@ export const navSections: readonly { id: string; title(): string; items: readonl
 export const destinations: readonly { hash: string; route: string; title(): string }[] = [
   ...routes.map((r) => ({ hash: `#${r.id}`, route: r.id, title: () => r.title() })),
   { hash: "#accounts?view=providers", route: "accounts", title: () => t("app.nav.providers") },
-  { hash: "#connect", route: "accounts", title: () => t("app.nav.connect") },
+  { hash: "#accounts?open=connect", route: "accounts", title: () => t("app.nav.connect") },
   { hash: "#clients?open=use", route: "clients", title: () => t("app.nav.use") },
   { hash: "#models?view=payload", route: "models", title: () => t("app.nav.payload") },
   { hash: "#activity?view=logs", route: "activity", title: () => t("app.nav.logs") },
   { hash: "#settings?open=plugins", route: "settings", title: () => t("app.nav.plugins") },
-  { hash: "#system", route: "settings", title: () => t("app.nav.system") },
+  { hash: "#settings?open=about", route: "settings", title: () => t("app.nav.system") },
 ];
 
 /**

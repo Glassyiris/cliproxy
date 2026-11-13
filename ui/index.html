@@ -19,9 +19,9 @@
       (function () {
         var root = document.documentElement, mode = null, palette = null, locale = null;
         try {
-          mode = localStorage.getItem("cliproxy-theme");
-          palette = localStorage.getItem("cliproxy-palette");
-          locale = localStorage.getItem("cliproxy-locale");
+          mode = localStorage.getItem("cook-router-theme");
+          palette = localStorage.getItem("cook-router-palette");
+          locale = localStorage.getItem("cook-router-locale");
         } catch (e) {}
         if (mode === "light" || mode === "dark") root.dataset.theme = mode;
         // Any stored palette but the default (Neutral, stored as nothing; a "neutral" kept from

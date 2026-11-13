@@ -106,7 +106,7 @@ try {
   assert.ok(pluginReads <= 1, `GET /plugins read ${pluginReads} times`);
   console.log(`PASS unsupported reads are not retried in a loop (${pluginReads} read of GET /plugins)`);
 
-  browser("click", 'nav a[href="#payload"]');
+  browser("click", 'nav a[href="#models?view=payload"]');
   settled();
   browser("find", "role", "button", "click", "--name", "Add rule");
   browser("wait", "--text", "Rule added.");
@@ -124,7 +124,7 @@ try {
   browser("screenshot", `${output}/rust-dashboard-narrow.png`, "--full");
   const storage = evaluate("({local:Object.keys(localStorage),session:Object.keys(sessionStorage)})");
   assert.deepEqual(storage.session, []);
-  assert.ok(storage.local.every((k) => k === "cliproxy-theme"));
+  assert.ok(storage.local.every((k) => k === "cook-router-theme"));
   console.log("PASS 390px Chromium: no overflow; management key absent from storage");
   writeFileSync(`${output}/rust-dashboard-checks.json`, JSON.stringify(results, null, 2));
 } finally {

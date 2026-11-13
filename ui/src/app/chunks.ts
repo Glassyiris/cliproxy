@@ -4,7 +4,6 @@
 // React.lazy suspends once even then, and React holds a revealed Suspense boundary back for up
 // to 300 ms.
 import type { ComponentType } from "react";
-import { redirect } from "../lib/hash.ts";
 
 /** A page chunk failed to load. React.lazy keeps the rejection, so only a reload fetches it again. */
 export class PageLoadError extends Error {}
@@ -43,10 +42,9 @@ export const pageChunks = {
 /** The shell, the quota checker and everything they share with the pages. */
 const shell = chunk(() => import("./SignedIn.tsx"));
 
-/** The page the hash opens; an old hash counts as the one it lands on. */
+/** The page the hash opens. */
 function currentPage() {
-  const hash = redirect(location.hash) ?? location.hash;
-  const id = hash.slice(1).split(/[/?]/)[0] ?? "";
+  const id = location.hash.slice(1).split(/[/?]/)[0] ?? "";
   return id in pageChunks ? pageChunks[id as keyof typeof pageChunks] : pageChunks.overview;
 }
 

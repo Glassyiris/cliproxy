@@ -119,7 +119,7 @@ try {
   await page.getByLabel("Management key").fill("orb-dashboard-test-only");
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   await main.getByText("operator@example.invalid").first().waitFor();
-  await page.evaluate(() => (location.hash = "#connect"));
+  await page.evaluate(() => (location.hash = "#overview?open=connect"));
   await main.getByRole("heading", { name: "Sign in with a provider" }).waitFor();
 
   if (mode === "plugin") {
@@ -310,7 +310,7 @@ try {
     await button("Check quotas").click();
     for (let i = 0; i < 50 && !reads; i++) await page.waitForTimeout(100);
     assert.equal(reads, 1, "the old read is in flight");
-    await page.evaluate(() => (location.hash = "#connect"));
+    await page.evaluate(() => (location.hash = "#overview?open=connect"));
     (status = { status: "wait" }), (usage = 200);
     await begin("Claude");
     (files = [fixture, { ...held, updated_at: "2026-11-05T11:00:00Z" }]), (status = { status: "ok" });
@@ -376,7 +376,7 @@ try {
     pass("all six new credentials are listed on Accounts");
 
     // A built-in provider this server lacks: honest message, button disabled afterwards.
-    await page.evaluate(() => (location.hash = "#connect"));
+    await page.evaluate(() => (location.hash = "#overview?open=connect"));
     await button("Antigravity").click();
     const toast = await page.locator(".toast", { hasText: /Antigravity|ok/ }).or(main.getByText("Waiting for approval")).first().textContent();
     if (toast.includes("not available")) {
