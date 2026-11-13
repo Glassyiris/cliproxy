@@ -17,6 +17,7 @@ Owners directed S1 to proceed with these binding defaults; an owner ruling may r
 | Conversion | Settled | Every ingress/egress converts, including same-protocol; replace pairwise paths without compatibility shims. | Settled |
 | Non-SSE | Settled | Custom-data chunks ≤50 KB; collection delay ≤100 ms. | Settled; `crates/AGENTS.md:25` |
 | Storage | Settled | mmap files, fixed blocks, positions only; no heap storage of stream data. | Settled; `crates/AGENTS.md:24` |
+| Block size | Settled | Storage blocks are 50,000 bytes, the non-SSE chunk size. | Owner ruling 2026-11-13 (G1′) |
 | Full storage | Settled | FIFO cache queue bounded by size and age; disk-full/other edges best effort. | Settled |
 | Exhaustion/platform | Settled | Visible failure, no degradation; Linux server only. | Settled; `crates/AGENTS.md:75` |
 | Plugin migration | Settled | ABI cutover; maintainers own SDK/store migration; no old path. | Settled |
@@ -35,7 +36,7 @@ Owners directed S1 to proceed with these binding defaults; an owner ruling may r
 | D3 | Default (2026-11-13), change by owner ruling | No failover after the first event producing client-deliverable bytes. | Q |
 | E2 | Default (2026-11-13), change by owner ruling | Native ABI and RPC schema both bump; reject old plugins at load. | Q |
 | F/G9 | Default (2026-11-13), change by owner ruling | Measure first, obtain owner-approved thresholds; use §9 commands and codec metrics. | Q |
-| G1′/G3′ | Default (2026-11-13), change by owner ruling | S1 choice: one pool file/process, page-aligned 64 KiB blocks, free-frame list and per-stream block table; centralize quotas and reuse without remapping. | Q |
+| G3′ | Default (2026-11-13), change by owner ruling | S1 choice: one pool file/process, free-frame list and per-stream block table; centralize quotas and reuse without remapping. | Q |
 | G2 | Default (2026-11-13), change by owner ruling | `$XDG_RUNTIME_DIR/cook-router/` on tmpfs by default; directory configurable. | Q |
 | G4/G5 | Default (2026-11-13), change by owner ruling | O_TMPFILE or immediate unlink; no crash-surviving stream files or startup scavenger. | Q |
 | G6 | Default (2026-11-13), change by owner ruling | File 0600, directory 0700; no extra encryption. | Q |
@@ -145,8 +146,8 @@ Refusals use Chat `delta.refusal`, with native safety/refusal metadata in annota
 ### 3.4 Custom data and media
 
 50 KB means 50,000 bytes; KiB means 1,024 bytes. JSON/SSE is textual; arbitrary binary appears only as base64 data chunks.
-Use full decoded chunks of 37,500 bytes (50,000 base64 ASCII bytes), with a short chunk on timer, object/message end or cancellation.
-This satisfies the ≤50 KB data ceiling and leaves 15,536 bytes for framing in one 65,536-byte block; 50,000 raw bytes would require 66,668 base64 bytes before framing and MUST NOT be used.
+Use full decoded chunks of 36,864 bytes (49,152 base64 ASCII bytes; 36,864 = 3 × 12,288), with a short chunk on timer, object/message end or cancellation.
+The whole encoded `data` event (SSE framing, JSON and base64) MUST NOT exceed 50,000 bytes, the size of one storage block. A full chunk leaves 848 bytes (50,000 − 49,152) for framing. When an event's framing would exceed 848 bytes, shorten the decoded chunk to the largest multiple of 3 bytes not above 3 × ⌊(50,000 − framing) / 4⌋. 50,000 raw bytes would require 66,668 base64 bytes before framing and MUST NOT be used.
 A complete `data` record MUST fit one storage block. It contains only compact common correlation and the three payload fields; emit large source metadata in `media.start`/`opaque`, not every chunk.
 Measure collection delay from the first byte of an uncommitted chunk using a monotonic clock; while allocation succeeds, publish within 100 ms or immediately at the chunk ceiling/object end.
 A stalled consumer delays transmission, not collection: publish to mmap, then pause reads under §6.4. Allocation failure instead ends the stream with an error event via §6.2 terminal state; it does not extend the timer or permit heap spill.
@@ -536,9 +537,9 @@ Current compact rejects stream=true (`crates/cpa-server/src/openai.rs:1064-1079`
 
 ### 6.1 Pool, positions and ownership
 
-**S1 choice:** one fixed-capacity shared mmap pool file/process, using page-aligned 64 KiB frames; a single allocation domain keeps process quotas explicit. Fixed mmap blocks and position-based access are interoperability requirements; the file count and block size are S1 defaults.
+**S1 choice:** one fixed-capacity shared mmap pool file/process, using 50,000-byte frames (settled, §2); a single allocation domain keeps process quotas explicit. Fixed mmap blocks and position-based access are interoperability requirements; the file count is an S1 default. Blocks are byte offsets inside the mapping; only the mapping itself is page-aligned, so blocks need not be.
 **S1 choice:** a free-frame list and per-stream logical-block→physical-frame table permit FIFO reuse without moving live bytes. Pool capacity is a block-size multiple; no hot-path remap/growth.
-A `Position` is `(logical_block_number, offset)` scoped by a stream handle/generation; `offset` is in `[0, 65536)`. Logical block numbers do not wrap/reuse within a stream.
+A `Position` is `(logical_block_number, offset)` scoped by a stream handle/generation; `offset` is in `[0, 50000)`. Logical block numbers do not wrap/reuse within a stream.
 Request/response directions of one exchange share its stream quota; reclaiming another exchange cannot raise this quota. Duplex sessions retain separate turn quotas, with shared session replay charged to the pool/cache and its retaining exchange until released.
 The block table holds integer frame indexes per logical block, like a page table, plus generation/ownership and committed extents. This is per-block state, not retained raw pointers; resolve temporary borrowed slices only under a read lease.
 Stages hold only start/current/end positions for byte access; retention watermarks are such positions. Identity indexes and bounded scalar counters are metadata; identity strings and variable metadata remain position-backed.
@@ -546,7 +547,7 @@ No `Vec<Bytes>`, body-sized String, JSON tree, tool-argument accumulator, media 
 Network/TLS library scratch is not a second stream store: consume it immediately into mapped storage, bound it by transport settings and include it in measurements.
 Codecs scan borrowed mapped spans and write encoding output into mapped blocks; string escaping/base64 and cross-block tokens are incremental, never assembled into a heap event.
 Request records, normalized events, boundary framing scratch, unknown payloads, plugin replacements and aggregation output all charge their actual live mapped blocks to stream and pool limits.
-General records may span blocks; readers parse across positions. Custom-data records start at a fresh block boundary and fit one block; unused tail space is padding, not stream bytes.
+General records may span blocks; readers parse across positions. A text SSE event larger than a block occupies consecutive blocks, addressed as (block, offset). Custom-data records start at a fresh block boundary and fit one block; unused tail space is padding, not stream bytes.
 A separate event index stores only start/end positions and type/correlation indexes; retained index metadata has a configured ceiling too.
 
 ### 6.2 Writer/reader publication
@@ -586,15 +587,15 @@ Unset capacity knobs use these provisional S1 defaults: **unmeasured, replace af
 | Configuration knob | Default and unit/scope | Accounting/rationale |
 | --- | --- | --- |
 | `stream.pool_directory` | `$XDG_RUNTIME_DIR/cook-router/`, directory/process | Private tmpfs location (§6.3); no fallback when XDG is absent. |
-| `stream.pool_bytes` | 256 MiB/process | Fixed block-aligned capacity bounds total mapped storage while allowing several concurrent exchanges. |
-| `stream.max_blocks` | 512 blocks/exchange (32 MiB) | Request/response/scratch/replay combined; one exchange cannot monopolize the pool. |
+| `stream.pool_bytes` | 250,000,000 bytes/process (5,000 blocks) | Fixed block-multiple capacity bounds total mapped storage while allowing several concurrent exchanges. |
+| `stream.max_blocks` | 640 blocks/exchange (32,000,000 bytes) | Request/response/scratch/replay combined; one exchange cannot monopolize the pool. |
 | `stream.max_event_bytes` | 1 MiB/event | Ordinary framed event including extensions; bound parser work, chunk large content/media instead. |
 | `stream.max_metadata_bytes` | 1 MiB/exchange | Tables/indexes/parser/consumer bookkeeping; bound tiny-event amplification. |
-| `stream.cache_bytes` | 128 MiB/process | Retained backlog/replay is part of the pool, not another pool; leave capacity for active encoding. |
+| `stream.cache_bytes` | 125,000,000 bytes/process (2,500 blocks) | Retained backlog/replay is part of the pool, not another pool; leave capacity for active encoding. |
 | `stream.cache_max_age` | 60 s/block | Bound logical stalled retention; first enqueue sets age, reads never refresh it. |
 
-**S1 choice:** high/low unread-backlog watermarks are 75%/50% of `max_blocks` (384/256 by default), rounded down; hysteresis pauses early enough to leave room for in-flight collection. The 64 KiB block size is a §2 default, not an independently settled ruling.
-Startup rejects zero capacities/age, non-block-aligned pool/cache sizes, `cache_bytes > pool_bytes`, `max_blocks < 4`, `max_blocks * 65536 > pool_bytes`, or `max_event_bytes > max_blocks * 65536`. Metadata must hold the configured block table plus one event index and reader entry; validate against actual entry sizes with checked arithmetic.
+**S1 choice:** high/low unread-backlog watermarks are 75%/50% of `max_blocks` (480/320 by default), rounded down; hysteresis pauses early enough to leave room for in-flight collection.
+Startup rejects zero capacities/age, pool/cache sizes that are not block multiples, `cache_bytes > pool_bytes`, `max_blocks < 4`, `max_blocks * 50000 > pool_bytes`, or `max_event_bytes > max_blocks * 50000`. Metadata must hold the configured block table plus one event index and reader entry; validate against actual entry sizes with checked arithmetic.
 1. Queue retained blocks in first-enqueue FIFO order, including unread/replay-pinned entries. Release consumed, unneeded blocks; physical reuse always waits for the last lease. Pause upstream reads at the high watermark, resume below the low watermark; already-arriving bytes and timer flushes still consume quota.
 2. At size/allocation pressure, process the oldest retained entries first: reclaim unneeded unleased entries; if a live retained entry must be removed, logically invalidate its owning stream. Age expiry invalidates that owner at 60 s by default even while reads are paused. Never skip live bytes and continue that stream.
 3. Invalidation cancels the producer, ends the stream with `stream.storage_exhausted` via §6.2, and makes readers see the terminal error then end-of-stream. Drop retention references; leased frames stay immutable and charged to pool/exchange limits until their last lease releases. FIFO logical removal is not physical reclamation.
@@ -665,7 +666,7 @@ Cover every registered client/upstream combination and applicable request/stream
 | Framing | Fragment every UTF-8/SSE delimiter/base64 unit across reads; exercise multiline data, CR/LF variants, empty events and source terminal markers. |
 | Failures | Client invalid UTF-8→400; upstream invalid UTF-8/malformed/truncated input→error; no success after error/cancel or post-terminal content. |
 | Commitment | Metadata-only output that egress suppresses permits retry; deliverable role/event bytes prevent it; keepalive cannot commit early. |
-| Media | Exact bytes/MIME/timing, 37,500-byte full chunks, ≤50 KB encoded data, one-block framing; ≤100 ms collection while allocation succeeds, including backpressure; failed reservation ends with error. |
+| Media | Exact bytes/MIME/timing, 36,864-byte full chunks, whole encoded event ≤50,000 bytes, framing overflow shortens the chunk; ≤100 ms collection while allocation succeeds, including backpressure; failed reservation ends with error. |
 | Duplex | Responses append/history and realtime control/media/sideband preserve direction/turn/session/packet identity; cancellation closes owned work. |
 | Storage | Concurrent publication exposes complete prefixes; cross-block JSON, lost-wakeup races, cancellation, stale handles and frame reuse cannot leak/corrupt content. |
 | Bounds | Exercise default and small-limit high/low watermarks, FIFO size/age invalidation, error then EOF, and last-lease-only reuse; a stuck lease survives expiry and forces visible allocation failure, never overwrite/heap growth. |
@@ -736,7 +737,7 @@ Every default below is binding for S1: **Default (2026-11-13), change by owner r
 | D3: first-deliverable-byte commit | Owner may revise (§3.6, §7). |
 | E2: ABI/schema bump and exact S1 2/7 assignments | Owner may revise (§8). |
 | F/G9: measurements and regression thresholds | Owner may revise; approve throughput/latency/CPU/allocation/total-storage tolerances after baseline, before accepting performance (§9). |
-| G1′/G3′: S1 one file, 64 KiB, free list/block table/metadata lock | Owner may revise these mechanisms, preserving mmap/position/publication/lease invariants (§6.1–6.2). |
+| G3′: S1 one file, free list/block table/metadata lock | Owner may revise these mechanisms, preserving mmap/position/publication/lease invariants (§6.1–6.2). |
 | G2: configurable tmpfs runtime directory | Owner may revise (§6.3). |
 | G4/G5: O_TMPFILE/unlink, no scavenger | Owner may revise (§6.3). |
 | G6: 0600/0700, no extra encryption | Owner may revise (§6.3). |
