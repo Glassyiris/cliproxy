@@ -183,4 +183,34 @@ Every applicable route/provider/mode cell remains pending until its implementati
 
 Storage, flow and security acceptance are independent of fixture fidelity: complete-prefix publication, generation/lease safety, cross-frame parsing, metadata/frame limits, 100 ms collection and 50,000-byte encoded data records, actual slow downstream, pre-delivery retry, post-commit failure, disconnect/resume, no duplicate usage, last-read expiry/LRU and shutdown. Resume tests use the exact API/cursors in INTERNAL-STREAM §6.7 and inspect access/application logs, capture/spools and client storage for ID leakage.
 
-Phase A checks validate documentation and the current dependency table only. Codec/pipeline tolerances remain PROPOSED in INTERNAL-STREAM §9.2 and require owner approval. Old release/codec/latency binaries and their revision/build/load provenance are pending inputs. No old-binary benchmark, S1 runtime gate or storage regression gate has run as part of this ledger freeze.
+## Old baseline build provenance
+
+Captured on 2026-11-14 from post-W1 `b518060ea1e43ef4b266591986ca92321e6289b5`. The build used isolated checkout `/scratch/ssd/s1a-old`, `CARGO_TARGET_DIR=/scratch/ssd/s1a-old-target` and `TMPDIR=/scratch/ssd/s1a-old-target/tmp`; the checkout and target were removed after capture. The retained executables and `fix-baseline-*` provenance records are in the maintainer-held directory `/home/zakk/code/jev-router/p4/s1-baseline/`, outside the repository, not in a public artifact store. Later builds must not overwrite them.
+
+| Artifact in that directory | SHA-256 | Size |
+| --- | --- | ---: |
+| `cooker-b518060e` | `4f89bd8e13abd3078adea569b7c61805b2a2f5d366219e4ae24883b28ea7a9fc` | 41,747,480 bytes |
+| `claude_latency-b518060e` | `9f5fecbebb3b411f60292a2d2b72a3aeaf9a88e521ac3d9add4f76a564cc0d79` | 34,443,032 bytes |
+
+| Field | Capture environment |
+| --- | --- |
+| Compiler | `rustc 1.99.0 (b940084d7 2026-09-28)`, full compiler commit `b940084d7eb6a299eb4bfeb8e34901bc051e7ac4`, LLVM 23.1.1 |
+| Cargo / target | Cargo 1.99.0 (`5f94df478 2026-08-27`); `x86_64-unknown-linux-gnu` |
+| Profile | `--locked --release -j 8`; workspace release profile: thin LTO, one codegen unit, `strip = true` |
+| Features / flags | No explicit feature flags or custom Rust/compiler/linker environment flags; Cargo fingerprints record no `cooker` or `ck-server` features for the gateway, and `ck-server/testing` for the latency example through its dev self-dependency. `media-relay` and `pprof` are disabled in both. |
+| Embedded dashboard | `npm ci --no-audit --no-fund` then `npm run build` in the old checkout's `ui/`, because `ui/dist` was absent; Node v26.13.1, npm 11.20.0 |
+| CPU / affinity | AMD Ryzen 9 9950X3D 16-Core Processor; x86_64, 16 cores / 32 threads; inherited affinity CPUs 0-31 |
+| Kernel / page size | Linux `7.3.4-gentoo-cjk-zakk`, `#1 SMP PREEMPT_DYNAMIC Fri Nov 13 15:40:29 AEDT 2026`; 4,096-byte pages |
+| Build filesystem | `/scratch/ssd` on ZFS dataset `vmpool/scratch` |
+| Host load at capture start/end | 1/5/15-minute averages: 1.77 / 1.92 / 2.26 at 2026-11-14 08:22:14 +11:00; 19.65 / 13.26 / 6.71 at 08:26:42 +11:00 after the builds. Full records: `fix-baseline-environment.log`. These are build-host loads, not benchmark results. |
+
+Reproduction commands, from the isolated old checkout with the target and temporary directories above:
+
+```sh
+cargo build --manifest-path /scratch/ssd/s1a-old/Cargo.toml --locked --release -j 8 -p cooker --bin cooker
+cargo build --manifest-path /scratch/ssd/s1a-old/Cargo.toml --locked --release -j 8 -p ck-server --example claude_latency
+```
+
+The pinned `ck-translate` package has library and test targets, but no standalone codec benchmark executable (`crates/ck-translate/Cargo.toml`; captured Cargo target inventory). Phase C's codec comparison interface must exercise equivalent fixtures through the pinned old pair API and the new boundary roles; neither the gateway nor the latency executable is a substitute for that codec harness.
+
+Phase A checks validate documentation and the current dependency table only. Codec/pipeline tolerances remain PROPOSED in INTERNAL-STREAM §9.2 and require owner approval. Both old executable builds completed in the release profile; the copied gateway reports `cooker 0.4.1` with `--version`. No old-binary benchmark, S1 runtime gate or storage regression gate has run as part of this ledger freeze.

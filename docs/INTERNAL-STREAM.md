@@ -27,7 +27,7 @@ The maintainer defaults B1-B9, C2, D1, D3 and F, and the pool-lifetime reading o
 | G7 | Settled | Out of pool space or over a limit returns an error; no heap fallback (§6.4). | Owner ruling 2026-11-13 |
 | G8 | Settled | Per-stream limit 256 MiB (5,368 frames); pool total at most 4 GiB (85,899 frames), lowered only by the startup caps in §6.4. | Owner ruling 2026-11-14 (Settled 41) |
 | G9 | Settled | Performance tests mount the storage directory on tmpfs; no regression against heap buffering is accepted (§9.3). | Owner ruling 2026-11-13 |
-| Exhaustion/platform | Settled | Visible failure, no degradation; Linux server only. | Settled; §6.4 |
+| Exhaustion/platform | Settled | Visible failure, no degradation; Linux server only. | Settled; §6.4, §10 |
 | B1 | Settled (default accepted 2026-11-14) | Claude signatures remain bound to their thinking block. | Q |
 | B2 | Settled (default accepted 2026-11-14) | Redacted thinking has its own opaque event. | Q |
 | B3 | Settled (default accepted 2026-11-14) | Gemini signatures remain part-bound, including signature-only parts. | Q |
@@ -689,7 +689,7 @@ These are implementation contracts, not endpoints available in the Phase A tree.
 
 Authenticate every attachment using the creating client identity, including its existing ephemeral-session scope where applicable. The ID alone grants no access. Perform authorization before cursor lookup. Unknown, foreign, expired and evicted IDs return the same 410 `stream.gone` response. Missing or duplicate identity headers, malformed cursors, incompatible cursor kinds and positions past published egress output return 400 after authentication; invalid credentials follow the existing authentication boundary. A body or query parameter cannot supply a missing ID.
 
-Redact `X-Ck-Stream-Id` case-insensitively in request/access logs and request/response capture before formatting or spooling. Redact `Last-Event-ID` as well wherever it carries resume identity. Do not forward gateway resume headers upstream. Supplied clients keep IDs only in memory, never localStorage, sessionStorage, IndexedDB or script-readable cookies. Native EventSource/WebSocket APIs cannot carry arbitrary request headers or expose WS response headers. Browser integrations use the Fetch attachment below, not URL tokens or an unspecified header-injection proxy.
+Redact `X-Ck-Stream-Id` case-insensitively in request/access logs and request/response capture before formatting or spooling. Redact `Last-Event-ID` as well; it carries a resume cursor even though it carries no identity. Do not forward gateway resume headers upstream. Supplied clients keep IDs only in memory, never localStorage, sessionStorage, IndexedDB or script-readable cookies. Native EventSource/WebSocket APIs cannot carry arbitrary request headers or expose WS response headers. Browser integrations use the Fetch attachment below, not URL tokens or an unspecified header-injection proxy.
 
 **Attachment.** `GET /v1/streams?after=<cursor>` attaches a reader. Send the ID in the `X-Ck-Stream-Id` request header and ordinary authentication headers. For SSE only, `Last-Event-ID` may replace `after`; if both appear they must agree. Omission of both is 400, not an implicit restart. Return 200 with the retained content type, `Cache-Control: no-store`, `X-Ck-Stream-Id` and `X-Ck-Stream-Cursor` containing the accepted starting cursor. WS attachments upgrade this same route and return 101. Neither form sends a fresh provider request. Ordinary HTTP reconnects need no original request body.
 
@@ -713,9 +713,14 @@ For ordered WS, Fetch and data-channel delivery, clients apply a unit only when 
 
 Duplex request-direction units have a separate accepted-prefix cursor, starting at `v1.e.0`. The receiver emits the same `x_ck.cursor` control with `direction: request` after storing and validating a complete unit; admission of a turn still waits for `request.end`. On attachment, the gateway reports that accepted prefix before accepting new input. A sender discards acknowledged units and resends only its unacknowledged suffix. Each unit is preceded by `{"type":"x_ck.input","unit":1,"direction":"request"}`, with consecutive unit numbers starting at 1. Duplicate unit numbers already accepted are acknowledged without execution; gaps fail before admission with HTTP 400 or a bounded transport error after upgrade. These boundary controls carry no stream IDs and never become trusted internal `x_ck` fields. The AI Studio relay applies the same rule with producer/consumer roles reversed; reconnect does not resubmit an accepted browser inference request.
 
-An abnormal socket loss releases a reader, not a producer. Explicit `response.cancel`, session-close and hangup controls still stop their owned work. Resume replays the stored terminal outcome once; a cursor already past that terminal receives EOF without another terminal. An active cursor at the published end waits for publication. No client acknowledgment frees cached response frames or updates accounting. Reads and acknowledgment advances refresh recency as in §6.4.
+An abnormal socket loss releases a reader, not a producer. Explicit `response.cancel`, session-close and hangup controls still stop their owned work. Resume replays the stored terminal outcome once; a cursor at the end of retained output after the terminal was delivered receives EOF without another terminal. A cursor beyond the retained end returns 400 under the cursor validation above. An active cursor at the published end waits for publication. No client acknowledgment frees cached response frames or updates accounting. Reads and acknowledgment advances refresh recency as in §6.4.
 
-Acceptance must cover zero-output events, one-to-many output, partial JSON/base64/byte units, terminal cursors, concurrent readers, both duplex directions and a lost cursor marker. Disconnect before the initial identity header is received cannot be resumed by that client; collection still follows §6.6. Test wrong identities, future cursors, expiry/eviction, explicit cancel, shutdown and case-varied headers through logging/capture/spooling. Verify no ID reaches a URL or client persistent storage.
+Acceptance must cover zero-output events, one-to-many output, partial JSON/base64/byte units, concurrent readers, both duplex directions and a lost cursor marker. Terminal-cursor acceptance includes both cases:
+
+- A cursor at the end of retained output after the terminal was delivered receives EOF without a repeated terminal.
+- A cursor beyond the retained end returns 400, not EOF.
+
+Disconnect before the initial identity header is received cannot be resumed by that client; collection still follows §6.6. Test wrong identities, future cursors, expiry/eviction, explicit cancel, shutdown and case-varied headers through logging/capture/spooling. Verify no ID reaches a URL or client persistent storage.
 
 ## 7. Bounds and flow
 
@@ -837,9 +842,18 @@ Each new driver exits nonzero on a missing workload, missing metric, invalid inp
 
 The container gate uses image `XDG_RUNTIME_DIR=/run/cooker-runtime`, uid/gid 10001, a fresh private `/data` volume and `--tmpfs /run/cooker-runtime:rw,noexec,nosuid,size=512m,mode=0700,uid=10001,gid=10001`. Check the created `cooker/` directory is 0700 and the pool is 0600. Also check missing XDG without an explicit directory fails, an unsafe directory is refused, and an explicit private directory works without XDG. A valid capped pool below 256 MiB must start with derived `max_frames`; an explicit value above `pool_frames` must fail. Rootless containers only. Version output alone is not startup proof.
 
+Phase A captured the old release gateway and the `bench/latency.sh` executable from post-W1 `b518060ea1e43ef4b266591986ca92321e6289b5`. Maintainer-held artifact directory: `/home/zakk/code/jev-router/p4/s1-baseline/`, outside the repository, not a public download location. Preserve these files separately from new builds.
+
+| Artifact in that directory | SHA-256 |
+| --- | --- |
+| `cooker-b518060e` | `4f89bd8e13abd3078adea569b7c61805b2a2f5d366219e4ae24883b28ea7a9fc` |
+| `claude_latency-b518060e` | `9f5fecbebb3b411f60292a2d2b72a3aeaf9a88e521ac3d9add4f76a564cc0d79` |
+
+Build provenance: `rustc 1.99.0 (b940084d7 2026-09-28)`, LLVM 23.1.1, `x86_64-unknown-linux-gnu`; `--locked --release -j 8`, thin LTO, one codegen unit, `strip = true`, no explicit feature flags or custom Rust/compiler/linker environment flags. Gateway features are empty; the latency example enables `ck-server/testing` through its dev self-dependency. Neither enables `media-relay` or `pprof`. The absent `ui/dist` was built first with `npm ci --no-audit --no-fund` and `npm run build`. Host: AMD Ryzen 9 9950X3D (16 cores / 32 threads), Linux `7.3.4-gentoo-cjk-zakk`, 4,096-byte pages, inherited CPU affinity 0-31. Build-start/end 1/5/15-minute load averages were 1.77 / 1.92 / 2.26 and 19.65 / 13.26 / 6.71. The isolated `/scratch/ssd/s1a-old` worktree and `/scratch/ssd/s1a-old-target` were removed after copying. `STREAM-GOLDEN-CHANGES.md`, Old baseline build provenance, records exact commands, sizes, compiler commit and the retained `fix-baseline-*` logs. This captures executables, not performance acceptance.
+
 Pending acceptance inputs, not Phase A results:
 
-- Separate old release gateway, old codec harness and old latency executable, each with revision/build/checksum provenance. Post-W1 `b518060e` is the source baseline; a binary has not been captured by this phase.
+- The Phase C codec comparison harness over equivalent old/new fixtures. The pinned `ck-translate` has no standalone codec benchmark executable; the captured gateway and latency example do not substitute for one.
 - Matching new release executables and adapted configuration/load harnesses. Do not overwrite old artifacts with new builds.
 - Same-host baseline/load records, raw rounds and owner approval of the tolerances below before performance acceptance.
 - Measurements for initial extent/growth (21 frames each is a hypothesis), header-slot capacity, heap headroom and provisional event/metadata limits. No measured value is claimed here.
