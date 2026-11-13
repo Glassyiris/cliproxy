@@ -13,7 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { t } from "../lib/i18n.ts";
 import { notify } from "../lib/notify.ts";
 import type { ServerBuild, SessionHooks } from "../lib/api/client.ts";
-import { dropLegacyKey, onForgotten } from "../lib/keyStore.ts";
+import { onForgotten } from "../lib/keyStore.ts";
 import {
   cancelSignIns,
   closeSession,
@@ -132,7 +132,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   useFollowSignOut(signedIn, endSession);
-  useEffect(dropLegacyKey, []);
 
   const signOut = useSignOut(leaving, endSession);
 

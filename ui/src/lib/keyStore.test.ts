@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { mock, test } from "node:test";
-import { dropLegacyKey, forget, onForgotten } from "./keyStore.ts";
+import { forget, onForgotten } from "./keyStore.ts";
 
 const storageAccess = mock.fn(() => undefined);
 for (const name of ["localStorage", "sessionStorage", "indexedDB"])
@@ -54,31 +54,5 @@ test("without BroadcastChannel, forget and onForgotten skip the broadcast", () =
       configurable: true,
       writable: true,
     });
-  }
-});
-
-test("dropLegacyKey deletes the key older dashboards stored, and survives blocked storage", () => {
-  const removed: string[] = [];
-  for (const name of ["localStorage", "sessionStorage"])
-    Object.defineProperty(globalThis, name, {
-      configurable: true,
-      value: { removeItem: (key: string) => removed.push(`${name}:${key}`) },
-    });
-  try {
-    dropLegacyKey();
-    assert.deepEqual(removed, [
-      "localStorage:cliproxy.managementKey",
-      "sessionStorage:cliproxy.managementKey",
-    ]);
-    Object.defineProperty(globalThis, "localStorage", {
-      configurable: true,
-      get: () => {
-        throw new DOMException("blocked", "SecurityError");
-      },
-    });
-    assert.doesNotThrow(dropLegacyKey);
-  } finally {
-    for (const name of ["localStorage", "sessionStorage"])
-      Object.defineProperty(globalThis, name, { configurable: true, get: storageAccess });
   }
 });
