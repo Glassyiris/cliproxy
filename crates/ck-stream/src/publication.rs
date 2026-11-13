@@ -1,6 +1,9 @@
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex, atomic::Ordering},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
     task::Poll,
     time::Duration,
 };
@@ -82,7 +85,6 @@ pub(crate) struct State {
     next_sequence: u64,
     end: u64,
     terminal: Option<Terminal>,
-    gone: bool,
     readers: usize,
     pub last_read: Duration,
 }
@@ -94,6 +96,7 @@ pub(crate) struct Stream {
     pool: Arc<Pool>,
     limits: Limits,
     pub state: Mutex<State>,
+    invalidated: AtomicBool,
     notify: Notify,
 }
 
@@ -105,6 +108,7 @@ impl Stream {
             pool,
             limits,
             notify: Notify::new(),
+            invalidated: AtomicBool::new(false),
             state: Mutex::new(State {
                 frames: VecDeque::new(),
                 base_frame: 0,
@@ -113,7 +117,6 @@ impl Stream {
                 next_sequence: 0,
                 end: 0,
                 terminal: None,
-                gone: false,
                 readers: 0,
                 last_read: now,
             }),
@@ -124,6 +127,40 @@ impl Stream {
         state.frames.capacity() * std::mem::size_of::<Frame>()
             + state.records.capacity() * std::mem::size_of::<Index>()
             + state.readers * READER_BYTES
+    }
+
+    fn write_reserved(&self, state: &State, mut byte: u64, mut bytes: &[u8]) -> Result<(), Error> {
+        while !bytes.is_empty() {
+            let frame_number = byte / FRAME_BYTES as u64;
+            let offset = byte as usize % FRAME_BYTES;
+            let len = bytes.len().min(FRAME_BYTES - offset);
+            let frame = state.frames[(frame_number - state.base_frame) as usize]
+                .pool
+                .ok_or(Error::Gone)?;
+            // SAFETY: the sole Writer reserved this frame; the locked state prevents invalidation,
+            // and this span is strictly after the immutable published end and within the frame.
+            unsafe {
+                self.pool.write(frame, offset, &bytes[..len]);
+            }
+            byte += len as u64;
+            bytes = &bytes[len..];
+        }
+        Ok(())
+    }
+
+    fn publish(&self, state: &mut State, index: Index) {
+        if let Some(last) = state.records.back_mut().filter(|last| last.extends(&index)) {
+            last.next_sequence = index.next_sequence;
+        } else {
+            state.records.push_back(index);
+        }
+        state.next_sequence = index.next_sequence;
+        state.end = index.start + index.len;
+        self.pool
+            .header(self.slot)
+            .committed
+            .store(state.end, Ordering::Release);
+        self.pool.header(self.slot).generation.fetch_add(1, Ordering::Release);
     }
 
     pub(crate) fn finish(&self, terminal: Terminal) {
@@ -146,7 +183,7 @@ impl Stream {
 
     pub(crate) fn invalidate_locked(&self, state: &mut State) -> u32 {
         let mut released = 0;
-        state.gone = true;
+        self.invalidated.store(true, Ordering::Release);
         state.terminal = Some(Terminal::Gone);
         for frame in &mut state.frames {
             frame.retained = false;
@@ -210,11 +247,8 @@ impl Writer {
         kind: u32,
         correlation: u32,
     ) -> Result<Reservation<'_>, Error> {
-        let result = self.reserve(len, aligned, kind, correlation);
-        if matches!(result, Err(Error::StorageExhausted | Error::Io(_))) {
-            self.stream.finish(Terminal::StorageExhausted);
-        }
-        let (record, index, old_count) = result?;
+        let (record, index, old_count, state) = self.reserve(len, aligned, kind, correlation)?;
+        drop(state);
         Ok(Reservation {
             writer: self,
             record,
@@ -225,12 +259,32 @@ impl Writer {
         })
     }
 
-    fn reserve(&self, len: usize, aligned: bool, kind: u32, correlation: u32) -> Result<(Record, Index, usize), Error> {
+    fn reserve(
+        &self,
+        len: usize,
+        aligned: bool,
+        kind: u32,
+        correlation: u32,
+    ) -> Result<(Record, Index, usize, MutexGuard<'_, State>), Error> {
+        let result = self.reserve_locked(len, aligned, kind, correlation);
+        if matches!(result, Err(Error::StorageExhausted | Error::Io(_))) {
+            self.stream.finish(Terminal::StorageExhausted);
+        }
+        result
+    }
+
+    fn reserve_locked(
+        &self,
+        len: usize,
+        aligned: bool,
+        kind: u32,
+        correlation: u32,
+    ) -> Result<(Record, Index, usize, MutexGuard<'_, State>), Error> {
         if len == 0 || len > self.inner.limits.max_event_bytes || (aligned && len > FRAME_BYTES) {
             return Err(Error::InvalidRecord);
         }
         let mut state = self.stream.state.lock().unwrap();
-        if state.gone {
+        if self.stream.invalidated.load(Ordering::Acquire) {
             return Err(Error::Gone);
         }
         if state.terminal.is_some() {
@@ -290,9 +344,9 @@ impl Writer {
         if Stream::metadata(&state) > self.inner.limits.max_metadata_bytes {
             return Err(Error::StorageExhausted);
         }
-        // Allocation may evict another stream. Never enter cache ownership with metadata locked.
-        drop(state);
         for _ in 0..extra {
+            // Allocation may evict another stream. Never enter cache ownership with metadata locked.
+            drop(state);
             let frame = match self.inner.allocate(self.id()) {
                 Ok(frame) => frame,
                 Err(error) => {
@@ -300,8 +354,8 @@ impl Writer {
                     return Err(error);
                 }
             };
-            let mut state = self.stream.state.lock().unwrap();
-            if state.gone || state.terminal.is_some() {
+            state = self.stream.state.lock().unwrap();
+            if self.stream.invalidated.load(Ordering::Acquire) || state.terminal.is_some() {
                 self.inner.pool.release(frame);
                 drop(state);
                 self.rollback(old_count);
@@ -313,7 +367,7 @@ impl Writer {
                 retained: true,
             });
         }
-        Ok((record, index, old_count))
+        Ok((record, index, old_count, state))
     }
 
     fn rollback(&self, old_count: usize) {
@@ -326,9 +380,16 @@ impl Writer {
     }
 
     pub fn append(&mut self, bytes: &[u8]) -> Result<Record, Error> {
-        let mut reservation = self.begin_record(bytes.len(), false, 0, 0)?;
-        reservation.write(bytes)?;
-        reservation.commit()
+        let (record, index, old_count, mut state) = self.reserve(bytes.len(), false, 0, 0)?;
+        if let Err(error) = self.stream.write_reserved(&state, index.start, bytes) {
+            drop(state);
+            self.rollback(old_count);
+            return Err(error);
+        }
+        self.stream.publish(&mut state, index);
+        drop(state);
+        self.stream.notify.notify_waiters();
+        Ok(record)
     }
 
     pub fn finish(&mut self, terminal: Terminal) {
@@ -397,34 +458,20 @@ pub struct Reservation<'a> {
 }
 
 impl Reservation<'_> {
-    pub fn write(&mut self, mut bytes: &[u8]) -> Result<(), Error> {
+    pub fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
         if bytes.len() > self.record.len() as usize - self.written {
             return Err(Error::InvalidPosition);
         }
         let stream = &self.writer.stream;
         let state = stream.state.lock().unwrap();
-        if state.gone {
+        if stream.invalidated.load(Ordering::Acquire) {
             return Err(Error::Gone);
         }
         if state.terminal.is_some() {
             return Err(Error::Closed);
         }
-        while !bytes.is_empty() {
-            let byte = self.record.start.byte(stream.id)? + self.written as u64;
-            let frame_number = byte / FRAME_BYTES as u64;
-            let offset = byte as usize % FRAME_BYTES;
-            let len = bytes.len().min(FRAME_BYTES - offset);
-            let frame = state.frames[(frame_number - state.base_frame) as usize]
-                .pool
-                .ok_or(Error::Gone)?;
-            // SAFETY: the sole Writer reserved this frame; the locked state prevents invalidation,
-            // and this span is strictly after the immutable published end and within the frame.
-            unsafe {
-                stream.pool.write(frame, offset, &bytes[..len]);
-            }
-            self.written += len;
-            bytes = &bytes[len..];
-        }
+        stream.write_reserved(&state, self.index.start + self.written as u64, bytes)?;
+        self.written += bytes.len();
         Ok(())
     }
 
@@ -434,29 +481,13 @@ impl Reservation<'_> {
         }
         let stream = &self.writer.stream;
         let mut state = stream.state.lock().unwrap();
-        if state.gone {
+        if stream.invalidated.load(Ordering::Acquire) {
             return Err(Error::Gone);
         }
         if state.terminal.is_some() {
             return Err(Error::Closed);
         }
-        if let Some(last) = state.records.back_mut().filter(|last| last.extends(&self.index)) {
-            last.next_sequence = self.index.next_sequence;
-        } else {
-            state.records.push_back(self.index);
-        }
-        state.next_sequence = self.index.next_sequence;
-        state.end = self.record.end.byte(stream.id)?;
-        stream
-            .pool
-            .header(stream.slot)
-            .committed
-            .store(state.end, Ordering::Release);
-        stream
-            .pool
-            .header(stream.slot)
-            .generation
-            .fetch_add(1, Ordering::Release);
+        stream.publish(&mut state, self.index);
         self.committed = true;
         drop(state);
         stream.notify.notify_waiters();
@@ -489,7 +520,7 @@ impl Reader {
     pub(crate) fn new(inner: Arc<Inner>, stream: Arc<Stream>, after: u64) -> Result<Self, Error> {
         {
             let mut state = stream.state.lock().unwrap();
-            if state.gone || after < state.base_sequence {
+            if stream.invalidated.load(Ordering::Acquire) || after < state.base_sequence {
                 return Err(Error::Gone);
             }
             if after > state.next_sequence {
@@ -515,7 +546,7 @@ impl Reader {
         let inner = &self.inner;
         let stream = &self.stream;
         inner.reading(stream, |state| {
-            if state.gone || self.next < state.base_sequence {
+            if stream.invalidated.load(Ordering::Acquire) || self.next < state.base_sequence {
                 self.terminal_seen = true;
                 return (Poll::Ready(Some(Read::Terminal(Terminal::Gone))), false);
             }
@@ -549,6 +580,10 @@ impl Reader {
                         inner: inner.clone(),
                         stream: stream.clone(),
                         record,
+                        first_frame: state.frames[(record.start.frame - state.base_frame) as usize]
+                            .pool
+                            .unwrap(),
+                        acknowledged: false,
                     }))),
                     true,
                 );
@@ -594,6 +629,8 @@ pub struct Lease {
     inner: Arc<Inner>,
     stream: Arc<Stream>,
     record: Record,
+    first_frame: u32,
+    acknowledged: bool,
 }
 
 impl Lease {
@@ -609,13 +646,17 @@ impl Lease {
         if byte < begin || byte >= end {
             return Err(Error::InvalidPosition);
         }
-        let state = self.stream.state.lock().unwrap();
-        if state.gone {
+        if self.stream.invalidated.load(Ordering::Acquire) {
             return Err(Error::Gone);
         }
-        let frame = state.frames[(position.frame - state.base_frame) as usize]
-            .pool
-            .ok_or(Error::Gone)?;
+        let frame = if position.frame == self.record.start.frame {
+            self.first_frame
+        } else {
+            let state = self.stream.state.lock().unwrap();
+            state.frames[(position.frame - state.base_frame) as usize]
+                .pool
+                .ok_or(Error::Gone)?
+        };
         let len = (end - byte).min((FRAME_BYTES - position.offset as usize) as u64) as usize;
         // SAFETY: this lease pins all record frames until Drop. Publication made this span
         // immutable before lease registration; the pool Arc outlives the returned borrow.
@@ -633,14 +674,11 @@ impl Lease {
         Ok(())
     }
 
-    pub fn acknowledge(self) {
-        self.inner.touch(&self.stream);
+    pub fn acknowledge(mut self) {
+        self.acknowledged = true;
     }
-}
 
-impl Drop for Lease {
-    fn drop(&mut self) {
-        let mut state = self.stream.state.lock().unwrap();
+    fn release(&self, state: &mut State) {
         for number in self.record.start.frame..=last_frame(self.record) {
             let index = (number - state.base_frame) as usize;
             let frame = &mut state.frames[index];
@@ -651,6 +689,19 @@ impl Drop for Lease {
             {
                 self.stream.pool.release(index);
             }
+        }
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        if self.acknowledged {
+            self.inner.reading(&self.stream, |state| {
+                self.release(state);
+                ((), true)
+            });
+        } else {
+            self.release(&mut self.stream.state.lock().unwrap());
         }
     }
 }

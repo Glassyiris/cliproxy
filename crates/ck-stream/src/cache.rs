@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     io,
     sync::{
-        Arc, Condvar, Mutex, RwLock, Weak,
+        Arc, Condvar, Mutex, RwLock, RwLockWriteGuard, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::JoinHandle,
@@ -67,20 +67,37 @@ pub(crate) struct Inner {
     pub pool: Arc<Pool>,
     pub limits: Limits,
     pub clock: Arc<dyn Clock>,
-    cache: RwLock<Cache>,
+    cache: Mutex<Cache>,
+    retention: RwLock<()>,
+    retaining: AtomicBool,
     closed: AtomicBool,
     reclaim_error: Mutex<Option<io::Error>>,
 }
 
+struct RetentionGuard<'a> {
+    _lock: RwLockWriteGuard<'a, ()>,
+    active: &'a AtomicBool,
+}
+
+impl Drop for RetentionGuard<'_> {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
+    }
+}
+
 impl Inner {
-    pub(crate) fn touch(&self, stream: &Stream) {
-        let _retention = self.cache.read().unwrap();
-        let mut state = stream.state.lock().unwrap();
-        state.last_read = self.clock.now();
+    fn retain(&self) -> RetentionGuard<'_> {
+        let lock = self.retention.write().unwrap();
+        self.retaining.store(true, Ordering::Release);
+        RetentionGuard {
+            _lock: lock,
+            active: &self.retaining,
+        }
     }
 
     pub(crate) fn evict_one(&self, exclude: u64) -> bool {
-        let mut cache = self.cache.write().unwrap();
+        let _retention = self.retain();
+        let mut cache = self.cache.lock().unwrap();
         while let Some(key) = cache.order.iter().find(|(_, id)| *id != exclude).copied() {
             let stream = cache.streams[&key.1].clone();
             let mut state = stream.state.lock().unwrap();
@@ -102,8 +119,17 @@ impl Inner {
         stream: &Stream,
         read: impl FnOnce(&mut crate::publication::State) -> (R, bool),
     ) -> R {
-        let _retention = self.cache.read().unwrap();
         let mut state = stream.state.lock().unwrap();
+        // Maintenance sets the flag before locking stream state. Once it has observed a
+        // stream, that mutex's release/acquire edge makes later readers take the fence.
+        let _retention = if self.retaining.load(Ordering::Acquire) {
+            drop(state);
+            let guard = self.retention.read().unwrap();
+            state = stream.state.lock().unwrap();
+            Some(guard)
+        } else {
+            None
+        };
         let (result, acquired) = read(&mut state);
         if acquired {
             state.last_read = self.clock.now();
@@ -114,7 +140,8 @@ impl Inner {
     fn tick(&self) -> io::Result<()> {
         let now = self.clock.now();
         {
-            let mut cache = self.cache.write().unwrap();
+            let _retention = self.retain();
+            let mut cache = self.cache.lock().unwrap();
             while let Some(&(read, id)) = cache.order.first() {
                 if now.saturating_sub(read) <= self.limits.cache_ttl {
                     break;
@@ -173,7 +200,9 @@ impl Store {
             pool,
             limits,
             clock,
-            cache: RwLock::new(Cache::default()),
+            cache: Mutex::new(Cache::default()),
+            retention: RwLock::new(()),
+            retaining: AtomicBool::new(false),
             closed: AtomicBool::new(false),
             reclaim_error: Mutex::new(None),
         });
@@ -223,7 +252,7 @@ impl Store {
 
     /// Admit one exclusive producer. The returned id is an internal generation, not an auth token.
     pub fn create(&self) -> Result<Writer, Error> {
-        let mut cache = self.inner.cache.write().unwrap();
+        let mut cache = self.inner.cache.lock().unwrap();
         if self.inner.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
@@ -241,7 +270,7 @@ impl Store {
         let stream = self
             .inner
             .cache
-            .read()
+            .lock()
             .unwrap()
             .streams
             .get(&id)
@@ -264,7 +293,8 @@ impl Store {
     pub fn shutdown(&mut self) -> io::Result<()> {
         self.inner.closed.store(true, Ordering::Release);
         {
-            let mut cache = self.inner.cache.write().unwrap();
+            let _retention = self.inner.retain();
+            let mut cache = self.inner.cache.lock().unwrap();
             for stream in cache.streams.values() {
                 stream.finish(Terminal::Shutdown);
             }
