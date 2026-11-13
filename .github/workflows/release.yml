@@ -3,11 +3,15 @@
 #
 # Pushing a tag such as v0.1.0 runs every CI lane, builds the Dockerfile's runtime stage on a
 # native runner per architecture, checks that the binary reports the tag's version, pushes
-# the result as the release candidate <version>-rc, and creates a draft GitHub release.
+# the result as the release candidate candidate-<version>-<commit>, and creates a draft GitHub
+# release that records the candidate's digest and commit. No release tag (<version>, latest)
+# starts with `candidate-`, and the full commit hash ends every candidate tag, so a candidate
+# never shares a tag with a release or with another version's candidate.
 # Publishing needs Vayun's approval (AGENTS.md, Rule priority); after it, a maintainer runs
-# this workflow by hand with the tag, which points <version> (and `latest`, unless the
-# version is a pre-release) at the candidate's images and publishes the draft. Nothing is
-# rebuilt between the candidate and the release.
+# this workflow by hand with the tag. It reads the digest from the draft, checks that the tag
+# still points at the recorded commit and that the image reports the tag's version, points
+# <version> (and `latest`, unless the version is a pre-release) at that digest and publishes
+# the draft. Nothing is rebuilt between the candidate and the release.
 name: release
 
 on:
@@ -91,7 +95,7 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
         run: |
-          tag="$IMAGE:${GITHUB_REF_NAME#v}-rc-$ARCH"
+          tag="$IMAGE:candidate-${GITHUB_REF_NAME#v}-$GITHUB_SHA-$ARCH"
           docker tag cook-router:release "$tag"
           docker push "$tag"
 
@@ -111,14 +115,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Multi-architecture candidate
+        id: candidate
         run: |
-          rc="$IMAGE:${GITHUB_REF_NAME#v}-rc"
-          docker buildx imagetools create -t "$rc" "$rc-amd64" "$rc-arm64"
-          docker buildx imagetools inspect "$rc"
+          candidate="$IMAGE:candidate-${GITHUB_REF_NAME#v}-$GITHUB_SHA"
+          docker buildx imagetools create -t "$candidate" "$candidate-amd64" "$candidate-arm64"
+          docker buildx imagetools inspect "$candidate"
+          digest="$(docker buildx imagetools inspect "$candidate" --format '{{json .Manifest}}' | jq -r .digest)"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::no digest for $candidate ($digest)"; exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      # The publish run takes the candidate from this line, by digest, so a later push to any
+      # tag cannot change what it publishes. gh puts the generated notes after it.
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --draft
+          DIGEST: ${{ steps.candidate.outputs.digest }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+            --notes "Image candidate: $IMAGE@$DIGEST, built from $GITHUB_SHA"$'\n' --generate-notes --draft
 
   # Run by hand after Vayun approves the draft release and its candidate.
   publish:
@@ -148,14 +163,44 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+      # The candidate the draft records, which must come from the commit the tag points at now
+      # and report the tag's version. The runner is amd64; the image job ran both
+      # architectures' binaries before the candidate existed, and the digest covers both.
+      - name: Candidate matches the tag
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          line="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
+            | tr -d '\r' | grep -m 1 '^Image candidate: ' || true)"
+          pattern='^Image candidate: ([^ @]+)@(sha256:[0-9a-f]{64}), built from ([0-9a-f]{40})$'
+          if [[ ! "$line" =~ $pattern ]]; then
+            echo "::error::the draft release of $TAG records no image candidate"; exit 1
+          fi
+          image="${BASH_REMATCH[1]}" digest="${BASH_REMATCH[2]}" commit="${BASH_REMATCH[3]}"
+          if [[ "$image" != "$IMAGE" ]]; then
+            echo "::error::the candidate $image is not $IMAGE"; exit 1
+          fi
+          tagged="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
+          if [[ "$tagged" != "$commit" ]]; then
+            echo "::error::$TAG points at $tagged, the candidate was built from $commit"; exit 1
+          fi
+          reported="$(docker run --rm "$IMAGE@$digest" --version | tail -n 1)"
+          echo "$reported"
+          if [[ "$reported" != "cook-router ${TAG#v}" ]]; then
+            echo "::error::$TAG does not match the candidate's version ($reported)"; exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Point the release tags at the candidate
         env:
           TAG: ${{ inputs.tag }}
+          DIGEST: ${{ steps.candidate.outputs.digest }}
         run: |
           version="${TAG#v}"
           tags=(-t "$IMAGE:$version")
           [[ "$version" == *-* ]] || tags+=(-t "$IMAGE:latest")
-          docker buildx imagetools create "${tags[@]}" "$IMAGE:$version-rc"
+          docker buildx imagetools create "${tags[@]}" "$IMAGE@$DIGEST"
           docker buildx imagetools inspect "$IMAGE:$version"
       - name: Publish the draft release
         env:
