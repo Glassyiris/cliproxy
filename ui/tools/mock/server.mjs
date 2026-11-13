@@ -952,8 +952,15 @@ const server = http.createServer((req, res) => {
       const headers = { "X-CPA-VERSION": VERSION, "X-CPA-COMMIT": "0000000", "X-CPA-BUILD-DATE": BUILD_DATE, "Cache-Control": "no-store", "X-Cook-Revision": String(configVersion), "X-Cook-Published-Revision": String(configVersion) };
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
       const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || String(req.headers["x-management-key"] || "");
-      if (!given) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"missing management key"}');
-      if (given !== KEY) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"invalid management key"}');
+      // The dashboard session: the key is exchanged once for a cookie, as the server does.
+      const cookie = /(?:^|;\s*)cook_session=1/.test(req.headers.cookie || "");
+      if (url.pathname === `${PREFIX}/session`) {
+        const signedIn = req.method === "GET" ? cookie : given === KEY;
+        const set = req.method === "DELETE" ? "cook_session=; Path=/; Max-Age=0" : "cook_session=1; Path=/; HttpOnly; SameSite=Strict";
+        return (status = signedIn || req.method === "DELETE" ? 204 : 401), send(status, { ...headers, ...(req.method === "GET" || status === 401 ? {} : { "Set-Cookie": set }) }, "");
+      }
+      if (!given && !cookie) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"missing management key"}');
+      if (given && given !== KEY) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"invalid management key"}');
       for (const r of routes) {
         if (r.method !== req.method) continue;
         const m = r.re.exec(url.pathname);
