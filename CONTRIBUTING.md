@@ -16,7 +16,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-CI runs the same tests with [cargo-nextest](https://nexte.st), which runs test binaries in parallel (`cargo nextest run --workspace --locked`; its settings are in `.config/nextest.toml`), then the doc tests, and cpa-server's unit tests with the optional relay and profiler: `cargo nextest run -p cpa-server --features media-relay,pprof --lib`.
+CI runs every check as a stage of the [`Dockerfile`](Dockerfile), and the same command runs it locally with Docker alone: `docker buildx build --target check .` (format, clippy, actionlint, notices, the harness build and the script tests), `--target test` (the tests, with no network), `--target dashboard` and `--target perf` (the size and idle gates). The test stage uses [cargo-nextest](https://nexte.st), which runs test binaries in parallel (`cargo nextest run --workspace --locked`; its settings are in `.config/nextest.toml`), then the doc tests, and cpa-server's unit tests with the optional relay and profiler: `cargo nextest run -p cpa-server --features media-relay,pprof --lib`.
 
 Tests use local mock upstreams only. Never point a test at a real provider or use a real account or key, and run the tests with external network access blocked if you can; CI runs them in a network namespace with only a loopback interface. The BoringSSL build and the release link use a lot of memory, so on a small machine set `CARGO_BUILD_JOBS=2`.
 
@@ -24,12 +24,12 @@ Tests use local mock upstreams only. Never point a test at a real provider or us
 
 CI holds the binary to the numbers in [`bench/budgets.txt`](bench/budgets.txt), and it counts events and bytes, never elapsed time:
 
-- Size, on every push to master and on pull requests that can change the binary (see `.github/scripts/ci-lanes.py`): the Linux release binary, its `.text` and `.rodata`, the release archive, and the number of crates linked in more than one version.
+- Size, on every push to master and on pull requests that can change the binary (see `.github/scripts/ci-lanes.py`): the Linux release binary, its `.text` and `.rodata`, and the number of crates linked in more than one version.
 - Idle, on the same changes: [`bench/idle.sh`](bench/idle.sh) with 1 and with 2,000 auth files: wakeups, CPU ticks, threads and RSS over 30 seconds without requests.
 - Heap per request: `crates/cpa-server/tests/alloc_budget.rs`, part of `cargo test`, sends one 306 KB and one 1.9 MB request through the Claude route, the same sizes through Claude count_tokens (counted locally) and through the Codex Responses route, and the Claude bodies cloaked and signed through a Claude OAuth login with request capture, one at a time and eight at once, under a counting allocator.
-- macOS and Windows idle, in the release builds and weekly ([`idle.yml`](.github/workflows/idle.yml)). Memory soaks ([`soak.yml`](.github/workflows/soak.yml), [`bench/soak.sh`](bench/soak.sh)): one hour of the Claude load and one hour of the field mix (Claude, Codex and count_tokens requests of 200 KB to 2 MB) on every release tag, 300 minutes of the field mix every week, and up to 330 minutes by hand before a release. The resting RSS must stay flat, and the field mix's peak (`VmHWM`) within its budget.
+- Memory soaks ([`bench/soak.sh`](bench/soak.sh)), by hand before a release: the Claude load and the field mix (Claude, Codex and count_tokens requests of 200 KB to 2 MB). The resting RSS must stay flat, and the field mix's peak (`VmHWM`) within its budget.
 
-To run the Linux gates locally, build with `cargo build --release -p cook-router`, then run `bench/gate.sh size x86_64-unknown-linux-gnu target/release/cook-router` and `bench/gate.sh idle linux target/release/cook-router 1`. The size lines and the dashboard's `ui/tools/size-budget.json` are ceilings with headroom, so an ordinary pull request does not edit them; each pull request instead gets a size report comment with its numbers next to master's and the ceilings ([`.github/ci/report`](.github/ci/report/README.md)). Raise a ceiling or budget only when a change needs it, with a maintainer's approval, and give the reason next to the line.
+To run the gates locally, run `docker buildx build --target perf .`. The size lines and the dashboard's `ui/tools/size-budget.json` are ceilings with headroom, so an ordinary pull request does not edit them; the perf and dashboard jobs print each number next to its ceiling. Raise a ceiling or budget only when a change needs it, with a maintainer's approval, and give the reason next to the line.
 
 The dashboard lives in `ui/` (React 19 and Astryx). `npm ci`, `npm run check`, `npm test` and `npm run build` there; the build also checks the bundle size budget. See [ui/README.md](ui/README.md).
 
@@ -43,7 +43,7 @@ Fixed
 - The relay stops waiting when the upstream request times out.
 ```
 
-A pull request that touches shipped code needs a new fragment: `crates/`, `ui/src/`, `ui/dist/`, `ui/public/`, `ui/index.html`, `install.sh`, `install.ps1`, `Dockerfile`, `vendor/`, `Cargo.toml` or `Cargo.lock`. Tests and documentation do not. A maintainer can apply the `no-changelog` label when an entry is unnecessary. The `Changes` workflow checks every fragment; `python3 -I tools/changelog.py check` runs the same check locally and `python3 -I tools/changelog.py render` previews the Unreleased section. [changes/README.md](changes/README.md) has the full rules and the release command.
+A pull request that touches shipped code needs a new fragment: `crates/`, `ui/src/`, `ui/dist/`, `ui/public/`, `ui/index.html`, `Dockerfile`, `vendor/`, `Cargo.toml` or `Cargo.lock`. Tests and documentation do not. A maintainer can apply the `no-changelog` label when an entry is unnecessary. The `Changes` workflow checks every fragment; `python3 -I tools/changelog.py check` runs the same check locally and `python3 -I tools/changelog.py render` previews the Unreleased section. [changes/README.md](changes/README.md) has the full rules and the release command.
 
 ## Pull requests
 
@@ -53,7 +53,7 @@ A pull request that touches shipped code needs a new fragment: `crates/`, `ui/sr
 - Request bodies are forwarded byte for byte unless a ported rule rewrites them; do not re-serialize JSON just to pass it through.
 - Never log or forward credentials or client keys to the wrong side.
 - Mark a deliberate simplification with a `ponytail:` comment that names its limit and how to lift it.
-- CI must pass: the `ci-ok` check, which requires every lane the change selects (format, clippy, tests, the harness check, clippy on Windows with all targets and warnings as errors, the Linux size and idle gates, the dashboard checks and actionlint), the changelog fragment check (`fragments`) and the title check (`title`). To run every lane, add the `ci:full` label and re-run the CI workflow.
+- CI must pass: the `ci-ok` check, which requires every lane the change selects (the `dashboard`, `check`, `test` and `perf` stages of the Dockerfile), the changelog fragment check (`fragments`) and the title check (`title`). To run every lane, add the `ci:full` label and re-run the CI workflow.
 - A ruleset protects `master`, and nobody can bypass it, administrators included:
   - every change goes through a pull request and is squash-merged;
   - `ci-ok`, `fragments` and `title` must pass. A branch behind `master` can still merge; GitHub refuses only when the two conflict;
@@ -63,7 +63,7 @@ A pull request that touches shipped code needs a new fragment: `crates/`, `ui/sr
 
 Pull requests are squash-merged: the pull request title becomes the commit subject on `master`, and GitHub appends the number, as in `fix(ui): keep Overview tiles whole on a phone (#41)`. The description stays on the pull request, so write why there.
 
-- Write the title as `type(scope): subject`. Types: `feat`, `fix`, `refactor`, `test`, `style`, `chore`, `docs`, `deps`, `ci` and `release`. Scopes: `cli` (crates/cook-router), `server`, `exec`, `translate`, `core` (cpa-core and cpa-common), `plugin`, `home` (the matching `crates/cpa-*`), `ui`, `installer`, `docker`, `packaging`, `ci`, `docs`, `deps`, `bench`, `tools` and `release`.
+- Write the title as `type(scope): subject`. Types: `feat`, `fix`, `refactor`, `test`, `style`, `chore`, `docs`, `deps`, `ci` and `release`. Scopes: `cli` (crates/cook-router), `server`, `exec`, `translate`, `core` (cpa-core and cpa-common), `plugin`, `home` (the matching `crates/cpa-*`), `ui`, `docker`, `ci`, `docs`, `deps`, `bench`, `tools` and `release`.
 - The subject is an English imperative phrase starting in lower case, such as `retry a reset Claude stream once`, with no full stop. A first word such as `OAuth` keeps its case.
 - The whole title fits in 72 characters.
 - Commit subjects follow the same grammar. Each commit stands alone; fixups are squashed before pushing, not pushed as `fixup!` commits.

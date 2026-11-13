@@ -94,11 +94,11 @@ A document may include `if_match` containing the 64 hexadecimal SHA-256 digits o
 
 ### Online credential commands
 
-While a service owns the database, a terminal sign-in goes through it: a login flag with `--db` alone is an offline write and is refused with `already owned`. Run the login against the service and type the management key when asked, or load it from the install script's keys file first:
+While a service owns the database, a terminal sign-in goes through it: a login flag with `--db` alone is an offline write and is refused with `already owned`. Run the login against the service and type the management key when asked, or export it as `COOK_ROUTER_MANAGEMENT_KEY` first:
 
 ```sh
-set -a; . ~/.cook-router/keys.env; set +a
-cook-router --management-base-url "http://127.0.0.1:$COOK_ROUTER_PORT" --claude-login --no-browser
+export COOK_ROUTER_MANAGEMENT_KEY=...   # the management.secret-key value
+cook-router --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
 ```
 
 With the service stopped, the same login flag with `--db` writes the database directly.

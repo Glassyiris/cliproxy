@@ -9,7 +9,7 @@ For behaviour of the original Go server, ask in [router-for-me/CLIProxyAPI](http
 ## Include diagnostic information
 
 - The version, from `cook-router --version`, or the commit if you built from source.
-- The operating system and how you installed cook-router: `install.sh`, `install.ps1`, a release binary, Docker or source.
+- The operating system and how you run cook-router: the Docker image tag, or a source build.
 - The tool or client that sends the request, and the relevant part of `config.yaml` with keys removed.
 - Reproduction steps, expected behaviour and actual behaviour.
 - The server log lines around the problem and, for dashboard problems, the browser name, version and console errors.

@@ -26,10 +26,10 @@ SHA = re.compile(r"[a-f0-9]{40,64}")
 NO_CHANGELOG = "no-changelog"
 
 # Paths whose changes reach users: the Rust workspace, the dashboard sources and its
-# embedded build, the installers, the Dockerfile, vendored code and the manifests.
+# embedded build, the Dockerfile, vendored code and the manifests.
 SHIPPED = re.compile(
     r"^(?:crates/|ui/src/|ui/dist/|ui/public/|vendor/)"
-    r"|^(?:ui/index\.html|install\.sh|install\.ps1|Dockerfile|Cargo\.toml|Cargo\.lock)$"
+    r"|^(?:ui/index\.html|Dockerfile|Cargo\.toml|Cargo\.lock)$"
 )
 # Tests and examples under a shipped prefix. Markdown is exempt separately.
 EXEMPT = re.compile(
@@ -217,7 +217,7 @@ def check_pull_request(base: str, head: str, labels: list[str], root: Path, runn
     if needs_fragment(paths) and not added and NO_CHANGELOG not in labels:
         raise FragmentError(
             "PRs touching shipped paths (crates/, ui/src/, ui/dist/, ui/public/, ui/index.html, "
-            "install.sh, install.ps1, Dockerfile, vendor/, Cargo.toml, Cargo.lock) must add a new "
+            "Dockerfile, vendor/, Cargo.toml, Cargo.lock) must add a new "
             f"changes/<branch-slug>.md fragment, or carry the {NO_CHANGELOG} label."
         )
 

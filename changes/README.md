@@ -25,7 +25,6 @@ A PR that touches a shipped path must add a new fragment. Shipped paths are:
 
 - `crates/`
 - `ui/src/`, `ui/dist/`, `ui/public/` and `ui/index.html`
-- `install.sh` and `install.ps1`
 - `Dockerfile`
 - `vendor/`
 - `Cargo.toml` and `Cargo.lock`
@@ -34,7 +33,7 @@ These do not require one:
 
 - Tests: `crates/*/tests/`, `crates/*/examples/`, and `*.test.ts`, `*.test.tsx`, `*.spec.ts` and `*.spec.tsx` files.
 - Documentation: `*.md` except `CHANGELOG.md`, and `docs/`.
-- Everything outside the list above, such as `bench/`, `harness/`, `packaging/`, `ui/scripts/`, `tools/` and `.github/`.
+- Everything outside the list above, such as `bench/`, `harness/`, `ui/scripts/`, `tools/` and `.github/`.
 
 A PR that also changes a shipped path still needs a fragment. Modifying or renaming an existing fragment does not count. Maintainers can apply the `no-changelog` label when an entry is unnecessary.
 

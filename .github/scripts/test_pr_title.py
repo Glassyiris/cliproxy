@@ -16,7 +16,7 @@ class Titles(unittest.TestCase):
     def test_valid_titles_pass(self):
         for title in ("fix(ui): keep Overview tiles whole on a phone",
                       "fix(exec): retry a reset Claude stream once",
-                      "chore(installer): reuse ~/.cliproxy-rs from before the rename",
+                      "chore(docker): reuse the cached toolchain layer",
                       "chore(docs): reuse ~/.cliproxy-rs from before the rename",
                       "deps(deps): bump the cargo group across 2 directories with 10 updates",
                       "fix(server): OAuth sign-ins keep their state",

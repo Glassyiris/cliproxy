@@ -233,7 +233,7 @@ class NeedsFragment(unittest.TestCase):
     def test_shipped_paths_need_a_fragment(self):
         for path in [
             "crates/cpa-server/src/lib.rs", "ui/src/app/App.tsx", "ui/dist/assets/a.js", "ui/index.html",
-            "ui/public/favicon.svg", "install.sh", "install.ps1", "Dockerfile", "vendor/gjson/a.go",
+            "ui/public/favicon.svg", "Dockerfile", "vendor/gjson/a.go",
             "Cargo.toml", "Cargo.lock", "crates/cook-router/Cargo.toml",
         ]:
             with self.subTest(path=path):

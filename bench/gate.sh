@@ -1,31 +1,20 @@
 #!/usr/bin/env bash
-# Performance gates against bench/budgets.txt, for CI on GitHub-hosted runners.
+# Performance gates against bench/budgets.txt, run by the Dockerfile's perf stage and by CI.
 #
-#   bench/gate.sh size <target> <binary> [archive]   bytes of the binary, its .text and
-#                                                    .rodata (ELF), the release archive,
-#                                                    and duplicate crates (Linux only)
+#   bench/gate.sh size <target> <binary>             bytes of the binary, its .text and
+#                                                    .rodata (ELF), and duplicate crates
 #   bench/gate.sh image <docker image>               compressed image bytes
-#   bench/gate.sh idle <os> <binary> [auth files]    idle cost over a window of no requests
+#   bench/gate.sh idle linux <binary> [auth files]   idle cost over a window of no requests
 #
-# <os> is linux, macos or windows. Each measured value is printed and compared with the
-# line of the same key in bench/budgets.txt: `<key> <value> <tolerance %>`. A key with no
-# line is printed and not gated, so a new target starts reporting before it has a budget.
+# Each measured value is printed and compared with the line of the same key in
+# bench/budgets.txt: `<key> <value> <tolerance %>`. A key with no line is printed and not
+# gated, so a new target starts reporting before it has a budget.
 # Gates count events and bytes, never elapsed time: shared runners vary by about 15%.
-# With GATE_REPORT set to a file, every check also appends one JSON line to it for the CI
-# report comment (.github/ci/report/schema.md): the key, the measurement (null when not
-# measured), the ceiling (null without a line) and the unit.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 BUDGETS=$HERE/budgets.txt
 failed=0
-
-report() { # key value ceiling
-  [[ -n ${GATE_REPORT:-} ]] || return 0
-  local unit=count
-  case $1 in *_bytes) unit=bytes ;; *_kb) unit=kB ;; *_ms) unit=ms ;; esac
-  printf '{"key":"%s","value":%s,"ceiling":%s,"unit":"%s"}\n' "$1" "${2:-null}" "${3:-null}" "$unit" >> "$GATE_REPORT"
-}
 
 check() { # key measured
   local key=$1 got=$2 line value tol limit
@@ -33,20 +22,17 @@ check() { # key measured
   if [[ ! $got =~ ^[0-9]+$ ]]; then
     printf '%-44s %12s   NOT MEASURED\n' "$key" "${got:-<empty>}"
     echo "::error title=Performance budget::$key was not measured (got '${got}')."
-    report "$key" "" ""
     failed=1
     return 0
   fi
   line=$(sed 's/#.*//' "$BUDGETS" | awk -v k="$key" '$1 == k {print $2, ($3 == "" ? 0 : $3)}')
   if [[ -z $line ]]; then
     printf '%-44s %12s   (no budget)\n' "$key" "$got"
-    report "$key" "$got" ""
     return
   fi
   read -r value tol <<<"$line"
   value=${value//_/}
   limit=$(awk -v v="$value" -v t="$tol" 'BEGIN {printf "%d", v * (1 + t / 100)}')
-  report "$key" "$got" "$limit"
   if (( got > limit )); then
     printf '%-44s %12s > %s (budget %s +%s%%)  OVER\n' "$key" "$got" "$limit" "$value" "$tol"
     echo "::error title=Performance budget::$key is $got, over $limit (bench/budgets.txt: $value +$tol%). Find the cause; a ceiling is raised only when a change needs it, with a maintainer's approval."
@@ -65,8 +51,8 @@ summary_header() {
   return 0
 }
 
-size_gate() { # target binary [archive]
-  local target=$1 bin=$2 archive=${3:-}
+size_gate() { # target binary
+  local target=$1 bin=$2
   summary_header "Size, $target"
   check "size.$target.binary_bytes" "$(bytes "$bin")"
   # Required for Linux targets: a missing section row fails instead of being skipped.
@@ -74,7 +60,6 @@ size_gate() { # target binary [archive]
     check "size.$target.text_bytes" "$(size -A "$bin" | awk '$1 == ".text" {print $2}')"
     check "size.$target.rodata_bytes" "$(size -A "$bin" | awk '$1 == ".rodata" {print $2}')"
   fi
-  [[ -n $archive ]] && check "size.$target.archive_bytes" "$(bytes "$archive")"
   if [[ $(uname -s) == Linux ]] && command -v cargo > /dev/null; then
     # Crates linked into the binary in more than one version (proc macros and build
     # scripts excluded).
@@ -104,24 +89,6 @@ idle_gate() { # os binary [files]
         check "idle.linux.$files.$metric" "$(jq -r ".$metric" <<<"$json" | tr -d '\r')"
       done
       ;;
-    macos | windows)
-      local json key metrics
-      json=$("$HERE/idle-other.sh" "$os" "$bin" "$files" "${IDLE_SECONDS:-60}")
-      echo "$json"
-      # Apple silicon and Intel idle at different sizes, so each has its own budgets.
-      if [[ $os == macos ]]; then
-        key=macos-$(uname -m)
-        metrics="cpu_ms idle_wakeups threads rss_kb"
-      else
-        key=windows
-        metrics="cpu_ms threads rss_kb"
-      fi
-      for metric in $metrics; do
-        # jq on Windows ends its lines with CRLF; a missing key prints "null", which
-        # check() rejects.
-        check "idle.$key.$files.$metric" "$(jq -r ".$metric" <<<"$json" | tr -d '\r')"
-      done
-      ;;
     *) echo "unknown os $os" >&2; exit 2 ;;
   esac
 }
@@ -130,6 +97,6 @@ case ${1:-} in
   size) shift; size_gate "$@" ;;
   image) shift; image_gate "$@" ;;
   idle) shift; idle_gate "$@" ;;
-  *) sed -n '2,16p' "$0"; exit 2 ;;
+  *) sed -n '2,12p' "$0"; exit 2 ;;
 esac
 exit "$failed"

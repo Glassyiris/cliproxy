@@ -22,25 +22,20 @@ Measure three runs on the build host with date and load before setting a whole-t
 | Tier | Command | Runs (where, when) | Wall-time limit | Baseline (date, host, load) |
 | --- | --- | --- | --- | --- |
 | Pre-commit | | No tier exists yet | | |
-| Merge gate | `cargo fmt --all --check`; `cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo nextest run --workspace --locked`; `cargo nextest run -p cpa-server --features media-relay,pprof --lib --locked`; `cargo check --locked --manifest-path harness/rust/Cargo.toml`; `npm run check` in ui/; `python3 -I tools/third-party-notices.py --check`; `python3 -I tools/changelog.py check`; `python3 -I .github/scripts/pr-title.py "$PR_TITLE"`; `python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes*.py'`; `actionlint`; `python3 -I scripts/check-requirements.py`; `python3 -I scripts/test_check_requirements.py` when scripts/ changes; `cargo build --release --locked -p cook-router`; `bench/gate.sh size x86_64-unknown-linux-gnu "${CARGO_TARGET_DIR:-target}/release/cook-router"`; `bench/gate.sh idle linux "${CARGO_TARGET_DIR:-target}/release/cook-router" 1`; `bench/gate.sh idle linux "${CARGO_TARGET_DIR:-target}/release/cook-router" 2000` | ci.yml selects lanes on PRs; all lanes on master, manual/release calls and ci:full reruns. Changes workflow runs fragments/title. The requirements check must run on every PR, including rule-only and documentation-only changes; its self-tests run when scripts/ changes. Both contribute to the required merge status. | | |
-| Scheduled run on main | `gh workflow run idle.yml`; `gh workflow run soak.yml` | Dispatch the workflows with their platform setup and target-specific builds. idle.yml also runs weekly and on selected PRs/pushes; soak.yml runs weekly and on tags. | | |
-| Release | `gh workflow run release.yml` | Calls all CI lanes, then builds/packages platform artifacts and Docker. Manual runs produce artifacts, not a release. Tag soaks run independently in soak.yml. Publishing follows root Rule priority. | | |
+| Merge gate | `docker buildx build --target dashboard .`; `docker buildx build --target check .`; `docker buildx build --target test-report --build-arg SHARD=1 --build-arg SHARDS=2 --output type=local,dest=out1 .` and the same with `SHARD=2`, then `python3 .github/scripts/test-counts.py total out1/counts-1.json out2/counts-2.json`; `docker buildx build --target perf .`; `docker buildx build --target runtime --load -t cook-router:ci .`; `docker run --rm cook-router:ci --version`; `bench/gate.sh image cook-router:ci`; `python3 -I tools/changelog.py check`; `python3 -I .github/scripts/pr-title.py "$PR_TITLE"`; `python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes*.py'`; `python3 -I scripts/check-requirements.py`; `python3 -I scripts/test_check_requirements.py` when scripts/ changes | ci.yml selects lanes on PRs; all lanes on master, manual/release calls and ci:full reruns. The stage contents are in `Dockerfile`. Changes workflow runs fragments/title. The requirements check must run on every PR, including rule-only and documentation-only changes; its self-tests run when scripts/ changes. Both contribute to the `ci-ok` result. | | |
+| Release | `git push origin vX.Y.Z`; after approval, `gh workflow run release.yml -f tag=vX.Y.Z` | The tag runs every CI lane, builds `runtime` natively for amd64 and arm64, checks the tag against `--version` and the image size, pushes the `X.Y.Z-rc` images and creates a draft release. The manual run tags the candidate `X.Y.Z` and `latest` and publishes the draft. Publishing follows root Rule priority. | | |
 
 Before opening a PR, run on the final tree:
 
-- `cargo fmt --all --check`
-- `cargo clippy --workspace --all-targets --locked -- -D warnings`
-- `cargo nextest run --workspace --locked`
-- `cargo nextest run -p cpa-server --features media-relay,pprof --lib --locked`
-- `cargo check --locked --manifest-path harness/rust/Cargo.toml`
-- `npm run check` in ui/; commit rebuilt `ui/dist` when it changes.
-- `python3 -I tools/third-party-notices.py --check`
+- `docker buildx build --target check .`
+- `docker buildx build --target test .`
+- `docker buildx build --target dashboard .`; commit rebuilt `ui/dist` when it changes.
 - `python3 -I scripts/check-requirements.py`; also `python3 -I scripts/test_check_requirements.py` when scripts/ changes.
-- After changes to anything running while the server is idle, also run `cargo build --release --locked -p cook-router && bench/gate.sh idle linux "${CARGO_TARGET_DIR:-target}/release/cook-router" 1`.
+- After changes to anything running while the server is idle, also run `docker buildx build --target perf .`.
 
 Before every release, run the dashboard performance harness using `ui/tools/perf/README.md` and compare its measurements with the recorded baseline. This is a measurement step, not a merge gate; exit 0 proves completion, not acceptable performance.
 
-Lane commands, isolation, matrices and coverage are defined in `.github/workflows/ci.yml` and `.github/AGENTS.md`.
+Stage commands and isolation are defined in `Dockerfile`; lanes and coverage in `.github/workflows/ci.yml` and `.github/AGENTS.md`.
 
 ## Numbers
 
@@ -62,13 +57,12 @@ UI scale/layout values remain in `ui/DESIGN.md` and code limits in `ui/CONVENTIO
 | Context handoff limit (share of the model's window) | | | Orchestrator; decision 13 |
 | Status check interval while several jobs run | | | Orchestrator; decision 13 |
 | Commit subject length | 72 characters; source: CONTRIBUTING.md, Commits and pull request titles | A setting, not measured | .github/scripts/pr-title.py checks PR titles; commit hook absent |
-| Linux release sizes | Binary 52000000 B; text 35000000 B; rodata 11000000 B; archive 23000000 B; zero tolerance; source: bench/budgets.txt size.x86_64-unknown-linux-gnu | | bench/gate.sh size |
+| Linux release sizes | Binary 52000000 B; text 35000000 B; rodata 11000000 B; zero tolerance; source: bench/budgets.txt size.x86_64-unknown-linux-gnu | | bench/gate.sh size |
 | Duplicate linked crate versions | 11 crates, zero tolerance; source: bench/budgets.txt deps.x86_64-unknown-linux-gnu.duplicate_crates | | bench/gate.sh size |
 | Linux idle | With 1 and 2000 credentials: 3 wakeups, 1 CPU tick, 6 threads; RSS 27500 and 77492 KB with 10% tolerance; source: bench/budgets.txt idle.linux | | bench/gate.sh idle |
-| macOS and Windows idle | macOS arm64/x86_64: CPU 20 ms, 3 wakeups, 6 threads, RSS 16592/11336 KB; Windows: CPU 20 ms, 7 threads, RSS 16300 KB; RSS tolerance 10%; source: bench/budgets.txt idle keys | | bench/gate.sh idle |
 | Field-mix soak peak | 173072 KB with 20% tolerance; source: bench/budgets.txt soak.field.peak_hwm_kb | | bench/soak.sh |
 | Request heap budgets | Per-route peak bytes, allocations and held bytes with keyed tolerances in bench/budgets.txt alloc.* | | crates/cpa-server/tests/alloc_budget.rs through nextest |
-| Dashboard npm run check wall time | 90 s local, 5 min CI | 5.8 s (2026-11-08, shell and System page; host/load not recorded) | ui/tools/check-all.mjs enforces 90 s, including in CI. The 5 min CI figure is the recorded target; the dashboard job's workflow timeout is 15 min (`.github/workflows/ci.yml`) |
+| Dashboard npm run check wall time | 90 s local, 5 min CI | 5.8 s (2026-11-08, shell and System page; host/load not recorded) | ui/tools/check-all.mjs enforces 90 s, including in CI. The 5 min CI figure is the recorded target; the dashboard job's workflow timeout is 30 min (`.github/workflows/ci.yml`) |
 | Accounts, 1000 accounts: load to all rows painted | ≤ baseline | | ui/tools/perf/run.mjs; before-release comparison |
 | One 10 s poll on Accounts, main thread | ≤ baseline | | ui/tools/perf/run.mjs; before-release comparison |
 | JS heap after 5 min of polling | ≤ baseline | | ui/tools/perf/run.mjs; before-release comparison |
@@ -212,7 +206,6 @@ Every incomplete Commands, Numbers or Enforcement row has one entry below. Due d
 | --- | --- | --- | --- |
 | Commands: Pre-commit | No hook/tier command | Add read-only changed-file checks; measure on build host before setting limit | 2026-12-08 |
 | Commands: Merge gate | Lane commands and the requirements check run under `ci-ok`; tier baseline and limit unmeasured | Measure three same-host runs with load and set the limit | 2026-12-08 |
-| Commands: Scheduled run on main | Workflows exist; tier baseline and limit unmeasured | Measure build-host/runner cost and document host/load | 2026-12-22 |
 | Commands: Release | Tier baseline/limit and full release proof absent | Measure; add gate self-tests, reproducibility and deployment rehearsal | 2026-12-31 |
 | Numbers: Type scale (role: size / line height) | Values live in ui/DESIGN.md; baseline unrecorded here | Measure rendered roles; reference existing values | 2026-12-08 |
 | Numbers: Spacing scale (section, card, inside card, label to field) | Existing design tokens; baseline pending | Measure repeated relationships | 2026-12-08 |
@@ -227,7 +220,6 @@ Every incomplete Commands, Numbers or Enforcement row has one entry below. Due d
 | Numbers: Linux release sizes | Existing gated ceilings; complete baseline pending | Record date/host/load without raising limits | 2026-12-15 |
 | Numbers: Duplicate linked crate versions | Existing gated ceiling; complete baseline pending | Record dependency set and build context | 2026-12-15 |
 | Numbers: Linux idle | Existing gated values; full baseline context pending | Remeasure on build host; retain source tolerances | 2026-12-15 |
-| Numbers: macOS and Windows idle | Existing gated values; full baseline context pending | Record platform-runner measurements and load | 2026-12-22 |
 | Numbers: Field-mix soak peak | Existing gated value; full baseline context pending | Record same-host soak evidence | 2026-12-22 |
 | Numbers: Request heap budgets | Existing keyed budgets; full baseline context pending | Record allocator workload and host/load | 2026-12-15 |
 | Numbers: Accounts, 1000 accounts: load to all rows painted | Baseline absent | Measure the dashboard performance harness on build host | 2026-12-22 |

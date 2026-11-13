@@ -15,7 +15,7 @@
 //
 //   node tools/size.mjs [dist] [--json <file>]
 //
-// --json also writes the measurements and ceilings for the CI report (.github/ci/report).
+// --json also writes the measurements and ceilings to <file>.
 // Exit codes: 0 within budget, 1 over budget, 2 no build output or unreadable budget.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
