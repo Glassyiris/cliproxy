@@ -10,7 +10,11 @@ use std::{
 
 use tokio::sync::Notify;
 
-use crate::{Error, FRAME_BYTES, Limits, Position, Record, Terminal, cache::Inner, pool::Pool};
+use crate::{
+    Error, FRAME_BYTES, Limits, Position, Record, Terminal,
+    cache::{Inner, Retention},
+    pool::Pool,
+};
 
 pub(crate) const READER_BYTES: usize = std::mem::size_of::<Reader>();
 
@@ -94,6 +98,7 @@ pub(crate) struct Stream {
     pub id: u64,
     slot: u32,
     pool: Arc<Pool>,
+    retention: Arc<Retention>,
     limits: Limits,
     pub state: Mutex<State>,
     invalidated: AtomicBool,
@@ -101,11 +106,19 @@ pub(crate) struct Stream {
 }
 
 impl Stream {
-    pub(crate) fn new(id: u64, slot: u32, pool: Arc<Pool>, limits: Limits, now: Duration) -> Self {
+    pub(crate) fn new(
+        id: u64,
+        slot: u32,
+        pool: Arc<Pool>,
+        retention: Arc<Retention>,
+        limits: Limits,
+        now: Duration,
+    ) -> Self {
         Self {
             id,
             slot,
             pool,
+            retention,
             limits,
             notify: Notify::new(),
             invalidated: AtomicBool::new(false),
@@ -510,14 +523,13 @@ pub enum Read {
 
 /// Independent complete-record cursor. A terminal is delivered once, followed by EOF.
 pub struct Reader {
-    inner: Arc<Inner>,
     stream: Arc<Stream>,
     next: u64,
     terminal_seen: bool,
 }
 
 impl Reader {
-    pub(crate) fn new(inner: Arc<Inner>, stream: Arc<Stream>, after: u64) -> Result<Self, Error> {
+    pub(crate) fn new(stream: Arc<Stream>, after: u64) -> Result<Self, Error> {
         {
             let mut state = stream.state.lock().unwrap();
             if stream.invalidated.load(Ordering::Acquire) || after < state.base_sequence {
@@ -532,7 +544,6 @@ impl Reader {
             state.readers += 1;
         }
         Ok(Self {
-            inner,
             stream,
             next: after,
             terminal_seen: false,
@@ -543,9 +554,8 @@ impl Reader {
         if self.terminal_seen {
             return Poll::Ready(None);
         }
-        let inner = &self.inner;
         let stream = &self.stream;
-        inner.reading(stream, |state| {
+        stream.retention.reading(stream, |state| {
             if stream.invalidated.load(Ordering::Acquire) || self.next < state.base_sequence {
                 self.terminal_seen = true;
                 return (Poll::Ready(Some(Read::Terminal(Terminal::Gone))), false);
@@ -577,7 +587,6 @@ impl Reader {
                 self.next += 1;
                 return (
                     Poll::Ready(Some(Read::Record(Lease {
-                        inner: inner.clone(),
                         stream: stream.clone(),
                         record,
                         first_frame: state.frames[(record.start.frame - state.base_frame) as usize]
@@ -626,7 +635,6 @@ fn last_frame(record: Record) -> u64 {
 
 /// Pins immutable published frames, including after invalidation. New access then returns Gone.
 pub struct Lease {
-    inner: Arc<Inner>,
     stream: Arc<Stream>,
     record: Record,
     first_frame: u32,
@@ -696,7 +704,7 @@ impl Lease {
 impl Drop for Lease {
     fn drop(&mut self) {
         if self.acknowledged {
-            self.inner.reading(&self.stream, |state| {
+            self.stream.retention.reading(&self.stream, |state| {
                 self.release(state);
                 ((), true)
             });

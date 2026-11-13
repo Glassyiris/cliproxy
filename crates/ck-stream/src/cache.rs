@@ -66,12 +66,50 @@ pub(crate) struct Cache {
 pub(crate) struct Inner {
     pub pool: Arc<Pool>,
     pub limits: Limits,
-    pub clock: Arc<dyn Clock>,
     cache: Mutex<Cache>,
-    retention: RwLock<()>,
-    retaining: AtomicBool,
+    retention: Arc<Retention>,
     closed: AtomicBool,
     reclaim_error: Mutex<Option<io::Error>>,
+}
+
+pub(crate) struct Retention {
+    clock: Arc<dyn Clock>,
+    fence: RwLock<()>,
+    active: AtomicBool,
+}
+
+impl Retention {
+    fn retain(&self) -> RetentionGuard<'_> {
+        let lock = self.fence.write().unwrap();
+        self.active.store(true, Ordering::Release);
+        RetentionGuard {
+            _lock: lock,
+            active: &self.active,
+        }
+    }
+
+    pub(crate) fn reading<R>(
+        &self,
+        stream: &Stream,
+        read: impl FnOnce(&mut crate::publication::State) -> (R, bool),
+    ) -> R {
+        let mut state = stream.state.lock().unwrap();
+        // Maintenance sets the flag before locking stream state. Once it has observed a
+        // stream, that mutex's release/acquire edge makes later readers take the fence.
+        let _retention = if self.active.load(Ordering::Acquire) {
+            drop(state);
+            let guard = self.fence.read().unwrap();
+            state = stream.state.lock().unwrap();
+            Some(guard)
+        } else {
+            None
+        };
+        let (result, acquired) = read(&mut state);
+        if acquired {
+            state.last_read = self.clock.now();
+        }
+        result
+    }
 }
 
 struct RetentionGuard<'a> {
@@ -86,17 +124,8 @@ impl Drop for RetentionGuard<'_> {
 }
 
 impl Inner {
-    fn retain(&self) -> RetentionGuard<'_> {
-        let lock = self.retention.write().unwrap();
-        self.retaining.store(true, Ordering::Release);
-        RetentionGuard {
-            _lock: lock,
-            active: &self.retaining,
-        }
-    }
-
     pub(crate) fn evict_one(&self, exclude: u64) -> bool {
-        let _retention = self.retain();
+        let _retention = self.retention.retain();
         let mut cache = self.cache.lock().unwrap();
         while let Some(key) = cache.order.iter().find(|(_, id)| *id != exclude).copied() {
             let stream = cache.streams[&key.1].clone();
@@ -114,33 +143,11 @@ impl Inner {
         }
         false
     }
-    pub(crate) fn reading<R>(
-        &self,
-        stream: &Stream,
-        read: impl FnOnce(&mut crate::publication::State) -> (R, bool),
-    ) -> R {
-        let mut state = stream.state.lock().unwrap();
-        // Maintenance sets the flag before locking stream state. Once it has observed a
-        // stream, that mutex's release/acquire edge makes later readers take the fence.
-        let _retention = if self.retaining.load(Ordering::Acquire) {
-            drop(state);
-            let guard = self.retention.read().unwrap();
-            state = stream.state.lock().unwrap();
-            Some(guard)
-        } else {
-            None
-        };
-        let (result, acquired) = read(&mut state);
-        if acquired {
-            state.last_read = self.clock.now();
-        }
-        result
-    }
 
     fn tick(&self) -> io::Result<()> {
-        let now = self.clock.now();
+        let now = self.retention.clock.now();
         {
-            let _retention = self.retain();
+            let _retention = self.retention.retain();
             let mut cache = self.cache.lock().unwrap();
             while let Some(&(read, id)) = cache.order.first() {
                 if now.saturating_sub(read) <= self.limits.cache_ttl {
@@ -199,10 +206,12 @@ impl Store {
         let inner = Arc::new(Inner {
             pool,
             limits,
-            clock,
             cache: Mutex::new(Cache::default()),
-            retention: RwLock::new(()),
-            retaining: AtomicBool::new(false),
+            retention: Arc::new(Retention {
+                clock,
+                fence: RwLock::new(()),
+                active: AtomicBool::new(false),
+            }),
             closed: AtomicBool::new(false),
             reclaim_error: Mutex::new(None),
         });
@@ -258,8 +267,15 @@ impl Store {
         }
         let id = checked_add(&NEXT_ID, 1).ok_or(Error::StorageExhausted)?;
         let slot = self.inner.pool.claim_slot().ok_or(Error::StorageExhausted)?;
-        let now = self.inner.clock.now();
-        let stream = Arc::new(Stream::new(id, slot, self.inner.pool.clone(), self.inner.limits, now));
+        let now = self.inner.retention.clock.now();
+        let stream = Arc::new(Stream::new(
+            id,
+            slot,
+            self.inner.pool.clone(),
+            self.inner.retention.clone(),
+            self.inner.limits,
+            now,
+        ));
         cache.order.insert((now, id));
         cache.streams.insert(id, stream.clone());
         Ok(Writer::new(self.inner.clone(), stream))
@@ -276,7 +292,7 @@ impl Store {
             .get(&id)
             .cloned()
             .ok_or(Error::Gone)?;
-        Reader::new(self.inner.clone(), stream, after)
+        Reader::new(stream, after)
     }
 
     /// Expire with the injected clock and perform one decay pass; errors remain visible.
@@ -293,7 +309,7 @@ impl Store {
     pub fn shutdown(&mut self) -> io::Result<()> {
         self.inner.closed.store(true, Ordering::Release);
         {
-            let _retention = self.inner.retain();
+            let _retention = self.inner.retention.retain();
             let mut cache = self.inner.cache.lock().unwrap();
             for stream in cache.streams.values() {
                 stream.finish(Terminal::Shutdown);

@@ -657,6 +657,8 @@ Reservation input errors (`len == 0`, above `max_event_bytes`, or an aligned rec
 
 Reads update timestamps under each stream's metadata lock. Eviction and expiry set a maintenance flag before taking stream locks; readers observing the flag drop their stream lock and wait on the retention fence. Once maintenance has observed a stream, the metadata lock's release/acquire edge makes later readers observe that flag. This stabilizes stale queue heads without global read-lock traffic during ordinary delivery. Cache membership remains separately locked. A pinned victim permits another allocation attempt only after invalidation actually releases a frame.
 
+The retention fence and clock have shared ownership independent of cache membership. Each stream retains that context; readers and leases retain only their stream, so ordinary record delivery does not increment a process-wide cache reference count. Leases still keep the mapping and retention context alive after store shutdown.
+
 Complete `append` calls keep one metadata guard through reservation, writing and publication, releasing it before any pool allocation that may evict. Incremental reservations retain no guard between calls. Leases cache their first pinned physical frame, check an atomic invalidation flag before each new borrow, and combine acknowledgment with pin release under one metadata guard.
 
 Owner ruling (D2, 2026-11-14): a slow consumer never pauses upstream reads. The stream keeps collecting into the cache queue and the gateway relays at the client's pace. Only `max_frames` and the pool bound that backlog, and it expires and is evicted like every other entry.
