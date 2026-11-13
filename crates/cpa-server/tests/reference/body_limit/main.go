@@ -6,8 +6,6 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"fmt"
 	"encoding/base64"
 	"encoding/json"
@@ -38,9 +36,6 @@ type scenario struct {
 	Body    string            `json:"body_b64"`
 	// Chunked sends the body without a Content-Length.
 	Chunked bool `json:"chunked"`
-	// PluginAuth adds a frontend auth provider that reads the body the way Go's plugin
-	// host adapter does, after the config keys.
-	PluginAuth bool `json:"plugin_auth,omitempty"`
 	// PadTo pads the body with "p" to this many bytes, so a large body need not be
 	// recorded.
 	PadTo int `json:"pad_to,omitempty"`
@@ -61,33 +56,6 @@ func (c *counter) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n.Add(int64(n))
 	return n, err
-}
-
-// bodyAuth is pluginhost accessAdapter.Authenticate for a plugin that never accepts:
-// readAndRestoreRequestBody, then NewRequestEntityTooLargeError on a MaxBytesError.
-type bodyAuth struct{}
-
-func (bodyAuth) Identifier() string { return "plugin:test:body-auth" }
-
-func (bodyAuth) Authenticate(_ context.Context, r *http.Request) (*sdkaccess.Result, *sdkaccess.AuthError) {
-	if r.Body == nil {
-		return nil, sdkaccess.NewNotHandledError()
-	}
-	orig := r.Body
-	body, err := io.ReadAll(orig)
-	if err != nil {
-		r.Body = struct {
-			io.Reader
-			io.Closer
-		}{io.MultiReader(bytes.NewReader(body), orig), orig}
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			return nil, sdkaccess.NewRequestEntityTooLargeError(err)
-		}
-		return nil, sdkaccess.NewInternalAuthError("failed to read plugin auth request body", err)
-	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	return nil, sdkaccess.NewNotHandledError()
 }
 
 func must(err error) {
@@ -199,8 +167,6 @@ func scenarios() []scenario {
 		{"PATCH", "/v8/management/config"},
 		{"PUT", "/v8/management/config.yaml"},
 		{"PUT", "/v8/management/config/server/port"},
-		{"POST", "/v8/management/plugins/store/demo/install"},
-		{"POST", "/v0/management/plugin-store/demo/install"},
 		{"POST", "/v0/management/api-call"},
 		{"POST", "/v8/management/requests/api-call"},
 		{"POST", "/v0/management/auth-files?name=x.json"},
@@ -213,8 +179,6 @@ func scenarios() []scenario {
 		{"POST", "/v8/management/oauth/callback"},
 		{"POST", "/v0/management/reset-quota"},
 		{"POST", "/v8/management/routing/cooldown/reset"},
-		{"POST", "/v0/management/plugins/demo/quota"},
-		{"POST", "/v0/management/plugins/demo/quota/reset"},
 		{"PUT", "/v0/management/debug"},
 		{"PUT", "/v0/management/config.yaml"},
 		{"PUT", "/v0/management/api-keys"},
@@ -226,12 +190,6 @@ func scenarios() []scenario {
 		add(scenario{Name: "management_multipart_chunked " + path, YAML: mgmtYAML, Method: "POST", Path: path,
 			Headers: map[string]string{"Authorization": "Bearer mgmt-secret", "Content-Type": uploadType}, Body: upload, Chunked: true})
 	}
-	for _, path := range []string{"/v1/chat/completions", "/v1/realtime/calls", "/v1/live"} {
-		add(scenario{Name: "plugin_auth_chunked " + path, YAML: api64(""), Method: "POST", Path: path, PluginAuth: true,
-			Headers: map[string]string{"Authorization": "Bearer wrong-key", "Content-Type": "application/json"}, Body: strings.Repeat("p", 1024), Chunked: true})
-	}
-	add(scenario{Name: "plugin_auth_content_length_over_limit", YAML: api64(""), Method: "POST", Path: "/v1/realtime/calls", PluginAuth: true,
-		Headers: map[string]string{"Authorization": "Bearer wrong-key", "Content-Type": "application/json"}, Body: strings.Repeat("p", 1024)})
 	for _, path := range []string{"/v1/realtime/client_secrets", "/v1/realtime/sessions", "/v1/realtime/calls", "/v1/live", "/v1/realtime/calls/rtc_1/hangup"} {
 		add(scenario{Name: "realtime_chunked " + path, YAML: api64(""), Method: "POST", Path: path, Headers: auth, Body: big, Chunked: true})
 	}
@@ -243,7 +201,7 @@ func scenarios() []scenario {
 	// json.Decoder.Decode) decode the first value from the permitted prefix, and Go's
 	// multipart reader reports either the limit or a parse error depending on where the
 	// limit falls in the form.
-	add(scenario{Name: "json_first_value_within_limit /v0/management/plugins/demo/quota", YAML: mgmtYAML, Method: "POST", Path: "/v0/management/plugins/demo/quota",
+	add(scenario{Name: "json_first_value_within_limit /v0/management/reset-quota", YAML: mgmtYAML, Method: "POST", Path: "/v0/management/reset-quota",
 		Headers: mgmt, Body: "{}" + strings.Repeat(" ", 64), Chunked: true})
 	// A top-level scalar ends one byte after its last byte; a syntax error in the prefix
 	// wins over the limit.
@@ -255,7 +213,7 @@ func scenarios() []scenario {
 		{"cut_inside_value", `{"auth_index":"` + strings.Repeat("1", 64) + `"}`},
 	}
 	for _, c := range quota {
-		add(scenario{Name: "json_first_value " + c.name, YAML: mgmtYAML, Method: "POST", Path: "/v0/management/plugins/demo/quota",
+		add(scenario{Name: "json_first_value " + c.name, YAML: mgmtYAML, Method: "POST", Path: "/v0/management/reset-quota",
 			Headers: mgmt, Body: c.body, Chunked: true})
 	}
 	pad := strings.Repeat(" ", 48)
@@ -271,8 +229,6 @@ func scenarios() []scenario {
 		{"POST", "/v0/management/oauth-callback", `{}`},
 		{"POST", "/v0/management/reset-quota", `{}`},
 		{"POST", "/v0/management/quota/fetch", `{}`},
-		{"PATCH", "/v0/management/plugins/demo/enabled", `{"enabled":true}`},
-		{"DELETE", "/v0/management/plugins/demo/quota", `{"auth_index":"1"}`},
 	} {
 		add(scenario{Name: "json_first_value_within_limit " + c.method + " " + c.path, YAML: mgmtYAML, Method: c.method, Path: c.path,
 			Headers: mgmt, Body: c.body + pad, Chunked: true})
@@ -319,30 +275,18 @@ func scenarios() []scenario {
 		limit      int
 		body       string
 	}{
-		{"bad_escape_digit", "/v0/management/plugins/demo/quota", 4, `"\uX000"` + strings.Repeat(" ", 8)},
-		{"nesting_over_go_limit", "/v0/management/plugins/demo/quota", 10001, strings.Repeat("[", 10002)},
-		{"nesting_at_go_limit", "/v0/management/plugins/demo/quota", 10000, strings.Repeat("[", 10001)},
+		{"bad_escape_digit", "/v0/management/reset-quota", 4, `"\uX000"` + strings.Repeat(" ", 8)},
+		{"nesting_over_go_limit", "/v0/management/reset-quota", 10001, strings.Repeat("[", 10002)},
+		{"nesting_at_go_limit", "/v0/management/reset-quota", 10000, strings.Repeat("[", 10001)},
 		{"value_then_data", "/v0/management/reset-quota", 3, "{}xx"},
 		{"value_then_data", "/v0/management/auth-files/refresh", 3, "{}xx"},
-		{"value_then_data", "/v0/management/plugins/demo/enabled", 17, `{"enabled":true}xx`},
 	} {
-		method := "POST"
-		if strings.HasSuffix(c.path, "/enabled") {
-			method = "PATCH"
-		}
-		add(scenario{Name: "json_first_value " + c.name + " " + c.path, YAML: limited(mgmtYAML, c.limit), Method: method, Path: c.path,
+		add(scenario{Name: "json_first_value " + c.name + " " + c.path, YAML: limited(mgmtYAML, c.limit), Method: "POST", Path: c.path,
 			Headers: mgmt, Body: c.body, Chunked: true})
 	}
-	// Without a limit gin binds the whole body into the struct: the first occurrence's
-	// type error wins over a later duplicate, and data after the value is not read.
-	add(scenario{Name: "json_duplicate_key_no_limit /v0/management/plugins/demo/enabled", YAML: limited(mgmtYAML, 0), Method: "PATCH",
-		Path: "/v0/management/plugins/demo/enabled", Headers: mgmt, Body: `{"enabled":1,"enabled":true}x`})
 	// Without a limit too, gin binds only the first value, matches field names under
 	// Unicode case folding (ſ folds to s) and fails on any member's type error.
 	for _, c := range []struct{ name, method, path, body string }{
-		{"value_then_data", "PATCH", "/v0/management/plugins/demo/enabled", `{"enabled":true}xx`},
-		{"folded_name", "PATCH", "/v0/management/plugins/demo/enabled", `{"ENABLED":true}`},
-		{"null_enabled", "PATCH", "/v0/management/plugins/demo/enabled", `{"enabled":true,"enabled":null}`},
 		{"value_then_data", "PATCH", "/v0/management/auth-files/status", `{"name":"x.json","disabled":true}x`},
 		{"long_s_fold", "PATCH", "/v0/management/auth-files/status", `{"name":"x.json","diſabled":true}`},
 		{"duplicate_type_error", "PATCH", "/v0/management/auth-files/status", `{"name":"x.json","disabled":1,"disabled":true}`},
@@ -375,7 +319,6 @@ func scenarios() []scenario {
 	} {
 		for _, c := range []struct{ method, path, body string }{
 			{"PATCH", "/v0/management/auth-files/status", `{"unused":` + u.value + `,"name":"x.json","disabled":true}`},
-			{"PATCH", "/v0/management/plugins/demo/enabled", `{"unused":` + u.value + `,"enabled":true}`},
 			{"POST", "/v0/management/api-call", `{"unused":` + u.value + `,"method":"GET"}`},
 		} {
 			add(scenario{Name: "json_bind_no_limit unknown_" + u.name + " " + c.method + " " + c.path, YAML: limited(mgmtYAML, 0), Method: c.method,
@@ -483,9 +426,6 @@ func run(s *scenario, raw string) {
 	must(err)
 	access := sdkaccess.NewManager()
 	server := api.NewServer(cfg, coreauth.NewManager(nil, nil, nil), access, path, api.WithPluginHost(pluginhost.New()))
-	if s.PluginAuth {
-		access.SetProviders(append(access.Providers(), bodyAuth{}))
-	}
 	c := &counter{r: strings.NewReader(raw)}
 	req := httptest.NewRequest(s.Method, s.Path, io.NopCloser(c))
 	req.RemoteAddr = "192.0.2.1:1234"

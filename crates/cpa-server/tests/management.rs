@@ -727,7 +727,7 @@ async fn nonlocal_socket_requires_allow_remote_even_with_a_valid_key() {
 /// The binary's composition (`cpa_server::app`): API routes first, management and its
 /// NoRoute behind them. The API keeps gin's NoRoute rules (bare 404, no `Allow`, HEAD on
 /// `/healthz` only); management keeps its own HEAD handling, so a HEAD under
-/// `/v0/management` reaches the guard on the way to plugin routes.
+/// `/v0/management` reaches the guard before its NoRoute.
 #[tokio::test]
 async fn served_app_keeps_api_and_management_no_route_rules() {
     let f = Fixture::new("served-app");
@@ -775,10 +775,101 @@ async fn served_app_keeps_api_and_management_no_route_rules() {
         );
     }
     assert_eq!(send(head.clone(), "/healthz", None).await.status(), 200);
-    // Go's NoRoute guards /v0/management before looking for a plugin route.
+    // Go's NoRoute guards /v0/management before answering 404.
     assert_eq!(send(head.clone(), "/v0/management/nothing", None).await.status(), 401);
     let res = send(head, "/v0/management/nothing", Some("fake-management-only")).await;
     assert_eq!(res.status(), 404);
+    server.abort();
+}
+
+/// The plugin routes are removed, not tombstoned: through the binary's composition, with
+/// the management key, every former plugin method and path answers the ordinary bare 404,
+/// as an unknown path does, while a retained route on the same prefix still answers its
+/// own method and keeps the bare 404 for HEAD and other methods.
+#[tokio::test]
+async fn removed_plugin_routes_answer_the_ordinary_not_found() {
+    let f = Fixture::new("removed-plugin-routes");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let app = cpa_server::app(f.rt.clone(), management::router(f.state.clone()));
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    let client = wreq::Client::new();
+    let send = |method: &str, path: &str| {
+        let mut req = client
+            .request(
+                wreq::Method::from_bytes(method.as_bytes()).unwrap(),
+                format!("{base}{path}"),
+            )
+            .bearer_auth("fake-management-only");
+        if method != "HEAD" {
+            req = req.header("content-type", "application/json").body("{}");
+        }
+        async move {
+            let res = req.send().await.unwrap();
+            let allow = res.headers().get("allow").cloned();
+            (res.status().as_u16(), allow, res.text().await.unwrap())
+        }
+    };
+    let mut removed = Vec::new();
+    for v in ["/v0/management", "/v8/management"] {
+        for (method, path) in [
+            ("GET", "/plugins"),
+            ("DELETE", "/plugins/demo"),
+            ("GET", "/plugins/demo/quota"),
+            ("POST", "/plugins/demo/quota"),
+            ("DELETE", "/plugins/demo/quota"),
+        ] {
+            removed.push((method, format!("{v}{path}")));
+        }
+    }
+    for (method, path) in [
+        ("GET", "/v8/management/plugins/store"),
+        ("POST", "/v8/management/plugins/store/demo/install"),
+        ("GET", "/v0/management/plugin-store"),
+        ("POST", "/v0/management/plugin-store/demo/install"),
+        ("PATCH", "/v0/management/plugins/demo/enabled"),
+        ("POST", "/v0/management/plugins/demo/quota/reset"),
+        ("GET", "/v0/management/quota/providers"),
+        ("POST", "/v0/management/quota/reset"),
+        ("GET", "/v0/management/plugins/demo/config"),
+        ("PUT", "/v0/management/plugins/demo/config"),
+        ("GET", "/v0/management/plugins/demo/route"),
+        ("GET", "/v0/resource/plugins/demo/route"),
+        ("POST", "/v0/resource/plugins/demo/route"),
+        ("GET", "/plugins/demo/route"),
+        ("POST", "/plugins/demo/route"),
+    ] {
+        removed.push((method, path.to_owned()));
+    }
+    // The ordinary answers for an unknown path under each prefix.
+    let management_unknown = send("GET", "/v0/management/nothing").await;
+    let api_unknown = send("GET", "/v2/nothing").await;
+    for unknown in [&management_unknown, &api_unknown] {
+        assert_eq!((unknown.0, &unknown.1), (404, &None), "{unknown:?}");
+    }
+    for (method, path) in &removed {
+        let unknown = if path.contains("/management/") {
+            &management_unknown
+        } else {
+            &api_unknown
+        };
+        assert_eq!(&send(method, path).await, unknown, "{method} {path}");
+    }
+    // The retained quota route on the same prefix: POST reaches its handler, HEAD and other
+    // methods get the bare 404.
+    let (status, _, body) = send("POST", "/v0/management/quota/fetch").await;
+    assert_eq!((status, body.as_str()), (400, r#"{"error":"auth_index is required"}"#));
+    for method in ["GET", "HEAD", "PUT", "DELETE"] {
+        let (status, allow, _) = send(method, "/v0/management/quota/fetch").await;
+        assert_eq!((status, allow), (404, None), "{method}");
+    }
     server.abort();
 }
 
@@ -1660,61 +1751,6 @@ async fn model_definitions_match_go_by_channel() {
         compared += 1;
     }
     assert_eq!(compared, 17);
-    server.abort();
-}
-
-/// Go v8.0.35 `TestGetStaticModelDefinitions_FallsBackToPluginStaticModels`: a plugin
-/// channel lists the plugin's static models in plugin order. The plugin is the Go
-/// recorder test plugin.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn model_definitions_fall_back_to_plugin_static_models() {
-    let tmp = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let Some(built) = cpa_plugin::testing::built_plugins(tmp, "model_definitions_plugin") else {
-        return;
-    };
-    let dir = cpa_plugin::testing::scratch(tmp, "definitions-plugin");
-    let (plugins, records) = (dir.join("plugins"), dir.join("records"));
-    let respond = records.join("respond/workbuddy");
-    std::fs::create_dir_all(&plugins).unwrap();
-    std::fs::create_dir_all(&respond).unwrap();
-    std::fs::copy(built.join("recorder.so"), plugins.join("workbuddy.so")).unwrap();
-    // pluginapi.ModelInfo has no JSON tags: the wire names are Go's field names.
-    let models = json!({"provider": "workbuddy", "models": [
-        {"ID": "workbuddy-pro", "DisplayName": "WorkBuddy Pro"},
-        {"ID": "workbuddy-lite", "DisplayName": "WorkBuddy Lite"}]});
-    std::fs::write(
-        respond.join("model.static.json"),
-        json!({"ok": true, "result": models}).to_string(),
-    )
-    .unwrap();
-    let f = Fixture::from_yaml("definitions-plugin", |_, hash| {
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    workbuddy:\n      enabled: true\n      label: workbuddy\n      record: {}\n      caps: model_provider\n",
-            plugins.display(),
-            records.display()
-        )
-    });
-    // The startup sync registers the plugin's static models.
-    cpa_server::plugins::start(&f.rt).await;
-    let (base, server) = f.server().await;
-    let r = wreq::Client::new()
-        .get(format!("{base}/v8/management/routing/model-definitions/WorkBuddy"))
-        .bearer_auth("fake-management-only")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
-    let v: Value = r.json().await.unwrap();
-    assert_eq!(v["channel"], "workbuddy");
-    let ids: Vec<_> = v["models"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|m| m["id"].clone())
-        .collect();
-    assert_eq!(ids, [json!("workbuddy-pro"), json!("workbuddy-lite")]);
-    assert_eq!(v["models"][0]["display_name"], "WorkBuddy Pro");
     server.abort();
 }
 
@@ -4406,49 +4442,18 @@ async fn siwc_binding_flows_follow_go() {
     upstream.abort();
 }
 
-/// Go `TestAuthFilesListV8_QuotaPluginIDAndNoQuotaProbe` (0c708401, 3d61c954): v8 lists
-/// name the quota plugin the host selects for each credential's provider (a first-pass
-/// identifier match beats an earlier plugin's described providers), and hide the
-/// declarative `quota_probe`, which only the v0 quota route runs. v0 lists keep the
-/// probe and never name the plugin.
+/// Go `TestAuthFilesListV8_QuotaPluginIDAndNoQuotaProbe` (0c708401, 3d61c954), without
+/// its plugin half: v8 lists hide the declarative `quota_probe`, which only the v0 quota
+/// route runs, and name no quota plugin; v0 lists keep the probe.
 #[tokio::test]
-async fn auth_files_list_v8_quota_plugin_id_and_no_quota_probe() {
-    use cpa_plugin::testing::scripted::{Script, host_with};
-    let quota = |identifier: &'static str, describe: &'static str| Script {
-        caps: r#""quota_provider":true"#,
-        results: [("quota.identifier", identifier), ("quota.describe", describe)].into(),
-        fuse_on: None,
-    };
-    let dir = std::env::temp_dir().join(format!("manage-quota-plugins-{}", uuid::Uuid::new_v4()));
-    let (host, _) = host_with(
-        &dir,
-        [
-            (
-                "a-multi-quota",
-                quota(
-                    r#"{"identifier":"multi-quota"}"#,
-                    r#"{"supported_providers":["foo","bar"]}"#,
-                ),
-            ),
-            ("m-high-quota", quota(r#"{"identifier":"high"}"#, "{}")),
-            ("z-foo-quota", quota(r#"{"identifier":"foo"}"#, "{}")),
-        ]
-        .into(),
-    )
-    .await;
+async fn auth_files_list_v8_hides_the_quota_probe() {
     let auth = std::env::temp_dir().join(format!("manage-quota-auth-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&auth).unwrap();
-    for (name, body) in [
-        ("foo.json", r#"{"type":"foo"}"#),
-        ("bar.json", r#"{"type":"bar"}"#),
-        ("upper.json", r#"{"type":"high"}"#),
-        (
-            "probe.json",
-            r#"{"type":"custom","quota_probe":{"url":"https://api.example.invalid/quota"}}"#,
-        ),
-    ] {
-        std::fs::write(auth.join(name), body).unwrap();
-    }
+    std::fs::write(
+        auth.join("probe.json"),
+        r#"{"type":"custom","quota_probe":{"url":"https://api.example.invalid/quota"}}"#,
+    )
+    .unwrap();
     let hash = bcrypt::hash("fake-management-only", 4).unwrap();
     let store = Arc::new(cpa_server::testing::config_store(&auth.join("config.db")).unwrap());
     store
@@ -4462,26 +4467,19 @@ async fn auth_files_list_v8_quota_plugin_id_and_no_quota_probe() {
     let db = CredentialDb::initialize(store.clone()).unwrap();
     cpa_server::testing::seed_credentials(&db, &auth);
     cfg.auth_dir = db.auth_dir();
-    let mut credentials = db.scan(&cfg).unwrap().credentials;
-    // A provider that isn't lowercased yet: Go's strings.ToLower maps U+0130 to a plain
-    // "i", so the lookup finds the plugin keyed "high"; full Unicode lowercasing doesn't.
-    let upper = credentials.iter_mut().find(|c| c.id == "upper.json").unwrap();
-    upper.provider = "H\u{130}GH".to_owned();
-    let rt = Arc::new(
-        cpa_server::testing::runtime_with_db(
-            cfg.clone(),
-            credentials,
-            Executors {
-                claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
-                codex: Default::default(),
-                devices: Default::default(),
-                openai: Default::default(),
-                google: Default::default(),
-            },
-            db,
-        )
-        .with_plugin_host(host),
-    );
+    let credentials = db.scan(&cfg).unwrap().credentials;
+    let rt = Arc::new(cpa_server::testing::runtime_with_db(
+        cfg.clone(),
+        credentials,
+        Executors {
+            claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+            codex: Default::default(),
+            devices: Default::default(),
+            openai: Default::default(),
+            google: Default::default(),
+        },
+        db,
+    ));
     let state = Management::new(rt, store);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -4510,116 +4508,17 @@ async fn auth_files_list_v8_quota_plugin_id_and_no_quota_probe() {
         }
     };
     let v8 = list("/v8/management/credentials").await;
-    assert_eq!(v8("foo.json")["quota_plugin_id"], "z-foo-quota");
-    assert_eq!(v8("bar.json")["quota_plugin_id"], "a-multi-quota");
-    assert_eq!(v8("bar.json")["supports_quota"], true);
-    assert_eq!(v8("bar.json")["quota_provider"], "bar");
-    assert_eq!(v8("upper.json")["quota_plugin_id"], "m-high-quota");
-    assert_eq!(v8("upper.json")["quota_provider"], "H\u{130}GH");
     let probe = v8("probe.json");
     assert!(probe.get("supports_quota").is_none(), "{probe}");
     assert!(probe.get("quota_probe").is_none(), "{probe}");
+    assert!(probe.get("quota_plugin_id").is_none(), "{probe}");
 
     let v0 = list("/v0/management/auth-files").await;
     let probe = v0("probe.json");
     assert_eq!(probe["supports_quota"], true);
     assert_eq!(probe["quota_probe"]["url"], "https://api.example.invalid/quota");
-    assert_eq!(v0("bar.json")["supports_quota"], true);
-    assert!(v0("bar.json").get("quota_plugin_id").is_none());
     server.abort();
     let _ = std::fs::remove_dir_all(&auth);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// Go's management rules for plugin-virtual credentials (several a plugin parsed from
-/// one file): a field edit, status change or delete naming one of them is refused with
-/// 409, and the source file is never overwritten with one credential's document; a
-/// status change or delete naming the source file applies to the file and every
-/// credential parsed from it. Go `TestPatchPluginVirtualAuthStatusReturnsConflictForVirtualChild`,
-/// `TestPatchPluginVirtualSourceStatusDisablesAllExpandedAuths`,
-/// `TestPatchPluginVirtualAuthFieldsReturnsConflict` and
-/// `TestDeletePluginVirtualSourceRemovesExpandedRuntimeAuths`.
-#[tokio::test]
-async fn plugin_virtual_credentials_change_only_through_their_source_file() {
-    let f = Fixture::new("plugin-virtual");
-    let dir = f.auth();
-    let source = dir.join("acme.json");
-    let original = r#"{"type":"acme","proxy-url":"http://proxy.invalid","openapi-location":"https://alias.invalid","openapi_location":"https://canonical.invalid","openapi-models":["m"]}"#;
-    f.writer().save(&source, original.as_bytes()).unwrap();
-    let full = source.display().to_string();
-    let child = |id: &str, token: &str| {
-        let metadata = json!({"type": "acme", "token": token});
-        let mut c =
-            cpa_core::credential::Credential::from_file(&dir, &source, metadata.as_object().unwrap().clone()).unwrap();
-        c.id = id.into();
-        for (k, v) in [
-            ("plugin_virtual", "true"),
-            ("virtual_source", &full),
-            ("path", &full),
-            ("source", &full),
-        ] {
-            c.attributes.insert(k.into(), v.to_owned());
-        }
-        c
-    };
-    f.rt.store().reconcile(vec![child("acme-a", "a"), child("acme-b", "b")]);
-    let (base, server) = f.server().await;
-    let client = wreq::Client::new();
-    let call = |method: wreq::Method, path: &str, body: Option<Value>| {
-        let mut req = client
-            .request(method, format!("{base}/v8/management/credentials{path}"))
-            .bearer_auth("fake-management-only");
-        if let Some(body) = body {
-            req = req.json(&body);
-        }
-        async move {
-            let r = req.send().await.unwrap();
-            (r.status().as_u16(), r.json::<Value>().await.unwrap())
-        }
-    };
-    let refused =
-        json!({"error": "plugin virtual auth cannot be modified directly; edit or delete the source auth file"});
-    let status = |name: &str| Some(json!({"name": name, "disabled": true}));
-    assert_eq!(
-        call(wreq::Method::PATCH, "/status", status("acme-a")).await,
-        (409, refused.clone())
-    );
-    assert_eq!(
-        call(
-            wreq::Method::PATCH,
-            "/fields",
-            Some(json!({"name": "acme-a", "prefix": "x"}))
-        )
-        .await,
-        (409, refused.clone())
-    );
-    assert_eq!(
-        f.rt.store().credential_backend().read(&source).unwrap().unwrap(),
-        original.as_bytes()
-    );
-    for id in ["acme-a", "acme-b"] {
-        assert!(!f.rt.store().get(id).unwrap().disabled, "{id}");
-    }
-    // Through the source file's name: the file and every parsed credential.
-    assert_eq!(
-        call(wreq::Method::PATCH, "/status", status("acme.json")).await,
-        (200, json!({"status": "ok", "disabled": true}))
-    );
-    assert_eq!(
-        f.rt.store().credential_backend().read(&source).unwrap().unwrap(),
-        br#"{"disabled":true,"openapi_location":"https://canonical.invalid","openapi_models":["m"],"proxy_url":"http://proxy.invalid","type":"acme"}"#
-    );
-    for id in ["acme-a", "acme-b"] {
-        let c = f.rt.store().get(id).unwrap();
-        assert!(c.disabled, "{id}");
-        assert_eq!(c.metadata["token"], if id == "acme-a" { "a" } else { "b" });
-    }
-    // A refused delete still republishes the folder, as every delete does.
-    assert_eq!(call(wreq::Method::DELETE, "?name=acme-a", None).await, (409, refused));
-    assert!(source.exists());
-    assert_eq!(call(wreq::Method::DELETE, "?name=acme.json", None).await.0, 200);
-    assert!(!source.exists());
-    server.abort();
 }
 
 /// Go `ForceRefreshAuth` and `ForceRefreshAll` (`authHasRefreshCredential`): a Codex
@@ -4774,7 +4673,7 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         let dir = std::env::temp_dir().join(format!("management-sqlite-delete-{}", uuid::Uuid::new_v4()));
         let legacy = dir.join("legacy");
         std::fs::create_dir_all(&legacy).unwrap();
-        let original = br#"{"type":"claude","access_token":"test-delete","plugin_extra":{"keep":true}}"#;
+        let original = br#"{"type":"claude","access_token":"test-delete","private_extra":{"keep":true}}"#;
         for name in ["a.json", "b.json"] {
             std::fs::write(legacy.join(name), original).unwrap();
         }

@@ -5,6 +5,9 @@
 //! Where Go answers an empty 404 because no management key exists, replay expects
 //! cook-router's 403 naming COOK_MANAGEMENT_PASSWORD: a deliberate divergence from Go
 //! (owner ruling 2026-11-13).
+//! Go also sends and exposes `X-CPA-SUPPORT-PLUGIN`; cook-router has no plugins, so replay
+//! drops that header from the recorded answers and from their CORS exposure list: a
+//! deliberate divergence (owner ruling 2026-11-13, plugin removal).
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -658,17 +661,21 @@ mod routes {
                         ("X-CPA-VERSION", "X-Cook-Version"),
                         ("X-CPA-COMMIT", "X-Cook-Commit"),
                         ("X-CPA-BUILD-DATE", "X-Cook-Build-Date"),
-                        ("X-CPA-SUPPORT-PLUGIN", "X-Cook-Support-Plugin"),
                         ("X-CPA-TRACE-ID", "X-Cook-Trace-Id"),
                     ]
                     .iter()
                     .fold(s.to_owned(), |s, (old, new)| s.replace(old, new))
                 };
+                let without_plugin = |s: &str| s.replace(", X-CPA-SUPPORT-PLUGIN", "");
                 let mut want: serde_json::Map<String, Value> = step["resp_headers"]
                     .as_object()
                     .unwrap()
                     .iter()
-                    .map(|(k, v)| (rename(k), v.as_str().map_or(v.clone(), |s| rename(s).into())))
+                    .filter(|(k, _)| k.as_str() != "X-CPA-SUPPORT-PLUGIN")
+                    .map(|(k, v)| {
+                        let v = v.as_str().map_or(v.clone(), |s| rename(&without_plugin(s)).into());
+                        (rename(k), v)
+                    })
                     .collect();
                 if step["path"].as_str().unwrap().starts_with("/admin/v1/") && matches!(status, 401 | 403) {
                     want.insert("Content-Type".into(), "application/json".into());
@@ -681,11 +688,6 @@ mod routes {
                         .any(|m| step["resp_body"].as_str().unwrap().contains(m));
                 if headers.contains_key("X-Cook-Version") && !guard_refused {
                     want.insert("Cache-Control".into(), "no-store".into());
-                }
-                // The goldens come from Go's cgo build, which loads native plugins; this
-                // binary does too, except on Windows.
-                if want.contains_key("X-Cook-Support-Plugin") {
-                    want.insert("X-Cook-Support-Plugin".into(), cpa_plugin::SUPPORT_PLUGIN.into());
                 }
                 assert_eq!(Value::Object(headers), Value::Object(want), "{name}[{i}] headers");
                 compared += 1;
