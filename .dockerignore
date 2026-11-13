@@ -1,7 +1,15 @@
+# Everything the stages in Dockerfile read is the tree minus build output, local packages and
+# documentation; ui/dist is the dashboard stage's output. harness/ stays, because the check
+# stage builds its Rust half. The build reads Dockerfile itself, so leaving it out of the
+# context keeps an edit to one stage from invalidating every COPY.
+Dockerfile
+.dockerignore
 target
 .git
 .amp
-harness
 docs
-ui/node_modules
+openspec
+**/node_modules
+ui/dist
 **/*.log
+**/__pycache__

@@ -2,41 +2,27 @@
 
 This guide connects a coding tool to your own accounts or API keys through cook-router. For Codex CLI with API keys and mixed providers, start with the [README recipe](../README.md#api-keys-codex-cli-and-mixed-providers).
 
-## 1. Install and start it
+## 1. Start it
 
-On macOS or Linux:
+Run the Docker image with a data directory that holds an initial `config.yaml`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/prep-cook/cook-router/master/install.sh | sh
+mkdir -m 700 -p data
+$EDITOR data/config.yaml                  # see INSTALL.md for a minimal file
+sudo chown -R 10001:10001 data
+docker run -d --name cook-router -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" ghcr.io/prep-cook/cook-router:latest --db /data/cook.db --config /data/config.yaml
 ```
 
-On Windows, in PowerShell:
+[INSTALL.md](INSTALL.md#docker) covers the volume, the config file and upgrades. The first start imports `config.yaml` into `/data/cook.db`; later starts use the database. Two keys matter:
 
-```powershell
-irm https://raw.githubusercontent.com/prep-cook/cook-router/master/install.ps1 | iex
-```
+- `management.secret-key` in the imported config (or the `MANAGEMENT_PASSWORD` environment variable) is the dashboard password.
+- An entry under `access.api-keys` is what your tools send to the proxy.
 
-The script downloads the release for your machine and checks its `SHA256SUMS`. On a fresh install it creates private bootstrap settings and keys, explicitly imports settings into `~/.cook-router/cook.db` (`%USERPROFILE%\.cook-router\cook.db` on Windows), then starts the server and checks that it answers. Set `COOK_DB` to choose another database. An existing database skips YAML import and key generation, even if those original files are missing. SQLite alone stores later configuration and OAuth changes; retained YAML is stale migration backup. The installer prints locations without printing keys:
-
-```text
-cook-router is running at http://127.0.0.1:8317
-  Dashboard  http://127.0.0.1:8317/management.html
-  Keys       /home/you/.cook-router/keys.env (show them with: cat /home/you/.cook-router/keys.env)
-  Database   /home/you/.cook-router/cook.db
-  Log        /home/you/.cook-router/cook-router.log
-  Stop       kill $(cat '/home/you/.cook-router/cook-router.pid')
-```
-
-The port is 8317 unless something already uses it, CLIProxyAPI for example; then the script takes the next free one. `keys.env` holds two keys:
-
-- `COOK_ROUTER_MANAGEMENT_KEY` is the dashboard password.
-- `COOK_ROUTER_CLIENT_KEY` is what your tools send to the proxy.
-
-Only you can read the keys file, and the script never prints keys. Preserve the persistent database and keys when upgrading, not only the import YAML. Every managed launch passes the same absolute `--db`; health probes read committed settings using `config listener`. There is no file watcher or asynchronous YAML mirror. [INSTALL.md](INSTALL.md) covers migration and rollback safeguards.
+Check that the server answers with `curl http://127.0.0.1:8317/healthz`.
 
 ## 2. Open the dashboard
 
-The script opens <http://127.0.0.1:8317/management.html> in your browser (use your port if it picked another). Sign in with `COOK_ROUTER_MANAGEMENT_KEY`. On a server without a browser, open an SSH tunnel from your own computer first, as [INSTALL.md](INSTALL.md#with-the-install-script) shows.
+Open <http://127.0.0.1:8317/management.html> in your browser and sign in with the management key. On a server without a browser, open an SSH tunnel from your own computer first, as [INSTALL.md](INSTALL.md#docker) shows.
 
 On a new server, the Overview shows a short Get started card with three steps: connect an account, point a tool at the proxy, and send a test request. It goes away once all three are done, or when you dismiss it.
 
@@ -52,10 +38,10 @@ In the dashboard, choose Connect account and pick a provider. Claude and ChatGPT
 You can also sign in from a terminal, which helps on a server without a browser. The running proxy owns its database, so the terminal sign-in goes through it:
 
 ```sh
-cook-router --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
+docker exec -it cook-router cook-router --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
 ```
 
-Use your port if the script picked another. When asked, type `COOK_ROUTER_MANAGEMENT_KEY` from `keys.env`; it is not shown as you type.
+When asked, type the management key; it is not shown as you type.
 
 The other sign-in flags are `--codex-login`, `--codex-device-login`, `--kimi-login`, `--meta-login`, `--xai-login` and `--devin-login`. API keys for Claude, Codex, Gemini, Vertex AI, xAI and OpenAI-compatible services go on the dashboard's Provider keys page.
 

@@ -33,7 +33,7 @@ recorded for this dashboard yet; the first run sets it.
 | Select all, main thread | ≤ baseline | not recorded yet | `tools/perf/run.mjs` |
 | Contrast, both themes | body ≥ 10:1, secondary and status text ≥ 5:1 (above WCAG AA, from `DESIGN.md`) | Rosé Pine Moon dark: body 11.86, lowest 3.94; Rosé Pine (Main) dark: body 13.39, lowest 3.16; Dawn light, both palettes: body 8.69, lowest 2.86 (browser, 1440 px, en). Pairs below the limits: Exceptions | browser measurement, by hand |
 
-Bundle ceilings: the limits above are ceilings with headroom, raised only when a change needs it, not the last measurement, so a pull request that grows the bundle does not edit `tools/size-budget.json`. CI posts each pull request's sizes next to master's and the ceilings as a comment (`.github/ci/report`). Raising a ceiling needs a maintainer's approval.
+Bundle ceilings: the limits above are ceilings with headroom, raised only when a change needs it, not the last measurement, so a pull request that grows the bundle does not edit `tools/size-budget.json`. The dashboard stage (`npm run check`) prints each build's sizes next to the ceilings in its CI log; compare them with a master run's log. Raising a ceiling needs a maintainer's approval.
 
 ## Enforcement
 

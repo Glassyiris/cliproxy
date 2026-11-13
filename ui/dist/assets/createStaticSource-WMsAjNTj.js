@@ -1,1 +1,0 @@
-function e(e,t){let n=t?.keywords;return{search(t){let r=t.toLowerCase().trim();return r===``?e:e.filter(e=>e.label.toLowerCase().includes(r)?!0:n?n(e).some(e=>e.toLowerCase().includes(r)):!1)},bootstrap(){return e}}}export{e as t};

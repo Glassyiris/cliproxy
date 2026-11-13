@@ -17,7 +17,7 @@ npm run build      # vite build into dist/
 npm run check:api  # src/lib/api/routes.ts against the Rust management router
 ```
 
-`ui/dist` is committed because the Rust binary embeds it at compile time. After a source change run `npm run build` and commit the result; CI rebuilds and fails when `ui/dist` differs from the source.
+`ui/dist` is not committed. The Rust binary embeds it at compile time, so run `npm run build` before `cargo build`; `docker buildx build` builds it in the dashboard stage.
 
 `npm run check:api` reads `fn router` in `crates/cpa-server/src/management.rs` and fails (exit 1) when the registry names a route the server lacks, or when a `/v8/management` route has neither a registry entry nor a line with a reason in `tools/api-allowlist.json`. It exits 2 when the router uses a construct it cannot follow.
 

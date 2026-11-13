@@ -6,13 +6,12 @@
 # A measurement fails when it exceeds value * (1 + tolerance / 100).
 #
 # The size lines are ceilings with headroom, not the last accepted measurement. A pull
-# request that grows the binary does not edit this file: the CI report comment on the pull
-# request (.github/workflows/report.yml) shows every size and Linux idle number next to
-# master's and the ceiling. Raise a line only when a change needs it, with a maintainer's
+# request that grows the binary does not edit this file: the perf job's log on the pull
+# request shows every size and idle number next to its ceiling. Raise a line only when a change needs it, with a maintainer's
 # approval, and give the reason next to it. Counts that must stay near zero have no
 # tolerance.
 #
-# Every budgeted number comes from one pinned compiler (RUST_TOOLCHAIN in the workflows).
+# Every budgeted number comes from one pinned compiler (the base stage of the Dockerfile).
 # A toolchain bump re-measures the measured budgets (idle, soak and heap) in the same pull
 # request, with a dated line:
 #
@@ -24,17 +23,16 @@
 
 # 2026-10-06: Rust 1.99.0.
 
-# Release binary and archive, Linux x86_64 (every pull request that can change the
-# binary). Target: binary 30 MB or less, archive 13 MB or less.
+# Release binary, Linux x86_64 (every pull request that can change the binary). Target:
+# binary 30 MB or less. The archive budget went with the release archives (2026-11-13).
 # Each ceiling is 13 to 17% above the measurement it was set from (binary 45,858,704,
 # .text 30,368,887, .rodata 9,369,056 and archive 20,120,276 bytes), rounded; a one-off
-# jump inside that room still shows in the report comment. .rodata gets the most room
+# jump inside that room still shows in the perf log. .rodata gets the most room
 # because the embedded dashboard (ui/dist, gzip-compressed) lives there. The measurements
 # behind earlier values are in the history of this file (git log -p bench/budgets.txt).
 size.x86_64-unknown-linux-gnu.binary_bytes   52_000_000  0
 size.x86_64-unknown-linux-gnu.text_bytes     35_000_000  0
 size.x86_64-unknown-linux-gnu.rodata_bytes   11_000_000  0
-size.x86_64-unknown-linux-gnu.archive_bytes  23_000_000  0
 # Crates linked into the binary in two or more versions; a new one fails until it is
 # justified here. 2026-10-05: base64, block-buffer, cpufeatures, crypto-common, digest,
 # getrandom, hashbrown (3), rand, rand_core, sha2, thiserror.
@@ -66,45 +64,23 @@ deps.x86_64-unknown-linux-gnu.duplicate_crates  11  0
 # median of 29,200 KB and 69faf5f2 at 30,380, with RssAnon flat at about 4.2 MB and
 # 1,672 KB of SQLite's 1,801 KB text resident. CI read 28,104 at 69faf5f2 and 28,104 to
 # 29,184 after it, against 26,848 to 27,056 before.
+# 2026-11-13: both RSS budgets re-based with a maintainer's approval when the gate moved
+# into the Dockerfile perf stage (a BuildKit RUN, isolation proxy-env) on ci/docker-stages.
+# The same binary idles higher there than on the runner host: GitHub runner 33,556 KB (1
+# file) and 85,824 KB (2,000 files) in the stage, against 28,104-29,184 and about 77,500
+# measured natively before; on the build host one docker-built binary read 29,776 natively
+# and 33,556 in the stage. The binary did not grow; the measuring environment changed.
 idle.linux.1.wakeups           3   0
 idle.linux.1.cpu_ticks         1   0
 idle.linux.1.threads           6   0
-idle.linux.1.rss_kb       27_500  10
+idle.linux.1.rss_kb       33_500  10
 idle.linux.2000.wakeups        3   0
 idle.linux.2000.cpu_ticks      1   0
 idle.linux.2000.threads        6   0
-idle.linux.2000.rss_kb    77_492  10
-
-# Idle, macOS and Windows (release builds and the weekly idle workflow): 60 s without
-# requests, after 30 s of warm-up (10 s for the measurements below). Windows adds one
-# parked thread for file change notifications. macOS keys carry `uname -m`. RSS measured
-# on 2026-10-05: 14,976 to 15,344 KB on macos-15 (Apple silicon), 10,496 to 10,656 KB on
-# macos-15-intel, 15,812 to 16,232 KB on windows-2025 (working set).
-# 2026-10-06: idle_wakeups cut from 30 to 3 per 60 s. Over four CI runs each, macos-15
-# measured 0, 0, 0 and 1, and macos-15-intel 0 every time; 3 sits just above the worst.
-# 2026-10-22: both macOS RSS budgets re-measured at master. Master 22abc036's idle run
-# read 11,772 KB on macos-15-intel, over the ceiling of 11,770. The last five idle runs
-# (master 22abc036, master f1fbe526, #150, #155, #153) read 11,772, 11,336, 11,448,
-# 11,288 and 11,288 KB on macos-15-intel and 16,704, 16,592, 16,272, 16,304 and
-# 16,608 KB on macos-15, against 10,496 to 10,656 and 14,976 to 15,344 KB on
-# 2026-10-05; each budget is the median. The cause is the one #155 measured on Linux:
-# the binary grew, which adds mapped binary pages (RssFile), and the catalog data each
-# credential registers grew. Windows (16,744 to 16,872 KB, one outlier at 8,208) is
-# still inside its ceiling of 17,930 and keeps its budget.
-idle.macos-arm64.1.cpu_ms           20   0
-idle.macos-arm64.1.idle_wakeups      3   0
-idle.macos-arm64.1.threads           6   0
-idle.macos-arm64.1.rss_kb       16_592  10
-idle.macos-x86_64.1.cpu_ms          20   0
-idle.macos-x86_64.1.idle_wakeups     3   0
-idle.macos-x86_64.1.threads          6   0
-idle.macos-x86_64.1.rss_kb      11_336  10
-idle.windows.1.cpu_ms         20   0
-idle.windows.1.threads         7   0
-idle.windows.1.rss_kb     16_300  10
+idle.linux.2000.rss_kb    85_800  10
 
 # Field-mix soak (bench/soak.sh MIX=field: Claude, Codex and count_tokens requests of
-# 200 KB to 2 MB from 4 sessions, on release tags and weekly): VmHWM at the end of the
+# 200 KB to 2 MB from 4 sessions, run by hand before a release): VmHWM at the end of the
 # run, in kB. A 60-minute run of this build on a GitHub-hosted Ubuntu 22.04 runner peaked
 # at 173,072 kB; 0.2.0 peaked at 225,380 kB under the same load. Peaks come from requests
 # that happen to overlap, so a 300-minute run sees more of them: 20% of room keeps the

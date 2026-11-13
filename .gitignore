@@ -1,5 +1,7 @@
 /target
 ui/node_modules/
+# Built by `npm run build` in ui/ or the Dockerfile's dashboard stage.
+ui/dist/
 ui/.amp/
 
 # Python bytecode

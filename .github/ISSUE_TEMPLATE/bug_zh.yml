@@ -34,7 +34,7 @@ body:
     id: system
     attributes:
       label: 系统
-      description: 填写操作系统和安装方式（install.sh、install.ps1、发行版二进制、Docker 或源码）。
+      description: 填写操作系统和运行方式（Docker 镜像标签或源码构建）。
   - type: dropdown
     id: go
     attributes:

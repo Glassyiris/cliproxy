@@ -232,8 +232,8 @@ class Release(Repo):
 class NeedsFragment(unittest.TestCase):
     def test_shipped_paths_need_a_fragment(self):
         for path in [
-            "crates/cpa-server/src/lib.rs", "ui/src/app/App.tsx", "ui/dist/assets/a.js", "ui/index.html",
-            "ui/public/favicon.svg", "install.sh", "install.ps1", "Dockerfile", "vendor/gjson/a.go",
+            "crates/cpa-server/src/lib.rs", "ui/src/app/App.tsx", "ui/index.html",
+            "ui/public/favicon.svg", "Dockerfile", "vendor/gjson/a.go",
             "Cargo.toml", "Cargo.lock", "crates/cook-router/Cargo.toml",
         ]:
             with self.subTest(path=path):
@@ -245,7 +245,7 @@ class NeedsFragment(unittest.TestCase):
             "crates/cook-router/examples/x.rs", "ui/src/app/useAction.test.ts", "ui/src/a/B.test.tsx",
             "ui/src/a/README.md", "crates/cook-router/README.md", "docs/INSTALL.md", "README.md", "CONTRIBUTING.md",
             "bench/budgets.txt", "harness/run", ".github/workflows/ci.yml", "ui/scripts/x.mjs",
-            "ui/package.json", "tools/changelog.py", "changes/fix.md", "packaging/aur/PKGBUILD",
+            "ui/package.json", "tools/changelog.py", "changes/fix.md", ".github/ci/pins.env",
         ]:
             with self.subTest(path=path):
                 self.assertFalse(changelog.needs_fragment([path]))
