@@ -56,7 +56,7 @@ fn help_never_creates_a_database_and_bad_databases_never_fall_back_to_yaml() {
         assert!(!dir.join("nested").exists());
     }
     std::fs::write(dir.join("bad.db"), "not SQLite").unwrap();
-    std::fs::write(dir.join("config.yaml"), "host: 127.0.0.1\nport: 0\n").unwrap();
+    std::fs::write(dir.join("config.yaml"), "server:\n  host: 127.0.0.1\n  port: 0\n").unwrap();
     let output = cli(&dir, &["--db", "bad.db", "--config", "config.yaml", "--local-model"]);
     assert!(!output.status.success());
     assert_eq!(std::fs::read_to_string(dir.join("bad.db")).unwrap(), "not SQLite");
@@ -66,10 +66,14 @@ fn help_never_creates_a_database_and_bad_databases_never_fall_back_to_yaml() {
 #[test]
 fn import_validate_export_and_backup_share_the_selected_database() {
     let dir = scratch("roundtrip");
-    std::fs::write(dir.join("source.yaml"), "port: 8345\napi-keys: [fake-client-secret]\n").unwrap();
+    std::fs::write(
+        dir.join("source.yaml"),
+        "server:\n  port: 8345\naccess:\n  api-keys: [fake-client-secret]\n",
+    )
+    .unwrap();
     success(cli(&dir, &["--db", "chosen.db", "config", "import", "source.yaml"]));
     assert!(!dir.join("cook.db").exists());
-    std::fs::write(dir.join("source.yaml"), "port: wrong\n").unwrap();
+    std::fs::write(dir.join("source.yaml"), "server:\n  port: wrong\n").unwrap();
     success(cli(&dir, &["config", "validate", "--db", "chosen.db"]));
     let invalid = cli(&dir, &["--db", "chosen.db", "config", "import", "source.yaml"]);
     assert!(!invalid.status.success());
@@ -200,7 +204,10 @@ impl OnlineOwner {
 #[tokio::test]
 async fn online_vertex_import_stages_privately_and_never_falls_back_on_one_worker() {
     let dir = scratch("online-vertex");
-    let source = format!("port: 0\noauth: {{auth-dir: {}}}\n", dir.join("legacy-auth").display());
+    let source = format!(
+        "server:\n  port: 0\noauth: {{auth-dir: {}}}\n",
+        dir.join("legacy-auth").display()
+    );
     std::fs::write(dir.join("source.yaml"), source).unwrap();
     success(cli(&dir, &["--db", "service.db", "config", "import", "source.yaml"]));
     std::fs::copy(dir.join("service.db"), dir.join("local.db")).unwrap();
@@ -363,7 +370,7 @@ async fn online_native_plugin_host_save_and_returned_auths_share_the_owner() {
     std::fs::create_dir_all(&respond).unwrap();
     std::fs::copy(built.join("recorder.so"), plugins.join("rec.so")).unwrap();
     let source = format!(
-        "config-version: 8\nport: 0\noauth: {{auth-dir: {}}}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    rec:\n      enabled: true\n      record: {}\n      label: a\n      caps: command_line_plugin\n",
+        "config-version: 8\nserver:\n  port: 0\noauth: {{auth-dir: {}}}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    rec:\n      enabled: true\n      record: {}\n      label: a\n      caps: command_line_plugin\n",
         dir.join("legacy").display(),
         plugins.display(),
         records.display()
@@ -538,7 +545,12 @@ async fn online_native_plugin_host_save_and_returned_auths_share_the_owner() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn online_import_uses_the_owner_without_local_fallback() {
     let dir = scratch("online-owner");
-    let source = |port| format!("port: {port}\noauth: {{auth-dir: {}}}\n", dir.join("auth").display());
+    let source = |port| {
+        format!(
+            "server:\n  port: {port}\noauth: {{auth-dir: {}}}\n",
+            dir.join("auth").display()
+        )
+    };
     std::fs::write(dir.join("source.yaml"), source(8450)).unwrap();
     success(cli(&dir, &["--db", "service.db", "config", "import", "source.yaml"]));
     std::fs::copy(dir.join("service.db"), dir.join("local.db")).unwrap();
@@ -670,7 +682,7 @@ async fn online_import_uses_the_owner_without_local_fallback() {
 async fn a_live_owner_allows_snapshot_reads_and_refuses_offline_logins() {
     let dir = scratch("owned-reads");
     let source = format!(
-        "port: 8460\napi-keys: [fake-owned-client-secret]\noauth: {{auth-dir: {}}}\n",
+        "server:\n  port: 8460\naccess:\n  api-keys: [fake-owned-client-secret]\noauth: {{auth-dir: {}}}\n",
         dir.join("auth").display()
     );
     std::fs::write(dir.join("source.yaml"), source).unwrap();
@@ -759,7 +771,10 @@ async fn concurrent_cli_writers_publish_one_complete_latest_snapshot() {
     let dir = scratch("process-race");
     std::fs::write(
         dir.join("initial.yaml"),
-        format!("port: 8500\noauth: {{auth-dir: {}}}\n", dir.join("auth").display()),
+        format!(
+            "server:\n  port: 8500\noauth: {{auth-dir: {}}}\n",
+            dir.join("auth").display()
+        ),
     )
     .unwrap();
     success(cli(&dir, &["--db", "shared.db", "config", "import", "initial.yaml"]));
@@ -770,7 +785,7 @@ async fn concurrent_cli_writers_publish_one_complete_latest_snapshot() {
             std::fs::write(
                 dir.join(&source),
                 format!(
-                    "port: {}\noauth: {{auth-dir: {}}}\n",
+                    "server:\n  port: {}\noauth: {{auth-dir: {}}}\n",
                     8500 + writer,
                     dir.join("auth").display()
                 ),
@@ -835,7 +850,7 @@ async fn concurrent_cli_writers_publish_one_complete_latest_snapshot() {
 #[test]
 fn database_flag_overrides_environment_and_environment_overrides_default() {
     let dir = scratch("environment");
-    std::fs::write(dir.join("source.yaml"), "port: 8345\n").unwrap();
+    std::fs::write(dir.join("source.yaml"), "server:\n  port: 8345\n").unwrap();
     for args in [
         vec!["config", "import", "source.yaml"],
         vec!["--db", "flag.db", "config", "import", "source.yaml"],
@@ -865,7 +880,7 @@ fn listener_reports_committed_defaults_and_tls_without_secrets_or_yaml_reads() {
     for (source, expected) in [
         ("{}\n", "\n0\nfalse\n"),
         (
-            "host: '::1'\nport: 8443\ntls: {enable: true, cert: fake-cert.pem, key: fake-private-key.pem}\napi-keys: [fake-client-secret]\n",
+            "server:\n  host: '::1'\n  port: 8443\n  tls: {enable: true, cert: fake-cert.pem, key: fake-private-key.pem}\naccess:\n  api-keys: [fake-client-secret]\n",
             "::1\n8443\ntrue\n",
         ),
     ] {
@@ -883,7 +898,7 @@ fn listener_reports_committed_defaults_and_tls_without_secrets_or_yaml_reads() {
 #[test]
 fn read_commands_leave_older_schema_versions_unchanged_and_refuse_newer_ones() {
     let dir = scratch("old-schema");
-    std::fs::write(dir.join("source.yaml"), "host: 127.0.0.1\nport: 8345\n").unwrap();
+    std::fs::write(dir.join("source.yaml"), "server:\n  host: 127.0.0.1\n  port: 8345\n").unwrap();
     success(cli(&dir, &["--db", "chosen.db", "config", "import", "source.yaml"]));
     let path = dir.join("chosen.db");
     let mut database = std::fs::read(&path).unwrap();

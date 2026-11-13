@@ -646,8 +646,8 @@ func yamlMergeCases() []yamlMergeCase {
 			"observability:\n  logs:\n    <<: [{debug: true, request-log: false}, {debug: false, request-log: true}]\n    logging-to-file: false\n"},
 		{Name: "nested_merge_in_merged_mapping", YAML: "config-version: 8\n" +
 			"routing:\n  retry:\n    <<: {<<: {request-retry: 6}, max-retry-interval: 2}\n"},
-		{Name: "legacy_layout_merge", YAML: "request-retry: &n 5\nmax-retry-interval: *n\n" +
-			"claude-api-key:\n  - &c {api-key: fake-l1, priority: 2}\n  - <<: *c\n    api-key: fake-l2\n"},
+		{Name: "legacy_layout_merge", YAML: "routing:\n  retry:\n    request-retry: &n 5\n    max-retry-interval: *n\n" +
+			"api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - &c {api-key: fake-l1, priority: 2}\n  - name: claude-2\n    keys:\n      - <<: *c\n        api-key: fake-l2\n"},
 		{Name: "scalar_merge", YAML: "config-version: 8\nrouting:\n  retry:\n    <<: 5\n    request-retry: 1\n"},
 		{Name: "scalar_in_merge_list", YAML: "config-version: 8\nrouting:\n  retry:\n    <<: [5]\n    request-retry: 1\n"},
 	}
@@ -1104,9 +1104,8 @@ func main() {
 		out.Synth = append(out.Synth, runSynth(c))
 	}
 	for _, text := range []string{
-		"codex: {disable-codex-cloaking: true}\nws-auth: true\n",
-		"config-version: 8\noauth: {providers: {codex: {disable-codex-cloaking: true, header-defaults: {user-agent: x}, live-media-relay: {enabled: false, ice-servers: []}}, aistudio: {ws-auth: null}, claude: {claude-code: {}}}}\n",
-		"codex: {model-level-cooling: true}\noauth: {providers: {codex: {stream-bootstrap-buffering: false}}}\n",
+		"config-version: 8\nupstream: {codex: {disable-codex-cloaking: true}}\noauth: {providers: {codex: {header-defaults: {user-agent: x}, live-media-relay: {enabled: false, ice-servers: []}}, aistudio: {ws-auth: null}, claude: {claude-code: {}}}}\n",
+		"upstream:\n  codex:\n    model-level-cooling: true\noauth: {providers: {codex: {stream-bootstrap-buffering: false}}}\n",
 		"flag: &f true\noauth: {providers: {codex: {response-steering: *f, orphan-delegation-compatibility: false}}}\n",
 		"oauth: {providers: {antigravity: {antigravity-credits: true, signature-cache-enabled: false, signature-bypass-strict: true}, xai: {}, devin: {}}}\n",
 		"oauth: {providers: {codex: {}, claude: {disable-claude-cloak-mode: true, header-defaults: {user-agent: y}}}}\n",
@@ -1131,33 +1130,42 @@ func main() {
 func synthCases() []synthCase {
 	return []synthCase{
 		{Name: "legacy_claude_and_overrides", YAML: `
-claude-api-key:
-  - api-key: " fake-claude-1 "
+api-keys:
+  claude:
+  - name: claude-1
     base-url: "https://claude.example.invalid/ "
     priority: 3
-    weight: 0
     prefix: "/team/"
     proxy-url: " socks5://proxy.example.invalid:1080 "
+    models:
+      - {name: claude-sonnet-4-6, alias: sonnet}
     headers: {X-Extra: " v ", X-Blank: " ", " ": x}
     excluded-models: [" Claude-Opus-*", claude-opus-*, "", Haiku]
     disable-cooling: false
     request-retry: -1
     request-scoped-errors:
       - {status: 400, match: ["overloaded"], action: stop}
-    models:
-      - {name: claude-sonnet-4-6, alias: sonnet}
-    rebuild-mid-system-message: true
-    fingerprint-profile: " CLI "
-  - api-key: fake-claude-2
-    weight: -4
-    request-retry: 2
+    keys:
+      - api-key: " fake-claude-1 "
+        weight: 0
+        rebuild-mid-system-message: true
+        fingerprint-profile: " CLI "
+  - name: claude-2
     prefix: a/b
-  - api-key: ""
+    request-retry: 2
+    keys:
+      - api-key: fake-claude-2
+        weight: -4
+  - name: claude-3
     base-url: ""
-  - api-key: fake-claude-2
-    weight: -4
-    request-retry: 2
+    keys:
+      - api-key: ""
+  - name: claude-4
     prefix: a/b
+    request-retry: 2
+    keys:
+      - api-key: fake-claude-2
+        weight: -4
 `},
 		{Name: "v8_groups_inherit_and_override", YAML: `
 config-version: 8
@@ -1193,47 +1201,72 @@ api-keys:
     - keys: [{api-key: "dca:fake"}, {api-key: fake-meta}]
 `},
 		{Name: "gemini_vertex_compat", YAML: `
-gemini-api-key:
-  - {api-key: fake-g1, priority: 1}
-  - {api-key: " fake-g1 "}
-  - {api-key: "", base-url: ""}
-  - {api-key: "", base-url: "https://gemini.example.invalid"}
-interactions-api-key:
-  - {api-key: fake-i1, excluded-models: [X]}
-vertex-api-key:
-  - {api-key: "", base-url: https://v.example.invalid}
-  - api-key: fake-v1
+api-keys:
+  gemini:
+  - name: gemini-1
+    priority: 1
+    keys:
+      - api-key: fake-g1
+  - name: gemini-2
+    keys:
+      - api-key: " fake-g1 "
+  - name: gemini-3
+    base-url: ""
+    keys:
+      - api-key: ""
+  - name: gemini-4
+    base-url: "https://gemini.example.invalid"
+    keys:
+      - api-key: ""
+  interactions:
+  - name: interactions-1
+    excluded-models: [X]
+    keys:
+      - api-key: fake-i1
+  vertex:
+  - name: vertex-1
     base-url: https://v.example.invalid
-    weight: 3
-    request-retry: 0
+    keys:
+      - api-key: ""
+  - name: vertex-2
+    base-url: https://v.example.invalid
     models: [{name: m1, alias: a1}, {name: m2, alias: ""}]
-  - {api-key: fake-v1, base-url: https://v.example.invalid}
-openai-compatibility:
+    request-retry: 0
+    keys:
+      - api-key: fake-v1
+        weight: 3
+  - name: vertex-3
+    base-url: https://v.example.invalid
+    keys:
+      - api-key: fake-v1
+  openai-compatibility:
   - name: OpenRouter
     base-url: https://router.example.invalid
     priority: 2
     disable-cooling: true
     request-retry: 1
     headers: {X-H: v}
-    api-key-entries:
+    keys:
       - {api-key: fake-or-1, weight: 4, proxy-url: http://p.example.invalid}
       - {api-key: fake-or-1}
   - name: nokeys
     base-url: https://nokeys.example.invalid
+    keys: []
   - name: off
     disabled: true
     base-url: https://off.example.invalid
-    api-key-entries: [{api-key: fake-off}]
+    keys: [{api-key: fake-off}]
   - name: nobase
-    api-key-entries: [{api-key: fake-nobase}]
+    keys: [{api-key: fake-nobase}]
   - name: openai-compatible-pre
     base-url: https://pre.example.invalid
-    api-key-entries: [{api-key: fake-pre}]
+    keys: [{api-key: fake-pre}]
 `},
 		{Name: "oauth_files", YAML: `
-auth-dir: ./auth
-oauth-excluded-models:
-  Claude: [" Opus-X ", opus-x, sonnet-y]
+oauth:
+  auth-dir: ./auth
+  excluded-models:
+    Claude: [" Opus-X ", opus-x, sonnet-y]
 `, Files: map[string]string{
 			"claude-a.json":  `{"type":"claude","email":"a@example.invalid","priority":"7","weight":2,"excluded_models":["Haiku-Z"],"prefix":"/p/","proxy_url":"http://p.example.invalid","note":" hi ","disabled":true}`,
 			"codex-b.json":   `{"type":"codex","plan_type":" pro "}`,
@@ -1243,7 +1276,7 @@ oauth-excluded-models:
 			"upper.JSON":     `{"type":"Claude","priority":1.9}`,
 			"weightbad.json": `{"type":"claude","weight":"abc"}`,
 		}},
-		{Name: "kimi_files", YAML: "auth-dir: ./auth\n", Files: map[string]string{
+		{Name: "kimi_files", YAML: "oauth:\n  auth-dir: ./auth\n", Files: map[string]string{
 			"k1-plain.json":          `{"type":"kimi"}`,
 			"k2-type-ai.json":        `{"type":"Kimi-AI"}`,
 			"k3-domain-ai.json":      `{"type":"kimi","domain":" AI "}`,
@@ -1258,15 +1291,15 @@ oauth-excluded-models:
 			"k12-colons.json":        `{"type":"kimi","base_url":"https://api.kimi.ai:1:2/x"}`,
 			"k10-v6.json":            `{"type":"kimi-ai","base_url":"https://[::1]:8080/x","domain":"sub.kimi.com"}`,
 		}},
-		{Name: "invalid_weight", YAML: "claude-api-key:\n  - {api-key: fake, weight: 1000001}\n"},
+		{Name: "invalid_weight", YAML: "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: fake\n        weight: 1000001\n"},
 	}
 }
 
 func routeScenarios() []routeScenario {
 	local := "127.0.0.1:40000"
 	key := h("Authorization", "Bearer fake-secret")
-	withSecret := "remote-management:\n  secret-key: '$HASH'\nport: 0\n"
-	noSecret := "remote-management:\n  allow-remote: false\nport: 0\n"
+	withSecret := "server:\n  port: 0\nmanagement:\n  secret-key: '$HASH'\n"
+	noSecret := "server:\n  port: 0\nmanagement:\n  allow-remote: false\n"
 	get := func(path string, headers map[string][]string) routeStep {
 		return routeStep{Method: http.MethodGet, Path: path, Remote: local, Headers: headers}
 	}
@@ -1314,7 +1347,7 @@ func configScenarios() []configScenario {
 		return configStep{Method: http.MethodPatch, Path: path, Body: body}
 	}
 	del := func(path string) configStep { return configStep{Method: http.MethodDelete, Path: path} }
-	owner := "# Owner config\nhost: \"\"\nport: 8317 # listen\nremote-management:\n  # allow the dashboard\n  allow-remote: true\n  secret-key: \"$HASH\" # hashed\nauth-dir: \"~/.cli-proxy-api\"\napi-keys:\n  - \"sk-fake-owner\"\n# disabled for now\nrequest-retry: 3\nmystery-section:\n  nested: [1, 2]\n"
+	owner := "# Owner config\nserver:\n  host: \"\"\n  port: 8317 # listen\noauth:\n  auth-dir: \"~/.cli-proxy-api\"\naccess:\n  api-keys:\n    - \"sk-fake-owner\"\n  # disabled for now\nrouting:\n  retry:\n    request-retry: 3\nmystery-section:\n  nested: [1, 2]\nmanagement:\n  # allow the dashboard\n  allow-remote: true\n  secret-key: \"$HASH\" # hashed\n"
 	v8 := "config-version: 8\nmanagement:\n  secret-key: '$HASH'\nrouting:\n  strategy: round-robin\n  retry:\n    request-retry: 2\n  cooldown:\n    disable-cooling: true\nserver:\n  mystery-field: 1\n  port: 0\nmystery-section: {a: 1}\n"
 	turn := "config-version: 8\nmanagement:\n  secret-key: '$HASH'\noauth:\n  providers:\n    codex:\n      live-media-relay:\n        ice-servers:\n          - {urls: ['turn:a.example.invalid'], username: fake-user-a, credential: fake-cred-a}\n          - {urls: ['turn:b.example.invalid'], username: fake-user-b, credential: fake-cred-b}\n"
 	nonDefaults := "config-version: 8\nmanagement:\n  secret-key: '$HASH'\n  panel-github-repository: fake/panel\n" +
@@ -1467,7 +1500,7 @@ func configScenarios() []configScenario {
 		// migrates and writes it like any setting; v0 GET /config omits it (json:"-").
 		// v8.0.35 models (CatalogSources): three source strings read, written and
 		// validated like any setting; an invalid source is a 422 (ValidateV8Config).
-		{Name: "model_catalog_sources", YAML: "models:\n  catalog: /abs/models.json\n  devin-catalog: 'https://devin.example.invalid/x.json'\nremote-management:\n  secret-key: '$HASH'\n", Steps: []configStep{
+		{Name: "model_catalog_sources", YAML: "models:\n  catalog: /abs/models.json\n  devin-catalog: 'https://devin.example.invalid/x.json'\nmanagement:\n  secret-key: '$HASH'\n", Steps: []configStep{
 			get("/config"), get("/config/models"), get("/config/models/catalog"),
 			put("/config/routing/strategy", `"fill-first"`), get("/config.yaml"),
 			put("/config/models/codex-catalog", `"HTTPS://Codex.example.invalid/c.json"`), get("/config/models"),
@@ -1483,12 +1516,12 @@ func configScenarios() []configScenario {
 			put("/config/models", `{"catalog":"/abs/a.json","codex-catalog":"http://h.example.invalid/c","devin-catalog":"/abs/d.json"}`),
 			del("/config/models"), get("/config/models"), get("/config.yaml"),
 			// The v0 upload decodes into Config first: a source error is its 400.
-			put("/v0/management/config.yaml", "remote-management:\n  secret-key: fake-secret\nmodels:\n  catalog: relative.json\n"),
+			put("/v0/management/config.yaml", "models:\n  catalog: relative.json\nmanagement:\n  secret-key: fake-secret\n"),
 			put("/v0/management/config.yaml", "config-version: 8\nmanagement:\n  secret-key: fake-secret\nmodels:\n  devin-catalog: 'http://x[::1]'\n"),
-			put("/v0/management/config.yaml", "remote-management:\n  secret-key: fake-secret\nmodels:\n  catalog: /abs/v0.json\n"),
+			put("/v0/management/config.yaml", "models:\n  catalog: /abs/v0.json\nmanagement:\n  secret-key: fake-secret\n"),
 			get("/config/models"),
 		}},
-		{Name: "server_github_token", YAML: "github-token: ' fake-legacy-token '\nremote-management:\n  secret-key: '$HASH'\n", Steps: []configStep{
+		{Name: "server_github_token", YAML: "server:\n  github-token: ' fake-legacy-token '\nmanagement:\n  secret-key: '$HASH'\n", Steps: []configStep{
 			get("/config"), get("/config/server/github-token"),
 			put("/config/routing/strategy", `"fill-first"`),
 			patch("/config/server/github-token", `"fake-patched"`), get("/config/server"),
@@ -1516,7 +1549,7 @@ func configScenarios() []configScenario {
 		}},
 		// !!binary scalars, aliases of them included: views and save candidates see the
 		// decoded text, and a migrating save keeps the values.
-		{Name: "binary_scalars", YAML: "remote-management:\n  secret-key: \"$HASH\"\nproxy-url: !!binary aHR0cDovL3guZXhhbXBsZTo4MA==\napi-keys: [fake-client, &k !!binary ZmFrZS1iaW5hcnk=, *k]\nrequest-retry: 1\n", Steps: []configStep{
+		{Name: "binary_scalars", YAML: "requests:\n  proxy-url: !!binary aHR0cDovL3guZXhhbXBsZTo4MA==\naccess:\n  api-keys: [fake-client, &k !!binary ZmFrZS1iaW5hcnk=, *k]\nrouting:\n  retry:\n    request-retry: 1\nmanagement:\n  secret-key: \"$HASH\"\n", Steps: []configStep{
 			get("/config"), get("/config/access/api-keys"), get("/config.yaml"),
 			put("/config/routing/strategy", `"fill-first"`),
 			get("/config"),
@@ -1527,16 +1560,16 @@ func configScenarios() []configScenario {
 			put("/config.yaml", "config-version: 8\nmanagement:\n  secret-key: fake-secret\nrequests:\n  proxy-url: !!binary aHR0cDovL3o=x\n"),
 			get("/config/requests"),
 			// A v0 upload checks the decoded catalog source.
-			put("/v0/management/config.yaml", "remote-management:\n  secret-key: fake-secret\nmodels:\n  catalog: !!binary aHR0cHM6Ly9jLmV4YW1wbGUvbW9kZWxzLmpzb24=\n"),
+			put("/v0/management/config.yaml", "models:\n  catalog: !!binary aHR0cHM6Ly9jLmV4YW1wbGUvbW9kZWxzLmpzb24=\nmanagement:\n  secret-key: fake-secret\n"),
 			get("/config/models"),
-			put("/v0/management/config.yaml", "remote-management:\n  secret-key: fake-secret\nproxy-url: !!binary aHR0cDovL3o=x\n"),
+			put("/v0/management/config.yaml", "requests:\n  proxy-url: !!binary aHR0cDovL3o=x\nmanagement:\n  secret-key: fake-secret\n"),
 			// The root shape is checked before decoding.
 			put("/config.yaml", "!!binary '!!!'"),
 		}},
 		// Go reads a plugin's store.version from the raw node, so this pin stays
 		// base64 text (unpinned) there, and a migrating save that drops the anchor's
 		// unknown section keeps the tag. cook-router refuses the file.
-		{Name: "binary_plugin_pin", YAML: "remote-management:\n  secret-key: \"$HASH\"\npin: &v !!binary MS4yLjM=\nplugins:\n  configs:\n    x:\n      store:\n        version: *v\n", Steps: []configStep{
+		{Name: "binary_plugin_pin", YAML: "pin: &v !!binary MS4yLjM=\nplugins:\n  configs:\n    x:\n      store:\n        version: *v\nmanagement:\n  secret-key: \"$HASH\"\n", Steps: []configStep{
 			get("/config/plugins"),
 			put("/config/routing/strategy", `"fill-first"`),
 			get("/config/plugins"), get("/config.yaml"),
@@ -1577,7 +1610,7 @@ func credScenarios() []credScenario {
 	}
 	return []credScenario{{
 		Name:  "credential_inventory_and_edits",
-		YAML:  "remote-management:\n  secret-key: '$HASH'\nauth-dir: $AUTH\nclaude-api-key:\n  - api-key: fake-cfg-key\n    base-url: https://claude.example.invalid\n",
+		YAML:  "oauth:\n  auth-dir: $AUTH\napi-keys:\n  claude:\n  - name: claude-1\n    base-url: https://claude.example.invalid\n    keys:\n      - api-key: fake-cfg-key\nmanagement:\n  secret-key: '$HASH'\n",
 		Files: files,
 		Steps: []credStep{
 			get("/credentials"),
@@ -1679,7 +1712,7 @@ func credScenarios() []credScenario {
 		// patched ones as written; an equal document leaves the file alone. Codex saves
 		// keep the disk's credentials when it holds a login.
 		Name: "save_bytes",
-		YAML: "remote-management:\n  secret-key: '$HASH'\nauth-dir: $AUTH\n",
+		YAML: "oauth:\n  auth-dir: $AUTH\nmanagement:\n  secret-key: '$HASH'\n",
 		Files: map[string]string{
 			"raw-plain.json":       "{\"type\":\"claude\",\"email\":\"p@example.invalid\",\"z\":{\"b\":1.50,\"a\":\"<x&y>\"},\"n\":1e2,\"big\":12345678901234567890123,\"sep\":\"\u2028\",\"proxy-url\":\"http://p.example.invalid\",\"disabled\":false}\n",
 			"raw-same.json":        "{\n  \"type\": \"claude\",\n  \"disabled\": false,\n  \"n\": 1.0\n}\n",

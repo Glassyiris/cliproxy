@@ -1300,7 +1300,7 @@
     },
     {
       "op": "apply",
-      "args": "auth-dir: RECORDDIR/auths\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    recorder-a:\n      enabled: true\n      priority: 5\n      record: RECORDDIR\n      label: a\n      caps: request_interceptor,response_interceptor,response_stream_interceptor,request_lifecycle_plugin,websocket_response_observer,scheduler,model_router,request_normalizer,request_translator,response_translator,response_before_translator,response_after_translator,thinking_applier,auth_provider,frontend_auth_provider,quota_provider,model_provider,command_line_plugin\n    recorder-b:\n      enabled: true\n      priority: 5\n      record: RECORDDIR\n      label: b\n      schema: 5\n      caps: request_interceptor,response_interceptor,response_stream_interceptor,request_lifecycle_plugin,request_normalizer,response_before_translator,frontend_auth_provider,quota_provider,thinking_applier,model_registrar,command_line_plugin\n    recorder-c:\n      enabled: true\n      priority: 1\n      record: RECORDDIR\n      label: c\n      scope: static\n      caps: executor,model_registrar,model_router,command_line_plugin,auth_provider\n    recorder-d:\n      enabled: true\n      priority: 0\n      record: RECORDDIR\n      label: d\n      caps: auth_provider\n",
+      "args": "oauth:\n  auth-dir: RECORDDIR/auths\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    recorder-a:\n      enabled: true\n      priority: 5\n      record: RECORDDIR\n      label: a\n      caps: request_interceptor,response_interceptor,response_stream_interceptor,request_lifecycle_plugin,websocket_response_observer,scheduler,model_router,request_normalizer,request_translator,response_translator,response_before_translator,response_after_translator,thinking_applier,auth_provider,frontend_auth_provider,quota_provider,model_provider,command_line_plugin\n    recorder-b:\n      enabled: true\n      priority: 5\n      record: RECORDDIR\n      label: b\n      schema: 5\n      caps: request_interceptor,response_interceptor,response_stream_interceptor,request_lifecycle_plugin,request_normalizer,response_before_translator,frontend_auth_provider,quota_provider,thinking_applier,model_registrar,command_line_plugin\n    recorder-c:\n      enabled: true\n      priority: 1\n      record: RECORDDIR\n      label: c\n      scope: static\n      caps: executor,model_registrar,model_router,command_line_plugin,auth_provider\n    recorder-d:\n      enabled: true\n      priority: 0\n      record: RECORDDIR\n      label: d\n      caps: auth_provider\n",
       "result": [
         {
           "id": "recorder-a",
@@ -3820,7 +3820,7 @@
     },
     {
       "op": "apply",
-      "args": "auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    recorder-a:\n      enabled: true\n      record: RECORDDIR\n      label: a\n      caps: management_api\n    host-callback-auth-files:\n      enabled: true\n",
+      "args": "oauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    recorder-a:\n      enabled: true\n      record: RECORDDIR\n      label: a\n      caps: management_api\n    host-callback-auth-files:\n      enabled: true\n",
       "result": [
         {
           "id": "host-callback-auth-files",

@@ -186,10 +186,6 @@ fn shown_as(r: &Resource) -> Json {
     })
 }
 
-fn visible(r: &Resource) -> bool {
-    !(r.kind == Kind::Setting && r.id == resources::PROVENANCE)
-}
-
 fn tagged(mut response: Response, rev: u64) -> Response {
     let etag = HeaderValue::try_from(format!("\"{rev}\"")).expect("digits");
     response.headers_mut().insert(header::ETAG, etag);
@@ -687,7 +683,7 @@ fn answer(state: &Management, done: &Committed, restart: bool, resource: Option<
         "changes": done.changes,
         "restart_required": restart,
     });
-    if let Some(r) = resource.filter(|r| visible(r)) {
+    if let Some(r) = resource {
         body["resource"] = shown(r);
     }
     let response = send(state, StatusCode::OK, &body, Some(done.rev));
@@ -743,7 +739,7 @@ pub(crate) async fn list(
 ) -> Result<Response, AdminError> {
     blocking(state, move |state| {
         let (rev, all) = state.config.snapshot().map_err(|_| AdminError::store(state))?;
-        let items: Vec<Json> = all.iter().filter(|r| r.kind == kind && visible(r)).map(shown).collect();
+        let items: Vec<Json> = all.iter().filter(|r| r.kind == kind).map(shown).collect();
         Ok(tagged(
             send(state, StatusCode::OK, &json!({ "items": items }), Some(rev)),
             rev,
@@ -761,20 +757,17 @@ pub(crate) async fn get(
 ) -> Result<Response, AdminError> {
     blocking(state, move |state| {
         let (rev, all) = state.config.snapshot().map_err(|_| AdminError::store(state))?;
-        let r = all
-            .iter()
-            .find(|r| r.kind == kind && r.id == id && visible(r))
-            .ok_or_else(|| {
-                AdminError(Box::new(error_at(
-                    state,
-                    404,
-                    "not_found",
-                    "no such resource",
-                    Some(&format!("{}/{id}", kind.name())),
-                    None,
-                    &[],
-                )))
-            })?;
+        let r = all.iter().find(|r| r.kind == kind && r.id == id).ok_or_else(|| {
+            AdminError(Box::new(error_at(
+                state,
+                404,
+                "not_found",
+                "no such resource",
+                Some(&format!("{}/{id}", kind.name())),
+                None,
+                &[],
+            )))
+        })?;
         let body = if query.include_secrets {
             tracing::warn!("admin api: {} {id} read with secrets", kind.name());
             shown_as(r)

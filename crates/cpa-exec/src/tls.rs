@@ -342,13 +342,15 @@ mod tests {
             read("requests:\n  tls-handshake-timeout-seconds: 7\n"),
             Some(Duration::from_secs(7))
         );
-        assert_eq!(read("tls-handshake-timeout-seconds: 3\n"), Some(Duration::from_secs(3)));
+        assert_eq!(
+            read("requests:\n  tls-handshake-timeout-seconds: 3\n"),
+            Some(Duration::from_secs(3))
+        );
         assert_eq!(read("requests:\n  tls-handshake-timeout-seconds: 0\n"), None);
         assert_eq!(read("requests:\n  tls-handshake-timeout-seconds: -5\n"), None);
         assert_eq!(read("{}\n"), None);
         // The canonical key wins over the flat spelling, even at 0.
-        let both =
-            |v: u32| format!("tls-handshake-timeout-seconds: 7\nrequests:\n  tls-handshake-timeout-seconds: {v}\n");
+        let both = |v: u32| format!("requests:\n  tls-handshake-timeout-seconds: {v}\n");
         assert_eq!(read(&both(12)), Some(Duration::from_secs(12)));
         assert_eq!(read(&both(0)), None);
         // The unreleased upstream.claude spelling is not an entry point.

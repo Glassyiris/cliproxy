@@ -18,7 +18,7 @@ import (
 // upstream model each request executes as, and AuthKind / AccountInfo for metadata
 // shapes (service_account, siwc).
 func TestZZVertexOpenAPIModels(t *testing.T) {
-	yaml := "oauth-model-alias:\n  vertex:\n    - {name: deepseek-ai/deepseek-v4.1-flash-maas, alias: deepseek-flash}\n    - {name: gemini-2.5-pro, alias: g-pro}\n  claude:\n    - {name: claude-sonnet-4-5, alias: global-sonnet}\n"
+	yaml := "oauth:\n  model-alias:\n    vertex:\n      - {name: deepseek-ai/deepseek-v4.1-flash-maas, alias: deepseek-flash}\n      - {name: gemini-2.5-pro, alias: g-pro}\n    claude:\n      - {name: claude-sonnet-4-5, alias: global-sonnet}\n"
 	cfg, err := config.ParseConfigBytes([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)

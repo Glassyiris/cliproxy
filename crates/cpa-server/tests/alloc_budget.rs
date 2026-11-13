@@ -314,7 +314,7 @@ async fn large_requests_stay_within_their_heap_budget() {
     )
     .unwrap();
     let mut config = Config::parse(&format!(
-        "access: {{api-keys: [client-key-1]}}\nforce-model-prefix: true\ncodex-api-key:\n  - api-key: sk-FAKE-codex\n    base-url: {upstream_url}\n    models:\n      - name: gpt-5.5\n"
+        "access: {{api-keys: [client-key-1]}}\nrouting:\n  force-model-prefix: true\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: {upstream_url}\n    models:\n      - name: gpt-5.5\n    keys:\n      - api-key: sk-FAKE-codex\n"
     ))
     .unwrap();
     config.api_keys = vec!["client-key-1".into()];

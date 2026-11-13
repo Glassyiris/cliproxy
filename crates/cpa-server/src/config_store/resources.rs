@@ -11,7 +11,6 @@ mod annotations;
 mod document;
 mod io;
 mod plugin;
-mod provenance;
 mod secrets;
 
 pub use annotations::strip_read_annotations_at;
@@ -20,7 +19,6 @@ pub use document::{at_path, config, document, set_path, split};
 pub use io::{ImportError, export_json, import_json, import_yaml};
 pub(crate) use plugin::RAW_YAML;
 pub use plugin::patch_plugin_controls;
-pub use provenance::preserve_scope;
 pub use secrets::{document_for_read, hash_management_key, redact_document, redacted, resolve_secrets};
 
 /// The kinds of resource. A setting is one top-level section of the document; the
@@ -88,7 +86,6 @@ const NOT_SETTINGS: [&str; 3] = ["api-keys", "model-routers", "config-version"];
 /// stored value by resource and nested entry identity, never by list position.
 pub const SECRET: &str = "$secret";
 
-pub const PROVENANCE: &str = "@store-provenance";
 pub const MAX_RESOURCES: usize = 10_000;
 pub const MAX_SPEC_BYTES: usize = 1 << 20;
 pub const MAX_STATE_BYTES: usize = 16 << 20;
@@ -207,24 +204,6 @@ pub fn check(r: &Resource) -> Result<(), Fault> {
     }
     if !bounded(&r.spec) || r.spec.to_string().len() > MAX_SPEC_BYTES || r.description.len() > 4096 {
         return fault("resource exceeds the size or depth limit");
-    }
-    if r.kind == Kind::Setting && r.id == PROVENANCE {
-        return match r.spec.as_object() {
-            Some(m)
-                if m.len() == 1
-                    && m.get("global-oauth-paths")
-                        .and_then(Json::as_array)
-                        .is_some_and(|paths| {
-                            paths.iter().all(|p| {
-                                p.as_str()
-                                    .is_some_and(|p| p.starts_with("oauth.providers.") && p.len() < 256)
-                            })
-                        }) =>
-            {
-                Ok(())
-            }
-            _ => fault("invalid config scope provenance"),
-        };
     }
     if r.kind == Kind::Provider {
         let mut ids = HashSet::new();

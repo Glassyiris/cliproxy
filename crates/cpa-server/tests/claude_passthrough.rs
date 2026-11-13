@@ -374,8 +374,18 @@ async fn request_log_masks_upstream_credentials() {
     let logs = dir.join("logs");
     std::fs::create_dir_all(&logs).unwrap();
     let mut config = Config::parse(&format!(
-        "access: {{api-keys: [client-key-1]}}\nrequest-log: true\nclaude-api-key:\n  - api-key: {API_KEY}\n    base-url: {upstream_url}\n    \
-         headers:\n      X-Api-Key: {HEADER_KEY}\n"
+        "access: {{api-keys: [client-key-1]}}\n\
+         observability:\n\
+         \x20 logs:\n\
+         \x20   request-log: true\n\
+         api-keys:\n\
+         \x20 claude:\n\
+         \x20 - name: claude-1\n\
+         \x20   base-url: {upstream_url}\n\
+         \x20   headers:\n\
+         \x20     X-Api-Key: {HEADER_KEY}\n\
+         \x20   keys:\n\
+         \x20     - api-key: {API_KEY}\n"
     ))
     .unwrap();
     config.api_keys = vec!["client-key-1".into()];
@@ -537,8 +547,16 @@ async fn slow_upstream(seen: Arc<Mutex<Vec<(usize, bool)>>>) -> String {
 /// `upstream_url`: the runtime, and the proxy's `/v1/messages` URL.
 async fn usage_proxy(dir: &Path, upstream_url: &str) -> (Arc<cpa_server::Runtime>, String) {
     let mut config = Config::parse(&format!(
-        "observability:\n  usage:\n    usage-statistics-enabled: true\n    claude-cache-telemetry: true\n\
-         claude-api-key:\n  - api-key: sk-upstream-usage\n    base-url: {upstream_url}\n"
+        "observability:\n\
+         \x20 usage:\n\
+         \x20   usage-statistics-enabled: true\n\
+         \x20   claude-cache-telemetry: true\n\
+         api-keys:\n\
+         \x20 claude:\n\
+         \x20 - name: claude-1\n\
+         \x20   base-url: {upstream_url}\n\
+         \x20   keys:\n\
+         \x20     - api-key: sk-upstream-usage\n"
     ))
     .unwrap();
     config.api_keys = vec!["client-key-1".into()];

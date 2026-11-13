@@ -145,15 +145,41 @@ pub(super) fn is_string(keys: &[Option<&str>]) -> bool {
     schema.get("optional").unwrap_or(schema).as_str() == Some("string")
 }
 
-pub(super) fn is_struct(path: &str) -> bool {
-    let mut schema = &*SCHEMA;
-    for part in path.split('.') {
-        let Some(next) = schema.get("fields").and_then(|f| f.get(part)) else {
-            return false;
+/// Every struct section reached through fields alone, as a dotted path, parents first.
+pub(super) fn struct_paths() -> &'static [String] {
+    fn walk(schema: &Schema, path: &str, out: &mut Vec<String>) {
+        let schema = schema.get("optional").unwrap_or(schema);
+        let Some(fields) = schema.get("fields").and_then(Schema::as_object) else {
+            return;
         };
-        schema = next;
+        if !path.is_empty() {
+            out.push(path.to_owned());
+        }
+        for (name, field) in fields {
+            let child = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}.{name}")
+            };
+            walk(field, &child, out);
+        }
     }
-    schema.get("fields").is_some()
+    static PATHS: LazyLock<Vec<String>> = LazyLock::new(|| {
+        let mut out = Vec::new();
+        walk(&SCHEMA, "", &mut out);
+        out
+    });
+    &PATHS
+}
+
+/// The provider families of `api-keys`, in schema order.
+pub(super) fn api_key_families() -> impl Iterator<Item = &'static str> {
+    SCHEMA
+        .pointer("/fields/api-keys/fields")
+        .and_then(Schema::as_object)
+        .expect("generated schema has api-keys")
+        .keys()
+        .map(String::as_str)
 }
 
 fn walk(value: &Value, schema: &Schema, path: &str, pointer: &str, strict: bool) -> anyhow::Result<()> {
@@ -168,8 +194,7 @@ fn walk(value: &Value, schema: &Schema, path: &str, pointer: &str, strict: bool)
 
 fn walk_at(value: &Value, schema: &Schema, path: &str, pointer: &str, strict: bool) -> anyhow::Result<()> {
     if value.is_null() {
-        // Routing is shared with the legacy layout, and `models` is no v8 path parent:
-        // Go decodes null into their zero structs. yaml.v3 skips the web search result
+        // `routing` and `models` may be null: Go decodes null into their zero structs. yaml.v3 skips the web search result
         // cache's own unmarshaler for null, which leaves its zero config.
         if schema.get("fields").is_some()
             && !matches!(

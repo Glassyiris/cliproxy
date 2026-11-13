@@ -255,7 +255,8 @@ fn service_spec_follows_config_bind_host_and_tls() {
     );
     assert_eq!(err("192.0.2.9"), "discovery: no interface owns bind host \"192.0.2.9\"");
     // Legacy layout reads the same; defaults fill service type and subtypes.
-    let legacy = cpa_core::config::Config::parse("discovery:\n  enabled: true\n  service-type: ''\n").unwrap();
+    let legacy =
+        cpa_core::config::Config::parse("server:\n  discovery:\n    enabled: true\n    service-type: ''\n").unwrap();
     let d = DiscoveryConfig::from_document(&legacy.document);
     assert!(d.enabled && d.auth_required.is_none());
     assert_eq!((d.service_type.as_str(), d.subtypes.len()), (DEFAULT_SERVICE_TYPE, 5));

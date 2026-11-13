@@ -1858,17 +1858,13 @@ mod tests {
         assert_eq!(rational("0.000"), "0");
     }
 
-    /// `chatgpt-keep-alive` is off unless the config turns it on, in the v8 layout or the
-    /// flat one (whose `codex:` section moves to `oauth.providers.codex`), and YAML 1.1
-    /// spellings decode as Go decodes a bool field.
+    /// `chatgpt-keep-alive` is off unless the config turns it on, and YAML 1.1 spellings
+    /// decode as Go decodes a bool field.
     #[test]
     fn chatgpt_keep_alive_is_off_unless_configured() {
         let cases = [
             ("", false),
-            (
-                "oauth:\n  providers:\n    codex:\n      disable-codex-cloaking: true\n",
-                false,
-            ),
+            ("upstream:\n  codex:\n    disable-codex-cloaking: true\n", false),
             (
                 "oauth:\n  providers:\n    codex:\n      chatgpt-keep-alive: false\n",
                 false,
@@ -1881,7 +1877,6 @@ mod tests {
                 "oauth:\n  providers:\n    codex:\n      chatgpt-keep-alive: yes\n",
                 true,
             ),
-            ("codex:\n  chatgpt-keep-alive: true\n", true),
         ];
         for (yaml, want) in cases {
             let cfg = Config::parse(yaml).unwrap();

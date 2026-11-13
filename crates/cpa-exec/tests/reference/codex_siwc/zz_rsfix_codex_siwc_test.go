@@ -62,7 +62,7 @@ func rsfixSIWCRun(t *testing.T, c rsfixSIWCCase) rsfixSIWCCase {
 		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n"))
 	}))
 	defer server.Close()
-	cfg, err := config.ParseConfigBytes([]byte(c.Config + "\nport: 8317\n"))
+	cfg, err := config.ParseConfigBytes([]byte(c.Config + "\nserver:\n  port: 8317\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -318,7 +318,7 @@ fn oauth_only_presence_matches_go() {
             .unwrap_or_else(|| panic!("no v8 prefix for {old}"))
     };
     let cases = fixture()["oauth_only"].as_array().unwrap().clone();
-    assert_eq!(cases.len(), 6);
+    assert_eq!(cases.len(), 5);
     for case in &cases {
         let yaml = case["yaml"].as_str().unwrap();
         let want: std::collections::BTreeSet<String> = case["fields"]
@@ -330,8 +330,8 @@ fn oauth_only_presence_matches_go() {
         assert_eq!(Config::parse(yaml).unwrap().oauth_only, want, "{yaml}");
     }
     // Go `ForAPIKey`: those fields read as zero for API-key credentials; the shared
-    // `upstream.codex` value written at its historical path stays.
-    let cfg = Config::parse(cases[1]["yaml"].as_str().unwrap()).unwrap();
+    // `upstream.codex` value stays.
+    let cfg = Config::parse(cases[0]["yaml"].as_str().unwrap()).unwrap();
     let view = cfg.for_api_key();
     assert_eq!(
         view.document["upstream"]["codex"]["disable-codex-cloaking"],
@@ -345,8 +345,6 @@ fn oauth_only_presence_matches_go() {
         serde_yaml_ng::Value::Bool(false)
     );
     assert!(view.oauth_only.is_empty());
-    let legacy = Config::parse(cases[0]["yaml"].as_str().unwrap()).unwrap();
-    assert!(matches!(legacy.for_api_key(), std::borrow::Cow::Borrowed(_)));
 }
 
 /// Go's shape: prefix/proxy_url are Auth fields, hashes are not ported, and the
@@ -550,7 +548,13 @@ mod routes {
             let dir = std::env::temp_dir().join(format!("cpa-routes-{name}-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             let auth = dir.join("auth");
-            let yaml = |text: &str| format!("{}\nauth-dir: '{}'\n", text.replace("$HASH", &hash), auth.display());
+            let yaml = |text: &str| {
+                format!(
+                    "{}\noauth: {{auth-dir: '{}'}}\n",
+                    text.replace("$HASH", &hash),
+                    auth.display()
+                )
+            };
             let store = Arc::new(ConfigStore::memory_with(&yaml(scenario["yaml"].as_str().unwrap())));
             let cfg = store.load().unwrap().config;
             let rt = Arc::new(cpa_server::testing::runtime(

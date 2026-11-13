@@ -15,7 +15,7 @@ import (
 // models under (registerModelsForAuth), for credentials that did not come from
 // config synthesis, such as Home-dispatched and plugin auths.
 func TestZZProviderKey(t *testing.T) {
-	yaml := "openai-compatibility:\n  - name: Acme\n    base-url: http://127.0.0.1:1\n    api-key-entries: [{api-key: k}]\n    models: [{name: m-acme}]\n"
+	yaml := "api-keys:\n  openai-compatibility:\n  - name: Acme\n    base-url: http://127.0.0.1:1\n    models: [{name: m-acme}]\n    keys: [{api-key: k}]\n"
 	cfg, err := config.ParseConfigBytes([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)

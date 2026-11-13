@@ -17,193 +17,195 @@ import (
 // configYAML exercises every rule section and gate. Each rule's params hold a single
 // path so Go's random map iteration cannot change the result.
 const configYAML = `
-disable-image-generation: chat
-payload:
-  default:
-    - models: [{name: "gpt-*"}]
-      params: {temperature: 0.5}
-    - models: [{name: "gpt-*"}]
-      params: {temperature: 0.9}
-    - models: [{name: "gpt-*", protocol: openai}]
-      params: {metadata.tags: ["a", "b"]}
-    - models: [{name: "gpt-*", from-protocol: openai-response}]
-      params: {reasoning.effort: "high"}
-    - models: [{name: "claude-*", headers: {X-Team: "red-*"}}]
-      params: {top_k: 40}
-    - models: [{name: "*-thinking"}]
-      params: {suffix_hit: true}
-    - models: [{name: "gpt-*", match: [{stream: true}]}]
-      params: {stream_options: {include_usage: true, "<tag>": 1.25e1}}
-    - models: [{name: "gpt-*", not-match: [{n: 2}]}]
-      params: {n_checked: 1}
-    - models: [{name: "gpt-*", exist: [user]}]
-      params: {user_seen: "yes"}
-    - models: [{name: "gpt-*", not-exist: [seed]}]
-      params: {seed: 7}
-    - models: [{name: "img-*"}]
-      params: {tool_choice: image_generation}
-    - models: [{name: "wild-*"}]
-      params: {"items.#(k==1)#.d": "dv"}
-    - models: [{name: "wild-*"}]
-      params: {"items.#(k==1)#.n.m": 5}
-    - models: [{name: "wild-*"}]
-      params: {"strs.#(==\"[1,2]\")#.0": "scalar"}
-    - models: [{name: "lin-*"}]
-      params: {"items.#(k==1)#.0": 9}
-    - models: [{name: "lin-*"}]
-      params: {"whole.#(k==2)#": 5}
-    - models: [{name: "lin-*", exist: ["whole.#(k==1)#"]}]
-      params: {whole_seen: true}
-    - models: [{name: "lin-*", match: [{"nums.#(>5)#": 7}]}]
-      params: {nums_matched: true}
-    - models: [{name: "wild-*", exist: ["strs.#(==\"[1,2]\")#.0"]}]
-      params: {scalar_exists: true}
-    - models: [{name: "lno-*"}]
-      params: {"items.#(k==1)#.x": 9}
-    - models: [{name: "lno-*"}]
-      params: {"whole.#(k==2)#": 5}
-    - models: [{name: "lns-*"}]
-      params: {"-1.#(k==1)#.d": 2}
-    - models: [{name: "lnx-*", exist: ["items.#(k==1)#.z"]}]
-      params: {z_seen: true}
-    - models: [{name: "subc-*", exist: ["{a}"]}]
-      params: {sub_seen: true}
-    - models: [{name: "subn-*", not-exist: ["{a}"]}]
-      params: {subn_seen: true}
-    - models: [{name: "esc-*", exist: ["k\\|@reverse"]}]
-      params: {esc_seen: true}
-  default-raw:
-    - models: [{name: "rawd-*"}]
-      params: {"@reverse": '{', x: '9'}
-    - models: [{name: "gpt-*"}]
-      params: {response_format: '{"type":"json_object"}'}
-    - models: [{name: "gpt-*"}]
-      params: {broken: '{"type":'}
-    - models: [{name: "wild-*"}]
-      params: {"items.#(k==2)#.r": '{"x":1}'}
-    - models: [{name: "lin-*"}]
-      params: {"multi.#(k==1)#.r": '{"y":2}'}
-    - models: [{name: "lno-*"}]
-      params: {"items.#(k==1)#.y": '{"a":1}'}
-    - models: [{name: "time-*"}]
-      params: {raw_at: 2001-12-14T21:59:43.10-05:00}
-  override:
-    - models: [{name: "gpt-*"}]
-      params: {max_tokens: 100}
-    - models: [{name: "gpt-*"}]
-      params: {max_tokens: 200}
-    - models: [{name: "gpt-*"}]
-      params: {model_label: "<b>&"}
-    - models: [{name: "gpt-*"}]
-      params: {big: 1e21}
-    - models: [{name: "gpt-*"}]
-      params: {"messages.#(role==\"system\").content": "rewritten"}
-    - models: [{name: "gpt-*"}]
-      params: {"tools.#(type==\"function\")#.strict": true}
-    - models: [{name: "gemini-*"}]
-      params: {generationConfig.maxOutputTokens: 64}
-    - models: [{name: "gpt-*"}]
-      params: {nullable: null}
-    - models: [{name: "uni-*"}]
-      params: {"items.#(é==1)#.x": true}
-    - models: [{name: "wild-*"}]
-      params: {"items.#(k==1)#.o": "ov"}
-    - models: [{name: "wild-*"}]
-      params: {"groups.#(g==1)#.members.#(m==1)#.flag": true}
-    - models: [{name: "wild-*"}]
-      params: {"i*.#(k==1)#.new": "complex"}
-    - models: [{name: "lin-*"}]
-      params: {"whole.#(k==1)#": "replaced"}
-    - models: [{name: "lin-*"}]
-      params: {"lap.#(k==1)#.b": 2}
-    - models: [{name: "lin-*"}]
-      params: {"arr.#(k==1)#.list.-1": "app"}
-    - models: [{name: "lin-*"}]
-      params: {"eq.#(k==1)#.v": 1}
-    - models: [{name: "lin-*"}]
-      params: {"a*.#(k==1)#.new": "complex"}
-    - models: [{name: "lnc-*"}]
-      params: {"a*.#(k==1)#.b.#(k==2)#.x": 9}
-    - models: [{name: "lng-*"}]
-      params: {"g.#(k==1)#.m.#(k==2)#.x": 9}
-    - models: [{name: "lns-*"}]
-      params: {"-1.#(k==1)#.s": 1}
-    - models: [{name: "sub-*"}]
-      params: {"[a].#(k==1)#.x": 9}
-    - models: [{name: "mod-*"}]
-      params: {"@reverse": 1}
-    - models: [{name: "ne0-*", not-exist: ["@this:{}"]}]
-      params: {hit: 9}
-    - models: [{name: "ne1-*", not-exist: ["a|!true"]}]
-      params: {hit: 9}
-    - models: [{name: "ne2-*", not-exist: ["a|..#"]}]
-      params: {hit: 9}
-    - models: [{name: "ne3-*", not-exist: ["a.#(k==1)|@reverse"]}]
-      params: {hit: 9}
-    - models: [{name: "ne4-*", not-exist: ["a.#(@keys)"]}]
-      params: {hit: 9}
-    - models: [{name: "ne5-*", not-exist: ["a.#[k==1]"]}]
-      params: {hit: 9}
-    - models: [{name: "ne6-*", not-exist: ["a|#(k==1)"]}]
-      params: {hit: 9}
-    - models: [{name: "ne7-*", not-exist: ["a(|@reverse"]}]
-      params: {hit: 9}
-    - models: [{name: "lnw-*"}]
-      params: {"a.18446744073709551616.#(k==1)#.x": 9}
-    - models: [{name: "qp0-*", not-exist: ['a.#(s=="")']}]
-      params: {hit: 9}
-    - models: [{name: "qp1-*", not-exist: ["a.#(x==~null)"]}]
-      params: {hit: 9}
-    - models: [{name: "qp2-*", not-exist: ['a.#(s%"?")']}]
-      params: {hit: 9}
-    - models: [{name: "qp3-*"}]
-      params: {'a.#(s!="").v': 9}
-    - models: [{name: "qp4-*", not-exist: ['a.#([k])']}]
-      params: {hit: 9}
-    - models: [{name: "qp5-*"}]
-      params: {'a.#(!=0)': 9}
-    - models: [{name: "qp6-*", not-exist: ['a.#(==~null)']}]
-      params: {hit: 9}
-    - models: [{name: "time-*"}]
-      params: {at: 2001-12-14 21:59:43.10}
-    - models: [{name: "time-*", match: [{when: 2001-1-2}]}]
-      params: {matched: true}
-    - models: [{name: "time-*"}]
-      params: {text: '2001-12-14'}
-  override-raw:
-    - models: [{name: "rawo-*"}]
-      params: {"@reverse": '{', x: '9'}
-    - models: [{name: "rawk-*"}]
-      params: {"@reverse": '1', x: '9'}
-    - models: [{name: "gpt-*"}]
-      params: {logit_bias: '{"1": -100}'}
-    - models: [{name: "wild-*"}]
-      params: {"items.#(k==1)#.raw": '[1, 2]'}
-    - models: [{name: "lin-*"}]
-      params: {"lap.#(k==1)#": '{"k":1,"z":true}'}
-    - models: [{name: "lin-*"}]
-      params: {"eq.#(k==1)#.w": '[1, 2]'}
-  filter:
-    - models: [{name: "gpt-*"}]
-      params: [frequency_penalty, "messages.#(role==\"developer\")#"]
-    - models: [{name: "wild-*"}]
-      params: ["items.#(k==1)#.drop"]
-    - models: [{name: "wild-*"}]
-      params: ["list.#(t==\"x\")#"]
-    - models: [{name: "wild-*"}]
-      params: ["nested.#(a==1)#.inner.#(b==1)#"]
-    - models: [{name: "wild-*"}]
-      params: ["i*.#(k==1)#.x"]
-    - models: [{name: "lin-*"}]
-      params: ["diagnostics.a*.#(k==1)#"]
-    - models: [{name: "lin-*"}]
-      params: [":a.#(k==1)#.x"]
-    - models: [{name: "lin-*"}]
-      params: ["neg.#(k==1)#.list.-1"]
-    - models: [{name: "lnm-*"}]
-      params: ["-1.#(k==1)#"]
-    - models: [{name: "lnf-*"}]
-      params: ["-1.#(k==1)#.y"]
+multimedia:
+  disable-image-generation: chat
+requests:
+  payload:
+    default:
+      - models: [{name: "gpt-*"}]
+        params: {temperature: 0.5}
+      - models: [{name: "gpt-*"}]
+        params: {temperature: 0.9}
+      - models: [{name: "gpt-*", protocol: openai}]
+        params: {metadata.tags: ["a", "b"]}
+      - models: [{name: "gpt-*", from-protocol: openai-response}]
+        params: {reasoning.effort: "high"}
+      - models: [{name: "claude-*", headers: {X-Team: "red-*"}}]
+        params: {top_k: 40}
+      - models: [{name: "*-thinking"}]
+        params: {suffix_hit: true}
+      - models: [{name: "gpt-*", match: [{stream: true}]}]
+        params: {stream_options: {include_usage: true, "<tag>": 1.25e1}}
+      - models: [{name: "gpt-*", not-match: [{n: 2}]}]
+        params: {n_checked: 1}
+      - models: [{name: "gpt-*", exist: [user]}]
+        params: {user_seen: "yes"}
+      - models: [{name: "gpt-*", not-exist: [seed]}]
+        params: {seed: 7}
+      - models: [{name: "img-*"}]
+        params: {tool_choice: image_generation}
+      - models: [{name: "wild-*"}]
+        params: {"items.#(k==1)#.d": "dv"}
+      - models: [{name: "wild-*"}]
+        params: {"items.#(k==1)#.n.m": 5}
+      - models: [{name: "wild-*"}]
+        params: {"strs.#(==\"[1,2]\")#.0": "scalar"}
+      - models: [{name: "lin-*"}]
+        params: {"items.#(k==1)#.0": 9}
+      - models: [{name: "lin-*"}]
+        params: {"whole.#(k==2)#": 5}
+      - models: [{name: "lin-*", exist: ["whole.#(k==1)#"]}]
+        params: {whole_seen: true}
+      - models: [{name: "lin-*", match: [{"nums.#(>5)#": 7}]}]
+        params: {nums_matched: true}
+      - models: [{name: "wild-*", exist: ["strs.#(==\"[1,2]\")#.0"]}]
+        params: {scalar_exists: true}
+      - models: [{name: "lno-*"}]
+        params: {"items.#(k==1)#.x": 9}
+      - models: [{name: "lno-*"}]
+        params: {"whole.#(k==2)#": 5}
+      - models: [{name: "lns-*"}]
+        params: {"-1.#(k==1)#.d": 2}
+      - models: [{name: "lnx-*", exist: ["items.#(k==1)#.z"]}]
+        params: {z_seen: true}
+      - models: [{name: "subc-*", exist: ["{a}"]}]
+        params: {sub_seen: true}
+      - models: [{name: "subn-*", not-exist: ["{a}"]}]
+        params: {subn_seen: true}
+      - models: [{name: "esc-*", exist: ["k\\|@reverse"]}]
+        params: {esc_seen: true}
+    default-raw:
+      - models: [{name: "rawd-*"}]
+        params: {"@reverse": '{', x: '9'}
+      - models: [{name: "gpt-*"}]
+        params: {response_format: '{"type":"json_object"}'}
+      - models: [{name: "gpt-*"}]
+        params: {broken: '{"type":'}
+      - models: [{name: "wild-*"}]
+        params: {"items.#(k==2)#.r": '{"x":1}'}
+      - models: [{name: "lin-*"}]
+        params: {"multi.#(k==1)#.r": '{"y":2}'}
+      - models: [{name: "lno-*"}]
+        params: {"items.#(k==1)#.y": '{"a":1}'}
+      - models: [{name: "time-*"}]
+        params: {raw_at: 2001-12-14T21:59:43.10-05:00}
+    override:
+      - models: [{name: "gpt-*"}]
+        params: {max_tokens: 100}
+      - models: [{name: "gpt-*"}]
+        params: {max_tokens: 200}
+      - models: [{name: "gpt-*"}]
+        params: {model_label: "<b>&"}
+      - models: [{name: "gpt-*"}]
+        params: {big: 1e21}
+      - models: [{name: "gpt-*"}]
+        params: {"messages.#(role==\"system\").content": "rewritten"}
+      - models: [{name: "gpt-*"}]
+        params: {"tools.#(type==\"function\")#.strict": true}
+      - models: [{name: "gemini-*"}]
+        params: {generationConfig.maxOutputTokens: 64}
+      - models: [{name: "gpt-*"}]
+        params: {nullable: null}
+      - models: [{name: "uni-*"}]
+        params: {"items.#(é==1)#.x": true}
+      - models: [{name: "wild-*"}]
+        params: {"items.#(k==1)#.o": "ov"}
+      - models: [{name: "wild-*"}]
+        params: {"groups.#(g==1)#.members.#(m==1)#.flag": true}
+      - models: [{name: "wild-*"}]
+        params: {"i*.#(k==1)#.new": "complex"}
+      - models: [{name: "lin-*"}]
+        params: {"whole.#(k==1)#": "replaced"}
+      - models: [{name: "lin-*"}]
+        params: {"lap.#(k==1)#.b": 2}
+      - models: [{name: "lin-*"}]
+        params: {"arr.#(k==1)#.list.-1": "app"}
+      - models: [{name: "lin-*"}]
+        params: {"eq.#(k==1)#.v": 1}
+      - models: [{name: "lin-*"}]
+        params: {"a*.#(k==1)#.new": "complex"}
+      - models: [{name: "lnc-*"}]
+        params: {"a*.#(k==1)#.b.#(k==2)#.x": 9}
+      - models: [{name: "lng-*"}]
+        params: {"g.#(k==1)#.m.#(k==2)#.x": 9}
+      - models: [{name: "lns-*"}]
+        params: {"-1.#(k==1)#.s": 1}
+      - models: [{name: "sub-*"}]
+        params: {"[a].#(k==1)#.x": 9}
+      - models: [{name: "mod-*"}]
+        params: {"@reverse": 1}
+      - models: [{name: "ne0-*", not-exist: ["@this:{}"]}]
+        params: {hit: 9}
+      - models: [{name: "ne1-*", not-exist: ["a|!true"]}]
+        params: {hit: 9}
+      - models: [{name: "ne2-*", not-exist: ["a|..#"]}]
+        params: {hit: 9}
+      - models: [{name: "ne3-*", not-exist: ["a.#(k==1)|@reverse"]}]
+        params: {hit: 9}
+      - models: [{name: "ne4-*", not-exist: ["a.#(@keys)"]}]
+        params: {hit: 9}
+      - models: [{name: "ne5-*", not-exist: ["a.#[k==1]"]}]
+        params: {hit: 9}
+      - models: [{name: "ne6-*", not-exist: ["a|#(k==1)"]}]
+        params: {hit: 9}
+      - models: [{name: "ne7-*", not-exist: ["a(|@reverse"]}]
+        params: {hit: 9}
+      - models: [{name: "lnw-*"}]
+        params: {"a.18446744073709551616.#(k==1)#.x": 9}
+      - models: [{name: "qp0-*", not-exist: ['a.#(s=="")']}]
+        params: {hit: 9}
+      - models: [{name: "qp1-*", not-exist: ["a.#(x==~null)"]}]
+        params: {hit: 9}
+      - models: [{name: "qp2-*", not-exist: ['a.#(s%"?")']}]
+        params: {hit: 9}
+      - models: [{name: "qp3-*"}]
+        params: {'a.#(s!="").v': 9}
+      - models: [{name: "qp4-*", not-exist: ['a.#([k])']}]
+        params: {hit: 9}
+      - models: [{name: "qp5-*"}]
+        params: {'a.#(!=0)': 9}
+      - models: [{name: "qp6-*", not-exist: ['a.#(==~null)']}]
+        params: {hit: 9}
+      - models: [{name: "time-*"}]
+        params: {at: 2001-12-14 21:59:43.10}
+      - models: [{name: "time-*", match: [{when: 2001-1-2}]}]
+        params: {matched: true}
+      - models: [{name: "time-*"}]
+        params: {text: '2001-12-14'}
+    override-raw:
+      - models: [{name: "rawo-*"}]
+        params: {"@reverse": '{', x: '9'}
+      - models: [{name: "rawk-*"}]
+        params: {"@reverse": '1', x: '9'}
+      - models: [{name: "gpt-*"}]
+        params: {logit_bias: '{"1": -100}'}
+      - models: [{name: "wild-*"}]
+        params: {"items.#(k==1)#.raw": '[1, 2]'}
+      - models: [{name: "lin-*"}]
+        params: {"lap.#(k==1)#": '{"k":1,"z":true}'}
+      - models: [{name: "lin-*"}]
+        params: {"eq.#(k==1)#.w": '[1, 2]'}
+    filter:
+      - models: [{name: "gpt-*"}]
+        params: [frequency_penalty, "messages.#(role==\"developer\")#"]
+      - models: [{name: "wild-*"}]
+        params: ["items.#(k==1)#.drop"]
+      - models: [{name: "wild-*"}]
+        params: ["list.#(t==\"x\")#"]
+      - models: [{name: "wild-*"}]
+        params: ["nested.#(a==1)#.inner.#(b==1)#"]
+      - models: [{name: "wild-*"}]
+        params: ["i*.#(k==1)#.x"]
+      - models: [{name: "lin-*"}]
+        params: ["diagnostics.a*.#(k==1)#"]
+      - models: [{name: "lin-*"}]
+        params: [":a.#(k==1)#.x"]
+      - models: [{name: "lin-*"}]
+        params: ["neg.#(k==1)#.list.-1"]
+      - models: [{name: "lnm-*"}]
+        params: ["-1.#(k==1)#"]
+      - models: [{name: "lnf-*"}]
+        params: ["-1.#(k==1)#.y"]
 `
 
 type payloadCase struct {

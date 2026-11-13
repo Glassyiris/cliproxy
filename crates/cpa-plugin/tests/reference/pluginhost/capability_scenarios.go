@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 )
 
-const capConfig = `auth-dir: RECORDDIR/auths
+const capConfig = `oauth:
+  auth-dir: RECORDDIR/auths
 plugins:
   enabled: true
   dir: PLUGINDIR

@@ -562,16 +562,13 @@ mod tests {
     async fn pprof_listener_reload_failure_and_shutdown() {
         let dir = std::env::temp_dir().join(format!("pprof-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let config = |enabled, addr: &str, legacy| {
+        // `touched` adds an unrelated setting: another document with the same pprof.
+        let config = |enabled, addr: &str, touched| {
             let pprof = format!("pprof: {{enable: {enabled}, addr: '{addr}'}}");
+            let logs = if touched { "logs: {debug: false}\n  " } else { "" };
             Config::parse(&format!(
-                "oauth: {{auth-dir: '{}'}}\n{}\n",
-                dir.display(),
-                if legacy {
-                    pprof
-                } else {
-                    format!("observability:\n  {pprof}")
-                }
+                "oauth: {{auth-dir: '{}'}}\nobservability:\n  {logs}{pprof}\n",
+                dir.display()
             ))
             .unwrap()
         };

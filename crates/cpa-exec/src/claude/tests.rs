@@ -564,7 +564,7 @@ async fn count_defaults_read_the_original_request() {
             String::from_utf8(body.to_vec()).unwrap()
         }
     };
-    let rule = "payload:\n  default:\n    - models: [{name: claude}]\n      params: {system: \"A configured system prompt that adds tokens\"}\n";
+    let rule = "requests:\n  payload:\n    default:\n      - models: [{name: claude}]\n        params: {system: \"A configured system prompt that adds tokens\"}\n";
     let original = br#"{"model":"claude","system":"x","messages":[{"role":"user","content":"Hello."}]}"#;
     let plain = count("", working).await;
     let defaulted = count(rule, working).await;
@@ -913,8 +913,9 @@ async fn tool_search_scenarios_match_go() {
 fn native_tool_search_support_matches_go() {
     const GATEWAY: &str = "https://gateway.example.test";
     let on = "upstream:\n  claude:\n    tool-search: true\n";
-    let forced =
-        format!("{on}claude-api-key:\n  - api-key: k\n    base-url: {GATEWAY}\n    native-tool-search: true\n");
+    let forced = format!(
+        "{on}api-keys:\n  claude:\n    - name: claude-1\n      base-url: {GATEWAY}\n      keys:\n        - api-key: k\n          native-tool-search: true\n"
+    );
     type Case<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a str, bool);
     let cases: &[Case] = &[
         ("default origin", on, &[("api_key", "k")], "claude-sonnet-4-5", true),
@@ -2387,7 +2388,7 @@ async fn refused_versions_log_only_when_the_identity_is_replaced() {
     );
 }
 
-/// `upstream.claude.model-level-cooling` (Go 52d5507d) in every spelling, seen through
+/// `upstream.claude.model-level-cooling` (Go 52d5507d), seen through
 /// the API-key view: off, a shared-window 429 cools the credential; on, the model.
 #[test]
 fn shared_window_429_follows_model_level_cooling() {
@@ -2398,11 +2399,6 @@ fn shared_window_429_follows_model_level_cooling() {
             FailureScope::Credential,
         ),
         ("upstream: {claude: {model-level-cooling: true}}\n", FailureScope::Model),
-        (
-            "oauth: {providers: {claude: {model-level-cooling: true}}}\n",
-            FailureScope::Model,
-        ),
-        ("claude: {model-level-cooling: true}\n", FailureScope::Model),
     ] {
         let cfg = Config::parse(yaml).unwrap();
         let settings = settings::Settings::from_config(&cfg.for_api_key());
@@ -2734,7 +2730,7 @@ async fn responses_compaction_matches_go() {
     assert!(!rawjson::get(&sent, "tool_choice").exists(), "{sent}");
     // CompactionSummaryPayloadRuleIsLast: payload rules see the finalized body.
     let ruled = Config::parse(
-        "payload:\n  override:\n    - models: [{name: claude-haiku-4-5-20251001}]\n      params: {max_tokens: 1234, tool_choice: {type: auto}}\n",
+        "requests:\n  payload:\n    override:\n      - models: [{name: claude-haiku-4-5-20251001}]\n        params: {max_tokens: 1234, tool_choice: {type: auto}}\n",
     )
     .unwrap();
     let (_, upstream, _) = run(

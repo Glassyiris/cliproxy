@@ -25,7 +25,7 @@ func main() {
 	case "advertise":
 		port, _ := strconv.Atoi(os.Args[3])
 		cfg, err := config.ParseConfigBytes([]byte(fmt.Sprintf(
-			"discovery:\n  enabled: true\n  service-name: %q\n  interfaces:\n    include: [%s]\n", os.Args[4], os.Args[2])))
+			"server:\n  discovery:\n    enabled: true\n    service-name: %q\n    interfaces:\n      include: [%s]\n", os.Args[4], os.Args[2])))
 		if err != nil {
 			panic(err)
 		}

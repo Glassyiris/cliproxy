@@ -19,8 +19,8 @@ type plugin struct {
 // given client keys and recorder plugins (each records to RECDIR under its own ID).
 func config(apiKeys []string, plugins []plugin) string {
 	var b strings.Builder
-	b.WriteString("config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\n")
-	b.WriteString("remote-management:\n  disable-control-panel: true\n")
+	b.WriteString("config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\n")
+	b.WriteString("management:\n  disable-control-panel: true\n")
 	if len(apiKeys) > 0 {
 		b.WriteString("api-keys:\n")
 		for _, key := range apiKeys {
@@ -84,7 +84,7 @@ func usage() scenario {
 		return "  - name: " + name + "\n    base-url: UPSTREAM" + path + "\n    api-key-entries:\n      - api-key: fake-" + name +
 			"\n    models:\n      - name: " + model + "\n        alias: " + name + "-alias\n"
 	}
-	cfg := config([]string{"k1"}, plugins) + "openai-compatibility:\n" + compat("up", "/v1", "up-model") +
+	cfg := config([]string{"k1"}, plugins) + "api-keys:\n  openai-compatibility:\n" + compat("up", "/v1", "up-model") +
 		compat("down", "/down", "down-model") + compat("sse", "/sse", "sse-model")
 	key := bearer("k1")
 	chat := func(body string) step {
@@ -138,7 +138,7 @@ func interceptors() scenario {
 		return "  - name: " + name + "\n    base-url: UPSTREAM" + path + "\n    api-key-entries:\n      - api-key: fake-" + name +
 			"\n    models:\n      - name: " + model + "\n        alias: " + name + "-alias\n"
 	}
-	cfg := config([]string{"k1"}, plugins) + "openai-compatibility:\n" + compat("up", "/v1", "up-model") +
+	cfg := config([]string{"k1"}, plugins) + "api-keys:\n  openai-compatibility:\n" + compat("up", "/v1", "up-model") +
 		compat("down", "/down", "down-model") + compat("sse", "/sse", "sse-model")
 	key := bearer("k1")
 	chat := func(body string, headers ...[2]string) step {
@@ -230,7 +230,7 @@ func interceptors() scenario {
 // header an interceptor clears stays away, and the handler's own headers win.
 func passthroughInterceptors() scenario {
 	plugins := []plugin{{ID: "ic", Caps: "response_interceptor,response_stream_interceptor"}}
-	cfg := config([]string{"k1"}, plugins) + "requests:\n  passthrough-headers: true\nopenai-compatibility:\n" +
+	cfg := config([]string{"k1"}, plugins) + "requests:\n  passthrough-headers: true\napi-keys:\n  openai-compatibility:\n" +
 		"  - name: up\n    base-url: UPSTREAM/v1\n    api-key-entries:\n      - api-key: fake-up\n    models:\n      - name: up-model\n        alias: up-alias\n" +
 		"  - name: sse\n    base-url: UPSTREAM/sse\n    api-key-entries:\n      - api-key: fake-sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n"
 	key := bearer("k1")
@@ -262,7 +262,7 @@ func passthroughInterceptors() scenario {
 // before its first delivered chunk: the bootstrap retry runs (one lifecycle).
 func droppedBootstrap() scenario {
 	plugins := []plugin{{ID: "ic", Caps: "response_stream_interceptor,request_lifecycle_plugin"}}
-	cfg := config([]string{"k1"}, plugins) + "requests:\n  streaming:\n    bootstrap-retries: 1\nopenai-compatibility:\n" +
+	cfg := config([]string{"k1"}, plugins) + "requests:\n  streaming:\n    bootstrap-retries: 1\napi-keys:\n  openai-compatibility:\n" +
 		"  - name: sse\n    base-url: UPSTREAM/sse\n    api-key-entries:\n      - api-key: fake-sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n"
 	chunk := `data: {"id":"s1","object":"chat.completion.chunk","created":1,"model":"sse-model","choices":[{"index":0,"delta":{"content":"a"}}]}` + "\n\n"
 	done := `data: {"id":"s2","object":"chat.completion.chunk","created":1,"model":"sse-model","choices":[{"index":0,"delta":{"content":"b"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
@@ -339,7 +339,7 @@ func modelRouter() scenario {
 		{ID: "rt", Priority: 2, Caps: "model_router,executor"},
 		{ID: "exb", Caps: "executor", Extra: "      inputs: claude\n      outputs: claude\n"},
 	}
-	cfg := config([]string{"k1"}, plugins) + "openai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n" +
+	cfg := config([]string{"k1"}, plugins) + "api-keys:\n  openai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n    keys: []\n" +
 		"    api-key-entries:\n      - api-key: fake-up-key\n    models:\n      - name: up-model\n        alias: up-alias\n"
 	key := bearer("k1")
 	chat := func(body string, headers ...[2]string) step {

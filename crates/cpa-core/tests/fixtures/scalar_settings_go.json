@@ -157,74 +157,8 @@
       ]
     },
     {
-      "name": "legacy",
-      "yaml": "host: 1.50\nauth-dir: 007\napi-keys: [0x1F]\ngithub-token: 1.50\nclaude-api-key: [{api-key: 0x1F, prefix: 1.50, base-url: http://127.0.0.1:1, headers: {X-V: 1.10}}]\nopenai-compatibility: [{name: 2024, base-url: http://127.0.0.1:2, api-key-entries: [{api-key: 1e3}]}]\noauth-settings: {claude: [{name: 1.50, alias: 2.50}]}\nproxy-url: 1.50\n",
-      "checks": [
-        {
-          "go": "proxy-url",
-          "rust": "requests.proxy-url",
-          "value": "1.50"
-        },
-        {
-          "go": "host",
-          "rust": "server.host",
-          "value": "1.50"
-        },
-        {
-          "go": "auth-dir",
-          "rust": "oauth.auth-dir",
-          "value": "007"
-        },
-        {
-          "go": "api-keys.0",
-          "rust": "access.api-keys.0",
-          "value": "0x1F"
-        },
-        {
-          "go": "github-token",
-          "rust": "server.github-token",
-          "value": "1.50"
-        },
-        {
-          "go": "claude-api-key.0.api-key",
-          "rust": "api-keys.claude.0.keys.0.api-key",
-          "value": "0x1F"
-        },
-        {
-          "go": "claude-api-key.0.prefix",
-          "rust": "api-keys.claude.0.prefix",
-          "value": "1.50"
-        },
-        {
-          "go": "claude-api-key.0.headers.X-V",
-          "rust": "api-keys.claude.0.headers.X-V",
-          "value": "1.10"
-        },
-        {
-          "go": "openai-compatibility.0.name",
-          "rust": "api-keys.openai-compatibility.0.name",
-          "value": "2024"
-        },
-        {
-          "go": "openai-compatibility.0.api-key-entries.0.api-key",
-          "rust": "api-keys.openai-compatibility.0.keys.0.api-key",
-          "value": "1e3"
-        },
-        {
-          "go": "oauth-settings.claude.0.name",
-          "rust": "oauth.settings.claude.0.name",
-          "value": "1.50"
-        },
-        {
-          "go": "oauth-settings.claude.0.alias",
-          "rust": "oauth.settings.claude.0.alias",
-          "value": "2.50"
-        }
-      ]
-    },
-    {
       "name": "anchored-key",
-      "yaml": "x: {\u0026k 1.50: v}\noauth:\n  model-alias: {codex: [{name: *k, alias: z}]}\n",
+      "yaml": "x: {&k 1.50: v}\noauth:\n  model-alias: {codex: [{name: *k, alias: z}]}\n",
       "checks": [
         {
           "go": "oauth-model-alias.codex.0.name",

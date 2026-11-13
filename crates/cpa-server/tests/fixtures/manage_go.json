@@ -854,7 +854,7 @@
     },
     {
       "name": "legacy_layout_merge",
-      "yaml": "request-retry: &n 5\nmax-retry-interval: *n\nclaude-api-key:\n  - &c {api-key: fake-l1, priority: 2}\n  - <<: *c\n    api-key: fake-l2\n",
+      "yaml": "routing:\n  retry:\n    request-retry: &n 5\n    max-retry-interval: *n\napi-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - &c {api-key: fake-l1, priority: 2}\n  - name: claude-2\n    keys:\n      - <<: *c\n        api-key: fake-l2\n",
       "error": false,
       "values": {
         "claude": [
@@ -886,11 +886,7 @@
   ],
   "oauth_only": [
     {
-      "yaml": "codex: {disable-codex-cloaking: true}\nws-auth: true\n",
-      "fields": []
-    },
-    {
-      "yaml": "config-version: 8\noauth: {providers: {codex: {disable-codex-cloaking: true, header-defaults: {user-agent: x}, live-media-relay: {enabled: false, ice-servers: []}}, aistudio: {ws-auth: null}, claude: {claude-code: {}}}}\n",
+      "yaml": "config-version: 8\nupstream: {codex: {disable-codex-cloaking: true}}\noauth: {providers: {codex: {header-defaults: {user-agent: x}, live-media-relay: {enabled: false, ice-servers: []}}, aistudio: {ws-auth: null}, claude: {claude-code: {}}}}\n",
       "fields": [
         "codex-header-defaults.user-agent",
         "codex.live-media-relay.enabled",
@@ -899,7 +895,7 @@
       ]
     },
     {
-      "yaml": "codex: {model-level-cooling: true}\noauth: {providers: {codex: {stream-bootstrap-buffering: false}}}\n",
+      "yaml": "upstream:\n  codex:\n    model-level-cooling: true\noauth: {providers: {codex: {stream-bootstrap-buffering: false}}}\n",
       "fields": []
     },
     {
@@ -922,7 +918,7 @@
   "credentials": [
     {
       "name": "credential_inventory_and_edits",
-      "yaml": "remote-management:\n  secret-key: '$HASH'\nauth-dir: $AUTH\nclaude-api-key:\n  - api-key: fake-cfg-key\n    base-url: https://claude.example.invalid\n",
+      "yaml": "oauth:\n  auth-dir: $AUTH\napi-keys:\n  claude:\n  - name: claude-1\n    base-url: https://claude.example.invalid\n    keys:\n      - api-key: fake-cfg-key\nmanagement:\n  secret-key: '$HASH'\n",
       "auth_files": {
         "claude-a.json": "{\"type\":\"claude\",\"email\":\"a@example.invalid\",\"priority\":\"7\",\"note\":\" hi \",\"access_token\":\"fake-at\",\"refresh_token\":\"fake-rt\",\"expired\":\"2099-01-01T00:00:00Z\",\"quota_probe\":{\"kind\":\"fake\"},\"zz\":{\"keep\":[1,2]}}",
         "codex-b.json": "{\"type\":\"codex\",\"id_token\":\"eyJhbGciOiJub25lIn0.eyJlbWFpbCI6ImJAZXhhbXBsZS5pbnZhbGlkIiwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7ImNoYXRncHRfcGxhbl90eXBlIjoicHJvIiwiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjLWZha2UifX0.sig\",\"access_token\":\"fake\",\"websockets\":\"true\",\"request-retry\":3,\"project_id\":\" proj \"}",
@@ -1539,14 +1535,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -1740,14 +1745,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -1947,14 +1961,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2015,14 +2038,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2347,14 +2379,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2414,14 +2455,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2481,14 +2531,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2547,14 +2606,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2612,14 +2680,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2677,14 +2754,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2742,14 +2828,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2807,14 +2902,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2877,14 +2981,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -2946,14 +3059,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -3015,14 +3137,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -3084,14 +3215,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -3153,14 +3293,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -3222,14 +3371,23 @@
             "readme.txt": "raw:not json"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "claude-api-key": [
-              {
-                "api-key": "fake-cfg-key",
-                "base-url": "https://claude.example.invalid"
-              }
-            ],
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "api-keys": {
+              "claude": [
+                {
+                  "name": "claude-1",
+                  "base-url": "https://claude.example.invalid",
+                  "keys": [
+                    {
+                      "api-key": "fake-cfg-key"
+                    }
+                  ]
+                }
+              ]
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -17278,7 +17436,7 @@
     },
     {
       "name": "save_bytes",
-      "yaml": "remote-management:\n  secret-key: '$HASH'\nauth-dir: $AUTH\n",
+      "yaml": "oauth:\n  auth-dir: $AUTH\nmanagement:\n  secret-key: '$HASH'\n",
       "auth_files": {
         "raw-codex-blank.json": "{\"type\":\"codex\",\"email\":\"d@example.invalid\",\"access_token\":\"\",\"note\":\"x\"}",
         "raw-codex.json": "{\"type\":\"codex\",\"email\":\"c@example.invalid\",\"refresh_token\":\"fake-rt\",\"access_token\":\"fake-at\",\"account_id\":\"acc\",\"note\":\"x\"}",
@@ -17359,8 +17517,10 @@
             "raw-same.json": "{\n  \"type\": \"claude\",\n  \"disabled\": false,\n  \"n\": 1.0\n}\n"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -17427,8 +17587,10 @@
             "raw-same.json": "{\n  \"type\": \"claude\",\n  \"disabled\": false,\n  \"n\": 1.0\n}\n"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -17509,8 +17671,10 @@
             "raw-same.json": "{\n  \"type\": \"claude\",\n  \"disabled\": false,\n  \"n\": 1.0\n}\n"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -17593,8 +17757,10 @@
             "raw-same.json": "{\n  \"type\": \"claude\",\n  \"disabled\": false,\n  \"n\": 1.0\n}\n"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -17678,8 +17844,10 @@
             "raw-same.json": "{\n  \"type\": \"claude\",\n  \"disabled\": false,\n  \"n\": 1.0\n}\n"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -17765,8 +17933,10 @@
             "raw-same.json": "{\n  \"type\": \"claude\",\n  \"disabled\": false,\n  \"n\": 1.0\n}\n"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -17853,8 +18023,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -17940,8 +18112,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18027,8 +18201,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18114,8 +18290,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18201,8 +18379,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18289,8 +18469,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18377,8 +18559,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18464,8 +18648,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18552,8 +18738,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18642,8 +18830,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18732,8 +18922,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18823,8 +19015,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -18913,8 +19107,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -19138,8 +19334,10 @@
             "raw-same.json": "{\"disabled\":true,\"n\":1,\"type\":\"claude\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -19239,8 +19437,10 @@
             "raw-up-codex.json": "{\"access_token\":\"fake-up\",\"disabled\":false,\"email\":\"u@example.invalid\",\"n\":1,\"note\":\"\\u003c\\u0026\\u003e\",\"proxy_url\":\"http://p.example.invalid\",\"type\":\"codex\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -19347,8 +19547,10 @@
             "raw-up-codex.json": "{\"access_token\":\"fake-up\",\"disabled\":false,\"email\":\"u@example.invalid\",\"n\":1,\"note\":\"\\u003c\\u0026\\u003e\",\"proxy_url\":\"http://p.example.invalid\",\"type\":\"codex\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -19462,8 +19664,10 @@
             "raw-up-codex.json": "{\"access_token\":\"fake-up\",\"disabled\":false,\"email\":\"u@example.invalid\",\"n\":1,\"note\":\"\\u003c\\u0026\\u003e\",\"proxy_url\":\"http://p.example.invalid\",\"type\":\"codex\"}"
           },
           "config": {
-            "auth-dir": "/fixture-root/auth",
-            "remote-management": {
+            "oauth": {
+              "auth-dir": "/fixture-root/auth"
+            },
+            "management": {
               "secret-key": "$2a$04$VQTF.hj4KheIEExJKdP4UOV8uSJxFWddGbkggEqkuUeVG3AE5FtFe"
             }
           }
@@ -27188,7 +27392,7 @@
   "routes": [
     {
       "name": "unknown_paths_methods_and_preflight",
-      "yaml": "remote-management:\n  secret-key: '$HASH'\nport: 0\n",
+      "yaml": "server:\n  port: 0\nmanagement:\n  secret-key: '$HASH'\n",
       "steps": [
         {
           "method": "GET",
@@ -27391,7 +27595,7 @@
     },
     {
       "name": "availability_follows_secret_across_reloads",
-      "yaml": "remote-management:\n  allow-remote: false\nport: 0\n",
+      "yaml": "server:\n  port: 0\nmanagement:\n  allow-remote: false\n",
       "steps": [
         {
           "method": "GET",
@@ -27425,7 +27629,7 @@
           }
         },
         {
-          "update": "remote-management:\n  secret-key: '$HASH'\nport: 0\n",
+          "update": "server:\n  port: 0\nmanagement:\n  secret-key: '$HASH'\n",
           "method": "GET",
           "path": "/admin/v1/effective/config",
           "remote": "127.0.0.1:40000",
@@ -27450,7 +27654,7 @@
           }
         },
         {
-          "update": "remote-management:\n  allow-remote: false\nport: 0\n",
+          "update": "server:\n  port: 0\nmanagement:\n  allow-remote: false\n",
           "method": "GET",
           "path": "/admin/v1/effective/config",
           "remote": "127.0.0.1:40000",
@@ -27472,7 +27676,7 @@
     },
     {
       "name": "local_password_only_until_reload",
-      "yaml": "remote-management:\n  allow-remote: false\nport: 0\n",
+      "yaml": "server:\n  port: 0\nmanagement:\n  allow-remote: false\n",
       "local_password": "fake-local",
       "steps": [
         {
@@ -27499,7 +27703,7 @@
           }
         },
         {
-          "update": "remote-management:\n  allow-remote: false\nport: 0\n",
+          "update": "server:\n  port: 0\nmanagement:\n  allow-remote: false\n",
           "method": "GET",
           "path": "/admin/v1/effective/config",
           "remote": "127.0.0.1:40000",
@@ -27521,7 +27725,7 @@
     },
     {
       "name": "env_secret_survives_reload",
-      "yaml": "remote-management:\n  allow-remote: false\nport: 0\n",
+      "yaml": "server:\n  port: 0\nmanagement:\n  allow-remote: false\n",
       "env": "fake-env",
       "steps": [
         {
@@ -27549,7 +27753,7 @@
           }
         },
         {
-          "update": "remote-management:\n  allow-remote: false\nport: 0\n",
+          "update": "server:\n  port: 0\nmanagement:\n  allow-remote: false\n",
           "method": "GET",
           "path": "/admin/v1/effective/config",
           "remote": "203.0.113.1:1",
@@ -32657,7 +32861,7 @@
   "synth": [
     {
       "name": "legacy_claude_and_overrides",
-      "yaml": "\nclaude-api-key:\n  - api-key: \" fake-claude-1 \"\n    base-url: \"https://claude.example.invalid/ \"\n    priority: 3\n    weight: 0\n    prefix: \"/team/\"\n    proxy-url: \" socks5://proxy.example.invalid:1080 \"\n    headers: {X-Extra: \" v \", X-Blank: \" \", \" \": x}\n    excluded-models: [\" Claude-Opus-*\", claude-opus-*, \"\", Haiku]\n    disable-cooling: false\n    request-retry: -1\n    request-scoped-errors:\n      - {status: 400, match: [\"overloaded\"], action: stop}\n    models:\n      - {name: claude-sonnet-4-6, alias: sonnet}\n    rebuild-mid-system-message: true\n    fingerprint-profile: \" CLI \"\n  - api-key: fake-claude-2\n    weight: -4\n    request-retry: 2\n    prefix: a/b\n  - api-key: \"\"\n    base-url: \"\"\n  - api-key: fake-claude-2\n    weight: -4\n    request-retry: 2\n    prefix: a/b\n",
+      "yaml": "\napi-keys:\n  claude:\n  - name: claude-1\n    base-url: \"https://claude.example.invalid/ \"\n    priority: 3\n    prefix: \"/team/\"\n    proxy-url: \" socks5://proxy.example.invalid:1080 \"\n    models:\n      - {name: claude-sonnet-4-6, alias: sonnet}\n    headers: {X-Extra: \" v \", X-Blank: \" \", \" \": x}\n    excluded-models: [\" Claude-Opus-*\", claude-opus-*, \"\", Haiku]\n    disable-cooling: false\n    request-retry: -1\n    request-scoped-errors:\n      - {status: 400, match: [\"overloaded\"], action: stop}\n    keys:\n      - api-key: \" fake-claude-1 \"\n        weight: 0\n        rebuild-mid-system-message: true\n        fingerprint-profile: \" CLI \"\n  - name: claude-2\n    prefix: a/b\n    request-retry: 2\n    keys:\n      - api-key: fake-claude-2\n        weight: -4\n  - name: claude-3\n    base-url: \"\"\n    keys:\n      - api-key: \"\"\n  - name: claude-4\n    prefix: a/b\n    request-retry: 2\n    keys:\n      - api-key: fake-claude-2\n        weight: -4\n",
       "config": [
         {
           "id": "claude:apikey:4cb9b4def9c2",
@@ -32854,7 +33058,7 @@
     },
     {
       "name": "gemini_vertex_compat",
-      "yaml": "\ngemini-api-key:\n  - {api-key: fake-g1, priority: 1}\n  - {api-key: \" fake-g1 \"}\n  - {api-key: \"\", base-url: \"\"}\n  - {api-key: \"\", base-url: \"https://gemini.example.invalid\"}\ninteractions-api-key:\n  - {api-key: fake-i1, excluded-models: [X]}\nvertex-api-key:\n  - {api-key: \"\", base-url: https://v.example.invalid}\n  - api-key: fake-v1\n    base-url: https://v.example.invalid\n    weight: 3\n    request-retry: 0\n    models: [{name: m1, alias: a1}, {name: m2, alias: \"\"}]\n  - {api-key: fake-v1, base-url: https://v.example.invalid}\nopenai-compatibility:\n  - name: OpenRouter\n    base-url: https://router.example.invalid\n    priority: 2\n    disable-cooling: true\n    request-retry: 1\n    headers: {X-H: v}\n    api-key-entries:\n      - {api-key: fake-or-1, weight: 4, proxy-url: http://p.example.invalid}\n      - {api-key: fake-or-1}\n  - name: nokeys\n    base-url: https://nokeys.example.invalid\n  - name: off\n    disabled: true\n    base-url: https://off.example.invalid\n    api-key-entries: [{api-key: fake-off}]\n  - name: nobase\n    api-key-entries: [{api-key: fake-nobase}]\n  - name: openai-compatible-pre\n    base-url: https://pre.example.invalid\n    api-key-entries: [{api-key: fake-pre}]\n",
+      "yaml": "\napi-keys:\n  gemini:\n  - name: gemini-1\n    priority: 1\n    keys:\n      - api-key: fake-g1\n  - name: gemini-2\n    keys:\n      - api-key: \" fake-g1 \"\n  - name: gemini-3\n    base-url: \"\"\n    keys:\n      - api-key: \"\"\n  - name: gemini-4\n    base-url: \"https://gemini.example.invalid\"\n    keys:\n      - api-key: \"\"\n  interactions:\n  - name: interactions-1\n    excluded-models: [X]\n    keys:\n      - api-key: fake-i1\n  vertex:\n  - name: vertex-1\n    base-url: https://v.example.invalid\n    keys:\n      - api-key: \"\"\n  - name: vertex-2\n    base-url: https://v.example.invalid\n    models: [{name: m1, alias: a1}, {name: m2, alias: \"\"}]\n    request-retry: 0\n    keys:\n      - api-key: fake-v1\n        weight: 3\n  - name: vertex-3\n    base-url: https://v.example.invalid\n    keys:\n      - api-key: fake-v1\n  openai-compatibility:\n  - name: OpenRouter\n    base-url: https://router.example.invalid\n    priority: 2\n    disable-cooling: true\n    request-retry: 1\n    headers: {X-H: v}\n    keys:\n      - {api-key: fake-or-1, weight: 4, proxy-url: http://p.example.invalid}\n      - {api-key: fake-or-1}\n  - name: nokeys\n    base-url: https://nokeys.example.invalid\n    keys: []\n  - name: off\n    disabled: true\n    base-url: https://off.example.invalid\n    keys: [{api-key: fake-off}]\n  - name: nobase\n    keys: [{api-key: fake-nobase}]\n  - name: openai-compatible-pre\n    base-url: https://pre.example.invalid\n    keys: [{api-key: fake-pre}]\n",
       "config": [
         {
           "id": "gemini:apikey:62813ab94c9d",
@@ -33024,7 +33228,7 @@
     },
     {
       "name": "oauth_files",
-      "yaml": "\nauth-dir: ./auth\noauth-excluded-models:\n  Claude: [\" Opus-X \", opus-x, sonnet-y]\n",
+      "yaml": "\noauth:\n  auth-dir: ./auth\n  excluded-models:\n    Claude: [\" Opus-X \", opus-x, sonnet-y]\n",
       "files": {
         "broken.json": "{\"type\":",
         "claude-a.json": "{\"type\":\"claude\",\"email\":\"a@example.invalid\",\"priority\":\"7\",\"weight\":2,\"excluded_models\":[\"Haiku-Z\"],\"prefix\":\"/p/\",\"proxy_url\":\"http://p.example.invalid\",\"note\":\" hi \",\"disabled\":true}",
@@ -33121,7 +33325,7 @@
     },
     {
       "name": "kimi_files",
-      "yaml": "auth-dir: ./auth\n",
+      "yaml": "oauth:\n  auth-dir: ./auth\n",
       "files": {
         "k1-plain.json": "{\"type\":\"kimi\"}",
         "k10-v6.json": "{\"type\":\"kimi-ai\",\"base_url\":\"https://[::1]:8080/x\",\"domain\":\"sub.kimi.com\"}",
@@ -33442,7 +33646,7 @@
     },
     {
       "name": "invalid_weight",
-      "yaml": "claude-api-key:\n  - {api-key: fake, weight: 1000001}\n",
+      "yaml": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: fake\n        weight: 1000001\n",
       "error": "claude-api-key[0].weight: weight must not exceed 1000000",
       "config": null,
       "file": null
@@ -33450,27 +33654,27 @@
   ],
   "load_errors": [
     {
-      "yaml": "trusted-proxies: ['']",
+      "yaml": "server:\n  trusted-proxies: ['']",
       "error": "invalid trusted-proxies entry \"\": expected an IP address or CIDR"
     },
     {
-      "yaml": "trusted-proxies: [' 127.0.0.1']",
+      "yaml": "server:\n  trusted-proxies: [' 127.0.0.1']",
       "error": "invalid trusted-proxies entry \" 127.0.0.1\": expected an IP address or CIDR"
     },
     {
-      "yaml": "trusted-proxies: [nonsense]",
+      "yaml": "server:\n  trusted-proxies: [nonsense]",
       "error": "invalid trusted-proxies entry \"nonsense\": invalid CIDR address: nonsense"
     },
     {
-      "yaml": "trusted-proxies: [10.0.0.0/33]",
+      "yaml": "server:\n  trusted-proxies: [10.0.0.0/33]",
       "error": "invalid trusted-proxies entry \"10.0.0.0/33\": invalid CIDR address: 10.0.0.0/33"
     },
     {
-      "yaml": "trusted-proxies: ['::1/129']",
+      "yaml": "server:\n  trusted-proxies: ['::1/129']",
       "error": "invalid trusted-proxies entry \"::1/129\": invalid CIDR address: ::1/129"
     },
     {
-      "yaml": "trusted-proxies: [fe80::1%eth0]",
+      "yaml": "server:\n  trusted-proxies: [fe80::1%eth0]",
       "error": "invalid trusted-proxies entry \"fe80::1%eth0\": invalid CIDR address: fe80::1%eth0"
     },
     {
@@ -33478,7 +33682,7 @@
       "error": ""
     },
     {
-      "yaml": "trusted-proxies: [01.2.3.4]",
+      "yaml": "server:\n  trusted-proxies: [01.2.3.4]",
       "error": "invalid trusted-proxies entry \"01.2.3.4\": invalid CIDR address: 01.2.3.4"
     },
     {
@@ -33534,7 +33738,7 @@
       "error": ""
     },
     {
-      "yaml": "codex: {live-media-relay: {enabled: true, max-sessions: -1}}",
+      "yaml": "oauth:\n  providers:\n    codex:\n      live-media-relay: {enabled: true, max-sessions: -1}",
       "error": "codex.live-media-relay.max-sessions must not be negative"
     },
     {

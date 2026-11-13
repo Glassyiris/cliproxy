@@ -343,9 +343,33 @@ pub struct ConfigModel {
     pub is_compat: bool,
     pub support_configuration_update: bool,
     pub image: bool,
+    #[serde(deserialize_with = "config_thinking")]
     pub thinking: Option<ThinkingSupport>,
     pub input_modalities: Vec<String>,
     pub output_modalities: Vec<String>,
+}
+
+/// `models[].thinking` as config YAML spells it (`zero-allowed`, `dynamic-allowed`,
+/// `disable-type`).
+fn config_thinking<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Option<ThinkingSupport>, D::Error> {
+    #[derive(Default, Deserialize)]
+    #[serde(default, rename_all = "kebab-case")]
+    struct Thinking {
+        min: i64,
+        max: i64,
+        zero_allowed: bool,
+        dynamic_allowed: bool,
+        disable_type: String,
+        levels: Vec<String>,
+    }
+    Ok(Option::<Thinking>::deserialize(de)?.map(|t| ThinkingSupport {
+        min: t.min,
+        max: t.max,
+        zero_allowed: t.zero_allowed,
+        dynamic_allowed: t.dynamic_allowed,
+        disable_type: t.disable_type,
+        levels: t.levels,
+    }))
 }
 
 /// Configured models carried on a config-backed credential: full entries under
@@ -1994,7 +2018,7 @@ mod tests {
     fn exclusions_match_with_go_lowercasing() {
         for excluded in ["MİNİ", "mini"] {
             let cfg = Config::parse(&format!(
-                "claude-api-key:\n  - api-key: k\n    models: [{{name: MİNİ}}, {{name: keep}}]\n    excluded-models: [{excluded}]\n"
+                "api-keys:\n  claude:\n  - name: claude-1\n    models: [{{name: MİNİ}}, {{name: keep}}]\n    excluded-models: [{excluded}]\n    keys:\n      - api-key: k\n"
             ))
             .unwrap();
             let creds: Vec<_> = crate::config::credentials::from_config(&cfg)
@@ -2045,7 +2069,7 @@ mod tests {
     #[test]
     fn compat_provider_lookup_lowercases_like_go() {
         let cfg = Config::parse(
-            "openai-compatibility:\n  - name: HİGH\n    base-url: http://127.0.0.1:9\n    api-key-entries: [{api-key: k}]\n    models: [{name: m1}]\n",
+            "api-keys:\n  openai-compatibility:\n  - name: HİGH\n    base-url: http://127.0.0.1:9\n    models: [{name: m1}]\n    keys: [{api-key: k}]\n",
         )
         .unwrap();
         let creds: Vec<_> = crate::config::credentials::from_config(&cfg)
@@ -2070,7 +2094,7 @@ mod tests {
     #[test]
     fn api_key_aliases_use_lowercase_keys_before_fold() {
         let cfg = Config::parse(
-            "claude-api-key:\n  - api-key: k\n    models: [{name: one, alias: σ}, {name: two, alias: ς}]\n",
+            "api-keys:\n  claude:\n  - name: claude-1\n    models: [{name: one, alias: σ}, {name: two, alias: ς}]\n    keys:\n      - api-key: k\n",
         )
         .unwrap();
         let c = crate::config::credentials::from_config(&cfg).remove(0);
@@ -2080,14 +2104,14 @@ mod tests {
         assert_eq!(upstream("Σ(high)"), ["one(high)"]);
 
         // go_lower("İ") is i, which EqualFold("i", "İ") does not match.
-        let cfg = Config::parse("claude-api-key:\n  - api-key: k\n    models: [{name: one, alias: i}]\n").unwrap();
+        let cfg = Config::parse("api-keys:\n  claude:\n  - name: claude-1\n    models: [{name: one, alias: i}]\n    keys:\n      - api-key: k\n").unwrap();
         let c = crate::config::credentials::from_config(&cfg).remove(0);
         assert_eq!(execution_models(&HashMap::new(), &c, "İ(high)").0, ["one(high)"]);
 
         // An OpenAI-compatible API key falls back to the table when the EqualFold pool is
         // empty.
         let cfg = Config::parse(
-            "openai-compatibility:\n  - name: g\n    base-url: http://127.0.0.1:9\n    api-key-entries: [{api-key: k}]\n    models: [{name: one, alias: i}]\n",
+            "api-keys:\n  openai-compatibility:\n  - name: g\n    base-url: http://127.0.0.1:9\n    models: [{name: one, alias: i}]\n    keys: [{api-key: k}]\n",
         )
         .unwrap();
         let c = crate::config::credentials::from_config(&cfg).remove(0);
@@ -2096,14 +2120,14 @@ mod tests {
         // A single-entry EqualFold pool still wins over the table, which maps σ to the
         // name σ here.
         let cfg = Config::parse(
-            "openai-compatibility:\n  - name: g\n    base-url: http://127.0.0.1:9\n    api-key-entries: [{api-key: k}]\n    models: [{name: σ, alias: x}, {name: one, alias: ς}]\n",
+            "api-keys:\n  openai-compatibility:\n  - name: g\n    base-url: http://127.0.0.1:9\n    models: [{name: σ, alias: x}, {name: one, alias: ς}]\n    keys: [{api-key: k}]\n",
         )
         .unwrap();
         let c = crate::config::credentials::from_config(&cfg).remove(0);
         assert_eq!(execution_models(&HashMap::new(), &c, "σ").0, ["one"]);
         // A keyless compatible credential has no API-key table.
         let cfg = Config::parse(
-            "openai-compatibility:\n  - name: g\n    base-url: http://127.0.0.1:9\n    models: [{name: one, alias: i}]\n",
+            "api-keys:\n  openai-compatibility:\n  - name: g\n    base-url: http://127.0.0.1:9\n    models: [{name: one, alias: i}]\n    keys: []\n",
         )
         .unwrap();
         let c = crate::config::credentials::from_config(&cfg).remove(0);
@@ -2149,6 +2173,20 @@ mod tests {
             &Config::parse("oauth:\n  model-alias:\n    claude:\n      - {name: one, alias: σ}\n").unwrap(),
         );
         assert_eq!(execution_models(&only_sigma, &global, "ς").0, ["ς"]);
+    }
+
+    /// Config YAML spells thinking support in kebab case; the catalog spelling is not a
+    /// second config spelling (the strict write check rejects it as an unknown setting).
+    #[test]
+    fn config_thinking_reads_the_kebab_spelling_only() {
+        let thinking = |yaml: &str| serde_yaml_ng::from_str::<ConfigModel>(yaml).unwrap().thinking.unwrap();
+        let t = thinking(
+            "{name: m, thinking: {min: 1, zero-allowed: true, dynamic-allowed: true, disable-type: between_tools}}",
+        );
+        assert!(t.zero_allowed && t.dynamic_allowed && t.min == 1);
+        assert_eq!(t.disable_type, "between_tools");
+        let t = thinking("{name: m, thinking: {zero_allowed: true, dynamic_allowed: true, disable_type: x}}");
+        assert_eq!(t, ThinkingSupport::default());
     }
 
     #[test]

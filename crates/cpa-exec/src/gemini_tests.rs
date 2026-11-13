@@ -1033,10 +1033,11 @@ async fn payload_rules_run_after_the_leading_user_turn() {
     let mock = Mock::start(&reply).await;
     let cfg = Config::parse(
         r#"
-payload:
-  override:
-    - models: [{name: gemini-3.7-flash, protocol: gemini}]
-      params: {"contents.0.parts.0.text": payload override}
+requests:
+  payload:
+    override:
+      - models: [{name: gemini-3.7-flash, protocol: gemini}]
+        params: {"contents.0.parts.0.text": payload override}
 "#,
     )
     .unwrap();
@@ -1079,10 +1080,11 @@ async fn count_refuses_when_the_original_does_not_translate() {
     let mock = Mock::start(&reply).await;
     let cfg = Config::parse(
         r#"
-payload:
-  default:
-    - models: [{name: gemini-3.7-flash, protocol: gemini}]
-      params: {"generationConfig.temperature": 0.9}
+requests:
+  payload:
+    default:
+      - models: [{name: gemini-3.7-flash, protocol: gemini}]
+        params: {"generationConfig.temperature": 0.9}
 "#,
     )
     .unwrap();

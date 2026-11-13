@@ -184,7 +184,7 @@
     },
     {
       "name": "apikey_stream_cloak_disabled_headers",
-      "config": "codex:\n  disable-codex-cloaking: true\n",
+      "config": "upstream:\n  codex:\n    disable-codex-cloaking: true\n",
       "attributes": {
         "api_key": "sk-FAKE",
         "header:X-Custom": "fixed",
@@ -919,7 +919,7 @@
     },
     {
       "name": "apikey_payload_rules_and_session_headers",
-      "config": "payload:\n  override:\n    - models:\n        - name: gpt-5.4\n      params:\n        reasoning.effort: low\n  default:\n    - models:\n        - name: \"gpt-*\"\n      params:\n        text.verbosity: low\n        reasoning.effort: minimal\n  filter:\n    - models:\n        - name: gpt-5.4\n      params:\n        - tool_choice\n",
+      "config": "requests:\n  payload:\n    override:\n      - models:\n          - name: gpt-5.4\n        params:\n          reasoning.effort: low\n    default:\n      - models:\n          - name: \"gpt-*\"\n        params:\n          text.verbosity: low\n          reasoning.effort: minimal\n    filter:\n      - models:\n          - name: gpt-5.4\n        params:\n          - tool_choice\n",
       "attributes": {
         "api_key": "sk-FAKE",
         "header:X-Combo": "s=$cpa-session-id;x",
@@ -1053,7 +1053,7 @@
     },
     {
       "name": "oauth_bootstrap_overload_failover",
-      "config": "codex:\n  stream-bootstrap-buffering: true\n",
+      "config": "upstream:\n  codex:\n    stream-bootstrap-buffering: true\n",
       "attributes": {},
       "metadata": {
         "access_token": "at-FAKE",
@@ -1116,7 +1116,7 @@
     },
     {
       "name": "oauth_bootstrap_time_budget_spent",
-      "config": "codex:\n  stream-bootstrap-buffering: true\n  stream-bootstrap-timeout: 1ns\n",
+      "config": "upstream:\n  codex:\n    stream-bootstrap-buffering: true\n    stream-bootstrap-timeout: 1ns\n",
       "attributes": {},
       "metadata": {
         "access_token": "at-FAKE",
@@ -1443,7 +1443,7 @@
     },
     {
       "name": "apikey_claude_compat_from_config",
-      "config": "codex-api-key:\n  - api-key: sk-FAKE\n    base-url: \"{{base_url}}\"\n    models:\n      - name: gpt-5.4\n        is-compat: true\n",
+      "config": "api-keys:\n  codex:\n  - name: codex-1\n    base-url: \"{{base_url}}\"\n    models:\n      - name: gpt-5.4\n        is-compat: true\n    keys:\n      - api-key: sk-FAKE\n",
       "attributes": {
         "api_key": "sk-FAKE"
       },
@@ -1816,7 +1816,7 @@
     },
     {
       "name": "oauth_grok_keepalive_bootstrap",
-      "config": "codex:\n  stream-bootstrap-buffering: true\n",
+      "config": "upstream:\n  codex:\n    stream-bootstrap-buffering: true\n",
       "attributes": {},
       "metadata": {
         "access_token": "at-FAKE",
@@ -1887,7 +1887,7 @@
     },
     {
       "name": "oauth_bootstrap_holds_then_releases",
-      "config": "codex:\n  stream-bootstrap-buffering: true\n",
+      "config": "upstream:\n  codex:\n    stream-bootstrap-buffering: true\n",
       "attributes": {},
       "metadata": {
         "access_token": "at-FAKE",
@@ -2138,7 +2138,7 @@
     },
     {
       "name": "tool_edit_json",
-      "config": "gpt-image-2-base-model: gpt-5.5\n",
+      "config": "multimedia:\n  gpt-image-2-base-model: gpt-5.5\n",
       "attributes": {},
       "metadata": {
         "access_token": "at-FAKE",
@@ -2723,7 +2723,7 @@
     },
     {
       "name": "tool_generation_uncloaked_client_ua",
-      "config": "codex:\n  disable-codex-cloaking: true\n",
+      "config": "upstream:\n  codex:\n    disable-codex-cloaking: true\n",
       "attributes": {},
       "metadata": {
         "access_token": "at-FAKE",
@@ -2787,7 +2787,7 @@
     },
     {
       "name": "direct_generation_uncloaked_drops_client_ua",
-      "config": "codex:\n  disable-codex-cloaking: true\n",
+      "config": "upstream:\n  codex:\n    disable-codex-cloaking: true\n",
       "attributes": {},
       "metadata": {
         "access_token": "at-FAKE",

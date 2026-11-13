@@ -376,7 +376,7 @@ impl Management {
                     crate::config_store::CommitError::invalid(format!("config is not YAML: {e}"))
                 };
                 let yaml = serde_yaml_ng::to_value(&*json).map_err(|e| invalid(&e))?;
-                let mut doc = ConfigDocument::unmigrated(yaml);
+                let mut doc = ConfigDocument::from_value(yaml);
                 if let Err(e) = edit(&mut doc) {
                     failed = Some(e);
                     return Err(crate::config_store::CommitError::invalid("edit refused"));

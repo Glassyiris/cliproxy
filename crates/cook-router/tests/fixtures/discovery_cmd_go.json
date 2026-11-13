@@ -40,14 +40,14 @@
         "eth0",
         "wl*"
       ],
-      "yaml": "discovery:\n  interfaces:\n    include: [\u0026i !!binary ZXRoMA==, wl*]\n    exclude: [!!binary ZG9ja2VyMA==, *i]\n"
+      "yaml": "discovery:\n  interfaces:\n    include: [&i !!binary ZXRoMA==, wl*]\n    exclude: [!!binary ZG9ja2VyMA==, *i]\n"
     },
     {
       "exclude": [
         "eth0"
       ],
       "include": null,
-      "yaml": "discovery:\n  interfaces:\n    \u003c\u003c: {exclude: [eth0]}\n"
+      "yaml": "discovery:\n  interfaces:\n    <<: {exclude: [eth0]}\n"
     },
     {
       "exclude": [
@@ -56,7 +56,7 @@
       "include": [
         "wl*"
       ],
-      "yaml": "discovery:\n  interfaces:\n    \u003c\u003c: {exclude: [!!binary ZXRoMA==]}\n    include: [wl*]\n"
+      "yaml": "discovery:\n  interfaces:\n    <<: {exclude: [!!binary ZXRoMA==]}\n    include: [wl*]\n"
     },
     {
       "exclude": [
@@ -65,7 +65,7 @@
       "include": [
         "c"
       ],
-      "yaml": "discovery:\n  interfaces:\n    \u003c\u003c: [{exclude: [a], include: [x]}, {exclude: [b]}]\n    include: [c]\n"
+      "yaml": "discovery:\n  interfaces:\n    <<: [{exclude: [a], include: [x]}, {exclude: [b]}]\n    include: [c]\n"
     },
     {
       "exclude": null,
@@ -84,12 +84,12 @@
       "include": [
         "wl*"
       ],
-      "yaml": "discovery:\n  interfaces:\n    '\u003c\u003c': {exclude: [eth0]}\n    include: [wl*]\n"
+      "yaml": "discovery:\n  interfaces:\n    '<<': {exclude: [eth0]}\n    include: [wl*]\n"
     },
     {
       "exclude": null,
       "include": null,
-      "yaml": "seq: \u0026s [{exclude: [eth0]}]\ndiscovery:\n  interfaces:\n    \u003c\u003c: *s\n    include: [wl*]\n"
+      "yaml": "seq: &s [{exclude: [eth0]}]\ndiscovery:\n  interfaces:\n    <<: *s\n    include: [wl*]\n"
     }
   ],
   "interface_lists": [

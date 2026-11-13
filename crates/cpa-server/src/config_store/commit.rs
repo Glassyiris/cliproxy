@@ -73,7 +73,6 @@ impl ConfigStore {
             for op in ops {
                 apply(&mut next, op)?;
             }
-            resources::preserve_scope(current, &mut next);
             Ok(next)
         })
     }
@@ -287,20 +286,9 @@ fn empty_like(v: &Json) -> bool {
 fn apply(next: &mut Vec<Resource>, op: &Op) -> Result<(), CommitError> {
     let position = |next: &[Resource], kind: Kind, id: &str| next.iter().position(|r| r.kind == kind && r.id == id);
     match op {
-        Op::Put { kind, id, spec, .. }
-        | Op::Patch {
-            kind, id, patch: spec, ..
-        } if kind == "setting" && id == resources::PROVENANCE
-            || kind == "plugin" && spec.get(resources::RAW_YAML).is_some() =>
+        Op::Put { kind, spec, .. } | Op::Patch { kind, patch: spec, .. }
+            if kind == "plugin" && spec.get(resources::RAW_YAML).is_some() =>
         {
-            return Err(CommitError::new(
-                400,
-                "read_only_field",
-                None,
-                "reserved config metadata",
-            ));
-        }
-        Op::Delete { kind, id, .. } if kind == "setting" && id == resources::PROVENANCE => {
             return Err(CommitError::new(
                 400,
                 "read_only_field",

@@ -74,7 +74,7 @@ fn auth_dir_line() -> String {
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("cpa-gemini-routes-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    format!("auth-dir: {}\n", dir.display())
+    format!("oauth:\n  auth-dir: {}\n", dir.display())
 }
 
 /// The router with Gemini and Interactions keys whose base URL is `up`.
@@ -506,7 +506,7 @@ async fn deeply_nested_body_skips_prefix_matching() {
     let auth_dir = std::env::temp_dir().join(format!("cpa-gemini-deep-auths-{}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
     let config = Config::parse(&format!(
-        "auth-dir: {}\naccess:\n  api-keys: [client-key]\nrouting:\n  session-affinity: true\napi-keys:\n  gemini:\n    - base-url: {up}/\n      headers:\n        X-Session: \"s-$CPA-SESSION-ID\"\n      models:\n        - name: gemini-2.5-flash\n          alias: flash\n      keys:\n        - api-key: AIza-fake-upstream\n",
+        "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key]\nrouting:\n  session-affinity: true\napi-keys:\n  gemini:\n    - base-url: {up}/\n      headers:\n        X-Session: \"s-$CPA-SESSION-ID\"\n      models:\n        - name: gemini-2.5-flash\n          alias: flash\n      keys:\n        - api-key: AIza-fake-upstream\n",
         auth_dir.display()
     ))
     .unwrap();
@@ -558,7 +558,13 @@ async fn vertex_openapi_refused_url_cools_the_model_without_retry_rounds() {
         serde_json::from_str(include_str!("../../cpa-exec/tests/fixtures/vertex_go.json")).unwrap();
     let auth_dir = auth_dir_line();
     let port = up.rsplit(':').next().unwrap().to_owned();
-    let dir = auth_dir.trim().trim_start_matches("auth-dir: ").to_owned();
+    let dir = auth_dir
+        .lines()
+        .nth(1)
+        .unwrap()
+        .trim()
+        .trim_start_matches("auth-dir: ")
+        .to_owned();
     let file = serde_json::json!({
         "type": "vertex",
         "project_id": "proj-1",

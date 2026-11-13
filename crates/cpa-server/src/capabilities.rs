@@ -504,7 +504,7 @@ mod tests {
         let out: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(out["thinking"], serde_json::json!({"type": "disabled"}), "{out}");
 
-        let explicit = support("levels: [low]\ndisable-type: disabled");
+        let explicit = support("levels: [low]\ndisable_type: disabled");
         let explicit = resolve_model_info("claude-sonnet-5-5", "claude", Some(explicit));
         assert_eq!(explicit.thinking.unwrap().disable_type, "disabled");
         let other = resolve_model_info("claude-opus-5", "claude", Some(configured.clone()));

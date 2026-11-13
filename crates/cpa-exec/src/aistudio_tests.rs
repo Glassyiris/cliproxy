@@ -327,16 +327,17 @@ fn colon_spacing_matches_go_rules() {
 fn payload_rules_run_after_the_cleanup() {
     let cfg = Config::parse(
         r#"
-payload:
-  override:
-    - models: [{name: "*"}]
-      params:
-        "generationConfig.maxOutputTokens": 900000
-        "generationConfig.thinkingConfig.thinkingLevel": low
-        "safetySettings": [{category: configured}]
-  filter:
-    - models: [{name: "*"}]
-      params: ["contents"]
+requests:
+  payload:
+    override:
+      - models: [{name: "*"}]
+        params:
+          "generationConfig.maxOutputTokens": 900000
+          "generationConfig.thinkingConfig.thinkingLevel": low
+          "safetySettings": [{category: configured}]
+    filter:
+      - models: [{name: "*"}]
+        params: ["contents"]
 "#,
     )
     .unwrap();

@@ -876,7 +876,7 @@ mod tests {
             google: Default::default(),
         };
         let dir = std::env::temp_dir().join(format!("cpa-updater-{}", uuid::Uuid::new_v4()));
-        let cfg = cpa_core::config::Config::parse(&format!("auth-dir: {}\n", dir.display())).unwrap();
+        let cfg = cpa_core::config::Config::parse(&format!("oauth:\n  auth-dir: {}\n", dir.display())).unwrap();
         let rt = Arc::new(crate::testing::runtime(cfg, Vec::new(), executors));
         start(&rt);
         let _ = crate::codex_models::response(&rt, "0.130.0");

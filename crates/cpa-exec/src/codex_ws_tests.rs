@@ -499,7 +499,7 @@ async fn bootstrap_overload_fails_over_without_disconnect_notice() {
     let (_up, url) = upstream(vec![Act::Send(vec![CREATED, FAILED])]).await;
     let executor = CodexExecutor::new().unwrap();
     // Legacy top-level spelling: global, so it applies to this API key too.
-    let cfg = Config::parse("codex:\n  stream-bootstrap-buffering: true\n").unwrap();
+    let cfg = Config::parse("upstream:\n  codex:\n    stream-bootstrap-buffering: true\n").unwrap();
     let error = executor
         .execute_in_session(&credential(&url), request(BODY), &cfg, &session(false))
         .await
@@ -704,11 +704,6 @@ async fn handshake_usage_limit_honours_model_level_cooling() {
     const LIMIT: &str = r#"{"error":{"type":"usage_limit_reached","message":"limit","resets_in_seconds":3600}}"#;
     for (yaml, scope) in [
         ("{}\n", FailureScope::Credential),
-        ("codex:\n  model-level-cooling: true\n", FailureScope::Model),
-        (
-            "oauth:\n  providers:\n    codex:\n      model-level-cooling: true\n",
-            FailureScope::Model,
-        ),
         (
             "upstream:\n  codex:\n    model-level-cooling: true\n",
             FailureScope::Model,
@@ -893,7 +888,7 @@ async fn duplex_delivers_upstream_events_while_a_write_is_blocked() {
     let (frames, input) = tokio::sync::mpsc::channel(4);
     let input = Arc::new(tokio::sync::Mutex::new(input));
     executor.attach_steering("conn-1", SteeringInput::new(input, |_| true));
-    let cfg = Config::parse("codex:\n  response-steering: true\n").unwrap();
+    let cfg = Config::parse("upstream:\n  codex:\n    response-steering: true\n").unwrap();
     let response = executor
         .execute_in_session(&credential(&url), request(BODY), &cfg, &session(false))
         .await

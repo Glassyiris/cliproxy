@@ -205,8 +205,8 @@ func TestZZDiscoveryFixture(t *testing.T) {
 	// BuildServiceSpec errors that do not depend on host interfaces.
 	var specErrors []strCase
 	for _, yamlText := range []string{
-		"discovery:\n  enabled: true\n  service-type: _bad\n",
-		"discovery:\n  enabled: true\n  interfaces:\n    include: [definitely-missing0]\n",
+		"server:\n  discovery:\n    enabled: true\n    service-type: _bad\n",
+		"server:\n  discovery:\n    enabled: true\n    interfaces:\n      include: [definitely-missing0]\n",
 	} {
 		cfg, errParse := config.ParseConfigBytes([]byte(yamlText))
 		if errParse != nil {
@@ -215,7 +215,7 @@ func TestZZDiscoveryFixture(t *testing.T) {
 		_, errSpec := BuildServiceSpec(cfg, 8317, false)
 		specErrors = append(specErrors, strCase{In: yamlText, Out: errText(errSpec)})
 	}
-	cfg, _ := config.ParseConfigBytes([]byte("discovery:\n  enabled: true\n"))
+	cfg, _ := config.ParseConfigBytes([]byte("server:\n  discovery:\n    enabled: true\n"))
 	_, errPort := BuildServiceSpec(cfg, 0, false)
 	specErrors = append(specErrors, strCase{In: "port 0", Out: errText(errPort)})
 	out["spec_errors"] = specErrors

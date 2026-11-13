@@ -1310,13 +1310,14 @@ async fn a_removal_during_a_turn_keeps_the_replacement_sessions_ids() {
 fn request_frame_runs_the_payload_rules_last() {
     let cfg = Config::parse(
         r#"
-payload:
-  override:
-    - models: [{name: "*"}]
-      params: {store: false, instructions: configured}
-  filter:
-    - models: [{name: "*"}]
-      params: ["input.0", "previous_response_id", "type"]
+requests:
+  payload:
+    override:
+      - models: [{name: "*"}]
+        params: {store: false, instructions: configured}
+    filter:
+      - models: [{name: "*"}]
+        params: ["input.0", "previous_response_id", "type"]
 "#,
     )
     .unwrap();

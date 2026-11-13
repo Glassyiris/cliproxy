@@ -108,8 +108,14 @@ async fn proxy_with(
     bound: &str,
 ) -> (String, Arc<cpa_server::Runtime>) {
     let yaml = format!(
-        "api-keys: [client-key]\nauth-dir: {dir}\nrouting:\n  cooldown:\n    \
-         save-cooldown-status: {save}\n    max-trusted-cooldown: \"{bound}\"\n",
+        "access:\n\
+         \x20 api-keys: [client-key]\n\
+         oauth:\n\
+         \x20 auth-dir: {dir}\n\
+         routing:\n\
+         \x20 cooldown:\n\
+         \x20   save-cooldown-status: {save}\n\
+         \x20   max-trusted-cooldown: \"{bound}\"\n",
         dir = auth_dir.display(),
     );
     // The private legacy credential is imported once into the runtime's SQLite database.

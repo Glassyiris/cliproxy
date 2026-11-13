@@ -9,7 +9,7 @@
   },
   "request": {
     "body": "{\"model\":\"kimi-k3\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"temperature\":0.3}",
-    "config": "payload:\n  override:\n    - models: [{name: \"kimi-*\"}]\n      params: {temperature: 0.3}\n",
+    "config": "requests:\n  payload:\n    override:\n      - models: [{name: \"kimi-*\"}]\n        params: {temperature: 0.3}\n",
     "model": "kimi-k3",
     "source": "openai",
     "stream": false

@@ -77,18 +77,14 @@ fn replays_go_translation_and_optimization() {
     assert_eq!((translated, optimized), (80, 8));
 }
 
-/// Orphan delegation is a shared `upstream.codex` setting (Go 52d5507d): API keys
-/// read it from every spelling, the historical `oauth.providers.codex` one included.
+/// Orphan delegation is a shared `upstream.codex` setting (Go 52d5507d): API keys read it.
 #[test]
 fn orphan_delegation_is_shared_with_api_keys() {
-    for yaml in [
-        "upstream:\n  codex:\n    orphan-delegation-compatibility: true\n",
-        "oauth:\n  providers:\n    codex:\n      orphan-delegation-compatibility: true\n",
-        "codex:\n  orphan-delegation-compatibility: true\n",
-    ] {
-        let cfg = Config::parse(&format!("client:\n  codex:\n    optimize-multi-agent-v2: true\n{yaml}")).unwrap();
-        assert!(Settings::from_config(&cfg).orphan_delegation, "{yaml}");
-        let api_key = Settings::from_config(&cfg.for_api_key());
-        assert!(api_key.orphan_delegation && api_key.optimize_multi_agent_v2, "{yaml}");
-    }
+    let cfg = Config::parse(
+        "client:\n  codex:\n    optimize-multi-agent-v2: true\nupstream:\n  codex:\n    orphan-delegation-compatibility: true\n",
+    )
+    .unwrap();
+    assert!(Settings::from_config(&cfg).orphan_delegation);
+    let api_key = Settings::from_config(&cfg.for_api_key());
+    assert!(api_key.orphan_delegation && api_key.optimize_multi_agent_v2);
 }

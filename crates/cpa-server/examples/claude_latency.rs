@@ -635,7 +635,7 @@ fn main() {
     let dir = std::env::temp_dir().join(format!("cpa-latency-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut yaml = format!(
-        "auth-dir: {:?}\napi-keys:\n  - {KEY}\nrequest-retry: 0\n",
+        "oauth:\n  auth-dir: {:?}\naccess:\n  api-keys:\n    - {KEY}\nrouting:\n  retry:\n    request-retry: 0\n",
         dir.to_string_lossy()
     );
     if let Some(value) = &telemetry {
@@ -660,7 +660,7 @@ fn main() {
         .unwrap();
     } else {
         yaml.push_str(&format!(
-            "claude-api-key:\n  - api-key: sk-ant-api03-FAKE-bench-key\n    base-url: http://{mock_addr}\n    models:\n      - name: {MODEL}\n        alias: {MODEL}\n"
+            "api-keys:\n  claude:\n  - name: claude-1\n    base-url: http://{mock_addr}\n    models:\n      - name: {MODEL}\n        alias: {MODEL}\n    keys:\n      - api-key: sk-ant-api03-FAKE-bench-key\n"
         ));
     }
     let config = cpa_core::config::Config::parse(&yaml).unwrap();

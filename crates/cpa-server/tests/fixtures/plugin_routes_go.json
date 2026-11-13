@@ -93,7 +93,7 @@
     },
     {
       "op": "config",
-      "args": "config-version: 8\nserver:\n  port: 18317\nauth-dir: AUTHDIR\nmanagement:\n  secret-key: $HASH\nplugins:\n  enabled: true\n  dir: PLUGINDIR/./sub/..\n  store-sources:\n    - https://third.example/registry.json\n  store-auth:\n    - match: https://third.example/\n      type: bearer\n      token-env: CPA_STORE_ROUTES_TOKEN\n  configs:\n    recorder-a:\n      enabled: true\n      priority: 5\n      record: RECORDDIR\n      label: a\n      caps: management_api,quota_provider,auth_provider\n      nested:\n        list: [1, two]\n        flag: yes\n    recorder-b:\n      enabled: true\n      record: RECORDDIR\n      label: b\n      caps: management_api\n    recorder-d:\n      enabled: false\n      store:\n        version: 1_bad\n        release-tag: 1.0.0\n    ghost:\n      enabled: true\n",
+      "args": "config-version: 8\nserver:\n  port: 18317\noauth:\n  auth-dir: AUTHDIR\nmanagement:\n  secret-key: $HASH\nplugins:\n  enabled: true\n  dir: PLUGINDIR/./sub/..\n  store-sources:\n    - https://third.example/registry.json\n  store-auth:\n    - match: https://third.example/\n      type: bearer\n      token-env: CPA_STORE_ROUTES_TOKEN\n  configs:\n    recorder-a:\n      enabled: true\n      priority: 5\n      record: RECORDDIR\n      label: a\n      caps: management_api,quota_provider,auth_provider\n      nested:\n        list: [1, two]\n        flag: yes\n    recorder-b:\n      enabled: true\n      record: RECORDDIR\n      label: b\n      caps: management_api\n    recorder-d:\n      enabled: false\n      store:\n        version: 1_bad\n        release-tag: 1.0.0\n    ghost:\n      enabled: true\n",
       "result": null
     },
     {

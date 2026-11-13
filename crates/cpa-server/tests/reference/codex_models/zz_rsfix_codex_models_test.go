@@ -24,13 +24,16 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
 
-const rsfixCodexModelsConfig = `codex-api-key:
-  - api-key: sk-FAKE-codex
+const rsfixCodexModelsConfig = `api-keys:
+  codex:
+  - name: codex-1
     base-url: http://127.0.0.1:1
     models:
       - name: gpt-5.5
-claude-api-key:
-  - api-key: sk-FAKE-claude
+    keys:
+      - api-key: sk-FAKE-codex
+  claude:
+  - name: claude-1
     base-url: http://127.0.0.1:1
     models:
       - name: claude-sonnet-4-6
@@ -40,11 +43,11 @@ claude-api-key:
         alias: opus-think
         thinking:
           levels: [low, high]
-openai-compatibility:
+    keys:
+      - api-key: sk-FAKE-claude
+  openai-compatibility:
   - name: acme
     base-url: http://127.0.0.1:1
-    api-key-entries:
-      - api-key: sk-FAKE-acme
     models:
       - name: acme-vision
         input-modalities: [TEXT, image, audio]
@@ -60,6 +63,8 @@ openai-compatibility:
         input-modalities: [text]
         thinking:
           levels: [low, xhigh]
+    keys:
+      - api-key: sk-FAKE-acme
 client:
   codex:
     optimize-multi-agent-v2: true
@@ -112,9 +117,12 @@ func TestRSFixCodexModels(t *testing.T) {
 
 // A Codex API key without configured models registers the Pro catalog with the
 // gpt-image-* built-ins (WithCodexBuiltins). Records Go's plain /v1/models list.
-const rsfixCodexBuiltinsConfig = `codex-api-key:
-  - api-key: sk-FAKE-codex-builtins
+const rsfixCodexBuiltinsConfig = `api-keys:
+  codex:
+  - name: codex-1
     base-url: http://127.0.0.1:1
+    keys:
+      - api-key: sk-FAKE-codex-builtins
 `
 
 func TestRSFixCodexBuiltins(t *testing.T) {
@@ -162,30 +170,38 @@ func TestRSFixCodexBuiltins(t *testing.T) {
 // upstream.claude.tool-search on (here through its legacy spelling): supports_search_tool
 // stays for a pure Claude model only when every credential serving it supports native
 // tool search for its execution model. Writes codex_tool_search_go.json.
-const rsfixCodexToolSearchConfig = `claude:
-  tool-search: true
-claude-api-key:
-  - api-key: sk-FAKE-claude-origin
+const rsfixCodexToolSearchConfig = `upstream:
+  claude:
+    tool-search: true
+api-keys:
+  claude:
+  - name: claude-1
     models:
       - name: claude-sonnet-4-6
         alias: sonnet-native
       - name: claude-sonnet-4-0
         alias: sonnet-legacy
-  - api-key: sk-FAKE-claude-trusted
+    keys:
+      - api-key: sk-FAKE-claude-origin
+  - name: claude-2
     base-url: http://127.0.0.1:1
-    native-tool-search: true
     models:
       - name: claude-opus-4-6
         alias: opus-trusted
       - name: claude-opus-4-6
         alias: opus-mixed
-  - api-key: sk-FAKE-claude-gateway
+    keys:
+      - api-key: sk-FAKE-claude-trusted
+        native-tool-search: true
+  - name: claude-3
     base-url: http://127.0.0.1:1
     models:
       - name: claude-haiku-4-5
         alias: haiku-gateway
       - name: claude-opus-4-6
         alias: opus-mixed
+    keys:
+      - api-key: sk-FAKE-claude-gateway
 `
 
 func TestRSFixCodexToolSearch(t *testing.T) {

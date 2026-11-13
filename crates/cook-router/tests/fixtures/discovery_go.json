@@ -649,11 +649,11 @@
   ],
   "spec_errors": [
     {
-      "in": "discovery:\n  enabled: true\n  service-type: _bad\n",
+      "in": "server:\n  discovery:\n    enabled: true\n    service-type: _bad\n",
       "out": "discovery: invalid service-type: service type \"_bad\" must end with ._tcp"
     },
     {
-      "in": "discovery:\n  enabled: true\n  interfaces:\n    include: [definitely-missing0]\n",
+      "in": "server:\n  discovery:\n    enabled: true\n    interfaces:\n      include: [definitely-missing0]\n",
       "out": "discovery: no qualified physical interfaces found matching filters (refusing fallback to all interfaces)"
     },
     {

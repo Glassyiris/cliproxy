@@ -437,7 +437,7 @@ mod tests {
         let err = error("server: {tls: {enable: true, cert: ' ', key: k.pem}}\n");
         assert_eq!(err, "failed to start HTTPS server: tls.cert or tls.key is empty");
         // Legacy top-level `tls` maps to server.tls.
-        let err = error("tls: {enable: true, cert: /nonexistent/c.pem, key: /nonexistent/k.pem}\n");
+        let err = error("server:\n  tls: {enable: true, cert: /nonexistent/c.pem, key: /nonexistent/k.pem}\n");
         assert!(
             err.starts_with("failed to start HTTPS server: open /nonexistent/c.pem"),
             "{err}"

@@ -9,7 +9,7 @@
   },
   "request": {
     "body": "{\"model\":\"kimi-k3\",\"input\":\"hi\",\"temperature\":0.4}",
-    "config": "payload:\n  override:\n    - models: [{name: \"kimi-*\"}]\n      params: {temperature: 0.4}\n",
+    "config": "requests:\n  payload:\n    override:\n      - models: [{name: \"kimi-*\"}]\n        params: {temperature: 0.4}\n",
     "model": "kimi-k3",
     "source": "openai-response",
     "stream": false

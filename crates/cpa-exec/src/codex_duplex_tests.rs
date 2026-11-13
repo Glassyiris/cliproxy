@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures_util::stream::BoxStream;
 
-const STEERING: &str = "codex:\n  response-steering: true\n";
+const STEERING: &str = "upstream:\n  codex:\n    response-steering: true\n";
 const MODEL: &str = "gpt-6-astra";
 
 /// One upstream conversation, as the Go test's handler runs it. Failures are collected
@@ -1490,11 +1490,11 @@ async fn steer_frames_pass_the_payload_rules() {
         })
         .await;
         let rule = if filter {
-            "  filter:\n    - models: [{name: \"*\", match: [{type: response.steer}]}]\n      params: [input, type]\n"
+            "    filter:\n      - models: [{name: \"*\", match: [{type: response.steer}]}]\n        params: [input, type]\n"
         } else {
-            "  override:\n    - models: [{name: \"*\", match: [{type: response.steer}]}]\n      params: {input: configured, type: response.create}\n"
+            "    override:\n      - models: [{name: \"*\", match: [{type: response.steer}]}]\n        params: {input: configured, type: response.create}\n"
         };
-        let config = format!("{STEERING}payload:\n{rule}");
+        let config = format!("{STEERING}requests:\n  payload:\n{rule}");
         let client = Client::new(&format!("duplex-steer-rules-{filter}"));
         let mut stream = client
             .start_config(&up.url, r#"{"input":[]}"#, Format::Codex, Default::default(), &config)

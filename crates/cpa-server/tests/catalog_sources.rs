@@ -22,7 +22,7 @@ fn runtime(auth: &Path, sources: [&Path; 3]) -> Arc<cpa_server::Runtime> {
 
 fn config(auth: &Path, [catalog, codex, devin]: [&Path; 3]) -> cpa_core::config::Config {
     let yaml = format!(
-        "auth-dir: '{}'\nmodels:\n  catalog: '{}'\n  codex-catalog: '{}'\n  devin-catalog: '{}'\n",
+        "oauth:\n  auth-dir: '{}'\nmodels:\n  catalog: '{}'\n  codex-catalog: '{}'\n  devin-catalog: '{}'\n",
         auth.display(),
         catalog.display(),
         codex.display(),

@@ -2,9 +2,41 @@ use super::*;
 use cpa_core::config::Config;
 use serde_json::json;
 
+/// Fields the Go config-diff fixture sets on a family whose current schema does
+/// not have them: (what the document sets, family header, field). Strict import
+/// rejects these documents on purpose; `go_only_fields_are_rejected_not_dropped`
+/// pins that, and every other fixture document must load.
+const GO_ONLY: &[(&str, &str, &str)] = &[
+    ("claude keys carry no websockets", "\n  claude:\n", "websockets:"),
+    ("gemini keys carry no websockets", "\n  gemini:\n", "websockets:"),
+    (
+        "interactions keys carry no websockets",
+        "\n  interactions:\n",
+        "websockets:",
+    ),
+    ("vertex keys carry no websockets", "\n  vertex:\n", "websockets:"),
+    ("vertex models carry no is-compat", "\n  vertex:\n", "is-compat:"),
+];
+
+fn go_only(text: &str) -> Option<&'static str> {
+    GO_ONLY
+        .iter()
+        .find(|(_, family, field)| text.contains(family) && text.contains(field))
+        .map(|(name, ..)| *name)
+}
+
 /// Every config the Go config-diff fixture holds, plus one with every split-out
-/// list, legacy flat keys and OAuth-only provider settings.
+/// list and OAuth-only provider settings, in the current layout. The documents
+/// named in `GO_ONLY` are left out; any other document that strict import
+/// rejects fails the test that loads it instead of being skipped.
 fn corpus() -> Vec<String> {
+    all_documents()
+        .into_iter()
+        .filter(|text| go_only(text).is_none())
+        .collect()
+}
+
+fn all_documents() -> Vec<String> {
     let fixture: Json =
         serde_json::from_str(include_str!("../../../tests/fixtures/config_diff_go.json")).expect("fixture JSON");
     let mut out: Vec<String> = fixture
@@ -16,26 +48,31 @@ fn corpus() -> Vec<String> {
         .collect();
     out.push(
         r#"
-port: 8317
-api-keys: [client-a, client-b]
-auth-dir: /tmp/cook-test-auth
-codex:
-  disable-codex-cloaking: true
+server:
+  port: 8317
+access:
+  api-keys: [client-a, client-b]
 oauth:
   providers:
     codex:
-      response-steering: true
       header-defaults: {user-agent: "codex-cli/1"}
+  auth-dir: /tmp/cook-test-auth
 upstream:
   claude: {tool-search: true}
-claude-api-key:
-  - api-key: sk-a
+  codex:
+    disable-codex-cloaking: true
+    response-steering: true
+api-keys:
+  claude:
+  - name: claude-1
     base-url: https://a.example.invalid
     models: [{name: claude-x, alias: x}]
-openai-compatibility:
+    keys:
+      - api-key: sk-a
+  openai-compatibility:
   - name: router
     base-url: https://r.example.invalid/v1
-    api-key-entries: [{api-key: sk-r}]
+    keys: [{api-key: sk-r}]
 model-routers:
   - {name: smart, judge: router/jev}
 requests:
@@ -55,16 +92,12 @@ plugins:
 
 #[test]
 fn an_imported_config_compiles_to_what_the_file_loads_to() {
-    for text in corpus() {
-        let Ok(original) = Config::parse(&text) else { continue };
-        if cpa_core::config::validate_config_fields(&original.document, true).is_err() {
-            assert!(
-                import_yaml(&text).is_err(),
-                "unsupported fields must not be dropped: {text}"
-            );
-            continue;
-        }
-        let resources = import_yaml(&text).unwrap_or_else(|e| panic!("import failed: {e:#}\n{text}"));
+    let corpus = corpus();
+    for text in &corpus {
+        let original = Config::parse(text).unwrap_or_else(|e| panic!("corpus document does not parse: {e:#}\n{text}"));
+        cpa_core::config::validate_config_fields(&original.document, true)
+            .unwrap_or_else(|e| panic!("corpus document fails validation: {e:#}\n{text}"));
+        let resources = import_yaml(text).unwrap_or_else(|e| panic!("import failed: {e:#}\n{text}"));
         let (compiled, _) = config(&resources).unwrap_or_else(|e| panic!("compile failed: {e}\n{text}"));
         let mut want = original.clone();
         let mut got = compiled;
@@ -96,15 +129,49 @@ fn an_imported_config_compiles_to_what_the_file_loads_to() {
             "{text}"
         );
     }
+    eprintln!("compiled and compared {} corpus documents", corpus.len());
+    assert!(corpus.len() > 100, "the corpus lost its fixture documents");
 }
 
 #[test]
 fn a_document_splits_back_into_the_same_resources() {
-    for text in corpus() {
-        let Ok(resources) = import_yaml(&text) else { continue };
+    let corpus = corpus();
+    for text in &corpus {
+        let resources = import_yaml(text).unwrap_or_else(|e| panic!("import failed: {e:#}\n{text}"));
         let doc = document(&resources, true);
         let again = split(&doc, &resources).unwrap();
         assert_eq!(again, resources, "{text}");
+    }
+    eprintln!("split {} corpus documents back", corpus.len());
+    assert!(corpus.len() > 100, "the corpus lost its fixture documents");
+}
+
+#[test]
+fn go_only_fields_are_rejected_not_dropped() {
+    let mut seen = std::collections::BTreeSet::new();
+    for text in all_documents() {
+        let Some(name) = go_only(&text) else { continue };
+        seen.insert(name);
+        assert!(import_yaml(&text).is_err(), "{name}: import must reject it\n{text}");
+    }
+    assert_eq!(
+        seen.len(),
+        GO_ONLY.len(),
+        "a GO_ONLY entry matches no fixture document: {seen:?}"
+    );
+}
+
+#[test]
+fn removed_layouts_are_rejected_instead_of_dropped() {
+    for (name, text) in [
+        ("root auth-dir", "auth-dir: /tmp/a\n"),
+        ("flat provider list", "gemini-api-key: [{api-key: k}]\n"),
+        (
+            "codex steering under oauth",
+            "oauth: {providers: {codex: {response-steering: true}}}\n",
+        ),
+    ] {
+        assert!(import_yaml(text).is_err(), "{name} must be rejected: {text}");
     }
 }
 
@@ -199,7 +266,7 @@ fn resources_that_cannot_compile_are_named() {
 
 #[test]
 fn legacy_and_mixed_oauth_scopes_survive_import_and_unrelated_edits() {
-    let source = "codex:\n  chatgpt-keep-alive: true\noauth:\n  providers:\n    codex:\n      header-defaults: {user-agent: scoped-agent}\n";
+    let source = "oauth:\n  providers:\n    codex:\n      header-defaults: {user-agent: scoped-agent}\n      chatgpt-keep-alive: true\n";
     let original = Config::parse(source).unwrap();
     let resources = import_yaml(source).unwrap();
     let (compiled, _) = config(&resources).unwrap();

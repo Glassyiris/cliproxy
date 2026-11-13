@@ -867,7 +867,7 @@ mod relay_tests {
             Some(relay.clone()),
             201,
             Some("/v1/live/call-123"),
-            "proxy-url: http://global-proxy.example:8080",
+            "requests: {proxy-url: http://global-proxy.example:8080}",
         )
         .await;
         let response = post(&proxy).await;
@@ -957,7 +957,7 @@ mod relay_tests {
             None,
             201,
             Some("/v1/live/call-1"),
-            "codex:\n  live-media-relay:\n    allow-private-remote-ips: true\n    disable-private-remote-ips: true\n",
+            "oauth:\n  providers:\n    codex:\n      live-media-relay:\n        allow-private-remote-ips: true\n        disable-private-remote-ips: true\n",
         )
         .await;
         let response = post(&proxy).await;

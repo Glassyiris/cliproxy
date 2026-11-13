@@ -114,7 +114,7 @@ async fn proxy(credentials: Vec<Credential>, mock: Shared) -> String {
             format!("ws{}/v1", upstream_url.trim_start_matches("http")),
         );
     let rt = Arc::new(cpa_server::testing::runtime(
-        Config::parse("api-keys: [good-key, other-key]").unwrap(),
+        Config::parse("access: {api-keys: [good-key, other-key]}").unwrap(),
         credentials,
         Executors {
             claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
@@ -533,7 +533,7 @@ async fn realtime_websockets_match_go() {
         ),
     ];
     let rt = Arc::new(cpa_server::testing::runtime(
-        Config::parse("api-keys: [owner-key, other-key]").unwrap(),
+        Config::parse("access: {api-keys: [owner-key, other-key]}").unwrap(),
         credentials,
         Executors {
             claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
@@ -797,7 +797,7 @@ async fn sideband_claims_and_hangup_teardown() {
             format!("ws{}/v1", upstream_url.trim_start_matches("http")),
         );
     let rt = Arc::new(cpa_server::testing::runtime(
-        Config::parse("api-keys: [owner-key]").unwrap(),
+        Config::parse("access: {api-keys: [owner-key]}").unwrap(),
         vec![credential(
             "only-oauth",
             serde_json::json!({"type":"codex","access_token":"only-token"}),
@@ -883,7 +883,7 @@ async fn raw_handshakes_match_gorilla() {
             format!("ws{}/v1", upstream_url.trim_start_matches("http")),
         );
     let rt = Arc::new(cpa_server::testing::runtime(
-        Config::parse("api-keys: [owner-key]").unwrap(),
+        Config::parse("access: {api-keys: [owner-key]}").unwrap(),
         vec![credential(
             "only-oauth",
             serde_json::json!({"type":"codex","access_token":"only-token"}),
@@ -972,7 +972,7 @@ async fn relay_end_close_codes_match_gorilla() {
             format!("ws{}/v1", upstream_url.trim_start_matches("http")),
         );
     let rt = Arc::new(cpa_server::testing::runtime(
-        Config::parse("api-keys: [owner-key]").unwrap(),
+        Config::parse("access: {api-keys: [owner-key]}").unwrap(),
         vec![credential(
             "only-oauth",
             serde_json::json!({"type":"codex","access_token":"only-token"}),

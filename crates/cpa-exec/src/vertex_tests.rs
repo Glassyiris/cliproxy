@@ -537,7 +537,7 @@ async fn refusing_proxy() -> (String, std::sync::Arc<std::sync::atomic::AtomicUs
 async fn token_exchange_uses_the_credential_proxy() {
     let (credential_proxy, credential_hits) = refusing_proxy().await;
     let (global_proxy, global_hits) = refusing_proxy().await;
-    let cfg = Config::parse(&format!("proxy-url: {global_proxy}\n")).unwrap();
+    let cfg = Config::parse(&format!("requests:\n  proxy-url: {global_proxy}\n")).unwrap();
     let s = fixture()["scenarios"]
         .as_array()
         .unwrap()

@@ -134,7 +134,7 @@ pub fn redact_document(doc: &mut Json) {
     }
 }
 
-pub(super) fn same_with_placeholders(value: Option<&Json>, stored: Option<&Json>) -> bool {
+fn same_with_placeholders(value: Option<&Json>, stored: Option<&Json>) -> bool {
     match (value, stored) {
         (Some(Json::String(value)), Some(_)) if value == SECRET => true,
         (Some(Json::Object(value)), Some(Json::Object(stored))) => {

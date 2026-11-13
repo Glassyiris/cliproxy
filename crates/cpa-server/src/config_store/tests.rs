@@ -487,7 +487,7 @@ fn versioned_exports_preserve_scope_and_raw_plugin_nodes_with_explicit_secret_ac
     let store = ConfigStore::memory();
     store
         .import_yaml(
-            "codex: {disable-codex-cloaking: true}\nplugins: {configs: {acme: {ratio: 1.50, binary: !!binary YWJj}}}\n",
+            "upstream:\n  codex:\n    disable-codex-cloaking: true\nplugins: {configs: {acme: {ratio: 1.50, binary: !!binary YWJj}}}\n",
             "t",
             "",
         )

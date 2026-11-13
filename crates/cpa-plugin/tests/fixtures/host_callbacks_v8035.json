@@ -144,7 +144,7 @@
     },
     {
       "op": "apply",
-      "args": "auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    recorder-a:\n      enabled: true\n      record: RECORDDIR\n      label: a\n      caps: management_api\n    host-callback-auth-files:\n      enabled: true\n"
+      "args": "oauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    recorder-a:\n      enabled: true\n      record: RECORDDIR\n      label: a\n      caps: management_api\n    host-callback-auth-files:\n      enabled: true\n"
     },
     {
       "op": "register_management",

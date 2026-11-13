@@ -240,14 +240,14 @@ mod tests {
 
     #[test]
     fn exports_hide_secrets_unless_requested_and_invalid_import_does_not_create_a_database() {
-        let store = ConfigStore::memory_with("api-keys: [fake-client-secret]\nport: 8317\n");
+        let store = ConfigStore::memory_with("access:\n  api-keys: [fake-client-secret]\nserver:\n  port: 8317\n");
         assert!(!export(&store, false).unwrap().contains("fake-client-secret"));
         assert!(export(&store, true).unwrap().contains("fake-client-secret"));
         let dir = std::env::temp_dir().join(format!("cook-config-cli-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let db = dir.join("invalid.db");
         let yaml = dir.join("invalid.yaml");
-        std::fs::write(&yaml, "port: wrong\n").unwrap();
+        std::fs::write(&yaml, "server:\n  port: wrong\n").unwrap();
         let cli = Cli::try_parse_from([
             "cook-router",
             "--db",
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn json_export_preserves_oauth_scope_and_raw_plugin_semantics() {
-        let source = "codex:\n  disable-codex-cloaking: true\noauth:\n  providers:\n    codex:\n      response-steering: true\nplugins:\n  enabled: true\n  configs:\n    acme:\n      ratio: 1.50\n      tagged: !!float 1\n      binary: !!binary YWJj\n      quoted: '007'\n";
+        let source = "upstream:\n  codex:\n    disable-codex-cloaking: true\noauth:\n  providers:\n    codex:\n      chatgpt-keep-alive: true\nplugins:\n  enabled: true\n  configs:\n    acme:\n      ratio: 1.50\n      tagged: !!float 1\n      binary: !!binary YWJj\n      quoted: '007'\n";
         let original = ConfigStore::memory_with(source);
         let expected = original.load().unwrap().config;
         let text = export(&original, true).unwrap();
@@ -285,6 +285,9 @@ mod tests {
             .replace(import_config(&masked).unwrap(), "cli", "masked roundtrip", false)
             .unwrap();
         assert_eq!(restored.load().unwrap().config.plugin_configs, expected.plugin_configs);
-        assert!(import_config("{port: 8317}").is_ok(), "flow YAML remains valid input");
+        assert!(
+            import_config("{server: {port: 8317}}").is_ok(),
+            "flow YAML remains valid input"
+        );
     }
 }

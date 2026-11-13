@@ -4,8 +4,8 @@ use cpa_core::config::Config;
 use serde_json::{Map, Value as Json};
 
 use super::{
-    FAMILIES, Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, PROVENANCE, Resource, SECRET, bounded, check, plugin,
-    provenance, secrets, strip_provider_annotations, strip_provider_read_annotations, valid_id,
+    FAMILIES, Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, Resource, SECRET, bounded, check, plugin,
+    strip_provider_annotations, strip_provider_read_annotations, valid_id,
 };
 
 /// The document `resources` compile to. With `annotate`, every provider and router
@@ -37,7 +37,6 @@ pub fn document(resources: &[Resource], annotate: bool) -> Json {
     let mut plugins = Map::new();
     for r in sorted {
         match r.kind {
-            Kind::Setting if r.id == PROVENANCE => {}
             Kind::Setting => {
                 root.insert(r.id.clone(), r.spec.clone());
             }
@@ -114,21 +113,6 @@ pub fn config(resources: &[Resource]) -> Result<(Config, String), Fault> {
     cpa_core::config::validate_config_fields(&yaml, true).map_err(|error| validation_fault(resources, error))?;
     let text = cpa_core::config::yaml_string(&yaml).map_err(|e| Fault::new(None, e.to_string()))?;
     let mut cfg = Config::parse_payload(&text).map_err(|e| Fault::new(None, format!("{e:#}")))?;
-    if let Some(paths) = resources
-        .iter()
-        .find(|r| r.kind == Kind::Setting && r.id == PROVENANCE)
-        .and_then(|r| r.spec.get("global-oauth-paths"))
-        .and_then(Json::as_array)
-    {
-        for path in paths.iter().filter_map(Json::as_str) {
-            if !cfg.oauth_only.remove(path) {
-                return Err(Fault::new(
-                    Some(format!("setting/{PROVENANCE}")),
-                    "unknown or duplicate OAuth scope provenance",
-                ));
-            }
-        }
-    }
     plugin::restore_raw(resources, &mut cfg)?;
     Ok((cfg, text))
 }
@@ -326,14 +310,7 @@ pub fn split(doc: &Json, old: &[Resource]) -> Result<Vec<Resource>, Fault> {
                     push(Kind::Setting, key.clone(), Json::Object(rest), &mut out);
                 }
             }
-            _ if key == PROVENANCE => return Err(Fault::new(None, "config provenance is reserved")),
             _ => push(Kind::Setting, key.clone(), value.clone(), &mut out),
-        }
-    }
-    if let Some(before) = old.iter().find(|r| r.kind == Kind::Setting && r.id == PROVENANCE) {
-        let mut scope = Resource::new(Kind::Setting, PROVENANCE, 0, before.spec.clone());
-        if provenance::retain_scope(&mut scope, &document(old, false), doc, secrets::same_with_placeholders) {
-            out.push(scope);
         }
     }
     for r in &mut out {

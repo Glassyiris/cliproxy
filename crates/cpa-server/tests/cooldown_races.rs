@@ -92,7 +92,10 @@ fn claude_credential(name: &str, upstream_url: &str, extra: &str) -> (Config, Cr
         std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("cooldown-races-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let yaml = format!("api-keys: [client-key]\nauth-dir: {}\n{extra}", dir.display());
+    let yaml = format!(
+        "access:\n  api-keys: [client-key]\noauth:\n  auth-dir: {}\n{extra}",
+        dir.display()
+    );
     let meta = json!({"type": "claude", "api_key": "sk-fake-claude", "base_url": upstream_url});
     std::fs::write(dir.join("claude.json"), meta.to_string()).unwrap();
     let mut credential =
