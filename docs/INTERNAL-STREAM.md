@@ -1,8 +1,8 @@
-# Internal stream reference (S0)
+# Internal stream reference (S0 decisions and S1 contracts)
 
 ## 1. Purpose and scope
 
-Define the sole internal representation for cooker inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search and AI Studio relay inference traffic. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion; authentication and transport remain boundary responsibilities, while SDP, session commands and media content are inside. Current route evidence: `crates/ck-server/src/lib.rs:81-146`, `crates/ck-server/src/realtime/api.rs:85-112`, `crates/ck-server/src/inference/codex_alpha.rs:22-25`, `crates/ck-server/src/realtime/aistudio_relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/ck-server/src/realtime/api.rs:12`. This is a normative target, not a claim of implementation; current-code citations refer to `prep-cook/cooker` master `17608e94`.
+Define the sole internal representation for cooker inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search and AI Studio relay inference traffic. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion. Authentication and transport remain boundary responsibilities; SDP, session commands and media content are inside. Current route evidence: `crates/ck-server/src/lib.rs:60-101`, `crates/ck-server/src/realtime/api.rs:79-106`, `crates/ck-server/src/inference/codex_alpha.rs:22-25`, `crates/ck-server/src/realtime/aistudio_relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/ck-server/src/realtime/api.rs:12`. This is a normative target, not a claim of implementation. Current-code citations refer to post-W1 master `b518060ea1e43ef4b266591986ca92321e6289b5`.
 
 ## 2. Decisions
 
@@ -15,8 +15,8 @@ The maintainer defaults B1-B9, C2, D1, D3 and F, and the pool-lifetime reading o
 | --- | --- | --- | --- |
 | A1–A4 | Settled | Chat chunk base; `x_ck` JSON plus named events; one version; unknown fields/events reach egress intact. | Settled |
 | Conversion | Settled | Every ingress/egress converts, including same-protocol; replace pairwise paths without compatibility shims. | Settled |
-| Non-SSE | Settled | Custom-data chunks ≤50 KB; collection delay ≤100 ms. | Settled; `crates/AGENTS.md:25` |
-| Storage | Settled | mmap files, fixed blocks, positions only; no heap storage of stream data. | Settled; `crates/AGENTS.md:24` |
+| Non-SSE | Settled | Custom-data chunks ≤50 KB; collection delay ≤100 ms. | Settled; §3.4 |
+| Storage | Settled | mmap files, fixed blocks, positions only; no heap storage of stream data. | Settled; §6.1 |
 | Frame size | Settled | Storage frames are 50,000 bytes, the non-SSE chunk size. | Owner ruling 2026-11-13 (G1′) |
 | Full storage | Settled | One cache queue holds all stream bytes. Under size pressure the stream read least recently goes first; a stream not read for 1 h expires. Disk-full/other edges best effort. | Settled; owner ruling 2026-11-14 (Settled 41, §6.4) |
 | Plugins | Settled | Plugins are deleted; extension means modifying the source and rebuilding. See §8. | Owner ruling 2026-11-13 |
@@ -27,7 +27,7 @@ The maintainer defaults B1-B9, C2, D1, D3 and F, and the pool-lifetime reading o
 | G7 | Settled | Out of pool space or over a limit returns an error; no heap fallback (§6.4). | Owner ruling 2026-11-13 |
 | G8 | Settled | Per-stream limit 256 MiB (5,368 frames); pool total at most 4 GiB (85,899 frames), lowered only by the startup caps in §6.4. | Owner ruling 2026-11-14 (Settled 41) |
 | G9 | Settled | Performance tests mount the storage directory on tmpfs; no regression against heap buffering is accepted (§9.3). | Owner ruling 2026-11-13 |
-| Exhaustion/platform | Settled | Visible failure, no degradation; Linux server only. | Settled; `crates/AGENTS.md:75` |
+| Exhaustion/platform | Settled | Visible failure, no degradation; Linux server only. | Settled; §6.4, §10 |
 | B1 | Settled (default accepted 2026-11-14) | Claude signatures remain bound to their thinking block. | Q |
 | B2 | Settled (default accepted 2026-11-14) | Redacted thinking has its own opaque event. | Q |
 | B3 | Settled (default accepted 2026-11-14) | Gemini signatures remain part-bound, including signature-only parts. | Q |
@@ -44,6 +44,22 @@ The maintainer defaults B1-B9, C2, D1, D3 and F, and the pool-lifetime reading o
 | Resume | Settled | A client disconnect never cancels, releases or cleans a stream: upstream collection continues and the bytes stay cached, so a reconnecting client resumes from its last delivered position (§6.6). | Owner ruling 2026-11-14 (Settled 42) |
 | D3 | Settled (default accepted 2026-11-14) | No failover after the first event producing client-deliverable bytes. | Q |
 | F | Settled (default accepted 2026-11-14) | Measure first, obtain owner-approved thresholds; use §9 commands and codec metrics. | Q |
+
+### 2.1 S1 responsibility and dependency contract
+
+Phase A freezes these boundaries. Phase B introduces `ck-stream` and its dependency-table row together. Until then, `crates/AGENTS.md` retains the exact current workspace membership; its existing table remains the only input to `tools/check-crate-deps.py`.
+
+| Owner | S1 responsibility |
+| --- | --- |
+| `ck-stream` | Grammar views, positions, pool, publication, leases, cache and bounded semantic state. No workspace dependencies, HTTP, credentials, provider selection or durable state. |
+| `ck-core` | Configuration, credential and model types. No dependency on `ck-stream` or `ck-exec`. |
+| `ck-wire` | Boundary helpers; depends only on `ck-core` among workspace crates. |
+| `ck-translate` | Ingress/egress codecs and destination capability validation; may use `ck-core`, `ck-wire`, `ck-stream`. No provider execution. |
+| `ck-exec` | Execution envelopes, provider transports, authentication and preparation; may use `ck-core`, `ck-wire`, `ck-stream`, `ck-translate`. Move inference envelopes out of `ck-core`; remove old re-exports and executor-side pair translation. |
+| `ck-server` | Client boundaries, scheduling, authenticated resume and runtime-owned work; may use `ck-core`, `ck-wire`, `ck-stream`, `ck-translate`, `ck-exec`. |
+| `cooker` | Bootstrap. Keep its current dependencies; add `ck-stream` only if the binary directly uses it. |
+
+Use the existing provider selector in `crates/ck-exec/src/lib.rs:164-184`. Executor dispatch stays static; no per-event trait boxing or second provider registry. In the post-W1 layout, stream ownership/resume belongs under `crates/ck-server/src/inference/`; egress belongs beside `http/respond.rs`. Runtime and listener integration belong under `runtime/` and `net/listener.rs`.
 
 ## 3. Stream grammar
 
@@ -265,7 +281,7 @@ Capability validation covers supplied model/operation, roles and ordered content
 Conversation items/tool results use Q history; audio append uses media events, whose packet attributes are `{track_id: string, packet_id: string, timestamp: uint, timebase_hz: uint, sequence?: uint, payload_type?: uint, flags?: string[]}`. Response controls reference a separately validated request; cancellation is not successful completion. Unknown sideband commands use `opaque`; mapped commands never do.
 An ingress codec parses and stores preserved fields once; egress overlays normalized values. Removing a field removes its stale source projection too.
 Signature replay is opaque and provider-bound; never fabricate a signature, substitute a validator-bypass token or silently discard an unsupported signed history block.
-Wire capture, when enabled, occurs only at ingress/egress through the sanctioned redacting logging boundary, not by serializing internal events into logs (`crates/AGENTS.md:36-46`).
+Wire capture, when enabled, occurs only at ingress/egress through the sanctioned redacting logging boundary, not by serializing internal events into logs (`crates/AGENTS.md`, Logging and Security).
 
 ## 5. Field mappings
 
@@ -534,7 +550,7 @@ These are source-verified transformations at the cited baseline, not claims that
 | L15 | Emulated xAI image completed events omit created and revised_prompt even though extraction retains both and buffered output includes them. | `crates/ck-server/src/inference/images.rs:378-393,437-481` | New |
 | L16 | Speech's xAI request builder reconstructs language/output_format/speed/text/voice_id only; supplied instructions are not forwarded. | `crates/ck-server/src/inference/speech.rs:184-233` | New |
 | L17 | Video status projection collapses expired/cancelled/canceled into failed without retaining the native status in the constructed response. | `crates/ck-server/src/inference/videos.rs:441-449,463-483,555-597` | New |
-| L18 | Realtime declares live usage logging unported; the S0 usage path must not inherit that omission. | `crates/ck-server/src/realtime/api.rs:24-26` | New |
+| L18 | Realtime declares live usage logging unported; the S0 usage path must not inherit that omission. | `crates/ck-server/src/realtime/api.rs:21-23` | New |
 
 Existing direct Claude→Responses carriage of redacted thinking must survive even though the Chat projection loses it (`crates/ck-translate/src/claude_responses_response.rs:167-175`).
 Current compact rejects stream=true (`crates/ck-server/src/inference/openai.rs:1064-1079`); S0 retains that operation contract, not a raw-body shortcut.
@@ -593,6 +609,18 @@ On disconnect, release only that reader's lease and connection state; the stream
 The application adds no encryption (G6); protection comes from OS disk and memory encryption, the 0600 file and the 0700 directory. tmpfs is not free memory and may swap; disk-backed mappings may persist physical remnants after unlink. Permissions/unlink are not secure erasure.
 Never expose the pool FD, filesystem path or other streams' frames to a client. Do not mix transient stream storage with the durable configuration database.
 
+**S1 choice: runtime ownership.** The runtime owns the pool, cache, producer task tracker, expiry work and one-second reclaimer. Each attempt owns its upstream collector, codec work, scheduler completion and usage settlement. HTTP bodies, WS connections and WebRTC peers own reader leases, not producers. Dropping a connection releases its reader only; upgraded sessions do not detach from runtime tracking.
+
+Shutdown follows `docs/STATE-AND-CONCURRENCY.md`, Explicit execution and lifetime:
+
+1. Stop new inference, turn, resume and relay admission through the listener/runtime owner.
+2. Signal active producers with `cancelled(reason: shutdown)` and cancel upstream I/O and cooperative codec work. Wake readers through terminal control state even when no frame is available. Keep completed prefixes readable until readers close.
+3. Close downstream HTTP, WS and media transports. Join producers and admitted codec/blocking work; settle each attempt's scheduler and usage outcome once. Resume never owns a second settlement.
+4. Stop and join expiry and reclaim work. Release cache retention and wait for every reader lease and mapped borrow to end. Never force reuse or unmap beneath a lease.
+5. Close the pool mapping/descriptor and remove only its fallback pathname, if present. Keep durable configuration shutdown under its existing owner.
+
+Cancellation notification is not a join. A stuck lease prevents safe pool teardown; it does not authorize early unmapping. Stream bytes are not restart recovery inputs. A restart loses resume state and old IDs return 410.
+
 ### 6.4 Limits and the cache queue
 
 Two structures hold frames. The free lists (§6.1) hold unused frames for allocation. The cache queue below holds every stream's retained frames in order of last read and decides which stream is invalidated after expiry or under size pressure. A frame moves from the queue to a free list only after its last lease and retention reference release it.
@@ -611,6 +639,8 @@ Owner ruling (G8, Settled 41, 2026-11-14): 「我记得这个 sse 缓存队列�
 | `stream.max_event_bytes` | 1 MiB/event | Ordinary framed event including extensions; bound parser work, chunk large content/media instead. |
 | `stream.max_metadata_bytes` | 1 MiB/exchange | Tables/indexes/parser/consumer bookkeeping; bound tiny-event amplification. |
 | `stream.cache_ttl` | 1 h since the stream's last read | Owner number (Settled 41). |
+
+**S1 choice: deploy-only settings.** All six knobs in this table are read and validated at startup. Changing any of them requires a restart. Configuration/schema declarations must classify them as deploy-only, not hot-applied runtime settings. Configured overrides remain supported within §6.4 validation and owner ceilings. There is no live-editable admin page or page exception for these values. Any later hot-change support must add its admin page in the same change. `REQUIREMENTS.md`, Deploy-only stream settings, records this classification.
 
 The unset knobs (event and metadata sizes, initial pool size, growth step, headroom) use provisional S1 defaults, **unmeasured, replace after the §9 benchmarks**. The server starts if directory/mapping and the validation below succeed; configured overrides remain supported.
 Owner ruling (D2, 2026-11-14): a slow consumer never pauses upstream reads. The stream keeps collecting into the cache queue and the gateway relays at the client's pace. Only `max_frames` and the pool bound that backlog, and it expires and is evicted like every other entry.
@@ -640,16 +670,57 @@ Accounting: mapped tmpfs pages count as `RssShmem` inside `VmRSS`, as `shmem` in
 
 ### 6.6 Client disconnect and resume
 
-Owner ruling (Settled 42, 2026-11-14): 「我们必须需要考虑，客户端可能暂时断开然后连接上后下一次继续读取的问题，所以一定不能清理」. Behaviour below is mandatory; only the mechanism marked **S1 choice** is open.
+Owner ruling (Settled 42, 2026-11-14): a disconnected client must be able to reconnect and continue reading. The behavior below is mandatory. Phase A fixes the **S1 choice** of mechanism in §6.7; it does not change the S0 retention rulings.
 
 - **Disconnect does nothing to the stream.** It closes the connection and releases that reader's lease. It does not cancel upstream, publish `cancelled`, invalidate the stream or free a frame. Collection continues until the upstream terminal event, or until the stream expires or is evicted (§6.4), whichever comes first; every byte stays in the cache queue meanwhile.
 - **What removes a stream.** Only the 1 h no-read expiry and least-recent-read eviction (§6.4).
 - **What still cancels upstream.** A client's explicit cancel control where the protocol has one (`client_cancel`: the `response.cancel` and close controls in §4 and §5.7), `shutdown`, expiry or eviction while upstream is still running (readers receive `error` `stream.gone`, not `cancelled`; §6.2), the per-stream limit and the other G7 limit errors, and an upstream error. A non-streaming client request is a client stream too: its upstream call also runs to the end after a disconnect, and its bytes stay cached.
-- **Resume.** The client presents a stream id and a position. **S1 choice:** the mechanism, for example SSE `id:` lines (equal to `X.seq`, §3.1) with a `Last-Event-ID` header and a stream id the client learned from the response, or a protocol-specific equivalent such as the Responses `response.id` with a sequence number. The egress codec maps the presented position to an internal `seq`, and the event index resolves `seq` to a `Position` (§6.1).
+- **Resume.** The client presents the header-only stream identity and a cursor defined in §6.7. The egress index maps the cursor to internal sequence and intra-unit offset; the event index resolves that sequence to a `Position` (§6.1).
 - **Resumed delivery.** A new reader attaches without a new routing attempt. It receives every retained record after the presented position in order, with no gap and no repeat, then follows the stream live while upstream is still being collected, or ends with the stored terminal record (`done`, `error` or `cancelled`) when it is finished. Resume neither fails over nor restarts the request.
 - **Authorization.** The stream id is unguessable and a resume is accepted only for the identity that created the stream. Any other identity receives the same error as an absent stream.
 - **Failure is visible.** A stream that has expired, was evicted, never existed or belongs to another identity fails the resume with `error` code `stream.gone`, status 410, scope `resource`. The gateway never answers with an empty success and never restarts the content from the beginning. A reader attached when its stream expires or is evicted receives the same `error` as one event (§6.2). A position beyond the committed end is a client 400.
 - **Readers pin frames.** Eviction or expiry of a stream with an active reader never overwrites leased frames (§6.1, §6.4).
+
+### 6.7 S1 resume API and cursor discovery
+
+These are implementation contracts, not endpoints available in the Phase A tree. Resume uses the retained destination codec, operation, output options and creating identity. A resume request cannot replace them, select a model/provider, create a routing attempt or add usage.
+
+**Identity and authorization.** Generate an unguessable, process-local ID from at least 128 random bits. Send it only in `X-Ck-Stream-Id`, never in a URL, SSE ID, JSON payload, WS subprotocol or cookie. It is distinct from provider response/call IDs and internal `X.stream_id`. On ordinary HTTP responses, expose it at the first-deliverable-byte commitment point, with no earlier success headers. For WS, issue it in the upgrade response for the retained session; the transport upgrade does not commit any inference turn. For WebRTC, issue it with the SDP response. Each subsequent turn stays bound to that session and retains its own attempt and quota.
+
+Authenticate every attachment using the creating client identity, including its existing ephemeral-session scope where applicable. The ID alone grants no access. Perform authorization before cursor lookup. Unknown, foreign, expired and evicted IDs return the same 410 `stream.gone` response. Missing or duplicate identity headers, malformed cursors, incompatible cursor kinds and positions past published egress output return 400 after authentication; invalid credentials follow the existing authentication boundary. A body or query parameter cannot supply a missing ID.
+
+Redact `X-Ck-Stream-Id` case-insensitively in request/access logs and request/response capture before formatting or spooling. Redact `Last-Event-ID` as well; it carries a resume cursor even though it carries no identity. Do not forward gateway resume headers upstream. Supplied clients keep IDs only in memory, never localStorage, sessionStorage, IndexedDB or script-readable cookies. Native EventSource/WebSocket APIs cannot carry arbitrary request headers or expose WS response headers. Browser integrations use the Fetch attachment below, not URL tokens or an unspecified header-injection proxy.
+
+**Attachment.** `GET /v1/streams?after=<cursor>` attaches a reader. Send the ID in the `X-Ck-Stream-Id` request header and ordinary authentication headers. For SSE only, `Last-Event-ID` may replace `after`; if both appear they must agree. Omission of both is 400, not an implicit restart. Return 200 with the retained content type, `Cache-Control: no-store`, `X-Ck-Stream-Id` and `X-Ck-Stream-Cursor` containing the accepted starting cursor. WS attachments upgrade this same route and return 101. Neither form sends a fresh provider request. Ordinary HTTP reconnects need no original request body.
+
+For browser duplex integrations, the original session GET route also accepts `Accept: application/x-ck-stream` without a WS upgrade. It returns the session identity in the response header and streams length-delimited destination messages. Each record is one kind byte (`1` text, `2` binary, `3` cursor/control), an unsigned 32-bit big-endian payload length, then that payload. Payloads remain the retained destination codec's messages, not internal SSE. Reconnect uses Fetch GET `/v1/streams?after=<cursor>` with the same Accept header and header-only identity. POST `/v1/streams` sends numbered request-direction records or transport controls to that retained session and returns its accepted request cursor in `X-Ck-Stream-Cursor`; it never creates a session. Use the same framing for POST bodies. Admit complete units only, bound each record by the exchange quota, and keep incomplete input in mapped scratch. This is a boundary encoding for header-capable browser delivery, not a second inference pipeline. WebRTC clients may submit `x_ck.transport.offer` through this POST and receive the answer through their attached control stream.
+
+**Cursor grammar.** Cursors contain positions only, never identity. Decimal components are unsigned 64-bit integers with checked parsing. `v1.e.<n>` means the client consumed the first `n` complete egress units; `v1.b.<n>` means it consumed the first `n` encoded entity-body bytes. Zero is the explicit beginning. Resume sends the suffix after that prefix. Event units are complete SSE records, WS messages or reconstructed media packets, not internal events or network fragments. `X-Ck-Stream-Cursor` advertises the zero cursor on the initial response and the accepted cursor on reattachment.
+
+The egress index maps each unit to internal `seq`, output ordinal and mapped start/end positions. Byte cursors additionally map to an intra-unit byte offset. One internal event may emit zero, one or many units. Suppressed events consume no external unit number. Internal SSE IDs still equal `X.seq`; external SSE IDs use `v1.e.<n>` after the corresponding output unit. Preserve native upstream IDs in provenance. Deterministic re-encoding fixes synthesized identities, timestamps, framing and output options for the retained stream. Rebuild encoder state from positions; never retain a second heap output log. Indexes, retained encoded spans and reconstruction scratch share the exchange quota.
+
+| Surface | Cursor discovery and acknowledgment | Reconnect |
+| --- | --- | --- |
+| SSE, including image and Gemini SSE | Read `id: v1.e.<n>` only after a complete event. Discard a partial event on disconnect. | GET with `after` or `Last-Event-ID`; deliver the next whole event. |
+| Buffered JSON: Chat, Messages, Responses, Interactions, legacy, count, compact, image results, video jobs and alpha search | Initial header advertises `v1.b.0`. Count entity-body bytes accepted by the client, including JSON framing. Keep the prefix until the document is complete. | GET with `v1.b.<received>`; append the exact suffix to the retained prefix, not to a newly parsed document. |
+| Non-SSE Gemini JSON/array streams | Use byte cursors and retain partial JSON tokens and array framing. | Same byte-suffix GET; no extra opening bracket or repeated element. |
+| Raw speech, finite video downloads, multipart or other binary HTTP output, SDP answers | Use byte cursors over encoded entity-body bytes, not decoded media bytes or HTTP chunk framing. | Same byte-suffix GET; do not issue a new media generation, job request or call. |
+| Responses WS, realtime/Live WS and sideband, AI Studio relay JSON/binary messages | Each complete outbound unit is followed by `{"type":"x_ck.cursor","direction":"response","after":"v1.e.<n>"}` on the ordered channel. The marker acknowledges the preceding unit, carries no stream ID and is not an inference unit. | Upgrade GET with header ID and `after`. Reattach to retained turn/session state and follow live output. No replayed `response.create` or provider session creation. |
+| WebRTC data-channel messages | Same marker on the reliable ordered data channel. | Upgrade GET with header ID and `after`; exchange `x_ck.transport.offer` / `x_ck.transport.answer` JSON messages containing `sdp` for a new client-facing peer only. Resume the retained upstream session. |
+| WebRTC audio/video packets | Reliable data-channel cursor records add `track_id` and `packet_id` from §4. Advance only through the contiguous prefix of packets actually received; retain later packet IDs to suppress duplicates during replay. | Same client-peer negotiation. Replay cached packet bytes/timestamps in order before live packets; no direct-media fallback. Requires `media-relay`. |
+
+For ordered WS, Fetch and data-channel delivery, clients apply a unit only when its following cursor marker arrives. If the connection dies between the two, discard that pending unit and resume from the previous marker. Packet delivery uses the explicit packet correlation above because media and control channels can arrive in different orders. HTTP byte delivery, both initial and resumed, uses identity content encoding; byte counts exclude transfer framing and remain stable across connections. Complete units and their markers are reconstructed from retained positions, not network write-success counters.
+
+Duplex request-direction units have a separate accepted-prefix cursor, starting at `v1.e.0`. The receiver emits the same `x_ck.cursor` control with `direction: request` after storing and validating a complete unit; admission of a turn still waits for `request.end`. On attachment, the gateway reports that accepted prefix before accepting new input. A sender discards acknowledged units and resends only its unacknowledged suffix. Each unit is preceded by `{"type":"x_ck.input","unit":1,"direction":"request"}`, with consecutive unit numbers starting at 1. Duplicate unit numbers already accepted are acknowledged without execution; gaps fail before admission with HTTP 400 or a bounded transport error after upgrade. These boundary controls carry no stream IDs and never become trusted internal `x_ck` fields. The AI Studio relay applies the same rule with producer/consumer roles reversed; reconnect does not resubmit an accepted browser inference request.
+
+An abnormal socket loss releases a reader, not a producer. Explicit `response.cancel`, session-close and hangup controls still stop their owned work. Resume replays the stored terminal outcome once; a cursor at the end of retained output after the terminal was delivered receives EOF without another terminal. A cursor beyond the retained end returns 400 under the cursor validation above. An active cursor at the published end waits for publication. No client acknowledgment frees cached response frames or updates accounting. Reads and acknowledgment advances refresh recency as in §6.4.
+
+Acceptance must cover zero-output events, one-to-many output, partial JSON/base64/byte units, concurrent readers, both duplex directions and a lost cursor marker. Terminal-cursor acceptance includes both cases:
+
+- A cursor at the end of retained output after the terminal was delivered receives EOF without a repeated terminal.
+- A cursor beyond the retained end returns 400, not EOF.
+
+Disconnect before the initial identity header is received cannot be resumed by that client; collection still follows §6.6. Test wrong identities, future cursors, expiry/eviction, explicit cancel, shutdown and case-varied headers through logging/capture/spooling. Verify no ID reaches a URL or client persistent storage.
 
 ## 7. Bounds and flow
 
@@ -673,8 +744,8 @@ Keep request-direction and scratch ranges only while an egress snapshot or reade
 Where a final response requires old content, do not evict it silently to meet a limit; fail visibly under the same queue rule.
 A destination that only accepts whole tool JSON may delay tool serialization at egress by reading mapped fragments; internal argument delivery remains incremental.
 SSE, JSON array streams, raw media HTTP bodies, WS JSON/binary messages and WebRTC packets are egress encodings, not alternate internal pipelines.
-Today `crates/ck-server/src/inference/dispatch.rs:2653-2675` bootstraps `Done::Stream` on the first nonempty upstream chunk and concatenates non-streaming output in `BytesMut`; bootstrap is not transport commitment.
-Configured nonstream/media keepalives can commit headers/body before an inference event (`crates/ck-server/src/inference/dispatch.rs:583-632`).
+Today `crates/ck-server/src/inference/dispatch.rs:1644-1680` bootstraps `Done::Stream` on the first nonempty upstream chunk and concatenates non-streaming output in `BytesMut`; bootstrap is not transport commitment.
+Configured nonstream/media keepalives can commit headers/body before an inference event (`crates/ck-server/src/inference/dispatch.rs:463-468`).
 The new single commit point is egress scheduling the first client-deliverable bytes after encoding; suppressed metadata cannot commit, and pre-delivery keepalives/success headers are forbidden (§3.6).
 Today's framer has a 16 MiB per-event default and a BytesMut buffer (`crates/ck-translate/src/sse.rs:9-13,28-34`); that number is evidence, not an adopted S0 stream/pool limit.
 
@@ -687,11 +758,11 @@ Every stage that reads or rewrites stream content is in-process code. It follows
 
 ### 9.1 Golden change ledger and semantic assertions
 
-For each changed fixture, record fixture ID, affected route/direction/mode, old behavior, new behavior, ruling/spec clause, and replacement semantic assertions.
+For each changed fixture, record fixture ID, affected route/direction/mode, old behavior, new behavior, ruling/spec clause, and replacement semantic assertions in [STREAM-GOLDEN-CHANGES.md](STREAM-GOLDEN-CHANGES.md). Its Phase A inventory is an acceptance input, not a list of passing S1 tests.
 Do not bless rewritten expected bytes wholesale. Keep exact-byte checks only where bytes remain contractual, such as decoded media and opaque signature content.
 Replace obsolete pair-registry/wiring assertions; same-protocol re-encoding is not a reason to retain legacy translators.
 The ledger MUST explicitly replace invalid-UTF-8 passthrough and single-buffered-tool-chunk expectations (`crates/ck-translate/tests/golden.rs:550-583,588-612`).
-Cover every registered client/upstream combination and applicable request/stream/buffered/count mode; current inventory is `crates/ck-translate/src/lib.rs:303-335`. Add native same-protocol, compact, all media and duplex routes.
+Cover every registered client/upstream combination and applicable request/stream/buffered/count mode; the current registry has 30 arms in `crates/ck-translate/src/lib.rs:283-315`. Add native same-protocol, compact, all media and duplex routes listed in the ledger inventory.
 
 | Assertion group | Required semantic proof |
 | --- | --- |
@@ -715,7 +786,7 @@ Cover every registered client/upstream combination and applicable request/stream
 
 New gates require planted violations and a recorded failing result: erase a signature, replace absent usage with zero, overwrite a Gemini part, publish before event completion, reuse a leased frame, bypass chunk timer/size, commit on suppressed metadata, cancel upstream on client disconnect, or leave the last-read time unrefreshed by a read.
 Use deterministic clocks and local mock upstreams; concurrency/storage checks use real temporary mappings and isolated process lifetimes, not fake success adapters.
-No live-provider traffic without owner approval. Cache-semantic changes require warm/changed-context/idle checks with observed cache read/write usage (`crates/AGENTS.md:88,92-94`).
+No live-provider traffic without owner approval. Cache-semantic changes require warm/changed-context/idle checks with observed cache read/write usage (`crates/AGENTS.md`, Performance and Verification).
 
 ### 9.2 Benchmarks and metrics
 
@@ -738,8 +809,8 @@ for round in 1 2 3; do
 done
 ```
 
-`bench/run.sh` resolves its second binary argument even for SERVERS=rust, so repeat the Rust path there; it is not a Go comparison (`bench/run.sh:30-33,155-158`).
-Scenario names and current measures are in `bench/run.sh:120-151`; Messages MIN/MAX/DELAY and affinity are in `bench/messages.sh:40-51,98-110`; latency arguments/isolation are in `bench/latency.sh:5-28`.
+`bench/run.sh` resolves its second binary argument even for SERVERS=rust, so repeat the Rust path there; it is not a Go comparison (`bench/run.sh:30-33,155-157`).
+Scenario names and current measures are in `bench/run.sh:120-151`; Messages MIN/MAX/DELAY and affinity are in `bench/messages.sh:40-51,96-110`; latency arguments/isolation are in `bench/latency.sh:5-28`.
 The current `chat-stream-slow` scenario delays the upstream, not the downstream consumer (`bench/run.sh:121-130`); additionally run an explicitly throttled downstream reader to prove upstream collection continues (D2) and the per-stream limit fails visibly.
 Latency harness peak memory includes proxy, mock and client (`crates/ck-server/examples/claude_latency.rs:7-28`); report it separately from proxy-only measures.
 
@@ -754,6 +825,52 @@ Latency harness peak memory includes proxy, mock and client (`crates/ck-server/e
 
 Record host architecture/page size, kernel, filesystem, CPU affinity/load, build flags, configuration, binaries/revisions, repetitions and raw results.
 A lower heap/RSS reading alone is not a memory improvement claim: account for mmap/tmpfs residency and OS page cache; compare total charged resources under the same workload.
+
+#### S1 benchmark interfaces and pending inputs
+
+Run from the repository root on Linux with release builds, Python, Go, curl, jq, taskset and working user/network/mount namespaces. `$TMPFS` names an existing private tmpfs directory. `$OUT` names external disposable output on a no-snapshot filesystem. These interfaces are frozen for later phases; Phase A does not implement or run them.
+
+| Interface | Implemented by | Required result |
+| --- | --- | --- |
+| `bench/stream-gate.sh "$TMPFS" "$OUT/storage"` | Phase B | Exercise production `ck-stream` against same-layout 50,000-byte heap frames. Run every §9.3 row, including 250 MiB, 101 alternating runs for the open row, memory decay, total cap and isolated ENOSPC. |
+| `bench/codec-gate.sh "$OLD_CODEC" "$NEW_CODEC" "$OUT/codecs"` | Phase C | Compare equivalent external fixture workloads through all four boundary roles, not old pair APIs. Three alternating old/new rounds; report every codec metric above per protocol, direction and event kind. |
+| `bench/flow-gate.sh "$NEW" "$OUT/flow"` | Phases D/E | Local upstreams and genuinely throttled clients; disconnect/live/completed resume, signatures, tools, logprobs, choices, long realtime/media and terminal snapshots. Record upstream progress independently of client progress. |
+| Existing `run.sh`, `messages.sh`, `latency.sh` commands above | Phases D/F | Three alternating old/new rounds with final configuration and private pool setup. Separate proxy-only memory from the combined latency process. |
+| `bench/container-start.sh cooker:ci "$OUT/container-start"` | Phase F | Start the actual runtime image, await `/healthz` with `{"status":"ok"}`, check pool initialization and modes, then shut down and remove disposable resources. |
+
+Each new driver exits nonzero on a missing workload, missing metric, invalid input or failed threshold. Write raw per-run records and a summary under its output directory. Record workload/fixture IDs, revision, binary checksum, compiler/profile/features/build flags, host/page size/kernel/filesystem, configuration, affinity/load, round and units. No aggregate may hide a failed row. Flow-only new capabilities have semantic/limit gates; do not invent an old resume baseline.
+
+The container gate uses image `XDG_RUNTIME_DIR=/run/cooker-runtime`, uid/gid 10001, a fresh private `/data` volume and `--tmpfs /run/cooker-runtime:rw,noexec,nosuid,size=512m,mode=0700,uid=10001,gid=10001`. Check the created `cooker/` directory is 0700 and the pool is 0600. Also check missing XDG without an explicit directory fails, an unsafe directory is refused, and an explicit private directory works without XDG. A valid capped pool below 256 MiB must start with derived `max_frames`; an explicit value above `pool_frames` must fail. Rootless containers only. Version output alone is not startup proof.
+
+Phase A captured the old release gateway and the `bench/latency.sh` executable from post-W1 `b518060ea1e43ef4b266591986ca92321e6289b5`. Maintainer-held artifact directory: `/home/zakk/code/jev-router/p4/s1-baseline/`, outside the repository, not a public download location. Preserve these files separately from new builds.
+
+| Artifact in that directory | SHA-256 |
+| --- | --- |
+| `cooker-b518060e` | `4f89bd8e13abd3078adea569b7c61805b2a2f5d366219e4ae24883b28ea7a9fc` |
+| `claude_latency-b518060e` | `9f5fecbebb3b411f60292a2d2b72a3aeaf9a88e521ac3d9add4f76a564cc0d79` |
+
+Build provenance: `rustc 1.99.0 (b940084d7 2026-09-28)`, LLVM 23.1.1, `x86_64-unknown-linux-gnu`; `--locked --release -j 8`, thin LTO, one codegen unit, `strip = true`, no explicit feature flags or custom Rust/compiler/linker environment flags. Gateway features are empty; the latency example enables `ck-server/testing` through its dev self-dependency. Neither enables `media-relay` or `pprof`. The absent `ui/dist` was built first with `npm ci --no-audit --no-fund` and `npm run build`. Host: AMD Ryzen 9 9950X3D (16 cores / 32 threads), Linux `7.3.4-gentoo-cjk-zakk`, 4,096-byte pages, inherited CPU affinity 0-31. Build-start/end 1/5/15-minute load averages were 1.77 / 1.92 / 2.26 and 19.65 / 13.26 / 6.71. The isolated `/scratch/ssd/s1a-old` worktree and `/scratch/ssd/s1a-old-target` were removed after copying. `STREAM-GOLDEN-CHANGES.md`, Old baseline build provenance, records exact commands, sizes, compiler commit and the retained `fix-baseline-*` logs. This captures executables, not performance acceptance.
+
+Pending acceptance inputs, not Phase A results:
+
+- The Phase C codec comparison harness over equivalent old/new fixtures. The pinned `ck-translate` has no standalone codec benchmark executable; the captured gateway and latency example do not substitute for one.
+- Matching new release executables and adapted configuration/load harnesses. Do not overwrite old artifacts with new builds.
+- Same-host baseline/load records, raw rounds and owner approval of the tolerances below before performance acceptance.
+- Measurements for initial extent/growth (21 frames each is a hypothesis), header-slot capacity, heap headroom and provisional event/metadata limits. No measured value is claimed here.
+
+#### PROPOSED codec and pipeline tolerances
+
+Owner approval is required. These are proposed decision rules, not accepted budgets or benchmark results. For each comparable workload, compare the median of three old and three new rounds. Each round reports its own p50/p95/p99; compare matching percentiles across rounds. Do not pool unrelated protocols, directions, modes or body sizes.
+
+| Metric | PROPOSED acceptance rule |
+| --- | --- |
+| Codec CPU ns/event, allocations/event, allocated bytes/event | New median no higher than old median (0% regression). |
+| Pipeline CPU/completion, first-deliverable, inter-event and completion latency p50/p95/p99 | New median no higher than old median (0% regression). |
+| Throughput | New median no lower than old median (0% regression). |
+| Heap peak/retained and total charged memory/storage | New median no higher than old median for equal work and retention. Report retained-cache cost separately from old disconnect cleanup; never call that unequal-lifetime comparison a pass. |
+| Flow, media and semantic correctness | No missing data, duplicate accounting, early commitment, upstream pause or limit/timer violation. These are mandatory contracts, not noise tolerances. |
+
+Zero old values require zero new values; use absolute values, not division by zero. Measurements outside a rule fail the proposal; noise needs another owner-approved decision, not an automatic waiver. Encoded byte counts may change with the grammar and are reported, not compared as byte-exact goldens. Exact decoded media and signature bytes remain contractual. Approval must name the table revision and any changed rule in this document before accepting results. None of these proposals relaxes §9.3, including its unresolved 101-run row, or the existing size, idle and request-heap budgets in `REQUIREMENTS.md`.
 
 ### 9.3 Storage regression gate (S1)
 
