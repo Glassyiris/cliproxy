@@ -621,7 +621,69 @@ fn materialize(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         create_dir(parent)?;
     }
-    cpa_plugin::auth::atomic_write(path, bytes).map_err(anyhow::Error::msg)
+    atomic_write(path, bytes).map_err(anyhow::Error::msg)
+}
+
+/// Go `atomicWriteFile`: a 0600 temp file beside `path`, renamed over it.
+pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> Result<(), String> {
+    use std::io::Write as _;
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d,
+        _ => Path::new("."),
+    };
+    create_private_dir(dir).map_err(|e| format!("create auth directory: {}", path_error("mkdir", dir, &e)))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    // Like Go `os.CreateTemp`: a fresh name until one is unused.
+    let mut attempt = 0u32;
+    let (tmp_path, mut tmp) = loop {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        let candidate = dir.join(format!(".credential-{}{nanos}{attempt}.tmp", std::process::id()));
+        match options.open(&candidate) {
+            Ok(file) => break (candidate, file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 10_000 => attempt += 1,
+            Err(e) => {
+                return Err(format!("create temp auth file: {}", path_error("open", &candidate, &e)));
+            }
+        }
+    };
+    let result = tmp
+        .write_all(data)
+        .map_err(|e| format!("write temp auth file: {}", path_error("write", &tmp_path, &e)))
+        .and_then(|()| {
+            drop(tmp);
+            std::fs::rename(&tmp_path, path).map_err(|e| format!("rename temp auth file: {e}"))
+        });
+    let _ = std::fs::remove_file(&tmp_path);
+    result
+}
+
+/// `os.MkdirAll(dir, 0o700)`.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
+}
+
+/// Go's `*fs.PathError` text: `op path: errno`.
+fn path_error(op: &str, path: &Path, e: &std::io::Error) -> String {
+    format!("{op} {}: {}", path.display(), errno_text(e))
+}
+
+/// Go's `syscall.Errno` text: strerror in lower case, without Rust's suffix.
+fn errno_text(e: &std::io::Error) -> String {
+    let text = e.to_string();
+    let text = text.split(" (os error").next().unwrap_or_default();
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map_or_else(String::new, |c| c.to_lowercase().chain(chars).collect())
 }
 
 fn remove(path: &Path) -> anyhow::Result<()> {

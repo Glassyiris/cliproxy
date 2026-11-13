@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use super::quota_probe::gojson::{self as pjson, Node};
 use axum::body::Bytes;
 use axum::extract::{Path as UrlPath, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -14,7 +15,6 @@ use cpa_core::config::credentials;
 use cpa_core::credential::Credential;
 use cpa_plugin::api::{QuotaFetchRequest, QuotaResetRequest};
 use cpa_plugin::auth::AuthView;
-use cpa_plugin::gojson::{self as pjson, Node};
 use serde_json::{Value, json};
 
 use super::Management;
@@ -142,7 +142,7 @@ fn first_value(body: &[u8]) -> &[u8] {
 fn go_object(data: &[u8]) -> bool {
     fn numbers_fit(n: &Node) -> bool {
         match n {
-            Node::Number(lit) => cpa_plugin::cli::parse_float(lit).is_some(),
+            Node::Number(lit) => pjson::parse_float(lit).is_some(),
             Node::Array(items) => items.iter().all(numbers_fit),
             Node::Object(fields) => fields.iter().all(|(_, v)| numbers_fit(v)),
             _ => true,
@@ -278,7 +278,7 @@ pub(crate) async fn fetch(
     // Go: the declarative quota probe, when the metadata declares one.
     if let Some(probe) = auth.metadata.get("quota_probe").and_then(Value::as_object) {
         match super::quota_probe::execute(&state, &auth, probe).await {
-            Some(Ok(resp)) => return go_json(StatusCode::OK, cpa_plugin::gojson::to_vec(&resp)),
+            Some(Ok(resp)) => return go_json(StatusCode::OK, pjson::to_vec(&resp)),
             Some(Err(e)) => return fail(StatusCode::BAD_GATEWAY, &format!("quota probe failed: {e}")),
             None => {}
         }

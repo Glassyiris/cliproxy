@@ -4536,12 +4536,12 @@ fn codex_patched(bytes: &[u8], patch: &cpa_exec::codex_refresh::RefreshPatch, re
     if !refresh_write {
         let legacy: Vec<String> = doc
             .keys()
-            .filter(|k| cpa_plugin::auth::canonical_metadata_key(k) != k.as_str())
+            .filter(|k| cpa_core::credential::canonical_metadata_key(k) != k.as_str())
             .cloned()
             .collect();
         for key in legacy {
             let value = doc.remove(&key).expect("listed above");
-            doc.entry(cpa_plugin::auth::canonical_metadata_key(&key).to_owned())
+            doc.entry(cpa_core::credential::canonical_metadata_key(&key).to_owned())
                 .or_insert(value);
         }
     }

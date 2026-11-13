@@ -124,3 +124,36 @@ impl MetadataPatch {
         }
     }
 }
+
+/// Go `CanonicalCredentialMetadataKey`: the metadata key a legacy hyphenated
+/// spelling is stored under.
+pub fn canonical_metadata_key(key: &str) -> &str {
+    match key {
+        "api-key" => "api_key",
+        "base-url" => "base_url",
+        "disable-cooling" => "disable_cooling",
+        "excluded-models" => "excluded_models",
+        "fingerprint-profile" => "fingerprint_profile",
+        "model-aliases" => "model_aliases",
+        "openapi-location" => "openapi_location",
+        "openapi-models" => "openapi_models",
+        "proxy-url" => "proxy_url",
+        "request-retry" => "request_retry",
+        "request-scoped-errors" => "request_scoped_errors",
+        "tool-prefix-disabled" => "tool_prefix_disabled",
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_metadata_key;
+
+    #[test]
+    fn legacy_hyphenated_metadata_keys_map_to_their_canonical_names() {
+        assert_eq!(canonical_metadata_key("base-url"), "base_url");
+        assert_eq!(canonical_metadata_key("tool-prefix-disabled"), "tool_prefix_disabled");
+        assert_eq!(canonical_metadata_key("base_url"), "base_url");
+        assert_eq!(canonical_metadata_key("x-custom"), "x-custom");
+    }
+}

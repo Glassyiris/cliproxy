@@ -994,7 +994,7 @@ fn go_redact(raw: &str) -> String {
 /// names and values, the scheme, a host. The error is the `*url.Error` cause.
 // ponytail: a URL whose host Go and the WHATWG parser read differently is refused
 // instead of being sent to a host Go would not contact.
-pub fn go_preflight(url: &str, parsed: &GoUrl, headers: &Header) -> Result<(), String> {
+fn go_preflight(url: &str, parsed: &GoUrl, headers: &Header) -> Result<(), String> {
     let is_http = matches!(parsed.scheme.as_str(), "http" | "https");
     if is_http && let Some(invalid) = invalid_header(headers) {
         return Err(format!("net/http: invalid header {invalid}"));
@@ -1009,23 +1009,6 @@ pub fn go_preflight(url: &str, parsed: &GoUrl, headers: &Header) -> Result<(), S
         return Err("unsupported URL: hosts differ between parsers".into());
     }
     Ok(())
-}
-
-/// The `*url.Error` text for a request Go's client refused: `Get "url": cause`.
-pub fn go_url_error_text(method: &str, url: &str, cause: &str) -> String {
-    format!("{} {}: {cause}", url_error_op(method), quote(strip_password(url)))
-}
-
-/// The error Go's response body reader reports for `err`.
-pub fn go_read_error_text(err: &std::io::Error) -> String {
-    go_read_error(err)
-}
-
-/// The `*url.Error` text Go's `http.Client.Do` returns for a failed send
-/// (`Get "url": cause`), password masked.
-pub fn go_url_error(method: &str, err: SendError) -> String {
-    let (url, cause) = send_error_parts(err);
-    format!("{} {}: {cause}", url_error_op(method), quote(strip_password(&url)))
 }
 
 /// Go `urlErrorOp`: the method with only its first letter upper case.
