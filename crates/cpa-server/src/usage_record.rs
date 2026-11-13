@@ -1998,8 +1998,6 @@ pub struct Tracker {
     client: Option<Client>,
     /// Go `requestedAt`.
     requested_at: chrono::DateTime<chrono::FixedOffset>,
-    /// Go `baseURL`: the credential's `base_url` attribute, else its metadata's.
-    base_url: String,
     attempt: usize,
 }
 
@@ -2032,14 +2030,6 @@ impl Tracker {
     ) -> Self {
         let (provider, executor_type) = executor_identity(credential);
         let now = chrono::Local::now();
-        let base_url = credential
-            .attributes
-            .get("base_url")
-            .map(|v| v.trim())
-            .filter(|v| !v.is_empty())
-            .or_else(|| credential.str("base_url").map(str::trim))
-            .unwrap_or_default()
-            .to_owned();
         let record = Record {
             timestamp: go_timestamp(&now),
             execution_id: uuid::Uuid::new_v4().to_string(),
@@ -2079,7 +2069,6 @@ impl Tracker {
             published: false,
             client: None,
             requested_at: now.fixed_offset(),
-            base_url,
             attempt: facts.attempts.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }

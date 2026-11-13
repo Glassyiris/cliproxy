@@ -210,6 +210,8 @@ pub(super) fn delete_journal(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A row of a kind this build does not know (one a removed feature stored) makes the
+/// database unreadable as a whole; nothing migrates it.
 pub(super) fn stored_kind(name: &str) -> rusqlite::Result<Kind> {
     Kind::parse(name).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
@@ -217,7 +219,7 @@ pub(super) fn stored_kind(name: &str) -> rusqlite::Result<Kind> {
             rusqlite::types::Type::Text,
             Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "unsupported stored resource kind",
+                format!("unknown stored resource kind {name:?}; this build cannot open the database, start from a new one"),
             )),
         )
     })

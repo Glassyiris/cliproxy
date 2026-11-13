@@ -1,7 +1,6 @@
 mod config_cli;
 mod discovery;
 mod dotenv;
-mod plugin_cli;
 mod tui;
 
 use std::io;
@@ -11,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use clap::{ArgAction, CommandFactory, FromArgMatches, Parser};
+use clap::{ArgAction, Parser};
 use cpa_core::config::Config;
 use cpa_exec::Executors;
 use cpa_exec::claude::{ClaudeExecutor, DEFAULT_BASE_URL};
@@ -50,7 +49,7 @@ struct Args {
     /// Write process logs to this file (10 MiB rotation), without a shell wrapper.
     #[arg(long)]
     log_file: Option<PathBuf>,
-    /// Change to this directory first, before reading .env, plugins or relative paths.
+    /// Change to this directory first, before reading .env or relative paths.
     #[arg(long)]
     working_dir: Option<PathBuf>,
     /// Log in to Claude using browser OAuth and PKCE.
@@ -271,8 +270,7 @@ fn discover_options(
 /// A personal proxy spends its time waiting on upstreams, so two workers serve hundreds
 /// of requests per second, and each extra worker can hold its own glibc arena. The
 /// blocking pool keeps tokio's default ceiling (512): its threads start on demand and
-/// exit after 10 idle seconds, and a native plugin call holds one for the whole call
-/// while its HTTP callbacks need others (DNS), so a low ceiling could deadlock.
+/// exit after 10 idle seconds.
 fn runtime(config: Option<&Config>) -> io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads(config))
@@ -407,55 +405,6 @@ async fn wait_for_cloud_deploy() {
     tracing::info!("Cloud deploy mode: Shutdown signal received; exiting");
 }
 
-/// A plugin flag the plugin rejected: the message, the usage, exit 2.
-fn flag_error(cmd: &mut clap::Command, message: &str) -> ! {
-    eprintln!("{message}");
-    eprint!("{}", cmd.render_help());
-    std::process::exit(2);
-}
-
-/// The built-in flags `main` needs before plugins load and declare their flags. An
-/// unknown long flag may belong to a plugin: it is set aside, with a following value, and
-/// the parse repeats, so a built-in flag after it still selects discovery or the database
-/// before either opens; the full parse confirms each value later. Every other parse
-/// error, help and version exit here, before any database or plugin opens.
-fn early_flags(raw: &[String]) -> clap::ArgMatches {
-    let mut argv = raw.to_vec();
-    loop {
-        let error = match Args::command().try_get_matches_from(&argv) {
-            Ok(matches) => return matches,
-            Err(error) => error,
-        };
-        let flag = match error.get(clap::error::ContextKind::InvalidArg) {
-            Some(clap::error::ContextValue::String(arg))
-                if error.kind() == clap::error::ErrorKind::UnknownArgument && arg.starts_with("--") =>
-            {
-                arg.clone()
-            }
-            _ => error.exit(),
-        };
-        let at = argv
-            .iter()
-            .position(|a| *a == flag || a.strip_prefix(flag.as_str()).is_some_and(|rest| rest.starts_with('=')))
-            .unwrap_or_else(|| error.exit());
-        // `--name value`: no built-in flag is positional, so a bare word belongs to it.
-        let end = if argv[at] == flag && argv.get(at + 1).is_some_and(|v| !v.starts_with('-')) {
-            at + 2
-        } else {
-            at + 1
-        };
-        argv.drain(at..end);
-    }
-}
-
-fn early_string(matches: &clap::ArgMatches, id: &str) -> String {
-    matches.get_one::<String>(id).cloned().unwrap_or_default()
-}
-
-fn early_flag(matches: &clap::ArgMatches, id: &str) -> bool {
-    matches.get_one::<bool>(id).copied().unwrap_or(false)
-}
-
 fn main() -> anyhow::Result<()> {
     cpa_server::logging::init();
     let raw: Vec<String> = std::env::args().collect();
@@ -468,57 +417,43 @@ fn main() -> anyhow::Result<()> {
         let opts = discover_options(args.timeout, args.json, args.service_type, &args.config, cli);
         std::process::exit(runtime(None)?.block_on(discovery::cli::discover(&opts)));
     }
-    let early = early_flags(&raw);
-    // First, so .env, plugins, the default config and relative paths resolve there.
-    let working_dir = early.get_one::<PathBuf>("working_dir").cloned();
-    if let Some(dir) = &working_dir {
+    // Parse errors, help and version exit here, before any database opens.
+    let args = Args::parse_from(&raw);
+    // First, so .env, the default config and relative paths resolve there.
+    if let Some(dir) = &args.working_dir {
         std::env::set_current_dir(dir).with_context(|| format!("change to working directory {}", dir.display()))?;
     }
     // Next, relative to that directory, so every line from here on reaches the file:
     // sizing the runtime can warn.
-    let log_file = early.get_one::<PathBuf>("log_file").cloned();
-    if let Some(path) = &log_file {
+    if let Some(path) = &args.log_file {
         cpa_server::logging::set_log_file(path.clone()).context("open process log")?;
     }
-    // Discovery neither loads plugins nor reads .env.
-    let discover_mode = early_flag(&early, "discover") || early_flag(&early, "discover_json");
+    // Discovery does not read .env.
+    let discover_mode = args.discover || args.discover_json;
     // Before the runtime starts: setting variables is only sound single-threaded.
     if !discover_mode {
         dotenv::load_from_working_dir();
     }
     // An explicit online command must be selected before opening any local store.
-    if !discover_mode && !early_string(&early, "management_base_url").trim().is_empty() {
-        let Ok(args) = Args::try_parse_from(&raw) else {
-            let code = runtime(None)?.block_on(online_plugin_command(&raw))?;
-            if code != 0 {
-                std::process::exit(code);
-            }
-            return Ok(());
-        };
-        if command_mode(&args) {
-            if !online_command_supported(&args) {
-                anyhow::bail!("this online provider login is not yet supported");
-            }
-            return runtime(None)?.block_on(online_command(&args));
+    if !discover_mode && !args.management_base_url.trim().is_empty() && command_mode(&args) {
+        if !online_command_supported(&args) {
+            anyhow::bail!("this online provider login is not yet supported");
         }
+        return runtime(None)?.block_on(online_command(&args));
     }
-    let config_flag = early_string(&early, "config");
-    let db_flag = early_string(&early, "db");
-    let config_file = if config_flag.is_empty() {
+    let config_file = if args.config.is_empty() {
         PathBuf::from("config.yaml")
     } else {
-        PathBuf::from(&config_flag)
+        PathBuf::from(&args.config)
     };
-    let db = db_path(&db_flag, &config_file);
-    let remote_client = Args::try_parse_from(&raw).is_ok_and(|args| {
-        args.tui && !args.standalone && !args.management_base_url.trim().is_empty() && !command_mode(&args)
-    });
+    let db = db_path(&args.db, &config_file);
+    let remote_client = args.tui && !args.standalone && !args.management_base_url.trim().is_empty();
     let loaded = if discover_mode || remote_client {
         None
     } else {
         let first = if std::env::var("COOK_DEPLOY").is_ok_and(|v| v == "cloud") {
             FirstImport::Cloud
-        } else if config_flag.is_empty() {
+        } else if args.config.is_empty() {
             FirstImport::Defaults
         } else {
             FirstImport::Required
@@ -526,34 +461,14 @@ fn main() -> anyhow::Result<()> {
         let loaded = load_config(&db, &config_file, first);
         // Like a failure inside `run`: the process log keeps why startup stopped.
         if let Err(error) = &loaded
-            && log_file.is_some()
+            && args.log_file.is_some()
         {
             tracing::error!("{error:#}");
         }
         Some(loaded?)
     };
     let runtime = runtime(loaded.as_ref().map(|(_, config)| config))?;
-    let builtin_cmd = Args::command();
-    let plugins = (!discover_mode).then(|| {
-        let builtin = |name: &str| builtin_cmd.get_arguments().any(|a| a.get_long() == Some(name));
-        let boot = loaded
-            .as_ref()
-            .map(|(_, config)| config.clone())
-            .unwrap_or_else(|| Config::parse("").expect("empty config"));
-        runtime.block_on(plugin_cli::bootstrap(boot, &builtin))
-    });
-    let mut cmd = match &plugins {
-        Some((_, flags)) => plugin_cli::with_flags(Args::command(), flags),
-        None => Args::command(),
-    };
-    let matches = cmd.clone().get_matches_from(&raw);
-    if let Some((host, _)) = &plugins
-        && let Err(e) = plugin_cli::set_flags(host, &matches)
-    {
-        flag_error(&mut cmd, &e);
-    }
-    let args = Args::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-    if args.discover || args.discover_json {
+    if discover_mode {
         let cli = (csv_flags(&args.discover_include), csv_flags(&args.discover_exclude));
         let opts = discover_options(
             args.discover_timeout,
@@ -564,12 +479,10 @@ fn main() -> anyhow::Result<()> {
         );
         std::process::exit(runtime.block_on(discovery::cli::discover(&opts)));
     }
-    let builtin = plugin_cli::builtin_values(&cmd, &matches);
-    let host = plugins.map(|(host, _)| host).unwrap_or_default();
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     runtime.spawn(heap_trim::run());
     let file_log = args.log_file.is_some();
-    let result = runtime.block_on(run(args, host, builtin, loaded));
+    let result = runtime.block_on(run(args, loaded));
     if file_log && let Err(error) = &result {
         tracing::error!("{error:#}");
     }
@@ -668,21 +581,11 @@ mod heap_trim {
     }
 }
 
-async fn run(
-    args: Args,
-    plugins: cpa_plugin::Host,
-    builtin: Vec<(String, String)>,
-    loaded: Option<(Arc<ConfigStore>, Config)>,
-) -> anyhow::Result<()> {
+async fn run(args: Args, loaded: Option<(Arc<ConfigStore>, Config)>) -> anyhow::Result<()> {
     // An explicit remote URL makes `--tui` a pure management client: it needs no local
     // config or store (Go loads them first and can fail or wait there).
-    // Login, import and plugin flags still run first, as in Go.
-    if args.tui
-        && !args.standalone
-        && !args.management_base_url.trim().is_empty()
-        && !command_mode(&args)
-        && !plugins.has_triggered_command_line_flags()
-    {
+    // Login and import flags still run first, as in Go.
+    if args.tui && !args.standalone && !args.management_base_url.trim().is_empty() && !command_mode(&args) {
         remote_tui(args.management_base_url.trim().to_owned(), args.password).await;
         return Ok(());
     }
@@ -690,19 +593,9 @@ async fn run(
     let cloud = std::env::var("COOK_DEPLOY").is_ok_and(|v| v == "cloud");
     let config_present = !cloud || cloud_config_present(&config_store, &config);
     let backend = initialize_credentials(config_store.clone(), &mut config)?;
-    plugin_cli::attach_credentials(&plugins, backend.clone());
     // Go ConfigureLogOutput and SetLogLevel, before any login command.
     cpa_server::logging::configure(&config);
     tracing::info!(commit = COMMIT, built = BUILD_DATE, "{VERSION}");
-    // Go: the loaded config reaches the plugins, and a plugin flag hands the run to
-    // the plugins that own it.
-    plugins.apply_config(Arc::new(config.clone())).await;
-    if let Some(code) = plugin_cli::execute(&plugins, &builtin, &backend).await {
-        if code != 0 {
-            std::process::exit(code);
-        }
-        return Ok(());
-    }
     if command_mode(&args) {
         return command(&args, &config, backend).await.map(|_| ());
     }
@@ -715,15 +608,15 @@ async fn run(
     }
     if args.tui {
         if args.standalone {
-            standalone_tui(config, config_store, backend, args.password, args.local_model, plugins).await;
+            standalone_tui(config, config_store, backend, args.password, args.local_model).await;
         } else {
             let base = resolve_management_base_url(&args.management_base_url, &config);
             remote_tui(base, args.password).await;
         }
         return Ok(());
     }
-    // Only the plain server detaches: discovery, login, import, TUI and plugin
-    // commands keep their console.
+    // Only the plain server detaches: discovery, login, import and TUI keep their
+    // console.
     if args.log_file.is_some() {
         free_console();
     }
@@ -733,7 +626,6 @@ async fn run(
         backend,
         args.password,
         args.local_model,
-        plugins,
         shutdown_signal(),
         None,
     )
@@ -900,7 +792,6 @@ async fn standalone_tui(
     backend: Arc<CredentialDb>,
     password: String,
     local_model: bool,
-    plugins: cpa_plugin::Host,
 ) {
     let hook = cpa_server::logging::capture(2000);
     let (quiet, out): (Option<QuietStdio>, Box<dyn io::Write + Send>) = match QuietStdio::start() {
@@ -926,7 +817,6 @@ async fn standalone_tui(
         backend,
         password.clone(),
         local_model,
-        plugins,
         shutdown,
         Some(listening),
     ));
@@ -1268,67 +1158,6 @@ async fn online_command(args: &Args) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `--management-base-url` and `--password` come before the plugin flags.
-async fn online_plugin_command(raw: &[String]) -> anyhow::Result<i32> {
-    let early = early_flags(raw);
-    let base = early_string(&early, "management_base_url");
-    anyhow::ensure!(!base.trim().is_empty(), "online management URL is required");
-    let password = online_management_key(early_string(&early, "password")).await?;
-    let client = Arc::new(tui::Client::new(&base, &password));
-    client.credential_admission().await.map_err(anyhow::Error::msg)?;
-    let mut config = client.plugin_config().await.map_err(anyhow::Error::msg)?;
-    let sources = client.credential_sources().await.map_err(anyhow::Error::msg)?;
-    let scratch = Arc::new(tempfile::Builder::new().prefix("cook-router-login-").tempdir()?);
-    let owner = scratch.clone();
-    let sources = tokio::task::spawn_blocking(move || {
-        for (name, source) in &sources.documents {
-            hydrate_login_source(owner.path(), &owner.path().join(name), &source.bytes)?;
-        }
-        Ok::<_, io::Error>(sources)
-    })
-    .await
-    .context("prepare private plugin inputs")??;
-    config.auth_dir = scratch.path().to_owned();
-    let (save, failure) = online_login_save(
-        scratch.clone(),
-        client,
-        sources.documents,
-        tokio::runtime::Handle::current(),
-    );
-    let host = cpa_plugin::Host::new();
-    // Install the persistence port before native initialization can call auth.save.
-    plugin_cli::attach_online_credentials(&host, scratch.path().to_owned(), save.clone());
-    let result = async {
-        host.apply_config(Arc::new(config)).await;
-        let flags = host
-            .register_command_line_flags(&|name| {
-                Args::command().get_arguments().any(|arg| arg.get_long() == Some(name))
-            })
-            .await;
-        let command = plugin_cli::with_flags(Args::command(), &flags);
-        let matches = command.clone().try_get_matches_from(raw).map_err(anyhow::Error::msg)?;
-        plugin_cli::set_flags(&host, &matches).map_err(anyhow::Error::msg)?;
-        let _args = <Args as clap::FromArgMatches>::from_arg_matches(&matches).map_err(anyhow::Error::msg)?;
-        let builtin = plugin_cli::builtin_values(&command, &matches);
-        plugin_cli::execute_online(&host, &builtin, raw, save.clone())
-            .await
-            .context("no online plugin command handled these flags")
-    }
-    .await;
-    host.shutdown_all(None).await;
-    host.set_auth_manager(None);
-    drop(save);
-    let cleanup = Arc::try_unwrap(scratch)
-        .map_err(|_| anyhow::anyhow!("plugin credential work has not settled"))?
-        .close()
-        .context("remove private plugin staging");
-    cleanup?;
-    if let Some(error) = failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
-        anyhow::bail!(error);
-    }
-    result
-}
-
 fn import_vertex(auth_dir: &Path, key: &str, prefix: &str, save: &cpa_exec::login_store::LoginSave) -> Ran {
     match cpa_exec::vertex_auth::import(auth_dir, key, prefix, Some(save)) {
         Ok(path) => Ran::Imported(path),
@@ -1482,14 +1311,12 @@ fn app(rt: &Arc<Runtime>, management: &Arc<cpa_server::management::Management>) 
 }
 
 /// `listening` (standalone TUI only) receives the bound address and whether TLS is on.
-#[allow(clippy::too_many_arguments)]
 async fn serve(
     config: Config,
     config_store: Arc<ConfigStore>,
     backend: Arc<CredentialDb>,
     password: String,
     local_model: bool,
-    plugins: cpa_plugin::Host,
     shutdown: impl std::future::Future<Output = ()>,
     listening: Option<tokio::sync::oneshot::Sender<(SocketAddr, bool)>>,
 ) -> anyhow::Result<()> {
@@ -1523,7 +1350,7 @@ async fn serve(
     let rt = cpa_server::testing::runtime_with_db(config, credentials, executors, backend);
     #[cfg(not(test))]
     let rt = Runtime::new(config, credentials, executors, backend);
-    let rt = Arc::new(rt.with_plugin_host(plugins));
+    let rt = Arc::new(rt);
     // What each file credential was loaded from, for Go-exact management saves.
     rt.store().note_loaded(&read);
     rt.set_local_model(local_model);
@@ -1541,9 +1368,6 @@ async fn serve(
         ..Default::default()
     };
     let management = cpa_server::management::Management::with_options(rt.clone(), config_store, options);
-    // Go applies the plugin config before serving; later publishes resync the host.
-    cpa_server::plugins::start(&rt).await;
-    cpa_server::plugins::reload_plugin_auth_files(&rt).await;
     let pprof = cpa_server::pprof::Server::start(&rt);
     let credential_notifications = cpa_server::watching::start(&management);
     // The served transport decides `tls=`: HTTPS exactly when server.tls loaded.
@@ -1597,7 +1421,6 @@ async fn serve(
     if let Err(error) = tokio::task::spawn_blocking(cpa_server::logging::stop_cleaner).await {
         tracing::error!("log directory cleaner did not stop: {error}");
     }
-    rt.plugins().shutdown_all(None).await;
     notifications?;
     persistence?;
     served
@@ -2646,7 +2469,6 @@ mod tests {
             backend,
             "fake-driver-password".into(),
             true,
-            cpa_plugin::Host::default(),
             async {
                 let _ = stopped.await;
             },
@@ -2756,7 +2578,6 @@ mod tests {
             backend,
             "fake-tui-password".into(),
             true,
-            cpa_plugin::Host::default(),
             async {
                 let _ = stopped.await;
             },

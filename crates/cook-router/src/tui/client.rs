@@ -476,13 +476,6 @@ impl Client {
         Self::compile(document)
     }
 
-    /// The complete configuration, secrets included, that plugin commands receive as
-    /// raw configuration.
-    pub async fn plugin_config(&self) -> Result<cpa_core::config::Config, String> {
-        let document = self.get_json("/admin/v1/export?include_secrets=true").await?;
-        Self::compile(Value::Object(document))
-    }
-
     fn compile(document: Value) -> Result<cpa_core::config::Config, String> {
         let resources = cpa_server::config_store::resources::import_json(&document.to_string())
             .map_err(|_| "invalid owner configuration export".to_owned())?;
@@ -1053,14 +1046,6 @@ mod tests {
                 .contains("without redirects")
         );
         assert!(client.login_config().await.err().unwrap().contains("without redirects"));
-        assert!(
-            client
-                .plugin_config()
-                .await
-                .err()
-                .unwrap()
-                .contains("without redirects")
-        );
         assert_eq!(followed.load(std::sync::atomic::Ordering::SeqCst), 0);
         let error = Client::new(&format!("{base}/wrong"), "fake-management-key")
             .save_credentials(&documents, None)

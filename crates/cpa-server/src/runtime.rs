@@ -1707,7 +1707,6 @@ pub(crate) struct Rejections {
 }
 
 pub struct CredentialStore {
-    owner_weak: std::sync::Weak<Self>,
     inner: RwLock<Inner>,
     policy: RwLock<Arc<Policy>>,
     scheduler: Mutex<Scheduler>,
@@ -1891,8 +1890,7 @@ impl CredentialStore {
         }
         let mut registrations = HashMap::new();
         register_change(&mut registrations, &[], &inner.creds);
-        Arc::new_cyclic(|owner_weak| Self {
-            owner_weak: owner_weak.clone(),
+        Arc::new(Self {
             inner: RwLock::new(inner),
             policy: RwLock::new(Arc::new(Policy::default())),
             scheduler: Mutex::default(),
@@ -4589,9 +4587,7 @@ pub(crate) mod tests {
         backend: &crate::credential_store::CredentialDb,
         cfg: &Config,
     ) -> cpa_core::config::credentials::AuthScan {
-        crate::testing::with_builtin_auth_parser(|| {
-            backend.scan(cfg).unwrap()
-        })
+        backend.scan(cfg).unwrap()
     }
     fn reload_private(rt: &Runtime, dir: &Path) {
         let mut cfg = (*rt.config()).clone();
@@ -4609,9 +4605,7 @@ pub(crate) mod tests {
         let (database, backend) = sqlite_backend(&dir);
         let mut cfg = Config::parse("").unwrap();
         cfg.auth_dir = backend.auth_dir();
-        let scan = crate::testing::with_builtin_auth_parser(|| {
-            backend.scan(&cfg).unwrap()
-        });
+        let scan = backend.scan(&cfg).unwrap();
         let store = CredentialStore::new(scan.credentials, backend.clone());
         store.note_loaded(&scan.read);
         let original = store.get("codex.json").unwrap();
@@ -4664,7 +4658,7 @@ pub(crate) mod tests {
         let (database, backend) = sqlite_backend(&dir);
         let mut cfg = Config::parse("").unwrap();
         cfg.auth_dir = backend.auth_dir();
-        let store = CredentialStore::new(crate::testing::builtin_auth_files(&cfg), backend.clone());
+        let store = CredentialStore::new(cpa_core::config::credentials::from_auth_dir(&cfg), backend.clone());
         let original = store.get("codex.json").unwrap();
         let path = cfg.auth_dir.join("codex.json");
         std::fs::remove_file(&path).unwrap();
@@ -4723,7 +4717,7 @@ pub(crate) mod tests {
         let (database, backend) = sqlite_backend(&dir);
         let mut cfg = Config::parse("").unwrap();
         cfg.auth_dir = backend.auth_dir();
-        let store = CredentialStore::new(crate::testing::builtin_auth_files(&cfg), backend.clone());
+        let store = CredentialStore::new(cpa_core::config::credentials::from_auth_dir(&cfg), backend.clone());
         let original = store.get("codex.json").unwrap();
         let epoch = store.epoch();
         let path = cfg.auth_dir.join("codex.json");
@@ -4851,7 +4845,7 @@ pub(crate) mod tests {
         .unwrap();
         let mut cfg = cpa_core::config::Config::parse("").unwrap();
         cfg.auth_dir = dir.clone();
-        let store = test_store(crate::testing::builtin_auth_files(&cfg));
+        let store = test_store(cpa_core::config::credentials::from_auth_dir(&cfg));
         let rev = store.get("claude-a.json").unwrap().revision;
 
         let mut patch = MetadataPatch::default();
@@ -4916,7 +4910,7 @@ pub(crate) mod tests {
         std::fs::write(dir.join("saved.json"), r#"{"type":"claude"}"#).unwrap();
         let mut cfg = cpa_core::config::Config::parse("").unwrap();
         cfg.auth_dir = dir.clone();
-        let store = Arc::new(test_store(crate::testing::builtin_auth_files(&cfg)));
+        let store = Arc::new(test_store(cpa_core::config::credentials::from_auth_dir(&cfg)));
         let saved = (*store.get("saved.json").unwrap()).clone();
         let saver = {
             let store = store.clone();
@@ -4995,7 +4989,7 @@ pub(crate) mod tests {
         }
         let mut cfg = cpa_core::config::Config::parse("").unwrap();
         cfg.auth_dir = dir.clone();
-        let store = test_store(crate::testing::builtin_auth_files(&cfg));
+        let store = test_store(cpa_core::config::credentials::from_auth_dir(&cfg));
         (dir, cfg, store)
     }
 
@@ -5168,7 +5162,7 @@ pub(crate) mod tests {
             std::fs::write(&path, br#"{"type":"codex","prefix":"pfx-8"}"#).unwrap();
             let mut cfg = Config::parse("").unwrap();
             cfg.auth_dir = dir.clone();
-            let store = test_store(crate::testing::builtin_auth_files(&cfg));
+            let store = test_store(cpa_core::config::credentials::from_auth_dir(&cfg));
             let backend = store.credential_backend();
             let stale = backend.scan(&cfg).unwrap();
             let revision = store.get("synthetic.json").unwrap().revision;
@@ -6169,7 +6163,7 @@ pub(crate) mod tests {
             cpa_exec::codex_oauth::CodexOAuth::with_endpoints(client.clone(), &token_url, &token_url, &token_url);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -6290,7 +6284,7 @@ pub(crate) mod tests {
                 cpa_exec::codex_oauth::CodexOAuth::with_endpoints(client.clone(), &token_url, &token_url, &token_url);
             let rt = Arc::new(test_runtime(
                 cfg.clone(),
-                crate::testing::builtin_auth_files(&cfg)
+                cpa_core::config::credentials::from_auth_dir(&cfg)
                     .into_iter()
                     .map(crate::testing::local)
                     .collect(),
@@ -8293,7 +8287,7 @@ pub(crate) mod tests {
             cpa_exec::codex_oauth::CodexOAuth::with_endpoints(client.clone(), &token_url, &token_url, &token_url);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -8689,7 +8683,7 @@ pub(crate) mod tests {
         let oauth = cpa_exec::oauth::OAuth::with_endpoints(wreq::Client::new(), &token, &profile, &profile);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -8848,7 +8842,7 @@ pub(crate) mod tests {
         let oauth = cpa_exec::oauth::OAuth::with_endpoints(wreq::Client::new(), &token, &profile, &profile);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -9162,7 +9156,7 @@ pub(crate) mod tests {
         let oauth = cpa_exec::oauth::OAuth::with_endpoints(wreq::Client::new(), &token, &profile, &profile);
         let rt = Arc::new(test_runtime(
             cfg.clone(),
-            crate::testing::builtin_auth_files(&cfg)
+            cpa_core::config::credentials::from_auth_dir(&cfg)
                 .into_iter()
                 .map(crate::testing::local)
                 .collect(),
@@ -9417,7 +9411,7 @@ pub(crate) mod tests {
         let mut cfg = Config::parse(&yaml).unwrap();
         cfg.auth_dir = auths.clone();
         let mut credentials = cpa_core::config::credentials::from_config(&cfg);
-        credentials.extend(crate::testing::builtin_auth_files(&cfg));
+        credentials.extend(cpa_core::config::credentials::from_auth_dir(&cfg));
         let rt = Arc::new(test_runtime(
             cfg,
             credentials,

@@ -1,5 +1,5 @@
 //! Management API: the `/admin/v1` config resources ([`admin`]) and the v8 routes for
-//! credentials, sign-ins, logs and plugins (plus the few v0 spellings the dashboard
+//! credentials, sign-ins and logs (plus the few v0 spellings the dashboard
 //! predates).
 //!
 //! Routing follows gin: an unknown path or an unregistered method on a known path is a
@@ -38,17 +38,12 @@ pub(crate) use oauth::{
     HeldLogin, LoginRejected, login_render_error, normalize_callback_provider as oauth_provider_key,
 };
 pub mod observability;
-mod plugin_auth;
-mod plugin_oauth;
-mod plugin_store;
-mod plugins;
 pub(crate) mod quota;
 mod quota_probe;
 mod session;
 mod siwc;
 pub use access::cors;
 pub(crate) use access::{Cors, cors_headers};
-pub(crate) use plugins::go_query;
 
 pub struct Management {
     pub(crate) rt: Arc<Runtime>,
@@ -92,8 +87,6 @@ pub struct Management {
     pub(crate) log_dir: PathBuf,
     /// The zone log line timestamps are parsed in (Go `time.Local` when `None`).
     pub(crate) log_zone: logs::Zone,
-    /// Plugin store test seams and release cache (Go `Handler.pluginStore*`).
-    pub(crate) plugin_store: plugin_store::StoreState,
     access: access::Access,
     configuration_subscription: Mutex<Vec<crate::config_store::ConfigurationSubscription>>,
     admission_closed: Mutex<bool>,
@@ -127,13 +120,6 @@ pub struct Options {
     pub log_dir: Option<PathBuf>,
     /// Parses log line timestamps in this zone instead of the local one (tests only).
     pub log_zone: Option<chrono::FixedOffset>,
-    /// The only plugin store registry (Go `pluginStoreRegistryURL`; tests only).
-    pub plugin_store_registry_url: Option<String>,
-    /// The plugin store's HTTP client (Go `pluginStoreHTTPClient`; tests only).
-    pub plugin_store_http: Option<Arc<dyn cpa_plugin::store::Doer>>,
-    /// The plugin store's GitHub rate limiter (Go `pluginStoreRateLimiter`); the
-    /// process-wide one when unset.
-    pub plugin_store_rate_limiter: Option<Arc<cpa_plugin::store::GitHubRateLimiter>>,
 }
 
 impl Management {
@@ -204,11 +190,6 @@ impl Management {
         let login_settled = options.login_settled.take();
         let login_panic = options.login_panic;
         let log_zone = options.log_zone;
-        let plugin_store = plugin_store::StoreState::new(
-            options.plugin_store_registry_url.take(),
-            options.plugin_store_http.take(),
-            options.plugin_store_rate_limiter.take(),
-        );
         let access = access::Access::new(&cfg, options);
         rt.usage_queue().configure(access.available(), &cfg);
         let published = config
@@ -244,7 +225,6 @@ impl Management {
             login_panic,
             log_dir,
             log_zone,
-            plugin_store,
         });
         let weak = Arc::downgrade(&state);
         let notify_owner = weak.clone();
@@ -315,7 +295,6 @@ impl Management {
             .extend([installation, notification]);
         oauth::install_callback_sink(&state);
         access::start_purge(&state);
-        plugin_auth::attach(&state);
         state
     }
 
@@ -349,8 +328,7 @@ impl Management {
         Ok((done, restart))
     }
 
-    /// Edits the config as one document, the way the plugin and credential endpoints
-    /// change it; the caller holds `disk`. `edit`'s own error comes back as `Err(Ok(e))`.
+    /// Edits the config as one document, the way the credential endpoints change it; the caller holds `disk`. `edit`'s own error comes back as `Err(Ok(e))`.
     pub(crate) fn edit_document<E>(
         &self,
         disk: &std::sync::MutexGuard<'_, ()>,
@@ -437,51 +415,6 @@ impl Management {
     /// Management callers hold `disk`; the service's required projection adapter
     /// invokes it under its own admission gate, without acquiring `disk`.
     pub(crate) fn publish(&self, cfg: Config, files: Option<credentials::AuthScan>) {
-        self.publish_upload(cfg, files, None);
-    }
-
-    /// Reads canonical documents; a failed scan keeps loaded file credentials while
-    /// allowing the config itself to take effect.
-    pub(crate) fn scan_credentials(&self, cfg: &Config) -> credentials::AuthScan {
-        self.rt.store().credential_backend().scan(cfg).unwrap_or_else(|error| {
-            tracing::error!("credential database: reading credentials failed, keeping the loaded ones: {error:#}");
-            let credentials = self
-                .rt
-                .store()
-                .snapshot()
-                .iter()
-                .filter(|c| matches!(c.source, Source::File(_)))
-                .map(|c| Credential::clone(c))
-                .collect();
-            credentials::AuthScan {
-                credentials,
-                ..Default::default()
-            }
-        })
-    }
-
-    /// [`Self::publish`] after an upload wrote `upload`'s file. While plugin auth
-    /// providers have not parsed the new bytes, the uploaded credential is registered as
-    /// built, as Go's upload registers it (`buildAuthFromFileData`, no plugin parser),
-    /// replacing one with the same ID; the watcher's next reload asks the plugins.
-    /// `upload` carries the SHA-256 of the bytes written: a write committed since (a
-    /// token refresh) changed the file, and the current credential is kept.
-    pub(crate) fn publish_upload(
-        &self,
-        cfg: Config,
-        files: Option<credentials::AuthScan>,
-        upload: Option<(Credential, [u8; 32])>,
-    ) {
-        self.publish_uploads(cfg, files, upload.into_iter().collect());
-    }
-
-    /// Reconciles one accepted document batch in a single runtime transition.
-    pub(crate) fn publish_uploads(
-        &self,
-        cfg: Config,
-        files: Option<credentials::AuthScan>,
-        uploads: Vec<(Credential, [u8; 32])>,
-    ) {
         // Nothing below is applied for a config the runtime would refuse to publish.
         if !Runtime::accepts_config(&cfg) {
             return;
@@ -543,22 +476,7 @@ impl Management {
             }
         }
         all.extend(credentials::from_config(&cfg));
-        let deferred: std::collections::HashSet<_> = scan.deferred.iter().map(absolute).collect();
-        let uploads: Vec<_> = uploads
-            .into_iter()
-            .filter(|(c, _)| matches!(&c.source, Source::File(path) if deferred.contains(&absolute(path))))
-            .collect();
-        for (upload, written) in &uploads {
-            if let Source::File(path) = &upload.source {
-                read.insert(path.clone(), *written);
-            }
-        }
-        let upload_ids: std::collections::HashSet<_> = uploads.iter().map(|(c, _)| c.id.clone()).collect();
-        let rejected = self.rt.store().reconcile_scanned_with(all, &read, |current, all| {
-            crate::plugins::keep_deferred(current, all, &scan.deferred);
-            all.retain(|c| !upload_ids.contains(&c.id));
-            all.extend(uploads.into_iter().map(|(credential, _)| credential));
-        });
+        let rejected = self.rt.store().reconcile_scanned_with(all, &read, |_, _| {});
         // A synthesizer claimed the file but its credential was rejected as stale, so the
         // fallback stays live: keep tracking it, or the next reload would drop it.
         let rejected: std::collections::HashSet<_> = rejected.iter().map(absolute).collect();
@@ -574,6 +492,26 @@ impl Management {
         }
         // Go's watcher calls redisqueue.NotifyUsageRefresh after every client reload.
         self.rt.usage_queue().notify_usage_refresh();
+    }
+
+    /// Reads canonical documents; a failed scan keeps loaded file credentials while
+    /// allowing the config itself to take effect.
+    pub(crate) fn scan_credentials(&self, cfg: &Config) -> credentials::AuthScan {
+        self.rt.store().credential_backend().scan(cfg).unwrap_or_else(|error| {
+            tracing::error!("credential database: reading credentials failed, keeping the loaded ones: {error:#}");
+            let credentials = self
+                .rt
+                .store()
+                .snapshot()
+                .iter()
+                .filter(|c| matches!(c.source, Source::File(_)))
+                .map(|c| Credential::clone(c))
+                .collect();
+            credentials::AuthScan {
+                credentials,
+                ..Default::default()
+            }
+        })
     }
 }
 
@@ -739,11 +677,14 @@ macro_rules! open {
 }
 
 /// gin answers HEAD and unregistered methods on a known path with NoRoute (no `Allow`
-/// header; starting from `any` keeps axum from adding one). Go's NoRoute serves
-/// plugin routes, so those requests go to [`plugins::no_route`].
+/// header; starting from `any` keeps axum from adding one): a bare 404.
 fn methods() -> MethodRouter<Arc<Management>> {
     // An explicit HEAD keeps axum from answering HEAD with the GET handler.
-    any(plugins::no_route).head(plugins::no_route)
+    any(no_route).head(no_route)
+}
+
+async fn no_route() -> Response {
+    access::not_found()
 }
 
 /// The OAuth callback POST needs no key, so unlike Go it keeps a bound: legitimate
@@ -911,63 +852,8 @@ pub fn router(state: Arc<Management>) -> Router {
     ] {
         router = router.route(&format!("{v0}/{path}"), route);
     }
-    // Plugin routes: v8 and the v0 spellings Go keeps (internal/api/server_management.go,
-    // server_management_v8.go); the v0 config, enable and v8 store routes share them.
-    for (path, route) in [
-        ("plugins", methods().get(guarded!(s, plugins::list))),
-        ("plugins/{id}", methods().delete(guarded!(s, plugins::delete))),
-    ] {
-        router = router
-            .route(&format!("{v8}/{path}"), route.clone())
-            .route(&format!("{v0}/{path}"), route);
-    }
-    // Plugin store (plugin_store.go). gin keeps one route tree per method, so a DELETE of
-    // `plugins/store` is DeletePlugin with the ID `store`.
     router = router
-        .route(
-            &format!("{v8}/plugins/store"),
-            methods()
-                .get(guarded!(s, plugin_store::list))
-                .delete(guarded!(s, plugins::delete_store_id)),
-        )
-        .route(
-            &format!("{v8}/plugins/store/{{id}}/install"),
-            methods().post(guarded!(s, plugin_store::install)),
-        )
-        .route(
-            &format!("{v0}/plugin-store"),
-            methods().get(guarded!(s, plugin_store::list)),
-        )
-        .route(
-            &format!("{v0}/plugin-store/{{id}}/install"),
-            methods().post(guarded!(s, plugin_store::install)),
-        );
-    // Plugin quota (plugin_quota.go): per-plugin under v8 and v0, the credential-level
-    // routes and the reset alias only under v0.
-    for base in [v8, v0] {
-        router = router.route(
-            &format!("{base}/plugins/{{id}}/quota"),
-            methods()
-                .get(guarded!(s, quota::get_plugin))
-                .post(guarded!(s, quota::fetch_plugin))
-                .delete(guarded!(s, quota::reset_plugin)),
-        );
-    }
-    router = router
-        .route(
-            &format!("{v0}/plugins/{{id}}/quota/reset"),
-            methods().post(guarded!(s, quota::reset_plugin)),
-        )
-        .route(
-            &format!("{v0}/quota/providers"),
-            methods().get(guarded!(s, quota::providers)),
-        )
-        .route(&format!("{v0}/quota/fetch"), methods().post(guarded!(s, quota::fetch)))
-        .route(&format!("{v0}/quota/reset"), methods().post(guarded!(s, quota::reset)));
-    router = router.route(
-        &format!("{v0}/plugins/{{id}}/enabled"),
-        methods().patch(guarded!(s, plugins::patch_enabled)),
-    );
+        .route(&format!("{v0}/quota/fetch"), methods().post(guarded!(s, quota::fetch)));
     for (path, _) in legacy::AUTH_URL_ROUTES {
         router = router.route(&format!("{v0}/{path}"), methods().get(guarded!(s, legacy::auth_url)));
     }
@@ -995,7 +881,7 @@ pub fn router(state: Arc<Management>) -> Router {
             methods().get(guarded!(s, logs::request_log)),
         );
     router
-        .fallback(plugins::no_route)
+        .fallback(no_route)
         .route("/management.html", get(panel))
         .route("/assets/{*path}", get(panel))
         .route("/fonts/{*path}", get(panel))

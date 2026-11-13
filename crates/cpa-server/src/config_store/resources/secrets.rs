@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde_json::{Map, Value as Json};
 
-use super::{Fault, Kind, Resource, SECRET, bounded, document, plugin, strip_provider_read_annotations, valid_id};
+use super::{Fault, Kind, Resource, SECRET, bounded, document, strip_provider_read_annotations, valid_id};
 
 fn secret_field(name: &str) -> bool {
     matches!(
@@ -87,9 +87,7 @@ fn mask_provider(value: &mut Json) {
 /// Every ordinary read and history representation uses the same secret policy.
 pub fn redacted(r: &Resource) -> Resource {
     let mut r = r.clone();
-    if r.kind == Kind::Plugin {
-        plugin::redact(&mut r.spec);
-    } else if r.kind == Kind::Provider {
+    if r.kind == Kind::Provider {
         mask_provider(&mut r.spec);
     } else {
         mask(&mut r.spec, "", false);
@@ -108,7 +106,6 @@ pub fn redact_document(doc: &mut Json) {
     let mut providers = doc.as_object_mut().and_then(|map| map.remove("api-keys"));
     let annotated =
         ["/access/api-keys", "/model-routers"].map(|path| (path, doc.pointer_mut(path).map(std::mem::take)));
-    plugin::redact_document(doc);
     mask(doc, "", false);
     for (path, value) in annotated {
         if let Some(mut value) = value {
@@ -286,7 +283,6 @@ pub fn resolve_secrets(r: &mut Resource, stored: Option<&Resource>) -> Result<()
     if !bounded(&r.spec) {
         return Err(Fault::new(Some(r.key()), "resource exceeds depth limit"));
     }
-    plugin::check_replacement(r)?;
     if r.kind == Kind::Provider
         && let Some(map) = r.spec.as_object_mut()
     {

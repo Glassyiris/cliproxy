@@ -900,7 +900,7 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(5), lock.lock_owned())
                 .await
                 .expect("the commit returns");
-            let (_, status, _, _, completed) = state.oauth.details(&sid).unwrap();
+            let (_, status, completed) = state.oauth.details(&sid).unwrap();
             assert_eq!(
                 (status.as_str(), completed),
                 ("SIWC binding target changed; start a new binding", false),
@@ -1032,7 +1032,7 @@ mod tests {
             };
             let mut lock = CodexLock::default();
             commit(&state, &sid, &flow, Some(&tokens), &mut lock).unwrap();
-            let (_, status, _, _, complete) = state.oauth.details(&sid).unwrap();
+            let (_, status, complete) = state.oauth.details(&sid).unwrap();
             assert!(
                 !complete && !status.is_empty(),
                 "cache failure cannot acknowledge successful binding"

@@ -798,11 +798,6 @@ impl Trace {
         self
     }
 
-    /// The request's upstream capture.
-    pub(crate) fn capture(&self) -> cpa_core::exec::CaptureSink {
-        self.2.clone()
-    }
-
     /// The `X-Cook-Trace-Id` value of the credential selected so far.
     fn header(&self) -> Option<axum::http::HeaderValue> {
         let id = self
@@ -848,7 +843,7 @@ impl Trace {
     /// The provider selector (`routing.providers`) of the last selected credential.
     fn routed_provider(&self, rt: &Runtime) -> Option<String> {
         let id = self
-            .7
+            .6
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()?;
@@ -996,7 +991,7 @@ async fn run_routed(
             }
         }
     }
-    let selection = Selection {
+    let mut selection = Selection {
         providers: providers.clone(),
         model: call.selection_model.clone().unwrap_or_else(|| model.clone()),
         session: session.id.clone(),

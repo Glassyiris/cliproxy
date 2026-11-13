@@ -4,7 +4,7 @@ use cpa_core::config::Config;
 use serde_json::Value as Json;
 
 use super::{
-    Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, Resource, check, hash_management_key, plugin, redacted,
+    Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, Resource, check, hash_management_key, redacted,
     resolve_secrets, split, strip_read_annotations_at,
 };
 
@@ -48,12 +48,10 @@ impl std::error::Error for ImportError {}
 pub fn import_yaml(text: &str) -> anyhow::Result<Vec<Resource>> {
     anyhow::ensure!(text.len() <= MAX_STATE_BYTES, "config exceeds size limit");
     let cfg = Config::parse(text)?;
-    // Plugin raw YAML stays in cfg.plugin_configs; only the semantic document is converted.
     let json = strip_read_annotations_at(serde_json::to_value(cpa_core::config::AsJson(&cfg.document))?, &[]);
     cpa_core::config::validate_config_fields(&serde_yaml_ng::to_value(&json)?, true)?;
     let mut resources = split(&json, &[]).map_err(|e| anyhow::anyhow!("{e}"))?;
     for r in &mut resources {
-        plugin::preserve_raw(r, &cfg)?;
         resolve_secrets(r, None).map_err(|e| anyhow::anyhow!("{e}"))?;
         hash_management_key(r).map_err(|e| anyhow::anyhow!("{e}"))?;
     }

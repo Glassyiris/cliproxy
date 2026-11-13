@@ -596,7 +596,7 @@ pub(crate) async fn credential_batch(
                     ));
                 }
             }
-            prepared.push((path.clone(), synthesized));
+            prepared.push((path.clone(), synthesized.is_some()));
         }
         for (deletion, path) in &deletions {
             let current = command.read(path).map_err(|_| AdminError::store(state))?;
@@ -630,22 +630,20 @@ pub(crate) async fn credential_batch(
         {
             state.oauth.invalidate_siwc(path);
         }
-        let mut uploads = Vec::new();
         {
             let mut fallbacks = state.fallbacks.lock().unwrap_or_else(PoisonError::into_inner);
             for (_, path) in &deletions {
                 fallbacks.remove(path);
             }
-            for ((path, synthesized), (_, bytes)) in prepared.into_iter().zip(&documents) {
-                if let Some(credential) = synthesized {
+            for (path, claimed) in prepared {
+                if claimed {
                     fallbacks.remove(&path);
-                    uploads.push((credential, Sha256::digest(bytes).into()));
                 } else {
                     fallbacks.insert(path);
                 }
             }
         }
-        state.publish_uploads((*state.rt.config()).clone(), None, uploads);
+        state.publish((*state.rt.config()).clone(), None);
         state.credential_changes.notify_one();
         let mut receipt = json!({"status": "ok", "saved": documents.len()});
         if !deletions.is_empty() {

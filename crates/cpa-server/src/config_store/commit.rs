@@ -286,19 +286,6 @@ fn empty_like(v: &Json) -> bool {
 fn apply(next: &mut Vec<Resource>, op: &Op) -> Result<(), CommitError> {
     let position = |next: &[Resource], kind: Kind, id: &str| next.iter().position(|r| r.kind == kind && r.id == id);
     match op {
-        Op::Put { kind, spec, .. } | Op::Patch { kind, patch: spec, .. }
-            if kind == "plugin" && spec.get(resources::RAW_YAML).is_some() =>
-        {
-            return Err(CommitError::new(
-                400,
-                "read_only_field",
-                None,
-                "reserved config metadata",
-            ));
-        }
-        _ => {}
-    }
-    match op {
         Op::Check { kind, id, revisions } => {
             let kind = kind_of(kind)?;
             let existing = position(next, kind, id).map(|i| &next[i]);
@@ -374,16 +361,8 @@ fn apply(next: &mut Vec<Resource>, op: &Op) -> Result<(), CommitError> {
                 .ok_or_else(|| CommitError::new(404, "not_found", Some(key.clone()), "no such resource"))?;
             expect_rev(Some(&next[i]), &key, *if_rev, false)?;
             let stored = next[i].clone();
-            let mut r = if kind == Kind::Plugin {
-                stored.clone()
-            } else {
-                resources::redacted(&stored)
-            };
-            if kind == Kind::Plugin {
-                resources::patch_plugin_controls(&mut r, patch).map_err(fault_422)?;
-            } else {
-                merge_patch(&mut r.spec, patch);
-            }
+            let mut r = resources::redacted(&stored);
+            merge_patch(&mut r.spec, patch);
             resources::resolve_secrets(&mut r, Some(&stored)).map_err(fault_422)?;
             resources::hash_management_key(&mut r).map_err(fault_422)?;
             next[i] = r;
