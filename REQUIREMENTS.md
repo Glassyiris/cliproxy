@@ -76,7 +76,7 @@ UI scale/layout values remain in `ui/DESIGN.md` and code limits in `ui/CONVENTIO
 | Select all, main thread | ≤ baseline | | ui/tools/perf/run.mjs; before-release comparison |
 | Contrast, project targets | Body ≥ 10:1; secondary and status text ≥ 5:1 | Moon dark: body 11.86, lowest 3.94; Main dark: body 13.39, lowest 3.16; Dawn light, both palettes: body 8.69, lowest 2.86 (browser, 1440 px, en; host/date not recorded); Exceptions lists misses | Browser measurement, by hand |
 | Contrast, WCAG AA | Normal text 4.5:1; large text, UI components and focus indicators 3:1 | Neutral and optional-palette measurements under Exceptions; optional palettes have an owner exception | Browser measurement, by hand |
-| Dashboard session lifetime | Default session 7 days; remember-this-device 30 days | Owner setting, 2026-11-13 | Session-cookie PR; gap under Dashboard sessions |
+| Dashboard session lifetime | Default session 7 days; remember-this-device 30 days | Owner setting, 2026-11-13 | `SHORT` and `LONG` in crates/cpa-server/src/management/session.rs; `dashboard_session_cookie_signs_in_reads_and_signs_out` in crates/cpa-server/tests/management.rs |
 
 Historical source evidence: `bench/budgets.txt` records dated compiler/runner measurements and tolerances; `ui/REQUIREMENTS.md` retains historical dashboard measurements. Dates, hosts and load are stated only where recorded.
 
@@ -110,7 +110,7 @@ Names exactly match `###` headings and tags. Gate commands cover existing mechan
 | ui/AGENTS.md: Usability | | `REVIEW.md`, "Checking against the rules"; inspect flow precedents and supported surfaces | |
 | ui/AGENTS.md: Accessibility | | | |
 | ui/AGENTS.md: Performance | `npm run check` in ui/ | `REVIEW.md`, Checking against the rules; bundle ceilings gated, runtime baselines pending | |
-| ui/AGENTS.md: Dashboard sessions | | | |
+| ui/AGENTS.md: Dashboard sessions | `cargo nextest run --workspace --locked`; `npm run check` in ui/ | `REVIEW.md`, Checking against the rules, Authorization and Sensitive data; a real-browser sign-in, reload and sign-out remain manual | |
 | ui/AGENTS.md: API error notifications | | | |
 | crates/AGENTS.md: APIs and modularity | `cargo clippy --workspace --all-targets --locked -- -D warnings` | `REVIEW.md`, Review guidelines; Go case-method bans gated, passthrough and boundaries reviewed | |
 | crates/AGENTS.md: Compatibility | | `REVIEW.md`, "Checking against the rules" and "Review guidelines" | |
@@ -237,7 +237,6 @@ Every incomplete Commands, Numbers or Enforcement row has one entry below. Due d
 | Numbers: Select all, main thread | Baseline absent | Measure the dashboard performance harness on build host | 2026-12-22 |
 | Enforcement: ui/AGENTS.md: Accessibility | Contrast measured by hand; no automatic check | Decide whether contrast automation earns its cost; retain keyboard and contrast review under REVIEW.md, Checking against the rules, and honor palette exceptions | 2026-12-22 |
 | Enforcement: ui/AGENTS.md: API error notifications | Levels defined in ui/DESIGN.md; API-error-to-notify mapping not tested | Add a unit test with the first write action whose errors reach notify() | 2026-12-15 |
-| Enforcement: ui/AGENTS.md: Dashboard sessions | Current dashboard stores the raw key in sessionStorage/localStorage (ui/src/lib/keyStore.ts) | Session-cookie PR: implement frontend exchange and backend session contract, clear legacy keys, and verify revocation, same-origin unsafe methods and Bearer CLI access | 2026-12-15 |
 | Enforcement: crates/AGENTS.md#authz | No actual-route-table authorization gate | Enumerate actual routes, reject routes neither authorized nor explicitly public, and plant a violation | 2026-12-15 |
 | Enforcement: crates/AGENTS.md#sensitive-values | No complete free-text write/log gate | Implement a gate submitting planted sensitive values through each covered write path; assert refusal or masking and no leakage in application/database logs; wire into merge tier and prove a planted violation fails | 2026-12-15 |
 | Enforcement: crates/AGENTS.md#management-cross-site | management/access.rs permits wildcard CORS and authenticates without the required Host/cross-site checks | Security PR: reject cross-site requests before key comparison; use a real-browser gate to prove Host validation, Origin/Sec-Fetch-Site rejection and no loopback ban | 2026-12-08 |
