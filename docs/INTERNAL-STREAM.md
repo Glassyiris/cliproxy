@@ -47,7 +47,7 @@ The maintainer defaults B1-B9, C2, D1, D3 and F, and the pool-lifetime reading o
 
 ### 2.1 S1 responsibility and dependency contract
 
-Phase A freezes these boundaries. Phase B introduces `ck-stream` and its dependency-table row together. Until then, `crates/AGENTS.md` retains the exact current workspace membership; its existing table remains the only input to `tools/check-crate-deps.py`.
+Phase B introduces `ck-stream` and its dependency-table row together, without production inference callers. `crates/AGENTS.md` remains the only input to `tools/check-crate-deps.py`; consuming edges are added with their cutover phases.
 
 | Owner | S1 responsibility |
 | --- | --- |
@@ -643,6 +643,10 @@ Owner ruling (G8, Settled 41, 2026-11-14): 「我记得这个 sse 缓存队列�
 **S1 choice: deploy-only settings.** All six knobs in this table are read and validated at startup. Changing any of them requires a restart. Configuration/schema declarations must classify them as deploy-only, not hot-applied runtime settings. Configured overrides remain supported within §6.4 validation and owner ceilings. There is no live-editable admin page or page exception for these values. Any later hot-change support must add its admin page in the same change. `REQUIREMENTS.md`, Deploy-only stream settings, records this classification.
 
 The unset knobs (event and metadata sizes, initial pool size, growth step, headroom) use provisional S1 defaults, **unmeasured, replace after the §9 benchmarks**. The server starts if directory/mapping and the validation below succeed; configured overrides remain supported.
+
+Phase B's `ck-stream::Store` owns retention and a joined maintenance thread. `Writer::begin_record` reserves the complete record; `Reservation::write` fills unpublished spans and `commit` publishes only after the declared length is written. Codecs remain responsible for valid JSON/SSE framing. `Reader` delivers complete-record `Lease` values and one scalar terminal outcome, then EOF. A lease resolves borrowed chunks by generation-scoped `Position`; invalidation rejects new chunk access while already borrowed bytes remain pinned. `Writer::release_before` is only for non-resumable request/scratch prefixes, never response retention. Internal numeric stream generations are not authorization tokens.
+
+Current storage choices are 21-frame initial/growth extents, 4,096 mapped header slots, 64 MiB cgroup heap headroom and the existing 1 MiB event/metadata defaults. These remain provisional until the storage gate measurements are accepted. Metadata accounting includes allocated frame/index capacity and reader entries. A `ManualClock` makes expiry deterministic; physical decay still belongs to the one-second runtime tick.
 Owner ruling (D2, 2026-11-14): a slow consumer never pauses upstream reads. The stream keeps collecting into the cache queue and the gateway relays at the client's pace. Only `max_frames` and the pool bound that backlog, and it expires and is evicted like every other entry.
 Startup rejects zero capacities or ttl, a `pool_bytes` that is not a frame multiple, `max_frames < 4`, `max_frames > pool_frames`, or `max_event_bytes > max_frames * 50000`. Metadata must hold the configured frame table plus one event index and reader entry; validate against actual entry sizes with checked arithmetic.
 1. Keep every stream's retained frames in last-read order; a read moves the stream to the recent end. Bytes arriving for a stream nobody reads do not refresh it. Physical reuse always waits for the last lease. Upstream reads never pause for a slow consumer (D2); every arriving byte and timer flush consumes quota.

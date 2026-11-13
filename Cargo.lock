@@ -759,6 +759,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ck-stream"
+version = "0.4.1"
+dependencies = [
+ "libc",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "ck-translate"
 version = "0.4.1"
 dependencies = [
