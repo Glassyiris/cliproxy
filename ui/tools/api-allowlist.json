@@ -9,7 +9,5 @@
   { "method": "GET", "path": "/admin/v1/credentials", "reason": "Online CLI logins read the source documents they render against; the dashboard lists credentials through /v8/management." },
   { "method": "POST", "path": "/admin/v1/credentials/batch", "reason": "Online CLI logins save rendered credential documents atomically; dashboard logins persist on the server." },
   { "method": "GET", "path": "/oauth/callback", "reason": "The provider's browser redirect lands here without the management key; the dashboard never fetches it." },
-  { "method": "POST", "path": "/oauth/siwc/bind", "reason": "Binds Sign in with ChatGPT to a file-backed Codex credential; Connect has no flow for it." },
-  { "method": "DELETE", "path": "/plugins/store", "reason": "Deletes the plugin whose id is store; DELETE /plugins/{id} with id store resolves to it at runtime." },
-  { "method": "GET", "path": "/plugins/{id}/quota", "reason": "Same fetch as POST /plugins/{id}/quota with auth_index in the query; the dashboard posts a body." }
+  { "method": "POST", "path": "/oauth/siwc/bind", "reason": "Binds Sign in with ChatGPT to a file-backed Codex credential; Connect has no flow for it." }
 ]

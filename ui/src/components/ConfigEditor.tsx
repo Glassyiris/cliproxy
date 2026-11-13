@@ -41,10 +41,6 @@ const diffText = (before: string, after: string) =>
     .map((l) => `${l.kind === "added" ? "+" : l.kind === "removed" ? "-" : " "}${l.text}`)
     .join("\n");
 
-/** Plugins read their switches from config, so these writes also change the plugin list. */
-const touchesPlugins = (source: ConfigSource) =>
-  source.path === "plugins" || source.path.startsWith("plugins/");
-
 /**
  * Edit `source`; `onClose` runs after a save or when the user leaves without one. Save runs
  * through the page's `action`, so the editor and the page's other writes go one at a time.
@@ -91,7 +87,7 @@ function useEditor(source: ConfigSource, action: Action, hashKey: string, onSave
 }
 
 /** Shared JSON review, refusal handling and unsaved-change protection. */
-export function useJsonEditor(
+function useJsonEditor(
   path: string,
   read: UseQueryResult<unknown, Error>,
   baseline: unknown,
@@ -210,7 +206,7 @@ function Editor({
   return <JsonEditorDialog path={source.path} title={title} editor={editor} onClose={onClose} />;
 }
 
-export function JsonEditorDialog({
+function JsonEditorDialog({
   path,
   title,
   editor,
@@ -308,8 +304,6 @@ function useSave(
       } finally {
         if (mounted.current) setSaving(false);
         await queryClient.invalidateQueries({ queryKey: serverKeys.config });
-        if (saved && touchesPlugins(source))
-          await queryClient.invalidateQueries({ queryKey: serverKeys.plugins });
       }
     });
     if (!saved || !mounted.current) return;

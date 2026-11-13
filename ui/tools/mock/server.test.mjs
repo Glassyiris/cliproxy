@@ -101,53 +101,52 @@ async function assertHiddenSecrets(read, apply) {
   );
 }
 
-async function assertPluginResource(apply, get) {
-  const plugin = await get("/admin/v1/r/plugin/quota-demo");
-  assert.equal(plugin.spec, "$secret");
+async function assertResourceRevisions(apply, get) {
+  const client = (await get("/admin/v1/r/client-key")).items[0];
   await apply([
     {
       op: "patch",
-      kind: "plugin",
-      id: plugin.id,
-      patch: { enabled: false, password: "plugin-secret", nested: { keep: true, remove: true } },
-      if_rev: plugin.rev,
+      kind: "client-key",
+      id: client.id,
+      patch: { key: "rotated-secret" },
+      if_rev: client.rev,
     },
   ]);
-  const changed = await get(`/admin/v1/r/plugin/${plugin.id}`);
-  assert.ok(changed.rev > plugin.rev);
-  assert.equal(changed.created_rev, plugin.created_rev);
+  const changed = await get(`/admin/v1/r/client-key/${client.id}`);
+  assert.ok(changed.rev > client.rev);
+  assert.equal(changed.created_rev, client.created_rev);
+  assert.equal(changed.spec.key, "$secret");
   await apply(
-    [{ op: "patch", kind: "plugin", id: plugin.id, patch: { enabled: true }, if_rev: plugin.rev }],
+    [
+      {
+        op: "patch",
+        kind: "client-key",
+        id: client.id,
+        patch: { key: "stale" },
+        if_rev: client.rev,
+      },
+    ],
     412,
   );
   await apply(
-    [{ op: "put", kind: "plugin", id: plugin.id, spec: { enabled: true }, if_rev: plugin.rev }],
+    [{ op: "put", kind: "client-key", id: client.id, spec: { key: "stale" }, if_rev: client.rev }],
     412,
   );
+  const exported = async () =>
+    (await get("/admin/v1/export?include_secrets=true")).resources.find(
+      ({ kind, id }) => kind === "client-key" && id === client.id,
+    );
+  assert.equal((await exported()).spec.key, "rotated-secret");
   await apply([
     {
-      op: "patch",
-      kind: "plugin",
-      id: plugin.id,
-      patch: { nested: { remove: null } },
+      op: "put",
+      kind: "client-key",
+      id: client.id,
+      spec: { key: "replaced-secret" },
       if_rev: changed.rev,
     },
   ]);
-  const withPatch = (await get("/admin/v1/export?include_secrets=true")).resources.find(
-    ({ kind, id }) => kind === "plugin" && id === plugin.id,
-  );
-  assert.deepEqual(withPatch.spec.nested, { keep: true });
-  assert.equal(withPatch.spec.password, "plugin-secret");
-  const current = await get(`/admin/v1/r/plugin/${plugin.id}`);
-  await apply([
-    { op: "put", kind: "plugin", id: plugin.id, spec: { enabled: true }, if_rev: current.rev },
-  ]);
-  assert.deepEqual(
-    (await get("/admin/v1/export?include_secrets=true")).resources.find(
-      ({ kind, id }) => kind === "plugin" && id === plugin.id,
-    ).spec,
-    { enabled: true },
-  );
+  assert.deepEqual((await exported()).spec, { key: "replaced-secret" });
 }
 
 async function assertClientResources(read, apply, get) {
@@ -177,7 +176,6 @@ async function assertClientResources(read, apply, get) {
     publicExport.resources.find(({ kind }) => kind === "provider").spec.keys[0]["api-key"],
     "$secret",
   );
-  assert.equal(publicExport.resources.find(({ kind }) => kind === "plugin").spec, "$secret");
   await get("/admin/v1/export?include_secrets=1", 400);
   assert.equal(
     (await get("/v1/models", 200, { Authorization: `Bearer ${originalKey}` })).object,
@@ -284,7 +282,7 @@ async function assertProviderResources(read, apply, get) {
 async function assertResources(read, apply, get) {
   const clients = await assertClientResources(read, apply, get);
   await assertClientResourceMutations(read, apply, get, clients);
-  await assertPluginResource(apply, get);
+  await assertResourceRevisions(apply, get);
   await assertProviderResources(read, apply, get);
 }
 
@@ -362,7 +360,7 @@ test(
       await apply(
         [
           { op: "set", path: "routing/strategy", value: "fill-first" },
-          { op: "set", path: "plugins/auth-revision", value: 99 },
+          { op: "set", path: "credentials/concurrency/lifecycle-config-revision", value: 99 },
         ],
         400,
       );

@@ -43,11 +43,8 @@ const BUILD_DATE: &str = match option_env!("COOK_BUILD_DATE") {
     Some(v) => v,
     None => "unknown",
 };
-/// Go reports "1" only for cgo builds that can load native plugins.
-const SUPPORT_PLUGIN: &str = cpa_plugin::SUPPORT_PLUGIN;
-
 const EXPOSED_HEADERS: &str = "X-Cook-Trace-Id, X-Cook-Version, X-Cook-Commit, X-Cook-Build-Date, \
-X-Cook-Support-Plugin, X-SERVER-VERSION, X-SERVER-BUILD-DATE, Location, Retry-After, ETag, \
+X-SERVER-VERSION, X-SERVER-BUILD-DATE, Location, Retry-After, ETag, \
 X-Request-Id, OpenAI-Request-Id";
 
 #[derive(Clone, Copy)]
@@ -325,7 +322,6 @@ pub(super) fn version_headers(headers: &mut HeaderMap) {
         ("X-Cook-Version", VERSION),
         ("X-Cook-Commit", COMMIT),
         ("X-Cook-Build-Date", BUILD_DATE),
-        ("X-Cook-Support-Plugin", SUPPORT_PLUGIN),
     ] {
         headers.insert(name, HeaderValue::from_static(value));
     }
@@ -514,6 +510,79 @@ mod tests {
             "the purge task ended with shutdown"
         );
         drop((state, db));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// gin's NoRoute ran the management middleware, so an unknown `/v0/management` path or
+    /// method answers like a known one until the caller authenticates.
+    #[tokio::test]
+    async fn unknown_management_routes_answer_behind_the_guard() {
+        use tower::ServiceExt as _;
+        let root = std::env::temp_dir().join(format!("access-no-route-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let config = std::sync::Arc::new(crate::testing::config_store(&root.join("config.db")).unwrap());
+        let db = crate::credential_store::CredentialDb::initialize(config.clone()).unwrap();
+        let mut cfg = config.load().unwrap().config;
+        cfg.auth_dir = db.auth_dir();
+        let rt = std::sync::Arc::new(crate::testing::runtime_with_db(
+            cfg,
+            Vec::new(),
+            cpa_exec::Executors {
+                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            db.clone(),
+        ));
+        let call = |state: &std::sync::Arc<Management>, method: &str, uri: &str, key: Option<&str>| {
+            let mut request = axum::http::Request::builder().method(method).uri(uri);
+            if let Some(key) = key {
+                request = request.header("authorization", format!("Bearer {key}"));
+            }
+            let app = super::super::router(state.clone());
+            async move {
+                let response = app
+                    .oneshot(request.body(axum::body::Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                let status = response.status();
+                let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                (status, String::from_utf8_lossy(&body).into_owned())
+            }
+        };
+        // An unknown path, and a known path with a method it does not serve.
+        let unknown = [
+            ("GET", "/v0/management/no-such-route"),
+            ("GET", "/v0/management/quota/fetch"),
+        ];
+
+        let options = |password: &str| super::super::Options {
+            management_password: Some(password.into()),
+            ..Default::default()
+        };
+        let keyless = Management::with_options(rt.clone(), config.clone(), options(""));
+        for (method, uri) in unknown {
+            let (status, body) = call(&keyless, method, uri, None).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
+            assert!(body.contains(KEY_NOT_SET), "{method} {uri}: {body}");
+        }
+        assert_eq!(
+            call(&keyless, "GET", "/v0/elsewhere", None).await.0,
+            StatusCode::NOT_FOUND
+        );
+        keyless.shutdown().await;
+
+        let keyed = Management::with_options(rt, config, options("no-route-key"));
+        for (method, uri) in unknown {
+            let (status, body) = call(&keyed, method, uri, None).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {uri}: {body}");
+            let (status, body) = call(&keyed, method, uri, Some("no-route-key")).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}: {body}");
+        }
+        keyed.shutdown().await;
+        drop((keyed, db));
         std::fs::remove_dir_all(root).unwrap();
     }
 

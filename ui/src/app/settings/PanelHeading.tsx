@@ -1,4 +1,4 @@
-// The open panel's heading in a settings-dialog frame (preferences, plugins). Opening the dialog
+// The open panel's heading in a settings-dialog frame (preferences). Opening the dialog
 // focuses it, as Astryx's DialogHeader focuses its title, so a screen reader starts at the panel
 // and the next Tab reaches the panel's first control rather than the rail's first item.
 

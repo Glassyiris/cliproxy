@@ -331,28 +331,6 @@ pub fn runtime_with_db(
     rt
 }
 
-/// Synchronous fixture parsing must not inherit another test host's native parser.
-/// Keep preparation and consumption inside this scope, never across await/spawn.
-#[cfg(test)]
-pub(crate) fn with_builtin_auth_parser<T>(f: impl FnOnce() -> T) -> T {
-    use cpa_core::config::credentials::{ParseRequest, Parsed, PluginAuthParser};
-    struct BuiltIn;
-    impl PluginAuthParser for BuiltIn {
-        fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
-            Parsed::NotHandled
-        }
-    }
-    cpa_core::config::credentials::with_thread_plugin_auth_parser(Arc::new(BuiltIn), f)
-}
-
-#[cfg(test)]
-pub(crate) fn builtin_auth_files(cfg: &Config) -> Vec<Credential> {
-    with_builtin_auth_parser(|| {
-        cpa_core::config::credentials::preparse_auth_dir(cfg);
-        cpa_core::config::credentials::from_auth_dir(cfg)
-    })
-}
-
 /// Marks a credential whose executor the test pointed at a local mock (for example
 /// `ClaudeExecutor::new(mock_url)`), so executor calls use it as stored.
 pub fn local(mut credential: Credential) -> Credential {
@@ -401,36 +379,6 @@ fn is_loopback(raw: &str) -> bool {
     };
     let host = host.trim_start_matches('[').trim_end_matches(']');
     host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
-}
-
-/// Registers, after the client keys, the frontend auth provider of a plugin that is not
-/// loaded: it reads each request body and never accepts.
-pub fn unloaded_frontend_auth(rt: &Runtime) {
-    rt.plugin_runtime()
-        .register_access(true, vec![("plugin-auth".into(), "p".into())], None);
-}
-
-/// Every record in a test plugin's JSONL file (none while the file is absent). A plugin
-/// may be appending one while a test reads, and a reader can see the first part of a
-/// write, so a last line without its newline is read again until it ends, for up to
-/// five seconds, then fails: a record being written must count, never look absent.
-pub fn records(path: &std::path::Path) -> Vec<serde_json::Value> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let text = loop {
-        let text = std::fs::read_to_string(path).unwrap_or_default();
-        if text.is_empty() || text.ends_with('\n') {
-            break text;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "{}: the last record never ended: {text:?}",
-            path.display()
-        );
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    };
-    text.lines()
-        .map(|line| serde_json::from_str(line).unwrap_or_else(|e| panic!("{}: {e}: {line:?}", path.display())))
-        .collect()
 }
 
 #[cfg(test)]
@@ -546,50 +494,6 @@ mod tests {
         let test = runtime(Config::default(), Vec::new(), executors());
         assert_eq!(test.for_executor(&c).attributes["proxy_url"], DENY_PROXY);
         drop(plain);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-}
-
-#[cfg(test)]
-mod builtin_auth_tests {
-    use super::*;
-    #[test]
-    fn builtin_preparation_is_explicit_and_preserves_the_enclosing_parser_context() {
-        use cpa_core::config::credentials::{self, ParseRequest, Parsed, PluginAuthParser};
-        struct Suppress;
-        impl PluginAuthParser for Suppress {
-            fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
-                Parsed::Handled(vec![])
-            }
-        }
-        let dir = std::env::temp_dir().join(format!("cpa-builtin-prepare-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&dir).unwrap();
-        std::fs::write(
-            dir.join("fixture.json"),
-            br#"{"type":"claude","access_token":"private-fixture"}"#,
-        )
-        .unwrap();
-        let mut cfg = Config::parse("").unwrap();
-        cfg.auth_dir = dir.clone();
-        credentials::with_thread_plugin_auth_parser(Arc::new(Suppress), || {
-            assert!(
-                credentials::from_auth_dir(&cfg).is_empty(),
-                "fresh cached-only scope must defer"
-            );
-            credentials::preparse_auth_dir(&cfg);
-            assert!(
-                credentials::from_auth_dir(&cfg).is_empty(),
-                "outer parser suppresses this document"
-            );
-            let loaded = builtin_auth_files(&cfg);
-            assert_eq!(loaded.len(), 1);
-            assert_eq!(loaded[0].id, "fixture.json");
-            assert_eq!(loaded[0].str("access_token"), Some("private-fixture"));
-            assert!(
-                credentials::from_auth_dir(&cfg).is_empty(),
-                "nested fixture preparation must restore outer answers"
-            );
-        });
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -303,67 +303,6 @@ fn unknown_sections_and_nested_fields_are_rejected_not_discarded() {
 }
 
 #[test]
-fn plugin_raw_scalar_and_binary_semantics_survive_every_round_trip() {
-    let source = "plugins:\n  enabled: true\n  configs:\n    acme:\n      ratio: 1.50\n      exponent: 1e3\n      hex: 0x1F\n      octal: 007\n      tagged: !!float 1\n      binary: !!binary YWJj\n      quoted: '007'\n      payload: {auth_index: keep, auth-index: keep, '@id': keep}\n";
-    let original = Config::parse(source).unwrap();
-    let resources = import_yaml(source).unwrap();
-    assert_eq!(config(&resources).unwrap().0.plugin_configs, original.plugin_configs);
-    let serialized = serde_json::to_string(&resources[0].spec).unwrap();
-    assert!(serialized.contains("@raw-yaml") || resources.iter().any(|r| r.spec.get(RAW_YAML).is_some()));
-    let again = split(&document(&resources, true), &resources).unwrap();
-    assert_eq!(config(&again).unwrap().0.plugin_configs, original.plugin_configs);
-    let plugin = resources.iter().find(|r| r.kind == Kind::Plugin).unwrap();
-    assert_eq!(redacted(plugin).spec, SECRET);
-    let mut back = redacted(plugin);
-    resolve_secrets(&mut back, Some(plugin)).unwrap();
-    assert_eq!(back, *plugin);
-    let mut forged = plugin.clone();
-    forged.spec[RAW_YAML]["value"] = "ratio: 999\n".into();
-    assert!(config(&[forged]).is_err());
-}
-
-#[test]
-fn null_plugin_configs_round_trip_and_accept_control_patches() {
-    for value in ["null", ""] {
-        let source = format!("plugins:\n  enabled: true\n  configs:\n    sample: {value}\n");
-        let original = Config::parse(&source).unwrap();
-        let resources = import_yaml(&source).unwrap();
-        let plugin = resources.iter().find(|r| r.kind == Kind::Plugin).unwrap();
-        assert!(plugin.spec.is_null());
-        let exported = export_json(1, &resources, true);
-        let restored = import_json(&exported.to_string()).unwrap();
-        let (compiled, _) = config(&restored).unwrap();
-        assert_eq!(compiled.plugin_configs, original.plugin_configs);
-        assert!(compiled.document["plugins"]["configs"]["sample"].is_null());
-        let runtime = cpa_plugin::config::runtime_config(&compiled.document, &compiled.plugin_configs).unwrap();
-        assert!(!runtime.items["sample"].enabled);
-        assert_eq!(runtime.items["sample"].priority, 0);
-        let split = split(&document(&restored, true), &restored).unwrap();
-        assert!(split.iter().find(|r| r.kind == Kind::Plugin).unwrap().spec.is_null());
-
-        let mut patched = plugin.clone();
-        for patch in [json!({}), json!({"enabled": null, "priority": null})] {
-            patch_plugin_controls(&mut patched, &patch).unwrap();
-            assert!(patched.spec.is_null());
-        }
-        patch_plugin_controls(&mut patched, &json!({"enabled": true, "priority": 5})).unwrap();
-        let mut changed = restored;
-        *changed.iter_mut().find(|r| r.kind == Kind::Plugin).unwrap() = patched.clone();
-        let (compiled, _) = config(&changed).unwrap();
-        let runtime = cpa_plugin::config::runtime_config(&compiled.document, &compiled.plugin_configs).unwrap();
-        assert!(runtime.items["sample"].enabled);
-        assert_eq!(runtime.items["sample"].priority, 5);
-        patch_plugin_controls(&mut patched, &json!({"enabled": null, "priority": null})).unwrap();
-        assert_eq!(patched.spec, json!({}));
-        *changed.iter_mut().find(|r| r.kind == Kind::Plugin).unwrap() = patched;
-        let (compiled, _) = config(&changed).unwrap();
-        let runtime = cpa_plugin::config::runtime_config(&compiled.document, &compiled.plugin_configs).unwrap();
-        assert!(!runtime.items["sample"].enabled);
-        assert_eq!(runtime.items["sample"].priority, 0);
-    }
-}
-
-#[test]
 fn masked_nested_keys_follow_identity_when_reordered_and_reject_ambiguity() {
     let mut stored = provider("main", "claude", "sk-a");
     stored.spec["keys"] = json!([{"api-key":"sk-a"},{"api-key":"sk-b"}]);
@@ -424,7 +363,7 @@ fn duplicate_and_invalid_document_annotations_are_errors() {
 
 #[test]
 fn resource_and_depth_limits_are_checked_before_compilation() {
-    let huge = Resource::new(Kind::Plugin, "huge", 0, json!({"value":"x".repeat(MAX_SPEC_BYTES)}));
+    let huge = Resource::new(Kind::Setting, "huge", 0, json!({"value":"x".repeat(MAX_SPEC_BYTES)}));
     assert!(check(&huge).is_err());
     let mut deep = json!(0);
     for _ in 0..=MAX_DEPTH {
@@ -450,7 +389,7 @@ fn expected_collection_annotations_are_stripped_without_touching_payloads() {
 
 #[test]
 fn effective_redaction_keeps_injected_identity_and_hides_opaque_configs() {
-    let mut doc = json!({"api-keys":{"gemini":[{"@id":"provider:owner@example.invalid","auth_index":"index:owner@example.invalid","keys":[{"@id":"key:owner@example.invalid","auth_index":"key-index","api-key":"sk-live"}],"headers":{"Authorization":"Bearer live"},"payload":{"auth_index":"https://user:password@example.invalid"}}]},"plugins":{"configs":{"acme":{"enabled":true,"opaque":"plugin-secret"}}}});
+    let mut doc = json!({"api-keys":{"gemini":[{"@id":"provider:owner@example.invalid","auth_index":"index:owner@example.invalid","keys":[{"@id":"key:owner@example.invalid","auth_index":"key-index","api-key":"sk-live"}],"headers":{"Authorization":"Bearer live"},"payload":{"auth_index":"https://user:password@example.invalid"}}]}});
     doc["access"] = json!({"api-keys":[{"@id":"client:alice@example.com","key":"fake-key"}]});
     doc["model-routers"] = json!([{"@id":"router:alice@example.com","name":"route"}]);
     redact_document(&mut doc);
@@ -467,7 +406,6 @@ fn effective_redaction_keeps_injected_identity_and_hides_opaque_configs() {
     assert_eq!(doc["api-keys"]["gemini"][0]["keys"][0]["api-key"], SECRET);
     assert_eq!(doc["api-keys"]["gemini"][0]["headers"]["Authorization"], SECRET);
     assert_eq!(doc["api-keys"]["gemini"][0]["payload"]["auth_index"], SECRET);
-    assert_eq!(doc["plugins"]["configs"]["acme"], SECRET);
     assert_eq!(doc["access"]["api-keys"][0]["@id"], "client:alice@example.com");
     assert_eq!(doc["access"]["api-keys"][0]["key"], SECRET);
     assert_eq!(doc["model-routers"][0]["@id"], "router:alice@example.com");

@@ -10,7 +10,7 @@ import type { Window, WindowLabel } from "../lib/quotaWindows.ts";
 import { roughSpan, span } from "../lib/time.ts";
 import { Words } from "./Words.tsx";
 
-/** A window's title in the current language; plugin and Kimi titles are the server's own text. */
+/** A window's title in the current language; Kimi titles are the server's own text. */
 export function windowLabel(label: WindowLabel): string {
   if ("text" in label) return label.text;
   switch (label.name) {

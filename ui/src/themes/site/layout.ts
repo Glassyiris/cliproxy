@@ -31,6 +31,9 @@ export const layout = {
   // phone, wrapping the value and leaving the third tile alone. 200 makes a phone one column (two columns from 416px of
   // content) and still gives three columns from 632px, so tablets and desktop keep one row.
   summaryTileMin: 200,
+  // The Connect dialog's choice cards: four columns in its 768px content, so its eight sign-ins
+  // fill two rows; one column on a 390px phone.
+  choiceTileMin: 160,
   // The settings template's two columns, a Region's heading and its controls, are each at least
   // this wide; where both do not fit they stack.
   settingsColumnMin: 320,

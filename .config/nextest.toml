@@ -36,13 +36,7 @@ threads-required = 'num-test-threads'
 priority = 90
 
 [[profile.default.overrides]]
-filter = '''
-    binary_id(cpa-server::plugin_routes) | binary_id(cpa-server::plugin_quota_cooldown)
-    | binary_id(cpa-server::plugin_owned)
-    | binary_id(cpa-server::plugin_host_model)
-    | binary_id(cook-router::plugin_cli) | binary_id(cook-router::plugin_wiring)
-    | binary_id(cpa-plugin::go_host) | binary_id(cpa-plugin::native_abi)
-'''
+filter = 'binary_id(cpa-plugin::go_host) | binary_id(cpa-plugin::native_abi)'
 test-group = 'go-plugins'
 priority = 50
 
@@ -54,7 +48,7 @@ command = '.config/private-tmpdir.sh'
 
 [[profile.default.scripts]]
 platform = { host = 'cfg(unix)' }
-filter = 'package(cpa-plugin) | binary_id(/^cpa-server::plugin_/) | binary_id(/^cook-router::plugin_/)'
+filter = 'package(cpa-plugin)'
 setup = 'private-tmpdir'
 
 # One build of the Go test plugins for the whole run (see the script). Every test gets the

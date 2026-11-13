@@ -4,7 +4,7 @@ use cpa_core::config::Config;
 use serde_json::{Map, Value as Json};
 
 use super::{
-    FAMILIES, Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, Resource, SECRET, bounded, check, plugin,
+    FAMILIES, Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, Resource, SECRET, bounded, check,
     strip_provider_annotations, strip_provider_read_annotations, valid_id,
 };
 
@@ -34,7 +34,6 @@ pub fn document(resources: &[Resource], annotate: bool) -> Json {
     let mut families: BTreeMap<usize, Vec<Json>> = BTreeMap::new();
     let mut keys = Vec::new();
     let mut routers = Vec::new();
-    let mut plugins = Map::new();
     for r in sorted {
         match r.kind {
             Kind::Setting => {
@@ -51,9 +50,6 @@ pub fn document(resources: &[Resource], annotate: bool) -> Json {
                 r.spec.get("key").cloned().unwrap_or(Json::Null)
             }),
             Kind::Router => routers.push(entry(r, None)),
-            Kind::Plugin => {
-                plugins.insert(r.id.clone(), plugin::document_spec(r));
-            }
         }
     }
     if !families.is_empty() {
@@ -77,9 +73,6 @@ pub fn document(resources: &[Resource], annotate: bool) -> Json {
     };
     if !keys.is_empty() {
         child("access", "api-keys", Json::Array(keys));
-    }
-    if !plugins.is_empty() {
-        child("plugins", "configs", Json::Object(plugins));
     }
     if !routers.is_empty() {
         root.insert("model-routers".into(), Json::Array(routers));
@@ -112,8 +105,7 @@ pub fn config(resources: &[Resource]) -> Result<(Config, String), Fault> {
         serde_yaml_ng::to_value(&doc).map_err(|e| Fault::new(None, format!("config is not YAML: {e}")))?;
     cpa_core::config::validate_config_fields(&yaml, true).map_err(|error| validation_fault(resources, error))?;
     let text = cpa_core::config::yaml_string(&yaml).map_err(|e| Fault::new(None, e.to_string()))?;
-    let mut cfg = Config::parse_payload(&text).map_err(|e| Fault::new(None, format!("{e:#}")))?;
-    plugin::restore_raw(resources, &mut cfg)?;
+    let cfg = Config::parse_payload(&text).map_err(|e| Fault::new(None, format!("{e:#}")))?;
     Ok((cfg, text))
 }
 
@@ -153,14 +145,6 @@ fn validation_fault(resources: &[Resource], error: anyhow::Error) -> Fault {
             2,
             "",
         ),
-        ["plugins", "configs", id, ..] => (
-            candidates
-                .iter()
-                .copied()
-                .find(|r| r.kind == Kind::Plugin && r.id == id.replace("~1", "/").replace("~0", "~")),
-            3,
-            "",
-        ),
         [section, ..] => (
             candidates
                 .iter()
@@ -186,7 +170,7 @@ fn validation_fault(resources: &[Resource], error: anyhow::Error) -> Fault {
 
 /// `doc` as resources. Entries keep the id of the resource in `old` they came from:
 /// providers and routers by `"@id"`, then routers by name, client keys by value,
-/// plugins and settings by key. Others get an id from their `name`, else a numbered
+/// settings by key. Others get an id from their `name`, else a numbered
 /// one. Descriptions and creation revisions carry over from `old`.
 pub fn split(doc: &Json, old: &[Resource]) -> Result<Vec<Resource>, Fault> {
     if !bounded(doc) || doc.to_string().len() > MAX_STATE_BYTES {
@@ -272,39 +256,35 @@ pub fn split(doc: &Json, old: &[Resource]) -> Result<Vec<Resource>, Fault> {
                     push(Kind::Router, id, Json::Object(spec), &mut out);
                 }
             }
-            "access" | "plugins" if value.is_object() => {
+            "access" if value.is_object() => {
                 let mut rest = value.as_object().cloned().unwrap_or_default();
-                if key == "access" {
-                    let keys = rest.remove("api-keys").unwrap_or(Json::Null);
-                    if !keys.is_null() && !keys.is_array() {
-                        return Err(Fault::new(None, "access.api-keys must be a list"));
-                    }
-                    for k in keys.as_array().into_iter().flatten() {
-                        let (asked, text) = if let Some(map) = k.as_object() {
-                            if map.keys().any(|k| k != "@id" && k != "key") {
-                                return Err(Fault::new(None, "invalid client key annotation"));
-                            }
-                            (map.get("@id").cloned(), map.get("key").and_then(Json::as_str))
-                        } else {
-                            (None, k.as_str())
-                        };
-                        let text = text.ok_or_else(|| Fault::new(None, "client key must be a string"))?;
-                        if text == SECRET && asked.is_none() {
-                            return Err(Fault::new(None, "masked client key requires @id"));
+                let keys = rest.remove("api-keys").unwrap_or(Json::Null);
+                if !keys.is_null() && !keys.is_array() {
+                    return Err(Fault::new(None, "access.api-keys must be a list"));
+                }
+                for k in keys.as_array().into_iter().flatten() {
+                    let (asked, text) = if let Some(map) = k.as_object() {
+                        if map.keys().any(|k| k != "@id" && k != "key") {
+                            return Err(Fault::new(None, "invalid client key annotation"));
                         }
-                        let known = old.iter().find(|r| {
-                            r.kind == Kind::ClientKey && r.spec.get("key").and_then(Json::as_str) == Some(text)
-                        });
-                        let id = assign(
-                            Kind::ClientKey,
-                            asked.or_else(|| known.map(|r| Json::String(r.id.clone()))),
-                            None,
-                            "key",
-                        )?;
-                        push(Kind::ClientKey, id, serde_json::json!({ "key": text }), &mut out);
+                        (map.get("@id").cloned(), map.get("key").and_then(Json::as_str))
+                    } else {
+                        (None, k.as_str())
+                    };
+                    let text = text.ok_or_else(|| Fault::new(None, "client key must be a string"))?;
+                    if text == SECRET && asked.is_none() {
+                        return Err(Fault::new(None, "masked client key requires @id"));
                     }
-                } else {
-                    plugin::split_configs(rest.remove("configs").unwrap_or(Json::Null), old, &mut out)?;
+                    let known = old
+                        .iter()
+                        .find(|r| r.kind == Kind::ClientKey && r.spec.get("key").and_then(Json::as_str) == Some(text));
+                    let id = assign(
+                        Kind::ClientKey,
+                        asked.or_else(|| known.map(|r| Json::String(r.id.clone()))),
+                        None,
+                        "key",
+                    )?;
+                    push(Kind::ClientKey, id, serde_json::json!({ "key": text }), &mut out);
                 }
                 if !rest.is_empty() {
                     push(Kind::Setting, key.clone(), Json::Object(rest), &mut out);

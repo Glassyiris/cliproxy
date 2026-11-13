@@ -164,47 +164,79 @@ async fn in_flight_successes_keep_a_fresh_quota_cooldown() {
     );
 }
 
-/// Go stamps a dispatch right before it executes, after the after-auth interceptor: a
-/// request whose interceptor was still running when a 429 was recorded is dispatched
-/// after it, so its success clears the cooldown.
-#[cfg(unix)]
+/// Token refresh's upstream: `/v1/messages` refuses the old token with 401, `/token`
+/// waits for `token` before rotating it, anything else succeeds.
+struct Refreshing {
+    calls: std::sync::Mutex<Vec<String>>,
+    token: Semaphore,
+}
+
+async fn refreshing_upstream(State(up): State<Arc<Refreshing>>, req: axum::extract::Request) -> Response {
+    let path = req.uri().path().to_owned();
+    let auth = req
+        .headers()
+        .get("authorization")
+        .map(|v| v.to_str().unwrap().to_owned())
+        .unwrap_or_default();
+    up.calls.lock().unwrap().push(path.clone());
+    match (path.as_str(), auth.as_str()) {
+        ("/token", _) => {
+            up.token.acquire().await.unwrap().forget();
+            axum::Json(json!({
+                "access_token": "sk-ant-oat-new-fake", "refresh_token": "fake-rotated", "expires_in": 3600,
+                "account": {"uuid": "acct-fake", "email_address": "a@example.invalid"}}))
+            .into_response()
+        }
+        ("/v1/messages", "Bearer sk-ant-oat-old-fake") => (
+            StatusCode::UNAUTHORIZED,
+            [("content-type", "application/json")],
+            r#"{"type":"error","error":{"type":"authentication_error","message":"token expired"}}"#,
+        )
+            .into_response(),
+        _ => ([("content-type", "application/json")], REPLY).into_response(),
+    }
+}
+
+/// Go stamps a dispatch right before it executes, after a refresh-and-retry
+/// (`tryRefreshAfterUnauthorized`): a request whose token refresh was still running when a
+/// 429 was recorded is dispatched after it, so its success clears the cooldown.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_dispatch_after_its_interceptor_clears_a_cooldown_recorded_meanwhile() {
-    let tmp = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let Some(built) = cpa_plugin::testing::built_plugins(tmp, "cooldown_races") else {
-        return;
-    };
-    let up = Arc::new(Up {
-        calls: AtomicUsize::new(0),
-        gates: Vec::new(),
-        refused: Vec::new(),
+async fn a_dispatch_after_its_refresh_clears_a_cooldown_recorded_meanwhile() {
+    let up = Arc::new(Refreshing {
+        calls: Default::default(),
+        token: Semaphore::new(0),
     });
-    let upstream_url = serve(axum::Router::new().fallback(upstream).with_state(up.clone())).await;
-    let plugins = cpa_plugin::testing::scratch(tmp, "cooldown-races-plugins");
-    let records = plugins.join("records");
-    let respond = records.join("respond/held");
-    std::fs::create_dir_all(&respond).unwrap();
-    std::fs::copy(built.join("recorder.so"), plugins.join("held.so")).unwrap();
-    let extra = format!(
-        "plugins:\n  enabled: true\n  dir: {}\n  configs:\n    held:\n      enabled: true\n      label: held\n      record: {}\n      caps: request_interceptor\n",
-        plugins.display(),
-        records.display()
+    let upstream_url = serve(axum::Router::new().fallback(refreshing_upstream).with_state(up.clone())).await;
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("cooldown-races-refresh-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("claude.json");
+    let meta = json!({"type": "claude", "access_token": "sk-ant-oat-old-fake", "refresh_token": "fake-refresh",
+        "account_uuid": "acct-fake", "email": "a@example.invalid", "claude_device_ids": ["b".repeat(64)]});
+    std::fs::write(&path, meta.to_string()).unwrap();
+    let mut credential = Credential::from_file(&dir, &path, meta.as_object().unwrap().clone()).unwrap();
+    credential.attributes.insert("base_url".into(), upstream_url.clone());
+    let oauth = cpa_exec::oauth::OAuth::with_endpoints(
+        wreq::Client::new(),
+        &format!("{upstream_url}/token"),
+        &format!("{upstream_url}/profile"),
+        &format!("{upstream_url}/roles"),
     );
-    let (cfg, credential, _dir) = claude_credential("interceptor", &upstream_url, &extra);
-    let rt = Arc::new(cpa_server::testing::runtime(cfg, vec![credential], executors()));
-    cpa_server::install_registry(&rt);
-    cpa_server::plugins::start(&rt).await;
+    let executors = Executors {
+        claude: ClaudeExecutor::new(&upstream_url).unwrap().with_oauth(oauth),
+        ..executors()
+    };
+    let cfg = Config::parse("access:\n  api-keys: [client-key]\n").unwrap();
+    let rt = Arc::new(cpa_server::testing::runtime(cfg, vec![credential], executors));
     let url = serve(cpa_server::router(rt.clone())).await;
 
-    let hold = respond.join("request.intercept_after.hold");
-    std::fs::write(&hold, "").unwrap();
-    let log = records.join("held.jsonl");
     let held = tokio::spawn({
         let url = url.clone();
         async move { message(&url, false).await }
     });
-    until("the after-auth interceptor", || {
-        std::fs::read_to_string(&log).is_ok_and(|l| l.contains("request.intercept_after"))
+    until("the token refresh", || {
+        up.calls.lock().unwrap().iter().any(|c| c == "/token")
     })
     .await;
     // Meanwhile another request on the same credential and model records a 429.
@@ -217,9 +249,15 @@ async fn a_dispatch_after_its_interceptor_clears_a_cooldown_recorded_meanwhile()
         .complete(cpa_server::runtime::Outcome::Failure(refusal));
     assert!(rt.store().select(selection.clone()).is_none(), "cooling");
 
-    std::fs::remove_file(&hold).unwrap();
+    up.token.add_permits(1);
     let (status, body) = held.await.unwrap();
     assert_eq!(status, 200, "{body}");
     assert!(rt.store().select(selection).is_some(), "the later dispatch cleared it");
-    assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *up.calls.lock().unwrap(),
+        // Claude's refresh also reads the profile.
+        ["/v1/messages", "/token", "/profile", "/v1/messages"]
+    );
+    rt.shutdown_codex_refreshes().await;
+    std::fs::remove_dir_all(&dir).unwrap();
 }

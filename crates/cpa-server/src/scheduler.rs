@@ -1128,23 +1128,6 @@ impl Scheduler {
         }
     }
 
-    /// Go's built-in scheduler with `strategy` (`pickSingleWithStrategy` and
-    /// `pickMixedWithStrategy`), without session affinity: what a plugin scheduler's
-    /// `delegate_builtin` answer runs.
-    /// ponytail: Go keeps the built-in scheduler's cursors apart from the configured
-    /// selector's; here they share the rotation state. Separate the maps if a plugin
-    /// scheduler mixing delegation and its own picks needs Go's exact rotation.
-    pub fn pick_builtin<'a>(
-        &mut self,
-        candidates: &[(&'a Credential, &str)],
-        selection: &Selection,
-        policy: &Policy,
-        strategy: Strategy,
-        ranks: &Ranks<'_>,
-    ) -> Option<&'a Credential> {
-        self.pick_unbound(candidates, selection, policy, strategy, ranks)
-    }
-
     /// Picks among the highest tier: credential priority, or the selection's provider
     /// order ([`scope`]).
     fn pick_unbound<'a>(

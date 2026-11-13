@@ -127,9 +127,8 @@ export const countBy = <K extends string>(
 export const inView = (rows: Row[], view: View) =>
   view === "all" ? rows : rows.filter((r) => !r.view.ready);
 
-// Accounts that share one file change together: a delete removes the file, and a plugin
-// source's status change reaches every account it expands to (Go auth_files_fields.go
-// patchPluginVirtualSourceStatus). A runtime-only account has no file and stands alone.
+// Accounts that share one file change together: a delete removes the file. A runtime-only
+// account has no file and stands alone.
 const fileOf = (r: Row) => (r.account.runtime_only ? `\u0000${r.key}` : r.account.name);
 
 /** Every file that holds a selected account, as all of that file's accounts. */

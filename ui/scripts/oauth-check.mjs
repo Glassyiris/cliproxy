@@ -7,11 +7,11 @@
 //   list. Providers the server lacks must turn into an honest "not available" message.
 // --mode dead: the shipped binary with requests.proxy-url on a dead port. A pasted callback
 //   must end in an honest failure, never "Connected". No request reaches a provider.
-// --mode plugin: fake management responses check relative and absolute login URLs,
+// --mode stub: fake management responses check relative and absolute login URLs,
 //   copied links and unsafe schemes, including under a reverse-proxy path prefix, and a
 //   sign-in the server forgot while the tab was hidden (the account list decides the result).
 //
-// Usage: CHROME_PATH=... node scripts/oauth-check.mjs <page-url> --mode fake|dead|plugin [capture-dir]
+// Usage: CHROME_PATH=... node scripts/oauth-check.mjs <page-url> --mode fake|dead|stub [capture-dir]
 import { chromium } from "playwright-core";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -19,9 +19,9 @@ import assert from "node:assert/strict";
 import { assertPrivateCredentialStore } from "./private-credential-store.mjs";
 
 const [url, , mode, dir] = process.argv.slice(2);
-assert.ok(url && ["fake", "dead", "plugin"].includes(mode), "usage: oauth-check.mjs <page-url> --mode fake|dead|plugin [capture-dir]");
-// fake and dead sign in through a real server; plugin mode answers every request itself.
-if (mode !== "plugin") await assertPrivateCredentialStore(url, "orb-dashboard-test-only");
+assert.ok(url && ["fake", "dead", "stub"].includes(mode), "usage: oauth-check.mjs <page-url> --mode fake|dead|stub [capture-dir]");
+// fake and dead sign in through a real server; stub mode answers every request itself.
+if (mode !== "stub") await assertPrivateCredentialStore(url, "orb-dashboard-test-only");
 const out = resolve(dir || "oauth-check");
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH });
@@ -51,7 +51,7 @@ async function paste(redirect) {
 }
 
 try {
-  let loginUrl = `./v0/resource/plugins/commandcode-go-cliproxyapi/oauth#state=${"a".repeat(64)}`;
+  let loginUrl = `./oauth-guide#state=${"a".repeat(64)}`;
   const fixture = { name: "fixture.json", type: "claude", disabled: true, email: "operator@example.invalid", updated_at: "2026-11-01T09:00:00Z" };
   let files = [fixture],
     status = { status: "wait" },
@@ -62,7 +62,7 @@ try {
     reads = 0,
     hold = null,
     credsLeft = Infinity;
-  if (mode === "plugin") {
+  if (mode === "stub") {
     // A tab the test can hide, and polling slowed thirtyfold, so a status read right after the
     // tab comes back can only be the one its return triggered.
     await page.context().addInitScript(() => {
@@ -88,7 +88,6 @@ try {
           if (credsFail || credsLeft-- <= 0) return route.fulfill({ status: 500, json: { error: "fixture: read failed" } });
           body = { files };
         }
-        else if (path === "plugins") body = { plugins: [{ id: "commandcode-go-cliproxyapi", supports_oauth: true, oauth_provider: "commandcode" }] };
         else if (path === "requests/api-call") {
           reads++;
           const code = usage;
@@ -110,8 +109,8 @@ try {
         else throw new Error(`Unexpected management request: ${path}`);
         return route.fulfill({ json: body, headers: { "X-Cook-Commit": "fixture" } });
       }
-      if (request.pathname.endsWith("/v0/resource/plugins/commandcode-go-cliproxyapi/oauth"))
-        return route.fulfill({ contentType: "text/html", body: "<h1>Plugin sign-in guide</h1>" });
+      if (request.pathname.endsWith("/oauth-guide"))
+        return route.fulfill({ contentType: "text/html", body: "<h1>Sign-in guide</h1>" });
       return route.continue();
     });
   }
@@ -122,16 +121,16 @@ try {
   await page.evaluate(() => (location.hash = "#overview?open=connect"));
   await main.getByRole("heading", { name: "Sign in with a provider" }).waitFor();
 
-  if (mode === "plugin") {
+  if (mode === "stub") {
     const prefix = new URL(".", url).href;
     for (const [input, expected] of [
-      [loginUrl, `${prefix}v0/resource/plugins/commandcode-go-cliproxyapi/oauth#state=${"a".repeat(64)}`],
-      ["/v0/resource/plugins/commandcode-go-cliproxyapi/oauth#state=root", `${new URL(url).origin}/v0/resource/plugins/commandcode-go-cliproxyapi/oauth#state=root`],
+      [loginUrl, `${prefix}oauth-guide#state=${"a".repeat(64)}`],
+      ["/oauth-guide#state=root", `${new URL(url).origin}/oauth-guide#state=root`],
       ["https://provider.example.invalid/authorize?state=https", "https://provider.example.invalid/authorize?state=https"],
       ["http://provider.example.invalid/authorize?state=http", "http://provider.example.invalid/authorize?state=http"],
     ]) {
       loginUrl = input;
-      const { href } = await begin("commandcode");
+      const { href } = await begin("Claude");
       assert.equal(href, expected, "sign-in link is absolute and preserves the document's path prefix");
       await button("Copy link").click();
       await page.getByText("Link copied.", { exact: true }).waitFor();
@@ -140,23 +139,23 @@ try {
         const popup = page.waitForEvent("popup");
         await main.getByRole("link", { name: "Open sign-in page" }).click();
         const guide = await popup;
-        await guide.getByRole("heading", { name: "Plugin sign-in guide" }).waitFor();
+        await guide.getByRole("heading", { name: "Sign-in guide" }).waitFor();
         assert.equal(guide.url(), expected);
         await guide.close();
-        await page.screenshot({ path: `${out}/oauth-plugin-waiting.png` });
+        await page.screenshot({ path: `${out}/oauth-stub-waiting.png` });
       }
       await button("Cancel sign-in").click();
       await main.getByText("Cancelled", { exact: true }).waitFor();
     }
-    pass("plugin: relative URLs preserve path prefixes; absolute HTTP(S), copied links, guide navigation and cancellation work");
+    pass("stub: relative URLs preserve path prefixes; absolute HTTP(S), copied links, guide navigation and cancellation work");
     for (const input of ["javascript:alert(1)", "data:text/html,unsafe", "file:///tmp/unsafe", "mailto:unsafe@example.invalid"]) {
       loginUrl = input;
-      await button("commandcode").click();
+      await button("Claude").click();
       await page.getByRole("alert").filter({ hasText: "The server returned an unsafe sign-in URL." }).waitFor();
       assert.equal(await main.getByRole("link", { name: "Open sign-in page" }).count(), 0);
       await page.getByRole("button", { name: "Dismiss", exact: true }).click();
     }
-    pass("plugin: javascript, data, file and mailto URLs cannot start a session");
+    pass("stub: javascript, data, file and mailto URLs cannot start a session");
 
     // Go and older servers forget a successful session a minute after it ends and answer
     // "unknown or expired state". A tab that was away longer reads the status as it comes
@@ -173,7 +172,6 @@ try {
       ["an unrelated rewrite", "Kimi", [kimi], [{ ...kimi, updated_at: "2026-11-03T09:00:00Z" }], unknown],
       ["a failed read after", "Kimi", [kimi], [kimi, fresh("kimi-new", "kimi")], unknown, true],
       ["a kimi credential for a kimi-ai sign-in", "Kimi (kimi.ai)", [kimi], [kimi, fresh("kimi-new", "kimi")], unknown],
-      ["a plugin provider", "commandcode", [kimi], [kimi, fresh("commandcode-new", "commandcode")], unknown],
     ]) {
       (files = before), (status = { status: "wait" }), (credsFail = false);
       await begin(who);
@@ -191,7 +189,7 @@ try {
       await page.screenshot({ path: `${out}/oauth-expired-${what.replaceAll(" ", "-")}.png` });
     }
     credsFail = false;
-    pass("plugin: returning to the tab reads the status at once; a forgotten sign-in counts only one new name of exactly its built-in provider, read successfully, and is otherwise \"Result unavailable\"");
+    pass("stub: returning to the tab reads the status at once; a forgotten sign-in counts only one new name of exactly its built-in provider, read successfully, and is otherwise \"Result unavailable\"");
 
     // A status reply delayed past a cancel and a new start belongs to the old sign-in only.
     (files = [kimi]), (status = { status: "wait" });
@@ -211,7 +209,7 @@ try {
     assert.equal(await main.getByText("fixture: the old sign-in failed").count(), 0, "the old reply was dropped");
     await button("Cancel sign-in").click();
     await main.getByText("Cancelled", { exact: true }).waitFor();
-    pass("plugin: a status reply delayed past cancel and restart does not change the new sign-in");
+    pass("stub: a status reply delayed past cancel and restart does not change the new sign-in");
 
     // An ordinary "ok" for an account that was disabled before: a re-login keeps it disabled,
     // so the panel must not claim it serves.
@@ -223,7 +221,7 @@ try {
     await main.locator(".flow .section-head").getByText("Connected", { exact: true }).waitFor();
     assert.ok(!/in rotation/.test(await main.locator(".flow").textContent()), 'ok: no "in rotation" claim');
     await page.screenshot({ path: `${out}/oauth-ok-disabled.png` });
-    pass("plugin: an ordinary successful sign-in says it was saved, never that it is in rotation");
+    pass("stub: an ordinary successful sign-in says it was saved, never that it is in rotation");
 
     // A confirmed sign-in with a new Claude credential: its usage is read once, the bars come
     // from that read, and Connect another starts the next sign-in.
@@ -246,7 +244,7 @@ try {
     await main.getByText("Waiting for approval").waitFor();
     await button("Cancel sign-in").click();
     await main.getByText("Cancelled", { exact: true }).waitFor();
-    pass("plugin: a verified sign-in reads usage once, shows those bars, and Connect another starts a new sign-in");
+    pass("stub: a verified sign-in reads usage once, shows those bars, and Connect another starts a new sign-in");
 
     // The same, when the server forgot the sign-in and the new name decides it: the usage
     // read must still find the new account in the reloaded list.
@@ -258,7 +256,7 @@ try {
     await main.getByText("Waiting for approval").waitFor();
     await button("Cancel sign-in").click();
     await main.getByText("Cancelled", { exact: true }).waitFor();
-    pass("plugin: a forgotten sign-in found by its new name still gets its usage read and bars");
+    pass("stub: a forgotten sign-in found by its new name still gets its usage read and bars");
 
     // The provider refuses the new token's usage read: the error, no bars, and Try again
     // within 2 minutes sends nothing.
@@ -272,7 +270,7 @@ try {
     await page.getByText(/Read moments ago/).waitFor();
     assert.equal(reads, 1, "Try again within 2 minutes sends nothing");
     assert.equal(await button("Sign in again").count(), 1);
-    pass("plugin: a refused usage read shows the provider's error without bars, and Try again respects the 2-minute wait");
+    pass("stub: a refused usage read shows the provider's error without bars, and Try again respects the 2-minute wait");
 
     // Signing in again within 2 minutes saves a new token but makes no read: the old refusal
     // must not stand in for it.
@@ -285,7 +283,7 @@ try {
     await main.locator(".flow").getByText("Usage not read: read under 2 minutes ago.").waitFor();
     assert.equal(reads, 1, "no read within 2 minutes");
     assert.equal(await main.locator(".flow .result [role=meter]").count(), 0, "no bars from an older read");
-    pass("plugin: signing in again within 2 minutes says usage was not read instead of reusing the old result");
+    pass("stub: signing in again within 2 minutes says usage was not read instead of reusing the old result");
 
     // A usage read that fails for another reason (HTTP 500) is not a refused token.
     await connected([fixture, { ...claudeNew, name: "claude-500.json", auth_index: "claude-500", email: "five@example.invalid" }], 500);
@@ -293,7 +291,7 @@ try {
     await main.locator(".flow").getByText(/Usage read failed: The provider answered HTTP 500/).waitFor();
     assert.equal(await main.locator(".flow .result [role=meter]").count(), 0, "no bars for a failed read");
     assert.equal(await button("Sign in again").count(), 0);
-    pass("plugin: a usage read that fails without rejecting the token says so, not \"Provider refused\"");
+    pass("stub: a usage read that fails without rejecting the token says so, not \"Provider refused\"");
 
     // A read of the old token still in flight (here from Accounts' Check quotas) when the
     // account signs in again: its answer (401) must not be shown as the new token's result.
@@ -323,7 +321,7 @@ try {
     assert.equal(await main.locator(".flow").getByText("Usage not read: read under 2 minutes ago.").count(), 1, "still not read after the old read lands");
     assert.equal(await main.locator(".flow .result [role=meter]").count(), 0);
     assert.equal(reads, 1, "no second read");
-    pass("plugin: an old read still in flight across a re-sign-in is never shown as the new token's result");
+    pass("stub: an old read still in flight across a re-sign-in is never shown as the new token's result");
 
     // The sign-in is found (forgotten state), then the account list fails to reload: the read
     // cannot be made, and the panel says why instead of claiming a recent read.
@@ -337,7 +335,7 @@ try {
     assert.equal(reads, 0, "no read queued");
     assert.equal(await main.locator(".flow").getByText(/read under 2 minutes ago/).count(), 0);
     credsLeft = Infinity;
-    pass("plugin: a failed account-list reload after sign-in says the read failed, not that it was recent");
+    pass("stub: a failed account-list reload after sign-in says the read failed, not that it was recent");
   } else if (mode === "fake") {
     for (const [provider, redirect, email] of [
       ["Claude", (s) => `http://localhost:54545/callback?code=fake-code&state=${s}`, "claude-login@example.invalid"],

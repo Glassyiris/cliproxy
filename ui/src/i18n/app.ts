@@ -50,7 +50,6 @@ export default {
     "app.nav.payload": "Payload rules",
     "app.nav.usage": "Usage",
     "app.nav.logs": "Logs",
-    "app.nav.plugins": "Plugins",
     "app.nav.connect": "Connect an account",
     "app.nav.system": "System",
     "app.nav.github": "GitHub",

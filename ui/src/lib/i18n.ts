@@ -8,7 +8,6 @@ import logs from "../i18n/logs.ts";
 import models from "../i18n/models.ts";
 import overview from "../i18n/overview.ts";
 import payload from "../i18n/payload.ts";
-import plugins from "../i18n/plugins.ts";
 import providers from "../i18n/providers.ts";
 import system from "../i18n/system.ts";
 import usage from "../i18n/usage.ts";
@@ -29,7 +28,6 @@ const areas = [
   usage,
   logs,
   config,
-  plugins,
   connect,
   system,
 ] as const;

@@ -27,8 +27,11 @@ cp "$crate/tests/reference/body_limit/main.go" "$tmp/main.go"
 rm -rf "$tmp"
 ```
 
-`/openai/v1/videos` failures carry a random video ID, which the replay ignores. The
-plugin auth cases add a provider that reads the body as Go's plugin host adapter does
-(`readAndRestoreRequestBody`, then `NewRequestEntityTooLargeError`); the replay registers
-the frontend auth provider of a plugin that is not loaded, which reads the body the same
-way.
+`/openai/v1/videos` failures carry a random video ID, which the replay ignores.
+
+The plugin routes were removed with the plugin host. Their plugin-only cases were deleted
+from the generator and the fixture. The first-JSON-value, bad escape and nesting cases
+recorded on `POST /v0/management/plugins/demo/quota` now target
+`POST /v0/management/reset-quota`, which binds the same `auth_index` body and answers the
+same recorded `invalid request body` 413 at the limit; their recorded answers were moved
+with them, not recorded again.

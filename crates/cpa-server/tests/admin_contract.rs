@@ -195,7 +195,7 @@ async fn download_credential(f: &Fixture, name: &str) -> Vec<u8> {
 async fn credential_batch_preserves_bytes_and_is_in_the_portable_snapshot() {
     let f = Fixture::new("credential-batch", false).await;
     let first = b" \n{ \"type\":\"claude\", \"access_token\":\"fixture-only\", \"opaque\": [1,true,null] }\n";
-    let second = b"{\"type\":\"custom-plugin\",\"private_extension\":{\"z\":2,\"a\":1}}\n";
+    let second = b"{\"type\":\"custom-extension\",\"private_extension\":{\"z\":2,\"a\":1}}\n";
     let head = f.head();
     let response = f
         .request(wreq::Method::POST, "/admin/v1/credentials/batch")
@@ -532,18 +532,26 @@ async fn committed_config_remains_readable_when_persistence_is_unavailable() {
 #[tokio::test]
 async fn resource_and_history_queries_keep_committed_identity_without_storage() {
     let f = Fixture::new("resource-history-memory", false).await;
-    for (id, ord) in [("opaque-later", 20), ("opaque-first", 10)] {
-        let response = f.request(wreq::Method::PUT, &format!("/admin/v1/r/plugin/{id}"))
-            .json(&json!({"ord": ord, "description": "retained description", "spec": {"future": {"opaque": [1, "two", {"three": true}]}}}))
-            .send().await.unwrap();
+    // Ordinals oppose the ids' alphabetical order, so the listing proves `ord`.
+    for (id, ord) in [("a-later", 20), ("b-first", 10)] {
+        let response = f
+            .request(wreq::Method::PUT, &format!("/admin/v1/r/provider/{id}"))
+            .json(
+                &json!({"ord": ord, "description": "retained description", "spec": {"type": "claude",
+                "base-url": "http://127.0.0.1:1", "models": [{"name": "claude-sonnet-4-6", "alias": id}],
+                "keys": [{"api-key": format!("sk-fake-{id}")}]}}),
+            )
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), 200);
     }
     let revision = f.head();
     let original = f.state.config_store().state_at(revision).unwrap();
     let committed = f.state.config_store().snapshot().unwrap().1;
     let paths = [
-        "/admin/v1/r/plugin".to_owned(),
-        "/admin/v1/r/plugin/opaque-first".to_owned(),
+        "/admin/v1/r/provider".to_owned(),
+        "/admin/v1/r/provider/b-first".to_owned(),
         "/admin/v1/revisions".to_owned(),
         format!("/admin/v1/revisions/{revision}"),
         "/admin/v1/effective/config".to_owned(),
@@ -568,14 +576,20 @@ async fn resource_and_history_queries_keep_committed_identity_without_storage() 
         assert_eq!(body, expected, "{path}");
     }
     assert_eq!(history.unwrap(), original);
-    let plugins: Vec<_> = original.iter().filter(|r| r.kind == Kind::Plugin).collect();
+    let providers: Vec<_> = original.iter().filter(|r| r.kind == Kind::Provider).collect();
     assert_eq!(
-        plugins.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-        ["opaque-first", "opaque-later"]
+        providers.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        ["b-first", "a-later"]
     );
-    assert_eq!(plugins[0].description, "retained description");
-    let opaque = committed.iter().find(|r| r.id == "opaque-first").unwrap();
-    assert_eq!(opaque.spec["future"]["opaque"], json!([1, "two", {"three": true}]));
+    assert_eq!(providers[0].description, "retained description");
+    let first = committed
+        .iter()
+        .find(|r| r.kind == Kind::Provider && r.id == "b-first")
+        .unwrap();
+    assert_eq!(
+        first.spec["models"],
+        json!([{"name": "claude-sonnet-4-6", "alias": "b-first"}])
+    );
 }
 
 #[tokio::test]
@@ -673,7 +687,7 @@ async fn admin_auth_failures_use_the_admin_error_contract_and_expose_revisions()
 }
 
 #[tokio::test]
-async fn validation_faults_locate_fields_and_reject_partial_plugin_placeholders() {
+async fn validation_faults_locate_fields() {
     let f = Fixture::new("validation-pointers", false).await;
     let fault = rejected(
         f.request(wreq::Method::PUT, "/admin/v1/r/setting/observability")
@@ -687,49 +701,23 @@ async fn validation_faults_locate_fields_and_reject_partial_plugin_placeholders(
     .await;
     assert_eq!(fault["resource"], "setting/observability");
     assert_eq!(fault["pointer"], "/logs/debug");
-    let response = f
-        .request(wreq::Method::PUT, "/admin/v1/r/plugin/opaque")
-        .json(&json!({"spec": {"token": "plugin-replacement-secret"}}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 200);
-    for method in [wreq::Method::PUT, wreq::Method::PATCH] {
-        let body = if method == wreq::Method::PUT {
-            json!({"spec": {"token": "$secret"}})
-        } else {
-            json!({"token": "$secret"})
-        };
-        let fault = rejected(
+    // The plugin kind is gone: its resource paths answer the ordinary unknown kind.
+    for method in [
+        wreq::Method::GET,
+        wreq::Method::PUT,
+        wreq::Method::PATCH,
+        wreq::Method::DELETE,
+    ] {
+        rejected(
             f.request(method, "/admin/v1/r/plugin/opaque")
-                .json(&body)
+                .json(&json!({"spec": {}}))
                 .send()
                 .await
                 .unwrap(),
-            422,
-            "opaque_config_requires_replacement",
+            404,
+            "unknown_kind",
         )
         .await;
-        assert_eq!(fault["resource"], "plugin/opaque");
-        assert_eq!(fault["pointer"], "/token");
-    }
-    let response = f
-        .request(wreq::Method::PUT, "/admin/v1/r/plugin/opaque")
-        .json(&json!({"spec": "$secret"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 200);
-    for method in [wreq::Method::GET, wreq::Method::PUT, wreq::Method::PATCH] {
-        assert_eq!(
-            f.request(method, "/v0/management/plugins/opaque/config")
-                .json(&json!({}))
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            404
-        );
     }
 }
 
@@ -1344,16 +1332,12 @@ async fn ordinary_http_reads_and_write_responses_mask_every_secret() {
         "provider-http-secret",
         "header-http-secret",
         "proxy-http-secret",
-        "plugin-http-secret",
         "github-http-secret",
     ];
-    for (path, body) in [
-        (
-            "/admin/v1/r/provider/main",
-            json!({"spec": {"type": "claude", "base-url": "http://127.0.0.1:1", "headers": {"Authorization": secrets[1]}, "proxy-url": format!("http://user:{}@127.0.0.1:1", secrets[2]), "keys": [{"api-key": secrets[0]}]}}),
-        ),
-        ("/admin/v1/r/plugin/opaque", json!({"spec": {"token": secrets[3]}})),
-    ] {
+    for (path, body) in [(
+        "/admin/v1/r/provider/main",
+        json!({"spec": {"type": "claude", "base-url": "http://127.0.0.1:1", "headers": {"Authorization": secrets[1]}, "proxy-url": format!("http://user:{}@127.0.0.1:1", secrets[2]), "keys": [{"api-key": secrets[0]}]}}),
+    )] {
         let response = f.request(wreq::Method::PUT, path).json(&body).send().await.unwrap();
         assert_eq!(response.status(), 200);
         let text = response.text().await.unwrap();
@@ -1363,18 +1347,17 @@ async fn ordinary_http_reads_and_write_responses_mask_every_secret() {
     }
     let response = f
         .request(wreq::Method::PATCH, "/admin/v1/r/setting/server")
-        .json(&json!({"github-token": secrets[4]}))
+        .json(&json!({"github-token": secrets[3]}))
         .send()
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    assert!(!response.text().await.unwrap().contains(secrets[4]));
+    assert!(!response.text().await.unwrap().contains(secrets[3]));
     let head = f.head();
     for path in [
         "/admin/v1/r/provider".to_owned(),
         "/admin/v1/r/provider/main".to_owned(),
         "/admin/v1/r/client-key".to_owned(),
-        "/admin/v1/r/plugin".to_owned(),
         "/admin/v1/r/setting".to_owned(),
         "/admin/v1/effective/config".to_owned(),
         "/admin/v1/export".to_owned(),

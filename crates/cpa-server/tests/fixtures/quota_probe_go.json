@@ -1,0 +1,710 @@
+{
+  "steps": [
+    {
+      "op": "upstream",
+      "args": {
+        "/badgroup": {
+          "Status": 200,
+          "Body": "{\"subscription\":{\"plan\":\"pro\"},\"groups\":[{\"buckets\":[{\"remainingFraction\":\"0.5\"}]}]}",
+          "Location": ""
+        },
+        "/case": {
+          "Status": 200,
+          "Body": "{\"subscription\":{\"plan\":\"paid\"},\"Subscription\":null}",
+          "Location": ""
+        },
+        "/empty": {
+          "Status": 200,
+          "Body": "{\"groups\":[],\"subscription\":{\"plan\":\" \"}}",
+          "Location": ""
+        },
+        "/mapped": {
+          "Status": 200,
+          "Body": "{\"account\":{\"plan\":\"team\",\"tier\":\"Gold\",\"tier_id\":7},\"usage\":{\"label\":\"Usage\",\"items\":[{\"w\":\"5h\",\"left\":3,\"max\":4,\"resets\":\"soon\"},{\"w\":\"day\",\"remaining_fraction\":\"0.1\",\"description\":\"d\"},{\"w\":\"bad\",\"left\":1,\"max\":0}]},\"fixed\":{\"frac\":\"0.75\",\"window\":\"monthly\",\"reset\":\"later\",\"left\":2,\"max\":8,\"zero\":0}}",
+          "Location": ""
+        },
+        "/notjson": {
+          "Status": 200,
+          "Body": "{not json",
+          "Location": ""
+        },
+        "/quota": {
+          "Status": 200,
+          "Body": "{\"subscription\":{\"plan\":\"pro\",\"tier_name\":\"T\"},\"serverTimeOffsetMs\":0,\"summary\":[{\"key\":\"k1\",\"label\":\"Spend\",\"value\":1.5,\"unit\":\" USD \",\"format\":\"currency\",\"currency\":\" usd \"},{\"key\":\"k2\",\"label\":\"Old\",\"value\":2,\"format\":\"currency\",\"currency\":\"DEM\"},{\"key\":\"k3\",\"label\":\"Bad\",\"value\":3,\"format\":\"currency\",\"currency\":\"XYZ\"},{\"key\":\"k4\",\"label\":\"N\",\"value\":4,\"format\":\"number\"},{\"key\":\"k5\",\"label\":\"S\",\"value\":\"5\"},{\"key\":\" \",\"label\":\"x\",\"value\":1},{\"key\":\"k6\",\"label\":\"P\",\"value\":6,\"format\":\"percent\"}],\"groups\":[{\"display_name\":\"G1\",\"buckets\":[{\"window\":\"5h\",\"remainingFraction\":0.5},{\"window\":\"d\",\"remaining_fraction\":0.25,\"reset_time\":\"r\"},{\"window\":\"none\"},{\"window\":\"zero\",\"remainingFraction\":0}]},{\"displayName\":\"G2\",\"buckets\":[{\"remainingFraction\":null}]},{\"displayName\":\"G3\"}]}",
+          "Location": ""
+        },
+        "/redirect": {
+          "Status": 302,
+          "Body": "",
+          "Location": "/quota?from=redirect"
+        },
+        "/status500": {
+          "Status": 500,
+          "Body": "upstream exploded",
+          "Location": ""
+        },
+        "/summary": {
+          "Status": 200,
+          "Body": "{\"Summary\":[{\"key\":\"a\",\"label\":\"A\",\"value\":1}],\"summary\":[{\"key\":\"b\",\"label\":\"B\",\"value\":2}],\"groups\":[]}",
+          "Location": ""
+        }
+      },
+      "result": null
+    },
+    {
+      "op": "auths",
+      "args": {
+        "claude.json": "{\"type\":\"claude\",\"email\":\"a@example.invalid\",\"access_token\":\"fake-access\",\"refresh_token\":\"fake-refresh\"}",
+        "codex.json": "{\"type\":\"codex\",\"email\":\"b@example.invalid\",\"access_token\":\"fake-codex\"}",
+        "probe-badgroup.json": "{\"type\":\"codex\",\"email\":\"p13@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/badgroup\"}}",
+        "probe-badheader.json": "{\"type\":\"codex\",\"email\":\"p18@example.invalid\",\"quota_probe\":{\"url\":\"http://127.0.0.1:1/quota\",\"header\":{\"Content-Length\":\"1\\r\\nX-Test: injected\"}}}",
+        "probe-badname.json": "{\"type\":\"codex\",\"email\":\"p19@example.invalid\",\"quota_probe\":{\"url\":\"http://127.0.0.1:1/quota\",\"header\":{\"bad name\":\"1\"}}}",
+        "probe-badurl.json": "{\"type\":\"codex\",\"email\":\"p10@example.invalid\",\"quota_probe\":{\"url\":\"http://[::1\"}}",
+        "probe-case.json": "{\"type\":\"codex\",\"email\":\"p21@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/case\"}}",
+        "probe-empty.json": "{\"type\":\"codex\",\"email\":\"p6@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/empty\"}}",
+        "probe-ftp.json": "{\"type\":\"codex\",\"email\":\"p16@example.invalid\",\"quota_probe\":{\"url\":\"ftp://127.0.0.1:1/quota\"}}",
+        "probe-headers.json": "{\"type\":\"codex\",\"email\":\"p17@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/quota\",\"method\":\"ſ\",\"header\":{\"Host\":\"other.example\",\"Content-Length\":\"5\",\"Transfer-Encoding\":\"chunked\",\"Trailer\":\"X-T\",\"x-a\":\"1\"}}}",
+        "probe-map.json": "{\"type\":\"codex\",\"email\":\"p2@example.invalid\",\"access_token\":\"t2\",\"quota_probe\":{\"url\":\"UPSTREAM/mapped\",\"headers\":{\"X-H\":\"h\"},\"mapping\":{\"plan\":\"account.plan\",\"tier_name\":\"\",\"tierName\":\"account.tier\",\"tier_id\":\"missing.path\",\"tierId\":\"account.tier_id\",\"groups\":[{\"display_name\":\"usage.label\",\"buckets_path\":\"usage.items\",\"window_key\":\"w\",\"remaining_amount_key\":\"left\",\"total_amount_key\":\"max\",\"reset_time_key\":\"resets\"},{\"displayName\":\"Literal name\",\"buckets\":[{\"remaining_fraction\":\"fixed.frac\",\"window\":\"fixed.window\",\"description\":\"just text\",\"reset_time\":\"fixed.reset\"},{\"remaining_amount\":\"fixed.left\",\"total_amount\":\"fixed.zero\"},{\"remaining_amount\":\"fixed.left\",\"total_amount\":\"fixed.max\",\"window\":\"weekly\"}]},{\"display_name\":\"nothing\",\"buckets_path\":\"usage.none\"}]}}}",
+        "probe-mapfail.json": "{\"type\":\"codex\",\"email\":\"p3@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/mapped\",\"mapping\":{\"plan\":\"no.such\",\"groups\":[{\"buckets_path\":\"usage.none\"}]}}}",
+        "probe-nohost.json": "{\"type\":\"codex\",\"email\":\"p15@example.invalid\",\"quota_probe\":{\"url\":\"http:///127.0.0.1:1/quota\"}}",
+        "probe-notjson.json": "{\"type\":\"codex\",\"email\":\"p5@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/notjson\"}}",
+        "probe-notoken.json": "{\"type\":\"codex\",\"email\":\"p9@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/quota\",\"header\":{\"A\":\"$TOKEN$\"}}}",
+        "probe-nourl.json": "{\"type\":\"codex\",\"email\":\"p11@example.invalid\",\"quota_probe\":{\"method\":\"GET\",\"url\":5}}",
+        "probe-ok.json": "{\"type\":\"codex\",\"email\":\"p1@example.invalid\",\"access_token\":\"tok-1\",\"quota_probe\":{\"url\":\"UPSTREAM/quota?t=$TOKEN$\",\"method\":\" post \",\"data\":\"{\\\"k\\\":\\\"$TOKEN$\\\"}\",\"header\":{\"Authorization\":\"Bearer $TOKEN$\",\"x-other\":\"1\",\"x-num\":2}}}",
+        "probe-redirect.json": "{\"type\":\"codex\",\"email\":\"p7@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/redirect\"}}",
+        "probe-refused.json": "{\"type\":\"codex\",\"email\":\"p8@example.invalid\",\"quota_probe\":{\"url\":\"http://127.0.0.1:1/x\"}}",
+        "probe-sharp.json": "{\"type\":\"codex\",\"email\":\"p20@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/quota\",\"method\":\"ß\"}}",
+        "probe-status.json": "{\"type\":\"codex\",\"email\":\"p4@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/status500\"}}",
+        "probe-string.json": "{\"type\":\"codex\",\"email\":\"p12@example.invalid\",\"quota_probe\":\"UPSTREAM/quota\"}",
+        "probe-summary.json": "{\"type\":\"codex\",\"email\":\"p14@example.invalid\",\"quota_probe\":{\"url\":\"UPSTREAM/summary\"}}"
+      },
+      "result": null
+    },
+    {
+      "op": "config",
+      "args": "config-version: 8\nserver:\n  port: 18317\noauth:\n  auth-dir: AUTHDIR\nmanagement:\n  secret-key: $HASH\n",
+      "result": null
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch"
+      },
+      "result": {
+        "status": 400,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"invalid request body\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "[]"
+      },
+      "result": {
+        "status": 400,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"invalid request body\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{}"
+      },
+      "result": {
+        "status": 400,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"auth_index is required\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "null"
+      },
+      "result": {
+        "status": 400,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"auth_index is required\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":5}"
+      },
+      "result": {
+        "status": 400,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"invalid request body\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"  \"}"
+      },
+      "result": {
+        "status": 400,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"auth_index is required\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"nope\"}"
+      },
+      "result": {
+        "status": 404,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"auth not found\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"claude.json\"}"
+      },
+      "result": {
+        "status": 404,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"auth not found\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/reset-quota",
+        "body": "{\"auth_id\":\"claude.json\"}"
+      },
+      "result": {
+        "status": 400,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"auth_index is required\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/reset-quota",
+        "body": "{\"auth_index\":\"claude.json\"}"
+      },
+      "result": {
+        "status": 404,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"auth not found\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-ok.json)\"}"
+      },
+      "result": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"subscription\":{\"plan\":\"pro\",\"tierName\":\"T\"},\"summary\":[{\"key\":\"k1\",\"label\":\"Spend\",\"value\":1.5,\"unit\":\"USD\",\"format\":\"currency\",\"currency\":\"USD\"},{\"key\":\"k2\",\"label\":\"Old\",\"value\":2,\"format\":\"currency\",\"currency\":\"DEM\"},{\"key\":\"k3\",\"label\":\"Bad\",\"value\":3},{\"key\":\"k4\",\"label\":\"N\",\"value\":4,\"format\":\"number\"},{\"key\":\"k6\",\"label\":\"P\",\"value\":6}],\"groups\":[{\"displayName\":\"G1\",\"buckets\":[{\"window\":\"5h\",\"remainingFraction\":0.5},{\"window\":\"d\",\"remainingFraction\":0.25,\"resetTime\":\"r\"},{\"window\":\"zero\",\"remainingFraction\":0}]}]}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-map.json)\"}"
+      },
+      "result": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"subscription\":{\"plan\":\"team\",\"tierName\":\"Gold\"},\"groups\":[{\"displayName\":\"Usage\",\"buckets\":[{\"window\":\"5h\",\"remainingFraction\":0.75,\"resetTime\":\"soon\"},{\"window\":\"day\",\"remainingFraction\":0.1,\"description\":\"d\"}]},{\"displayName\":\"Literal name\",\"buckets\":[{\"window\":\"monthly\",\"remainingFraction\":0.75,\"resetTime\":\"later\",\"description\":\"just text\"},{\"window\":\"weekly\",\"remainingFraction\":0.25}]}]}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-mapfail.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: probe response mapping failed: response mapping did not match any valid quota fields in upstream response\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-status.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: probe returned status 500: upstream exploded\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-notjson.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: upstream probe response is not valid JSON\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-empty.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: upstream probe response does not match normalized quota shape or declared mapping\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-redirect.json)\"}"
+      },
+      "result": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"subscription\":{\"plan\":\"pro\",\"tierName\":\"T\"},\"summary\":[{\"key\":\"k1\",\"label\":\"Spend\",\"value\":1.5,\"unit\":\"USD\",\"format\":\"currency\",\"currency\":\"USD\"},{\"key\":\"k2\",\"label\":\"Old\",\"value\":2,\"format\":\"currency\",\"currency\":\"DEM\"},{\"key\":\"k3\",\"label\":\"Bad\",\"value\":3},{\"key\":\"k4\",\"label\":\"N\",\"value\":4,\"format\":\"number\"},{\"key\":\"k6\",\"label\":\"P\",\"value\":6}],\"groups\":[{\"displayName\":\"G1\",\"buckets\":[{\"window\":\"5h\",\"remainingFraction\":0.5},{\"window\":\"d\",\"remainingFraction\":0.25,\"resetTime\":\"r\"},{\"window\":\"zero\",\"remainingFraction\":0}]}]}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-refused.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: probe request failed: Get \\\"http://127.0.0.1:1/x\\\": dial tcp 127.0.0.1:1: connect: connection refused\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-notoken.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: probe authentication token not found for credential\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-badurl.json)\"}"
+      },
+      "result": {
+        "status": 501,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"no quota provider available for credential\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-nourl.json)\"}"
+      },
+      "result": {
+        "status": 501,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"no quota provider available for credential\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-string.json)\"}"
+      },
+      "result": {
+        "status": 501,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"no quota provider available for credential\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-badgroup.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: upstream probe response does not match normalized quota shape or declared mapping\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-summary.json)\"}"
+      },
+      "result": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"summary\":[{\"key\":\"b\",\"label\":\"B\",\"value\":2}]}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-nohost.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: probe request failed: Get \\\"http:///127.0.0.1:1/quota\\\": http: no Host in request URL\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-ftp.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: probe request failed: Get \\\"ftp://127.0.0.1:1/quota\\\": unsupported protocol scheme \\\"ftp\\\"\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-headers.json)\"}"
+      },
+      "result": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"subscription\":{\"plan\":\"pro\",\"tierName\":\"T\"},\"summary\":[{\"key\":\"k1\",\"label\":\"Spend\",\"value\":1.5,\"unit\":\"USD\",\"format\":\"currency\",\"currency\":\"USD\"},{\"key\":\"k2\",\"label\":\"Old\",\"value\":2,\"format\":\"currency\",\"currency\":\"DEM\"},{\"key\":\"k3\",\"label\":\"Bad\",\"value\":3},{\"key\":\"k4\",\"label\":\"N\",\"value\":4,\"format\":\"number\"},{\"key\":\"k6\",\"label\":\"P\",\"value\":6}],\"groups\":[{\"displayName\":\"G1\",\"buckets\":[{\"window\":\"5h\",\"remainingFraction\":0.5},{\"window\":\"d\",\"remainingFraction\":0.25,\"resetTime\":\"r\"},{\"window\":\"zero\",\"remainingFraction\":0}]}]}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-badheader.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: probe request failed: Get \\\"http://127.0.0.1:1/quota\\\": net/http: invalid header field value for \\\"Content-Length\\\"\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-badname.json)\"}"
+      },
+      "result": {
+        "status": 502,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"quota probe failed: probe request failed: Get \\\"http://127.0.0.1:1/quota\\\": net/http: invalid header field name \\\"bad name\\\"\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-sharp.json)\"}"
+      },
+      "result": {
+        "status": 501,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"error\":\"no quota provider available for credential\"}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "http",
+      "args": {
+        "method": "POST",
+        "path": "/v0/management/quota/fetch",
+        "body": "{\"auth_index\":\"AUTHINDEX(probe-case.json)\"}"
+      },
+      "result": {
+        "status": 200,
+        "content_type": "application/json; charset=utf-8",
+        "body": "{\"subscription\":{\"plan\":\"paid\"}}",
+        "version_headers": true
+      }
+    },
+    {
+      "op": "upstream_requests",
+      "result": [
+        {
+          "body": "{\"k\":\"tok-1\"}",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "Authorization": [
+              "Bearer tok-1"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ],
+            "X-Other": [
+              "1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "POST",
+          "uri": "/quota?t=tok-1"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ],
+            "X-H": [
+              "h"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/mapped"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/mapped"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/status500"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/notjson"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/empty"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/redirect"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "Referer": [
+              "UPSTREAM/redirect"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/quota?from=redirect"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/badgroup"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/summary"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ],
+            "X-A": [
+              "1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "S",
+          "uri": "/quota"
+        },
+        {
+          "body": "",
+          "header": {
+            "Accept-Encoding": [
+              "gzip"
+            ],
+            "User-Agent": [
+              "Go-http-client/1.1"
+            ]
+          },
+          "host": "UPSTREAMHOST",
+          "method": "GET",
+          "uri": "/case"
+        }
+      ]
+    }
+  ]
+}

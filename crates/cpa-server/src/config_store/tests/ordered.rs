@@ -552,10 +552,7 @@ fn seed_protocol_credential(f: &Fixture) -> Arc<cpa_core::credential::Credential
     let path = f.db.auth_dir().join("protocol.json");
     f.db.save(&path, br#"{"type":"codex","access_token":"T0","refresh_token":"R0"}"#)
         .unwrap();
-    let scan = crate::testing::with_builtin_auth_parser(|| {
-        f.db.preparse(&f.rt.config()).unwrap();
-        f.db.scan(&f.rt.config()).unwrap()
-    });
+    let scan = f.db.scan(&f.rt.config()).unwrap();
     f.rt.store().reconcile_scanned(scan.credentials, &scan.read);
     f.rt.store()
         .snapshot()
@@ -617,10 +614,7 @@ fn configuration_and_public_credential_patch_complete_coherently() {
     assert_eq!(receive(&received), committed.rev);
     assert!(received.try_recv().is_err());
     assert_eq!(f.rt.config().routing.strategy, "fill-first");
-    let scan = crate::testing::with_builtin_auth_parser(|| {
-        f.db.preparse(&f.rt.config()).unwrap();
-        f.db.scan(&f.rt.config()).unwrap()
-    });
+    let scan = f.db.scan(&f.rt.config()).unwrap();
     assert_eq!(scan.credentials[0].str("access_token"), Some("T1"));
     assert_eq!(f.rt.store().snapshot()[0].str("access_token"), Some("T1"));
     drop((fault, subscription));

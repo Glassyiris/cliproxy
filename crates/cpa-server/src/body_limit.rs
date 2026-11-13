@@ -165,24 +165,6 @@ impl<S: Send + Sync> FromRequest<S> for Read {
     }
 }
 
-/// [`Read::first_json`] over `axum::body::to_bytes(body, usize::MAX)`.
-pub(crate) async fn first_json_body(request: Request) -> Result<Bytes, axum::Error> {
-    if request.extensions().get::<Limit>().is_none_or(|l| l.0.is_none()) {
-        return axum::body::to_bytes(request.into_body(), usize::MAX).await;
-    }
-    let (body, seen) = Tee::wrap(request.into_body());
-    match axum::body::to_bytes(body, usize::MAX).await {
-        Err(error) if is_too_large(&error) => {
-            let prefix = seen.prefix();
-            match first_value(&prefix) {
-                Some(value) => Ok(prefix.slice_ref(value)),
-                None => Err(error),
-            }
-        }
-        body => body,
-    }
-}
-
 impl Read {
     /// gin `ShouldBindJSON` and `json.Decoder.Decode`: when the limit stopped the read,
     /// a first JSON value complete before it binds as if the body were exactly that

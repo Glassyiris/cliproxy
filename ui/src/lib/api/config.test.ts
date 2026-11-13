@@ -97,7 +97,7 @@ test("absent baselines become JSON defaults and absent next values become unset 
     { path, before: absent, next: ["key"], unset: absent },
     { path: "oauth/model-alias", before: absent, next: {}, unset: {} },
     { path: "routing/strategy", before: absent, next: "round-robin" },
-    { path: "plugins/configs/my plugin", before: { enabled: true }, next: absent },
+    { path: "routing/aliases/my alias", before: { enabled: true }, next: absent },
     { path: "upstream/proxy-url", before: null, next: "http://proxy.test" },
     { path: "server/host", before: undefined, next: "127.0.0.1" },
   ]);
@@ -106,7 +106,7 @@ test("absent baselines become JSON defaults and absent next values become unset 
       { op: "set", path, value: ["key"], expect: null },
       { op: "set", path: "oauth/model-alias", value: {}, expect: {} },
       { op: "set", path: "routing/strategy", value: "round-robin", expect: null },
-      { op: "unset", path: "plugins/configs/my plugin", expect: { enabled: true } },
+      { op: "unset", path: "routing/aliases/my alias", expect: { enabled: true } },
       { op: "set", path: "upstream/proxy-url", value: "http://proxy.test", expect: null },
       { op: "set", path: "server/host", value: "127.0.0.1", expect: null },
     ],

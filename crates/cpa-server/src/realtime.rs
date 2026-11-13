@@ -170,38 +170,19 @@ async fn authenticate(
             secret: Some(grant),
         }
     } else {
-        let (authenticated, access) = crate::plugins::authenticate(&rt, req).await;
-        req = authenticated;
-        match access {
-            // No provider registered: Go sets nothing.
-            Ok(crate::plugins::Access::Open) => Principal::default(),
-            Ok(crate::plugins::Access::Granted(caller)) => Principal {
+        match crate::access::client_caller(&rt, req.headers(), req.uri().query().unwrap_or_default()) {
+            // No client keys: Go sets nothing.
+            Ok(caller) => Principal {
                 key: caller.principal,
                 provider: caller.provider,
                 secret: None,
             },
-            Err(denied) if matches!(mode, Mode::Ordinary) => {
-                let body = crate::gojson::Obj::new().str("error", denied.message).finish();
-                return crate::respond::gin_json(denied.status, body);
+            Err(message) if matches!(mode, Mode::Ordinary) => {
+                let body = crate::gojson::Obj::new().str("error", message).finish();
+                return crate::respond::gin_json(401, body);
             }
-            Err(denied) if denied.status == 413 => {
-                return realtime_error(
-                    denied.status,
-                    denied.message,
-                    "invalid_request_error",
-                    "request_body_too_large",
-                );
-            }
-            Err(denied) if denied.status >= 500 => {
-                return realtime_error(
-                    denied.status,
-                    denied.message,
-                    "server_error",
-                    "authentication_service_error",
-                );
-            }
-            Err(denied) => {
-                return realtime_error(denied.status, denied.message, "authentication_error", "invalid_api_key");
+            Err(message) => {
+                return realtime_error(401, message, "authentication_error", "invalid_api_key");
             }
         }
     };
@@ -289,16 +270,6 @@ async fn select_oauth(
         exclude,
         // Go selects with an empty model; an existing call's selection names its
         // credential and call (sideband.go:381-388, capabilities.go:80-87).
-        scheduler: crate::plugins::provider_scheduler_context(
-            rt,
-            "codex",
-            headers,
-            "",
-            &[("pinned_auth_id", pinned), ("execution_session_id", execution_session)]
-                .into_iter()
-                .filter_map(|(k, v)| Some((k, v?)))
-                .collect::<Vec<_>>(),
-        ),
         ..Selection::default()
     };
     rt.acquire(selection, cfg, policy, &rt.registry())
@@ -351,18 +322,6 @@ async fn select_oauth(
             AcquireError::Prepare { error, .. } => Rejection {
                 status: error.status,
                 text: String::from_utf8_lossy(&error.body).into_owned(),
-                retry_after: None,
-            },
-            // A plugin scheduler's answer: Go returns the error as is, and a statusless one
-            // answers 503 (`writeSelectionError`).
-            AcquireError::Rejected { code, message } => Rejection {
-                status: 503,
-                text: format!("{code}: {message}"),
-                retry_after: None,
-            },
-            AcquireError::Scheduler(error) => Rejection {
-                status: if error.status > 0 { error.status } else { 503 },
-                text: crate::classify::error_text(&error),
                 retry_after: None,
             },
         })
