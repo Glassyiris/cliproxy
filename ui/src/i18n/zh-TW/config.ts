@@ -1,7 +1,6 @@
 export default {
   "zh-TW": {
     "config.page.what": "設定",
-    "config.page.legacy": "舊設定格式，首次儲存時遷移",
     "config.save.button": "儲存變更",
     "config.save.none": "沒有需要儲存的變更。",
     "config.review.title": "檢查變更",

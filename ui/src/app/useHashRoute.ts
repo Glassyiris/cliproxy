@@ -10,7 +10,6 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import { redirect } from "../lib/hash.ts";
 import { parseHash } from "./routes.ts";
 
 type Parsed = ReturnType<typeof parseHash>;
@@ -19,13 +18,6 @@ type Params = Readonly<Record<string, string>>;
 
 const here = (to: string) => `${location.pathname}${location.search}${to}`;
 
-/** An old hash is replaced by its new place in the same history entry. */
-function land(before: string) {
-  const to = redirect(location.hash, before);
-  if (to) history.replaceState(history.state, "", here(to));
-}
-
-land("");
 let hash = location.hash;
 let parsed = parseHash(hash);
 // Replaced only when they change, so a reader of one is not rerendered by the other.
@@ -50,8 +42,6 @@ const mark = (at: number) => history.replaceState({ ...history.state, index: at 
 mark(index);
 
 function sync() {
-  if (location.hash === hash) return;
-  land(hash);
   if (location.hash === hash) return;
   const next = parseHash(location.hash);
   const moves = next.route !== place.route || next.arg !== place.arg;

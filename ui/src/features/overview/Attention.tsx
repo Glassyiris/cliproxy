@@ -126,7 +126,7 @@ function AlertCard({ alert, now }: { alert: Alert; now: number }) {
       badge={<Badge variant={tone} label={badgeWord[tone]()} />}
       // A line only where the title does not say it all: when the accounts come back, or why.
       detail={detail && basis(detail)}
-      href={reason === "signIn" ? "#connect" : `#accounts?show=${reason}`}
+      href={reason === "signIn" ? "#overview?open=connect" : `#accounts?show=${reason}`}
     />
   );
 }
