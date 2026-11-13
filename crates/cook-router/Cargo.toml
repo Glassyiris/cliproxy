@@ -12,15 +12,6 @@ readme = "../../README.md"
 keywords = ["llm", "proxy", "openai", "claude-code", "codex"]
 categories = ["command-line-utilities", "network-programming", "web-programming::http-server"]
 
-# cargo binstall installs the GitHub release archive for the host target.
-[package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/cook-router-{ version }-{ target }{ archive-suffix }"
-bin-dir = "cook-router-{ version }-{ target }/{ bin }{ binary-ext }"
-pkg-fmt = "tgz"
-
-[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
-pkg-fmt = "zip"
-
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true

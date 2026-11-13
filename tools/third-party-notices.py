@@ -7,7 +7,7 @@ Usage (run with `python3 -I tools/third-party-notices.py`):
 
 Needs cargo-about (CARGO_ABOUT overrides the lookup on PATH), cargo, and `npm ci` done in ui/.
 Rust: cargo-about reads about.toml, runs offline against the locked dependency set, and covers the
-normal dependencies of the `cook-router` binary for the five release targets. npm: ui/vite.config.ts
+normal dependencies of the `cook-router` binary for the Linux release targets. npm: ui/vite.config.ts
 loads ui/tools/notices-plugin.ts, which writes the license of every package bundled into the
 dashboard when COOK_ROUTER_NOTICES_OUT is set; the build goes to a temporary directory, so ui/dist
 is not touched.
@@ -233,9 +233,8 @@ def render():
         "",
         "Packages offered under a choice of licenses appear under each license; the recipient",
         "may use them under any one of them. The Rust list covers the normal dependencies of",
-        "the cook-router binary on the five release targets (Linux x86_64 and aarch64, macOS",
-        "x86_64 and aarch64, Windows x86_64). The npm list covers the packages bundled into",
-        "the dashboard in ui/dist.",
+        "the cook-router binary on the Linux release targets (x86_64 and aarch64). The npm list",
+        "covers the packages bundled into the dashboard in ui/dist.",
         "",
     ]
     lines = head

@@ -12,13 +12,10 @@ accepted = [
   "Unicode-3.0",
   "Zlib",
 ]
-# The five release targets (.github/workflows/release.yml).
+# The Linux release targets (the project supports Linux only).
 targets = [
   "x86_64-unknown-linux-gnu",
   "aarch64-unknown-linux-gnu",
-  "aarch64-apple-darwin",
-  "x86_64-apple-darwin",
-  "x86_64-pc-windows-msvc",
 ]
 # Only what is linked into the binary.
 ignore-dev-dependencies = true
