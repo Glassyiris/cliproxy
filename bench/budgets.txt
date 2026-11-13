@@ -60,10 +60,16 @@ deps.x86_64-unknown-linux-gnu.duplicate_crates  11  0
 # and 827445c at 55,464 and 20,264: +3,240 KB of heap, 1.6 KB per credential, and +1 MB
 # of mapped binary pages. CI read 77,420 (eb800dc), 77,548 (827445c) and 77,492 (#152 on
 # 827445c) after #87, against 73,320 to 74,172 before it; the budget is their median.
+# 2026-11-13: 1 file raised to 27,500 with a maintainer's approval. #33 (69faf5f2) made
+# startup open SQLite and import the config, so SQLite's code stays mapped: on the build
+# host, release builds run from tmpfs (three alternating runs each) put 2fa6b013 at a
+# median of 29,200 KB and 69faf5f2 at 30,380, with RssAnon flat at about 4.2 MB and
+# 1,672 KB of SQLite's 1,801 KB text resident. CI read 28,104 at 69faf5f2 and 28,104 to
+# 29,184 after it, against 26,848 to 27,056 before.
 idle.linux.1.wakeups           3   0
 idle.linux.1.cpu_ticks         1   0
 idle.linux.1.threads           6   0
-idle.linux.1.rss_kb       25_500  10
+idle.linux.1.rss_kb       27_500  10
 idle.linux.2000.wakeups        3   0
 idle.linux.2000.cpu_ticks      1   0
 idle.linux.2000.threads        6   0
