@@ -26,27 +26,25 @@ CREATE TABLE change (
   after  TEXT,
   PRIMARY KEY (rev, kind, id)
 ) STRICT;
+CREATE INDEX change_resource_rev ON change(kind, id, rev);
+CREATE TABLE credential_document (
+  name  TEXT    PRIMARY KEY,
+  bytes BLOB    NOT NULL,
+  rev   INTEGER NOT NULL DEFAULT 1
+) STRICT;
+CREATE TABLE credential_meta (
+  name  TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) STRICT;
+CREATE TABLE credential_cooldown (
+  id     TEXT PRIMARY KEY,
+  record TEXT NOT NULL CHECK (json_valid(record))
+) STRICT;
 ";
 
-/// The schema version in `PRAGMA user_version`; each step upgrades from the one before.
-pub(super) const MIGRATIONS: &[&str] = &[
-    SCHEMA,
-    "UPDATE revision SET digest = ''; ",
-    "CREATE TABLE credential_document (
-       name TEXT PRIMARY KEY,
-       bytes BLOB NOT NULL,
-       rev INTEGER NOT NULL DEFAULT 1
-     ) STRICT;
-     CREATE TABLE credential_meta (
-       name TEXT PRIMARY KEY,
-       value TEXT NOT NULL
-     ) STRICT;
-     CREATE TABLE credential_cooldown (
-       id TEXT PRIMARY KEY,
-       record TEXT NOT NULL CHECK(json_valid(record))
-     ) STRICT;",
-    "CREATE INDEX change_resource_rev ON change(kind, id, rev);",
-];
+/// The only schema this build reads, kept in `PRAGMA user_version`. There are no
+/// upgrade steps: a database with any other version is refused at open.
+pub(super) const SCHEMA_VERSION: i64 = 4;
 
 impl ConfigStore {
     /// Opens or creates the database at `path`, readable by this user only.
@@ -54,8 +52,8 @@ impl ConfigStore {
         Self::open_mode(path, true)
     }
 
-    /// Opens an existing database for offline reads and dry runs, without migrations.
-    pub fn open_without_migration(path: &Path) -> anyhow::Result<Self> {
+    /// Opens an existing database for offline reads and dry runs; never creates one.
+    pub fn open_existing(path: &Path) -> anyhow::Result<Self> {
         Self::open_mode(path, false)
     }
 
@@ -71,14 +69,14 @@ impl ConfigStore {
         Self::init(conn, None, false)
     }
 
-    fn open_mode(path: &Path, migrate: bool) -> anyhow::Result<Self> {
-        super::published::open(path, migrate)
+    fn open_mode(path: &Path, create: bool) -> anyhow::Result<Self> {
+        super::published::open(path, create)
     }
 
     /// Fixtures choose a private namespace; production always uses OS tmp.
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Result<Self> {
-        super::published::open_in(path, migrate, root)
+    pub(crate) fn open_in(path: &Path, create: bool, root: PathBuf) -> anyhow::Result<Self> {
+        super::published::open_in(path, create, root)
     }
 
     /// A private in-memory store (tests, and the CLI's dry runs).
@@ -93,8 +91,8 @@ impl ConfigStore {
         store
     }
 
-    pub(super) fn init(mut conn: Connection, path: Option<PathBuf>, migrate: bool) -> anyhow::Result<Self> {
-        initialize(&mut conn, path.is_some(), migrate)?;
+    pub(super) fn init(mut conn: Connection, path: Option<PathBuf>, create: bool) -> anyhow::Result<Self> {
+        initialize(&mut conn, path.is_some(), create)?;
         let state = State::decode(&conn)?;
         Ok(Self {
             state: RwLock::new(Arc::new(state)),
@@ -135,20 +133,20 @@ impl ConfigStore {
     }
 }
 
-pub(super) fn initialize(conn: &mut Connection, disk: bool, migrate: bool) -> anyhow::Result<()> {
+/// Checks the schema version; with `create`, an empty database first receives the
+/// whole schema. A database that holds anything else is never changed.
+pub(super) fn initialize(conn: &mut Connection, disk: bool, create: bool) -> anyhow::Result<()> {
     configure(conn, disk)?;
-    if migrate {
+    if create {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let version = schema_version(&tx)?;
-        for (i, step) in MIGRATIONS.iter().enumerate().skip(version) {
-            tx.execute_batch(step)?;
-            tx.pragma_update(None, "user_version", (i + 1) as i64)?;
+        let objects: i64 = tx.query_row("SELECT count(*) FROM sqlite_schema", [], |r| r.get(0))?;
+        if user_version(&tx)? == 0 && objects == 0 {
+            tx.execute_batch(SCHEMA)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         tx.commit()?;
-    } else {
-        schema_version(conn)?;
     }
-    Ok(())
+    check_schema(conn)
 }
 
 pub(super) fn configure(conn: &Connection, disk: bool) -> anyhow::Result<()> {
@@ -162,22 +160,25 @@ pub(super) fn configure(conn: &Connection, disk: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(super) fn schema_version(conn: &Connection) -> anyhow::Result<usize> {
-    let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    let version = usize::try_from(version).unwrap_or(usize::MAX);
+pub(super) fn user_version(conn: &Connection) -> anyhow::Result<i64> {
+    Ok(conn.pragma_query_value(None, "user_version", |r| r.get(0))?)
+}
+
+pub(super) fn check_schema(conn: &Connection) -> anyhow::Result<()> {
+    let version = user_version(conn)?;
     anyhow::ensure!(
-        version <= MIGRATIONS.len(),
-        "config database schema {version} is newer than this build ({})",
-        MIGRATIONS.len()
+        version == SCHEMA_VERSION,
+        "config database schema {version} is not supported by this build, which reads only schema {SCHEMA_VERSION}; \
+         start from a new database and import the configuration"
     );
-    Ok(version)
+    Ok(())
 }
 
 pub(super) fn private_files(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        // WAL/SHM are protected only while importing an older database.
+        // WAL/SHM exist only while importing a database left in WAL mode.
         for suffix in ["", "-journal", "-wal", "-shm"] {
             let mut name = path.as_os_str().to_owned();
             name.push(suffix);

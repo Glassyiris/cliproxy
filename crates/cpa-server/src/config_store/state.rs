@@ -64,37 +64,34 @@ impl State {
             let (rev, change) = row?;
             Arc::make_mut(changes.entry(rev).or_default()).push(change);
         }
-        let mut state = Self {
+        let mut query = conn.prepare("SELECT name, bytes, rev FROM credential_document ORDER BY name")?;
+        let documents = query
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    Document {
+                        bytes: Arc::new(r.get(1)?),
+                        rev: r.get(2)?,
+                    },
+                ))
+            })?
+            .collect::<Result<_, _>>()?;
+        let mut query = conn.prepare("SELECT name, value FROM credential_meta ORDER BY name")?;
+        let metadata = query
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        let mut query = conn.prepare("SELECT id, record FROM credential_cooldown ORDER BY id")?;
+        let cooldowns = query
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
             resources,
             revisions,
             changes,
-            documents: BTreeMap::new(),
-            metadata: BTreeMap::new(),
-            cooldowns: BTreeMap::new(),
-        };
-        if super::db::schema_version(conn)? >= 3 {
-            let mut query = conn.prepare("SELECT name, bytes, rev FROM credential_document ORDER BY name")?;
-            state.documents = query
-                .query_map([], |r| {
-                    Ok((
-                        r.get(0)?,
-                        Document {
-                            bytes: Arc::new(r.get(1)?),
-                            rev: r.get(2)?,
-                        },
-                    ))
-                })?
-                .collect::<Result<_, _>>()?;
-            let mut query = conn.prepare("SELECT name, value FROM credential_meta ORDER BY name")?;
-            state.metadata = query
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<Result<_, _>>()?;
-            let mut query = conn.prepare("SELECT id, record FROM credential_cooldown ORDER BY id")?;
-            state.cooldowns = query
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<Result<_, _>>()?;
-        }
-        Ok(state)
+            documents,
+            metadata,
+            cooldowns,
+        })
     }
 
     pub fn rev(&self) -> u64 {

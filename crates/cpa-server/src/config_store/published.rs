@@ -84,12 +84,12 @@ impl ConfigStore {
     }
 }
 
-pub(super) fn open(path: &Path, migrate: bool) -> anyhow::Result<ConfigStore> {
-    open_in(path, migrate, std::env::temp_dir().join("cook-router"))
+pub(super) fn open(path: &Path, create: bool) -> anyhow::Result<ConfigStore> {
+    open_in(path, create, std::env::temp_dir().join("cook-router"))
 }
 
-pub(super) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Result<ConfigStore> {
-    let path = canonical_path(path, migrate)?;
+pub(super) fn open_in(path: &Path, create: bool, root: PathBuf) -> anyhow::Result<ConfigStore> {
+    let path = canonical_path(path, create)?;
     // The native guard is the only cross-process exclusion: no shared SQL
     // coordinator spans the databases of one temporary namespace.
     let ownership = ownership(&path)?;
@@ -103,13 +103,17 @@ pub(super) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Resu
     let existing = match std::fs::metadata(&live) {
         Ok(metadata) if metadata.len() > 0 => match open_live(&live) {
             Ok(conn) => {
-                // Unknown newer tables are not permission to discard their data.
-                let version = super::db::schema_version(&conn)?;
-                let tables: i64 = conn.query_row(
-                    "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('resource', 'revision', 'change')",
-                    [], |row| row.get(0),
-                )?;
-                if version > 0 && tables == 3 { Some(conn) } else { None }
+                // An unsupported schema is not permission to discard its data.
+                if super::db::user_version(&conn)? == 0 {
+                    None
+                } else {
+                    super::db::check_schema(&conn)?;
+                    let tables: i64 = conn.query_row(
+                        "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('resource', 'revision', 'change')",
+                        [], |row| row.get(0),
+                    )?;
+                    (tables == 3).then_some(conn)
+                }
             }
             Err(error) if corrupt(&error) => None,
             Err(error) => return Err(error).context("resume temporary config database"),
@@ -127,25 +131,30 @@ pub(super) fn open_in(path: &Path, migrate: bool, root: PathBuf) -> anyhow::Resu
                 private_dir(&directory)?;
             }
             if path.exists() && std::fs::metadata(&path)?.len() > 0 {
+                // Read-only and first: a database this build rejects keeps its bytes, mode, journal
+                // mode and companion files.
+                {
+                    let probe = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+                    super::db::check_schema(&probe)?;
+                }
                 super::db::private_files(&path)?;
                 let source = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-                super::db::delete_journal(&source).context("close old WAL users before importing this database")?;
+                super::db::delete_journal(&source).context("close WAL users before importing this database")?;
                 let file = private_file(&live)?;
                 source.execute(
                     "VACUUM INTO ?1",
                     [live.to_str().context("temporary database path must be UTF-8")?],
                 )?;
                 file.sync_all()?;
-            } else if !migrate {
+            } else if !create {
                 bail!("config database {} does not exist or is empty", path.display());
             }
             open_live(&live)?
         }
     };
-    let mut store = ConfigStore::init(conn, Some(path.clone()), migrate)?;
+    let mut store = ConfigStore::init(conn, Some(path.clone()), create)?;
     // Includes recovery of a committed live transaction whose earlier publication
     // failed. Readiness is never acknowledged before the snapshot catches up.
-    // Bootstrap-only conversion preserves explicit old-schema/offline-read behavior.
     // Ordinary publications below encode the canonical State, not this connection.
     publish_bootstrap(&*store.conn()?, &path)?;
     store.disk = Some(Disk {
@@ -249,7 +258,7 @@ fn corrupt(error: &anyhow::Error) -> bool {
     }) || error.to_string() == "temporary config database failed its integrity check"
 }
 
-/// Bootstrap/migration is the only publication sourced from an imported database.
+/// Bootstrap is the only publication sourced from an imported database.
 fn publish_bootstrap(conn: &Connection, destination: &Path) -> anyhow::Result<()> {
     install(
         destination,

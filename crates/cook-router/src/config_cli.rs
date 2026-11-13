@@ -111,7 +111,7 @@ fn existing(db: &Path) -> anyhow::Result<ConfigStore> {
         "config database {} does not exist; run config import first",
         db.display()
     );
-    match ConfigStore::open_without_migration(db) {
+    match ConfigStore::open_existing(db) {
         // A running owner keeps publishing complete single-file snapshots: reading one
         // is not a competing mutation.
         Err(error) if error.is::<cpa_server::config_store::AlreadyOwned>() => ConfigStore::open_published(db),

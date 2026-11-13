@@ -139,7 +139,7 @@ fn replaced_or_invalid_published_bytes_do_not_change_accepted_state() {
 }
 
 #[test]
-fn opening_fresh_databases_serializes_migrations() {
+fn opening_fresh_databases_serializes_schema_creation() {
     let (dir, path) = database_path("race");
     let start = std::sync::Arc::new(std::sync::Barrier::new(4));
     let workers: Vec<_> = (0..4)
@@ -159,9 +159,9 @@ fn opening_fresh_databases_serializes_migrations() {
             Err(error) => assert!(error.to_string().contains("already owned"), "{error}"),
         }
     }
-    assert_eq!(stores.len(), 1, "only the admitted owner performs bootstrap/migrations");
+    assert_eq!(stores.len(), 1, "only the admitted owner creates the schema");
     let conn = stores[0].conn().unwrap();
-    assert_eq!(schema_version(&conn).unwrap(), MIGRATIONS.len());
+    assert_eq!(user_version(&conn).unwrap(), SCHEMA_VERSION);
     assert!(
         conn.prepare("SELECT kind, id, rev FROM change INDEXED BY change_resource_rev")
             .is_ok()
@@ -191,34 +191,102 @@ fn opening_fresh_databases_serializes_migrations() {
 }
 
 #[test]
-fn offline_open_preserves_old_schema_and_migrating_open_upgrades_it() {
-    let (dir, path) = database_path("old-read");
-    let conn = Connection::open(&path).unwrap();
-    conn.execute_batch(SCHEMA).unwrap();
-    conn.pragma_update(None, "user_version", 1).unwrap();
-    drop(conn);
-    let store = crate::testing::config_store_without_migration(&path).unwrap();
-    assert_eq!(schema_version(&store.conn().unwrap()).unwrap(), 1);
-    store.load().unwrap();
-    assert!(
-        store
-            .conn()
-            .unwrap()
-            .prepare("SELECT * FROM credential_document")
-            .is_err()
-    );
-    drop(store);
-    let store = crate::testing::config_store(&path).unwrap();
-    assert_eq!(schema_version(&store.conn().unwrap()).unwrap(), MIGRATIONS.len());
-    assert!(
-        store
-            .conn()
-            .unwrap()
-            .prepare("SELECT * FROM credential_document")
-            .is_ok()
-    );
-    drop(store);
-    std::fs::remove_dir_all(dir).unwrap();
+fn other_schema_versions_are_refused_and_left_unchanged() {
+    for version in [0, 1, 3, SCHEMA_VERSION + 1] {
+        let (dir, path) = database_path("other-schema");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.pragma_update(None, "user_version", version).unwrap();
+        drop(conn);
+        let before = std::fs::read(&path).unwrap();
+        let files = || {
+            let mut names: Vec<_> = std::fs::read_dir(&dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .filter(|name| name.to_string_lossy().starts_with("cook.db"))
+                .collect();
+            names.sort();
+            names
+        };
+        let listed = files();
+        for create in [true, false] {
+            let error = if create {
+                crate::testing::config_store(&path)
+            } else {
+                crate::testing::existing_config_store(&path)
+            }
+            .err()
+            .expect("another schema version must be refused");
+            assert!(error.to_string().contains("not supported"), "{version}: {error}");
+            assert_eq!(std::fs::read(&path).unwrap(), before, "{version}");
+            assert_eq!(files(), listed, "{version}: no companion file appears");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+/// A rejected database is not touched: a WAL-mode file with an uncheckpointed write keeps its
+/// bytes, mode and companion files, because the schema is checked before permissions or the
+/// journal mode change.
+#[cfg(unix)]
+#[test]
+fn a_rejected_wal_database_keeps_its_contents_mode_and_companions() {
+    use std::os::unix::fs::PermissionsExt as _;
+    for version in [1, SCHEMA_VERSION + 1] {
+        let (origin_dir, origin) = database_path("rejected-wal-origin");
+        let (dir, path) = database_path("rejected-wal");
+        let conn = Connection::open(&origin).unwrap();
+        let mode: String = conn
+            .pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+        conn.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.pragma_update(None, "user_version", version).unwrap();
+        // Copy while the writer is open: the write is only in the -wal file, as after a crash.
+        for suffix in ["", "-wal", "-shm"] {
+            let mut from = origin.as_os_str().to_owned();
+            from.push(suffix);
+            let mut to = path.as_os_str().to_owned();
+            to.push(suffix);
+            std::fs::copy(&from, &to).unwrap();
+            std::fs::set_permissions(&to, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        drop(conn);
+        std::fs::remove_dir_all(origin_dir).unwrap();
+        let companion = |suffix: &str| {
+            let mut name = path.as_os_str().to_owned();
+            name.push(suffix);
+            PathBuf::from(name)
+        };
+        let snapshot = || {
+            ["", "-wal"].map(|suffix| {
+                let file = companion(suffix);
+                (
+                    std::fs::read(&file).ok(),
+                    std::fs::metadata(&file).ok().map(|m| m.permissions().mode() & 0o777),
+                )
+            })
+        };
+        assert!(
+            snapshot()[1].0.as_ref().is_some_and(|wal| !wal.is_empty()),
+            "the write is still in the -wal file"
+        );
+        let before = snapshot();
+        for create in [true, false] {
+            let error = if create {
+                crate::testing::config_store(&path)
+            } else {
+                crate::testing::existing_config_store(&path)
+            }
+            .err()
+            .expect("an unsupported schema must be refused");
+            assert!(error.to_string().contains("not supported"), "{version}: {error}");
+            assert_eq!(snapshot(), before, "{version}: contents and modes are unchanged");
+            assert!(companion("-shm").exists(), "{version}: the -shm file stays");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[cfg(unix)]
@@ -237,7 +305,7 @@ fn opening_tightens_snapshot_and_temporary_database_permissions() {
         std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
     std::fs::set_permissions(live.parent().unwrap(), std::fs::Permissions::from_mode(0o755)).unwrap();
-    let store = Arc::new(crate::testing::config_store_without_migration(&path).unwrap());
+    let store = Arc::new(crate::testing::existing_config_store(&path).unwrap());
     let another = store.clone();
     for file in [&path, &live] {
         assert_eq!(std::fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
@@ -276,7 +344,7 @@ fn published_main_file_is_a_standalone_backup_after_each_commit() {
         std::fs::copy(&path, &copy).unwrap();
         let bytes = std::fs::read(&copy).unwrap();
         assert_eq!(&bytes[18..20], &[1, 1], "published backups must not depend on WAL");
-        let copied = crate::testing::config_store_without_migration(&copy).unwrap();
+        let copied = crate::testing::existing_config_store(&copy).unwrap();
         assert_eq!(copied.get(Kind::Setting, "server").unwrap().unwrap().spec["port"], port);
     }
     drop(store);
@@ -284,29 +352,29 @@ fn published_main_file_is_a_standalone_backup_after_each_commit() {
 }
 
 #[test]
-fn legacy_uncheckpointed_wal_is_preserved_in_the_published_backup() {
-    let (dir, path) = database_path("legacy-wal");
-    let legacy = Connection::open(&path).unwrap();
-    legacy.execute_batch(SCHEMA).unwrap();
-    legacy.pragma_update(None, "user_version", 1).unwrap();
-    legacy.pragma_update(None, "journal_mode", "WAL").unwrap();
-    legacy
+fn uncheckpointed_wal_is_preserved_in_the_published_backup() {
+    let (dir, path) = database_path("wal");
+    let writer = Connection::open(&path).unwrap();
+    writer.execute_batch(SCHEMA).unwrap();
+    writer.pragma_update(None, "user_version", SCHEMA_VERSION).unwrap();
+    writer.pragma_update(None, "journal_mode", "WAL").unwrap();
+    writer
         .set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)
         .unwrap();
-    legacy
+    writer
         .execute_batch(
             "INSERT INTO revision VALUES (1, '2026-01-01', 'test', '', '');
         INSERT INTO resource(kind, id, spec, rev, created_rev)
         VALUES ('setting', 'server', '{\"port\":8123}', 1, 1);",
         )
         .unwrap();
-    drop(legacy);
+    drop(writer);
     assert!(dir.join("cook.db-wal").exists());
     let store = crate::testing::config_store(&path).unwrap();
     let copy = dir.join("restored.db");
     std::fs::copy(&path, &copy).unwrap();
     assert_eq!(&std::fs::read(&copy).unwrap()[18..20], &[1, 1]);
-    let restored = crate::testing::config_store_without_migration(&copy).unwrap();
+    let restored = crate::testing::existing_config_store(&copy).unwrap();
     assert_eq!(
         restored.get(Kind::Setting, "server").unwrap().unwrap().spec["port"],
         8123
@@ -319,26 +387,25 @@ fn legacy_uncheckpointed_wal_is_preserved_in_the_published_backup() {
 }
 
 #[test]
-fn legacy_wal_conflict_preserves_sidecars_and_recovers_opaque_state_after_close() {
-    let (dir, path) = database_path("active-legacy-wal");
+fn wal_conflict_preserves_sidecars_and_recovers_opaque_state_after_close() {
+    let (dir, path) = database_path("active-wal");
     let expected = resources::import_yaml(
         "server: {port: 8124}\nplugins: {enabled: true, configs: {acme: {ratio: 1.50, binary: !!binary YWJj}}}\n",
     )
     .unwrap();
-    let legacy = Connection::open(&path).unwrap();
-    legacy.execute_batch(SCHEMA).unwrap();
-    legacy.execute_batch(MIGRATIONS[2]).unwrap();
-    legacy.pragma_update(None, "user_version", 3).unwrap();
-    legacy.pragma_update(None, "journal_mode", "WAL").unwrap();
-    legacy.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
-    legacy
+    let writer = Connection::open(&path).unwrap();
+    writer.execute_batch(SCHEMA).unwrap();
+    writer.pragma_update(None, "user_version", SCHEMA_VERSION).unwrap();
+    writer.pragma_update(None, "journal_mode", "WAL").unwrap();
+    writer.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+    writer
         .set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)
         .unwrap();
-    legacy
-        .execute_batch("BEGIN IMMEDIATE; INSERT INTO revision VALUES (1, '2026-01-01', 'legacy', 'WAL state', '');")
+    writer
+        .execute_batch("BEGIN IMMEDIATE; INSERT INTO revision VALUES (1, '2026-01-01', 'writer', 'WAL state', '');")
         .unwrap();
     for resource in &expected {
-        legacy
+        writer
             .execute(
                 "INSERT INTO resource(kind,id,ord,spec,description,rev,created_rev) VALUES (?1,?2,?3,?4,?5,1,1)",
                 params![
@@ -352,35 +419,35 @@ fn legacy_wal_conflict_preserves_sidecars_and_recovers_opaque_state_after_close(
             .unwrap();
     }
     let raw = b"{\n \"type\":\"private\", \"opaque\":{\"ratio\":1.50,\"keep\":[1,2]}\n}\n";
-    legacy
+    writer
         .execute(
             "INSERT INTO credential_document(name,bytes,rev) VALUES ('local:private.json',?1,7)",
             [raw.as_slice()],
         )
         .unwrap();
-    legacy
+    writer
         .execute(
-            "INSERT INTO credential_meta VALUES ('opaque-legacy-meta','preserve')",
+            "INSERT INTO credential_meta VALUES ('opaque-writer-meta','preserve')",
             [],
         )
         .unwrap();
-    legacy.execute_batch("COMMIT; BEGIN;").unwrap();
-    assert_eq!(head(&legacy).unwrap(), 1); // Keep the real WAL reader transaction open.
+    writer.execute_batch("COMMIT; BEGIN;").unwrap();
+    assert_eq!(head(&writer).unwrap(), 1); // Keep the real WAL reader transaction open.
     let wal = dir.join("cook.db-wal");
     let shm = dir.join("cook.db-shm");
     let before_wal = std::fs::read(&wal).unwrap();
     let before_main = std::fs::read(&path).unwrap();
     let error = crate::testing::config_store(&path)
         .err()
-        .expect("active legacy WAL must block conversion");
-    assert!(error.to_string().contains("close old WAL users"), "{error}");
+        .expect("an active WAL user must block conversion");
+    assert!(error.to_string().contains("close WAL users"), "{error}");
     assert_eq!(std::fs::read(&path).unwrap(), before_main);
     assert_eq!(std::fs::read(&wal).unwrap(), before_wal);
     assert!(shm.exists(), "failed bootstrap must not delete an active sidecar");
-    assert_eq!(head(&legacy).unwrap(), 1);
-    legacy.execute_batch("ROLLBACK").unwrap();
-    legacy.close().unwrap();
-    assert!(wal.exists(), "committed legacy state still needs WAL recovery");
+    assert_eq!(head(&writer).unwrap(), 1);
+    writer.execute_batch("ROLLBACK").unwrap();
+    writer.close().unwrap();
+    assert!(wal.exists(), "committed writer state still needs WAL recovery");
     let store = Arc::new(crate::testing::config_store(&path).unwrap());
     assert_eq!(store.load().unwrap().config.port, 8124);
     for resource in expected {
@@ -399,7 +466,7 @@ fn legacy_wal_conflict_preserves_sidecars_and_recovers_opaque_state_after_close(
     let conn = restored.conn().unwrap();
     assert_eq!(
         conn.query_row(
-            "SELECT value FROM credential_meta WHERE name='opaque-legacy-meta'",
+            "SELECT value FROM credential_meta WHERE name='opaque-writer-meta'",
             [],
             |row| row.get::<_, String>(0)
         )
@@ -436,7 +503,7 @@ fn publication_does_not_change_an_already_open_raw_copy() {
     copying.read_to_end(&mut bytes).unwrap();
     let copy = dir.join("copy.db");
     std::fs::write(&copy, bytes).unwrap();
-    let old = crate::testing::config_store_without_migration(&copy).unwrap();
+    let old = crate::testing::existing_config_store(&copy).unwrap();
     assert_eq!(old.get(Kind::Setting, "server").unwrap().unwrap().spec["port"], 8001);
     assert_eq!(store.get(Kind::Setting, "server").unwrap().unwrap().spec["port"], 8002);
     drop(old);
@@ -616,9 +683,7 @@ fn recovery_uses_native_ownership_not_stale_process_markers() {
             "corrupt" => std::fs::write(&live, b"not a SQLite database").unwrap(),
             _ => {
                 let empty = Connection::open(&live).unwrap();
-                empty
-                    .pragma_update(None, "user_version", MIGRATIONS.len() as i64)
-                    .unwrap();
+                empty.pragma_update(None, "user_version", SCHEMA_VERSION).unwrap();
                 empty.close().unwrap();
             }
         }
@@ -658,16 +723,14 @@ fn recovery_preserves_newer_schemas_even_without_known_tables() {
                 "CREATE TABLE future_payload(value TEXT); INSERT INTO future_payload VALUES ('keep future data');",
             )
             .unwrap();
-        future
-            .pragma_update(None, "user_version", (MIGRATIONS.len() + 1) as i64)
-            .unwrap();
+        future.pragma_update(None, "user_version", SCHEMA_VERSION + 1).unwrap();
         future.close().unwrap();
         let before_live = std::fs::read(&live).unwrap();
         let before_published = std::fs::read(&path).unwrap();
         let error = crate::testing::config_store(&path)
             .err()
             .expect("unsupported state must not cold-fallback");
-        assert!(error.to_string().contains("newer"), "{error}");
+        assert!(error.to_string().contains("not supported"), "{error}");
         assert_eq!(
             std::fs::read(&live).unwrap(),
             before_live,
@@ -769,10 +832,10 @@ fn databases_sharing_a_temporary_namespace_publish_independently() {
         outcome.expect("another database's open connection stalled this publication"),
         Ok(1)
     );
-    let published = crate::testing::config_store_without_migration(&dir.join("copy.db"));
+    let published = crate::testing::existing_config_store(&dir.join("copy.db"));
     assert!(published.is_err(), "no copy exists yet");
     std::fs::copy(&second_path, dir.join("copy.db")).unwrap();
-    let copy = crate::testing::config_store_without_migration(&dir.join("copy.db")).unwrap();
+    let copy = crate::testing::existing_config_store(&dir.join("copy.db")).unwrap();
     assert_eq!(copy.load().unwrap().config.port, 8371);
     first
         .commit(&[put("setting", "server", json!({"port": 8372}))], "t", "", false)

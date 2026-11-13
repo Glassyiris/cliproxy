@@ -49,7 +49,7 @@ fn assert_standalone_private(path: &Path) {
             .unwrap(),
         "ok"
     );
-    assert_eq!(schema_version(&conn).unwrap(), MIGRATIONS.len());
+    assert_eq!(user_version(&conn).unwrap(), SCHEMA_VERSION);
     assert!(
         conn.prepare("SELECT kind,id,rev FROM change INDEXED BY change_resource_rev")
             .is_ok()
@@ -158,7 +158,7 @@ fn complete_state_exports_without_any_previous_database_or_credential_cache() {
     // Legacy import metadata must survive: neither a revoked old file nor a new
     // legacy file can re-enter an already initialized credential domain.
     std::fs::write(legacy.join("late.json"), b"{}").unwrap();
-    let recovered_store = Arc::new(crate::testing::config_store_without_migration(&output).unwrap());
+    let recovered_store = Arc::new(crate::testing::existing_config_store(&output).unwrap());
     let recovered = CredentialDb::initialize(recovered_store.clone(), &legacy).unwrap();
     let again = recovered_store.load().unwrap();
     assert_eq!(again.resources, expected.resources);
@@ -216,7 +216,7 @@ fn empty_and_initialized_memory_states_encode_without_a_disk_source() {
         let output = root.join(format!("{initialized}.db"));
         store.backup(&output).unwrap();
         assert_standalone_private(&output);
-        let recovered = crate::testing::config_store_without_migration(&output).unwrap();
+        let recovered = crate::testing::existing_config_store(&output).unwrap();
         assert_eq!(recovered.is_empty().unwrap(), !initialized);
         assert_eq!(recovered.snapshot().unwrap(), store.snapshot().unwrap());
         assert_eq!(
@@ -269,7 +269,7 @@ fn ordinary_publication_encodes_only_the_admitted_candidate() {
     );
     let copy = root.join("cold.db");
     std::fs::copy(&path, &copy).unwrap();
-    let recovered = crate::testing::config_store_without_migration(&copy).unwrap();
+    let recovered = crate::testing::existing_config_store(&copy).unwrap();
     assert_eq!(recovered.load().unwrap().config.port, 8914);
     assert!(recovered.snapshot().unwrap().1.iter().all(|r| r.id != "unadmitted"));
     assert_eq!(recovered.snapshot().unwrap(), store.snapshot().unwrap());

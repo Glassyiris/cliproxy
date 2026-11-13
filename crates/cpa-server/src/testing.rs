@@ -47,21 +47,21 @@ pub fn working_directory(store: &crate::config_store::ConfigStore) -> Option<std
     store.working_directory().map(std::path::Path::to_owned)
 }
 
-/// The same fixture namespace, preserving the offline no-schema-migration contract.
-pub fn config_store_without_migration(path: &std::path::Path) -> anyhow::Result<crate::config_store::ConfigStore> {
+/// The same fixture namespace, opening only an existing database (offline reads).
+pub fn existing_config_store(path: &std::path::Path) -> anyhow::Result<crate::config_store::ConfigStore> {
     config_store_mode(path, false)
 }
 
-fn config_store_mode(path: &std::path::Path, migrate: bool) -> anyhow::Result<crate::config_store::ConfigStore> {
+fn config_store_mode(path: &std::path::Path, create: bool) -> anyhow::Result<crate::config_store::ConfigStore> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(std::path::Path::new("."));
-    if migrate {
+    if create {
         std::fs::create_dir_all(parent)?;
     }
     let root = std::fs::canonicalize(parent)?.join(".cook-router-test-storage");
-    crate::config_store::ConfigStore::open_in(path, migrate, root)
+    crate::config_store::ConfigStore::open_in(path, create, root)
 }
 
 /// Executes fixture SQL on a fresh copy of canonical state, then installs the

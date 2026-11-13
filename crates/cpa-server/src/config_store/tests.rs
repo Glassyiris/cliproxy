@@ -1,4 +1,4 @@
-use super::db::{MIGRATIONS, SCHEMA, schema_version};
+use super::db::{SCHEMA, SCHEMA_VERSION, user_version};
 use super::*;
 use serde_json::json;
 
@@ -515,26 +515,22 @@ fn versioned_exports_preserve_scope_and_raw_plugin_nodes_with_explicit_secret_ac
 }
 
 #[test]
-fn legacy_history_is_masked_on_read_and_secret_digests_are_invalidated() {
-    let dir = std::env::temp_dir().join(format!("cook-config-old-history-{}", uuid::Uuid::new_v4()));
+fn stored_history_is_masked_on_read() {
+    let dir = std::env::temp_dir().join(format!("cook-config-history-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("cook.db");
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch(SCHEMA).unwrap();
-    conn.pragma_update(None, "user_version", 1).unwrap();
-    conn.execute(
-        "INSERT INTO revision VALUES (1,'then','t','','secret-derived-digest')",
-        [],
-    )
-    .unwrap();
-    let after = json!({"ord":0,"spec":{"type":"claude","headers":{"Authorization":"Bearer legacy-secret"},"keys":[{"api-key":"$secret"}]}}).to_string();
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION).unwrap();
+    conn.execute("INSERT INTO revision VALUES (1,'then','t','','')", [])
+        .unwrap();
+    let after = json!({"ord":0,"spec":{"type":"claude","headers":{"Authorization":"Bearer stored-secret"},"keys":[{"api-key":"$secret"}]}}).to_string();
     conn.execute("INSERT INTO change VALUES (1,'provider','main',NULL,?1)", [&after])
         .unwrap();
     drop(conn);
     let store = crate::testing::config_store(&path).unwrap();
-    let (revision, changes) = store.revision(1).unwrap().unwrap();
-    assert!(revision.digest.is_empty());
-    assert!(!serde_json::to_string(&changes).unwrap().contains("legacy-secret"));
+    let (_, changes) = store.revision(1).unwrap().unwrap();
+    assert!(!serde_json::to_string(&changes).unwrap().contains("stored-secret"));
     assert_eq!(
         store.state_at(1).unwrap()[0].spec["headers"]["Authorization"],
         resources::SECRET

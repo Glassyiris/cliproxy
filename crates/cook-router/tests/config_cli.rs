@@ -896,45 +896,31 @@ fn listener_reports_committed_defaults_and_tls_without_secrets_or_yaml_reads() {
 }
 
 #[test]
-fn read_commands_leave_older_schema_versions_unchanged_and_refuse_newer_ones() {
-    let dir = scratch("old-schema");
+fn read_commands_refuse_other_schema_versions_and_leave_them_unchanged() {
+    let dir = scratch("other-schema");
     std::fs::write(dir.join("source.yaml"), "server:\n  host: 127.0.0.1\n  port: 8345\n").unwrap();
     success(cli(&dir, &["--db", "chosen.db", "config", "import", "source.yaml"]));
     let path = dir.join("chosen.db");
     let mut database = std::fs::read(&path).unwrap();
-    let current_version = database[60..64].to_vec();
-    // SQLite's user_version is a big-endian u32 in the database header.
-    database[60..64].copy_from_slice(&1u32.to_be_bytes());
-    std::fs::write(&path, &database).unwrap();
-    for args in [
-        vec!["config", "listener"],
-        vec!["config", "export"],
-        vec!["config", "validate"],
-        vec!["config", "validate", "source.yaml"],
-        vec!["config", "backup", "backup.db"],
-    ] {
-        let mut command = vec!["--db", "chosen.db"];
-        command.extend(args);
-        success(cli(&dir, &command));
-        assert_eq!(&std::fs::read(&path).unwrap()[60..64], &1u32.to_be_bytes());
+    for version in [1u32, 3, u32::MAX] {
+        // SQLite's user_version is a big-endian u32 in the database header.
+        database[60..64].copy_from_slice(&version.to_be_bytes());
+        std::fs::write(&path, &database).unwrap();
+        for args in [
+            vec!["config", "listener"],
+            vec!["config", "export"],
+            vec!["config", "validate"],
+            vec!["config", "backup", "backup.db"],
+        ] {
+            let mut command = vec!["--db", "chosen.db"];
+            command.extend(&args);
+            let output = cli(&dir, &command);
+            assert!(!output.status.success(), "{version} {args:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("not supported"), "{version} {args:?}: {stderr}");
+            assert_eq!(std::fs::read(&path).unwrap(), database, "{version} {args:?}");
+        }
     }
-    assert_eq!(
-        &std::fs::read(dir.join("backup.db")).unwrap()[60..64],
-        current_version.as_slice(),
-        "a fresh backup uses the supported encoder schema without migrating the source"
-    );
-    assert_eq!(
-        success(cli(&dir, &["--db", "backup.db", "config", "export", "--secrets"])),
-        success(cli(&dir, &["--db", "chosen.db", "config", "export", "--secrets"])),
-        "fresh encoding preserves the complete exported configuration"
-    );
-    assert_eq!(&std::fs::read(&path).unwrap()[60..64], &1u32.to_be_bytes());
-    database[60..64].copy_from_slice(&u32::MAX.to_be_bytes());
-    std::fs::write(&path, &database).unwrap();
-    let output = cli(&dir, &["--db", "chosen.db", "config", "listener"]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("newer than this build"));
-    database[60..64].copy_from_slice(&current_version);
-    std::fs::write(&path, database).unwrap();
+    assert!(!dir.join("backup.db").exists());
     std::fs::remove_dir_all(dir).unwrap();
 }
