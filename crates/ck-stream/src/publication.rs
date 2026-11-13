@@ -637,6 +637,9 @@ impl Reader {
                 return value;
             }
             notified.await;
+            if let Poll::Ready(value) = self.try_next() {
+                return value;
+            }
         }
     }
 }
