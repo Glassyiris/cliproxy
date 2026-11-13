@@ -225,9 +225,11 @@ The precedent is the BoothDex admin console, itself built from the same template
   the content width, and a reading-width page caps only its content, aligned to the header's
   start, never centred.
 - The header holds the h1, one supporting line (held empty while the page's line waits for its
-  data, so nothing moves), the page's controls and at most one primary action. A list's search
-  and filters sit in the `LayoutHeader` (as `table-filter` does), so they stay while the content
-  scrolls; on phones they fold as the template's narrow layout folds them
+  data, so nothing moves), the page's controls and at most one primary action. Controls that do
+  not fit beside the title (a phone with two labelled buttons) take their own row under the
+  supporting line, decided by the title and the controls alone, so a count arriving never moves
+  them. A list's search and filters sit in the `LayoutHeader` (as `table-filter` does), so they
+  stay while the content scrolls; on phones they fold as the template's narrow layout folds them
   (`table-filter:2034-2088`). A rarely used action (Clear) goes into a menu. A route's views are
   side-nav items, never a tab strip in the header.
 - A page hosted by a route renders through `PageHostContext` (`src/app/pageHost.ts`): as a tab,

@@ -11,7 +11,6 @@
 // - Phones keep the table with two columns (model with its family and status as a second line,
 //   and the row menu) instead of the template's card list: the rows stay one pattern.
 import { useRef, useState, type ReactNode, type RefObject } from "react";
-import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Text } from "@astryxdesign/core/Text";
@@ -185,16 +184,11 @@ function HeaderActions({
   onExclude: () => void;
   onAdd: () => void;
 }) {
-  // On phones the secondary action is icon-only, so the title, its count line and both buttons
-  // share one row whether or not the count has loaded.
-  const isMobile = useAppShellMobile().isMobile;
   return (
     <>
       <Button
         label={t("models.page.exclude")}
         icon={<Icon icon={icons.exclude} />}
-        isIconOnly={isMobile}
-        tooltip={isMobile ? t("models.page.exclude") : undefined}
         onClick={onExclude}
       />
       <Button
