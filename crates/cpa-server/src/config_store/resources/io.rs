@@ -4,8 +4,8 @@ use cpa_core::config::Config;
 use serde_json::Value as Json;
 
 use super::{
-    Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, Resource, check, hash_management_key, redacted,
-    resolve_secrets, split, strip_read_annotations_at,
+    Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, Resource, check, hash_management_key, redacted, resolve_secrets,
+    split, strip_read_annotations_at,
 };
 
 const EXPORT_FORMAT: &str = "cook-router-config";

@@ -275,9 +275,9 @@ pub fn split(doc: &Json, old: &[Resource]) -> Result<Vec<Resource>, Fault> {
                     if text == SECRET && asked.is_none() {
                         return Err(Fault::new(None, "masked client key requires @id"));
                     }
-                    let known = old.iter().find(|r| {
-                        r.kind == Kind::ClientKey && r.spec.get("key").and_then(Json::as_str) == Some(text)
-                    });
+                    let known = old
+                        .iter()
+                        .find(|r| r.kind == Kind::ClientKey && r.spec.get("key").and_then(Json::as_str) == Some(text));
                     let id = assign(
                         Kind::ClientKey,
                         asked.or_else(|| known.map(|r| Json::String(r.id.clone()))),

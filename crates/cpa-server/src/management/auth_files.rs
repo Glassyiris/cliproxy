@@ -2959,9 +2959,7 @@ mod tests {
         let mut patch = MetadataPatch::default();
         patch.set.insert("access_token".into(), "p2".into());
         patch.set.insert("refresh_token".into(), "r2".into());
-        let fence = crate::runtime::RefreshFence {
-            registered,
-        };
+        let fence = crate::runtime::RefreshFence { registered };
         let committed = crate::runtime::commit_refresh(store, "a.json", &current, fence, &patch).unwrap();
         assert_eq!(committed.metadata["refresh_token"], "r2", "the refresh commits");
         let on_disk: Value = serde_json::from_slice(&std::fs::read(dir.join("a.json")).unwrap()).unwrap();
@@ -3441,5 +3439,4 @@ mod tests {
         );
         std::fs::remove_dir_all(dir).unwrap();
     }
-
 }

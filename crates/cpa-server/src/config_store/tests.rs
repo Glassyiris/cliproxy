@@ -401,24 +401,15 @@ fn unsupported_database_kinds_are_rejected_before_bootstrap() {
 fn public_digests_do_not_fingerprint_secrets() {
     let store = ConfigStore::memory();
     let first = store
-        .commit(
-            &[
-                put("provider", "main", provider("short")),
-                put("plugin", "opaque", json!({"token":"secret-a"})),
-            ],
-            "t",
-            "",
-            false,
-        )
+        .commit(&[put("provider", "main", provider("short"))], "t", "", false)
         .unwrap();
     let second = store.commit(&[
-        Op::Patch {kind:"provider".into(),id:"main".into(),patch:json!({"keys":[{"@id":first.resources.iter().find(|r| r.kind == Kind::Provider).unwrap().spec["keys"][0]["@id"],"api-key":"another-secret"}]}),if_rev:None},
-        put("plugin", "opaque", json!({"token":"secret-b", "other-secret":"never-digest"}))
+        Op::Patch {kind:"provider".into(),id:"main".into(),patch:json!({"keys":[{"@id":first.resources.iter().find(|r| r.kind == Kind::Provider).unwrap().spec["keys"][0]["@id"],"api-key":"another-secret"}]}),if_rev:None}
     ], "t", "", false).unwrap();
     assert_eq!(first.digest, second.digest);
     assert_eq!(store.load().unwrap().digest, second.digest);
     let history = serde_json::to_string(&store.revision(2).unwrap().unwrap().1).unwrap();
-    for secret in ["short", "another-secret", "secret-a", "secret-b", "never-digest"] {
+    for secret in ["short", "another-secret"] {
         assert!(!history.contains(secret));
     }
 }

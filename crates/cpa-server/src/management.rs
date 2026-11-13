@@ -852,8 +852,7 @@ pub fn router(state: Arc<Management>) -> Router {
     ] {
         router = router.route(&format!("{v0}/{path}"), route);
     }
-    router = router
-        .route(&format!("{v0}/quota/fetch"), methods().post(guarded!(s, quota::fetch)));
+    router = router.route(&format!("{v0}/quota/fetch"), methods().post(guarded!(s, quota::fetch)));
     for (path, _) in legacy::AUTH_URL_ROUTES {
         router = router.route(&format!("{v0}/{path}"), methods().get(guarded!(s, legacy::auth_url)));
     }

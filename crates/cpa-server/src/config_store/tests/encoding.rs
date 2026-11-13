@@ -63,10 +63,13 @@ fn complete_state_exports_without_any_previous_database_or_credential_cache() {
     std::fs::create_dir_all(&clean).unwrap();
     let source = root.join("source.db");
     let store = Arc::new(crate::testing::config_store(&source).unwrap());
-    store.import_yaml(
-        "server: {port: 8911}\nupstream:\n  codex:\n    disable-codex-cloaking: true\n",
-        "fixture", "first revision",
-    ).unwrap();
+    store
+        .import_yaml(
+            "server: {port: 8911}\nupstream:\n  codex:\n    disable-codex-cloaking: true\n",
+            "fixture",
+            "first revision",
+        )
+        .unwrap();
     let first_rev = store.snapshot().unwrap().0;
     let mut resources = store.snapshot().unwrap().1;
     for (index, resource) in resources.iter_mut().filter(|r| r.kind == Kind::Setting).enumerate() {

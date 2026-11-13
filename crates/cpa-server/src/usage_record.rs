@@ -2263,7 +2263,6 @@ impl Tracker {
             upstream_response_bytes: bytes(exchange.response_bytes),
         }
     }
-
 }
 
 impl Drop for Tracker {

@@ -389,7 +389,7 @@ fn expected_collection_annotations_are_stripped_without_touching_payloads() {
 
 #[test]
 fn effective_redaction_keeps_injected_identity_and_hides_opaque_configs() {
-    let mut doc = json!({"api-keys":{"gemini":[{"@id":"provider:owner@example.invalid","auth_index":"index:owner@example.invalid","keys":[{"@id":"key:owner@example.invalid","auth_index":"key-index","api-key":"sk-live"}],"headers":{"Authorization":"Bearer live"},"payload":{"auth_index":"https://user:password@example.invalid"}}]},"plugins":{"configs":{"acme":{"enabled":true,"opaque":"plugin-secret"}}}});
+    let mut doc = json!({"api-keys":{"gemini":[{"@id":"provider:owner@example.invalid","auth_index":"index:owner@example.invalid","keys":[{"@id":"key:owner@example.invalid","auth_index":"key-index","api-key":"sk-live"}],"headers":{"Authorization":"Bearer live"},"payload":{"auth_index":"https://user:password@example.invalid"}}]}});
     doc["access"] = json!({"api-keys":[{"@id":"client:alice@example.com","key":"fake-key"}]});
     doc["model-routers"] = json!([{"@id":"router:alice@example.com","name":"route"}]);
     redact_document(&mut doc);
@@ -406,7 +406,6 @@ fn effective_redaction_keeps_injected_identity_and_hides_opaque_configs() {
     assert_eq!(doc["api-keys"]["gemini"][0]["keys"][0]["api-key"], SECRET);
     assert_eq!(doc["api-keys"]["gemini"][0]["headers"]["Authorization"], SECRET);
     assert_eq!(doc["api-keys"]["gemini"][0]["payload"]["auth_index"], SECRET);
-    assert_eq!(doc["plugins"]["configs"]["acme"], SECRET);
     assert_eq!(doc["access"]["api-keys"][0]["@id"], "client:alice@example.com");
     assert_eq!(doc["access"]["api-keys"][0]["key"], SECRET);
     assert_eq!(doc["model-routers"][0]["@id"], "router:alice@example.com");

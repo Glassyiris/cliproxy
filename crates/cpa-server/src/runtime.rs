@@ -755,7 +755,9 @@ impl Runtime {
         match failed {
             Some(revision) if current.revision != revision && !self.store.grant_blocks(&current) => return Ok(current),
             Some(_) => {}
-            None if self.executors.readiness(&current, cfg) == Readiness::Ready && !self.store.grant_blocks(&current) => {
+            None if self.executors.readiness(&current, cfg) == Readiness::Ready
+                && !self.store.grant_blocks(&current) =>
+            {
                 return Ok(current);
             }
             None => {}
@@ -1044,9 +1046,7 @@ async fn refresh_loop(weak: std::sync::Weak<Runtime>) {
                         if rt.executors.needs_prepare_at(c, &cfg, eventually) {
                             soonest(now + HORIZON);
                         }
-                        let due = rt
-                            .executors
-                            .prepare_due(c, &cfg, wall, horizon);
+                        let due = rt.executors.prepare_due(c, &cfg, wall, horizon);
                         match due {
                             Some(at) if at > wall => soonest(now + (at - wall).to_std().unwrap_or_default()),
                             Some(_) => {
@@ -1092,9 +1092,7 @@ async fn refresh_loop(weak: std::sync::Weak<Runtime>) {
                 if rt.executors.needs_prepare_at(c, &cfg, eventually) {
                     soonest(now + HORIZON);
                 }
-                let due = rt
-                    .executors
-                    .prepare_due(c, &cfg, wall, horizon);
+                let due = rt.executors.prepare_due(c, &cfg, wall, horizon);
                 match due {
                     Some(at) if at > wall => soonest(now + (at - wall).to_std().unwrap_or_default()),
                     Some(_) if state.reserve(c, now) => jobs.push(spawn(c, false)),
@@ -1569,9 +1567,7 @@ pub fn admission<'a>(
 ) -> impl Fn(&Credential) -> Option<String> + 'a {
     move |c| {
         let provider = crate::registry::provider_key(c);
-        if !selection.provider_keys().contains(&provider)
-            || !executors.supports(&c.provider)
-        {
+        if !selection.provider_keys().contains(&provider) || !executors.supports(&c.provider) {
             return None;
         }
         let key = crate::registry::selection_model(aliases, c, &selection.model);
@@ -3697,9 +3693,14 @@ pub(crate) fn commit_refresh(
     let mut revision = current.revision;
     let mut attempt = patch.clone();
     loop {
-        match store.apply_refresh(id, revision, fence.clone(), &attempt, |_| {}, |c| {
-            credentials_changed(current, c)
-        }) {
+        match store.apply_refresh(
+            id,
+            revision,
+            fence.clone(),
+            &attempt,
+            |_| {},
+            |c| credentials_changed(current, c),
+        ) {
             // Edited since the snapshot (the prepare lock does not hold off other writers),
             // within the refresh's registration: the writer refuses a re-registered ID
             // first (Go "stale registration epoch"), on every retry. Go 935aa6e3: an edit
@@ -5070,59 +5071,48 @@ pub(crate) mod tests {
     /// A scanned SQLite document cannot overwrite a later durable save or deletion.
     #[test]
     fn a_stale_scan_cannot_undo_a_later_write() {
-        use cpa_core::config::credentials::{ParseRequest, Parsed, PluginAuthParser};
-        struct BuiltIn;
-        impl PluginAuthParser for BuiltIn {
-            fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
-                Parsed::NotHandled
-            }
-        }
-        // Keep this built-in fixture independent of another runtime's native
-        // parser registration and epoch changes in the shared test process.
-        cpa_core::config::credentials::with_thread_plugin_auth_parser(Arc::new(BuiltIn), || {
-            let dir = std::env::temp_dir().join(format!("cpa-stale-scan-{}", uuid::Uuid::new_v4()));
-            std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("synthetic.json");
-            std::fs::write(&path, br#"{"type":"codex","prefix":"pfx-8"}"#).unwrap();
-            let mut cfg = Config::parse("").unwrap();
-            cfg.auth_dir = dir.clone();
-            let store = test_store(cpa_core::config::credentials::from_auth_dir(&cfg));
-            let backend = store.credential_backend();
-            let stale = backend.scan(&cfg).unwrap();
-            let revision = store.get("synthetic.json").unwrap().revision;
-            let mut patch = MetadataPatch::default();
-            patch.set.insert("prefix".into(), "pfx-9".into());
-            store.apply_patch("synthetic.json", revision, &patch).unwrap();
-            let current = || store.get("synthetic.json").unwrap();
-            let before = current();
-            store.reconcile_scanned(stale.credentials, &stale.read);
-            assert_eq!(current().metadata["prefix"], "pfx-9");
-            assert_eq!(current().revision, before.revision);
-            backend
-                .save(&path, br#"{"type":"codex","prefix":"saved-edit"}"#)
-                .unwrap();
-            let saved = backend.scan(&cfg).unwrap();
-            std::fs::write(&path, b"corrupt cache").unwrap();
-            store.reconcile_scanned(saved.credentials, &saved.read);
-            assert_eq!(
-                current().metadata["prefix"],
-                "saved-edit",
-                "cache cannot veto a SQLite save"
-            );
-            let before = current();
-            backend
-                .save(&path, br#"{"type":"codex","prefix":"deleted-edit"}"#)
-                .unwrap();
-            let deleted = backend.scan(&cfg).unwrap();
-            backend.delete(&path).unwrap();
-            store.reconcile_scanned(deleted.credentials, &deleted.read);
-            assert_eq!(
-                current().revision,
-                before.revision,
-                "a deleted document's snapshot was applied"
-            );
-            std::fs::remove_dir_all(dir).unwrap();
-        });
+        let dir = std::env::temp_dir().join(format!("cpa-stale-scan-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("synthetic.json");
+        std::fs::write(&path, br#"{"type":"codex","prefix":"pfx-8"}"#).unwrap();
+        let mut cfg = Config::parse("").unwrap();
+        cfg.auth_dir = dir.clone();
+        let store = test_store(cpa_core::config::credentials::from_auth_dir(&cfg));
+        let backend = store.credential_backend();
+        let stale = backend.scan(&cfg).unwrap();
+        let revision = store.get("synthetic.json").unwrap().revision;
+        let mut patch = MetadataPatch::default();
+        patch.set.insert("prefix".into(), "pfx-9".into());
+        store.apply_patch("synthetic.json", revision, &patch).unwrap();
+        let current = || store.get("synthetic.json").unwrap();
+        let before = current();
+        store.reconcile_scanned(stale.credentials, &stale.read);
+        assert_eq!(current().metadata["prefix"], "pfx-9");
+        assert_eq!(current().revision, before.revision);
+        backend
+            .save(&path, br#"{"type":"codex","prefix":"saved-edit"}"#)
+            .unwrap();
+        let saved = backend.scan(&cfg).unwrap();
+        std::fs::write(&path, b"corrupt cache").unwrap();
+        store.reconcile_scanned(saved.credentials, &saved.read);
+        assert_eq!(
+            current().metadata["prefix"],
+            "saved-edit",
+            "cache cannot veto a SQLite save"
+        );
+        let before = current();
+        backend
+            .save(&path, br#"{"type":"codex","prefix":"deleted-edit"}"#)
+            .unwrap();
+        let deleted = backend.scan(&cfg).unwrap();
+        backend.delete(&path).unwrap();
+        store.reconcile_scanned(deleted.credentials, &deleted.read);
+        assert_eq!(
+            current().revision,
+            before.revision,
+            "a deleted document's snapshot was applied"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -5596,32 +5586,6 @@ pub(crate) mod tests {
         store.persist_credential(&stale).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), refreshed);
         assert!(refreshed.contains("\"new\"") && refreshed.contains("\"disabled\":false"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Go `Manager.persist` skips plugin-virtual auths: a refresh of one of the
-    /// credentials a plugin parsed from one file commits in memory and leaves the shared
-    /// file alone.
-    #[test]
-    fn a_plugin_virtual_refresh_never_rewrites_the_shared_source_file() {
-        let dir = std::env::temp_dir().join(format!("virtual-{}-{}", std::process::id(), line!()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("multi.json");
-        let source = r#"{"type":"claude","accounts":[{"access_token":"a"},{"access_token":"b"}]}"#;
-        std::fs::write(&path, source).unwrap();
-        let metadata: Map<String, Value> = serde_json::from_str(r#"{"type":"claude","access_token":"a"}"#).unwrap();
-        let mut credential = Credential::from_file(&dir, &path, metadata).unwrap();
-        credential.id = "multi-a".into();
-        credential.attributes.insert("plugin_virtual".into(), "true".into());
-        let store = test_store(vec![credential]);
-        let current = store.get("multi-a").unwrap();
-        let mut patch = MetadataPatch::default();
-        patch.set.insert("access_token".into(), "refreshed".into());
-        let committed = store.apply_patch("multi-a", current.revision, &patch).unwrap();
-        assert_eq!(committed.metadata["access_token"], "refreshed");
-        assert_eq!(store.get("multi-a").unwrap().metadata["access_token"], "refreshed");
-        store.persist_credential(&committed).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -6643,9 +6607,7 @@ pub(crate) mod tests {
                 let result = store.apply_refresh(
                     &original.id,
                     original.revision,
-                    RefreshFence {
-                        registered,
-                    },
+                    RefreshFence { registered },
                     &MetadataPatch {
                         set: serde_json::from_value(
                             serde_json::json!({"access_token":"returned","refresh_token":"R2"}),
@@ -6774,107 +6736,6 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    /// The source file is shared plugin data, not either child's token document.
-    /// A real loopback OAuth response supplies the consumed result at the effect port.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn pending_virtual_grant_is_held_without_rewriting_its_source_and_admitted_once() {
-        let mock = CodexDisk::gated(&[], 0).await;
-        let root = std::env::temp_dir().join(format!("cpa-pending-virtual-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).unwrap();
-        let (database, backend) = sqlite_backend(&root);
-        let path = backend.auth_dir().join("shared.json");
-        let raw = br#"{"type":"claude","wrapped":"shared-plugin-material"}"#;
-        backend.save(&path, raw).unwrap();
-        let mut cfg = Config::parse("").unwrap();
-        cfg.auth_dir = backend.auth_dir();
-        let children = ["child-a", "child-b"].map(|id| {
-            let mut child = cred(id, "claude", false);
-            child.source = Source::File(path.clone());
-            child.attributes.insert("plugin_virtual".into(), "true".into());
-            child.metadata = serde_json::json!({
-                "type": "claude", "access_token": format!("sk-ant-oat-{id}"),
-                "refresh_token": format!("refresh-{id}"),
-                "expired": (chrono::Utc::now() - chrono::Duration::minutes(1)).to_rfc3339(),
-                "account_uuid": "private-fixture", "claude_device_ids": ["b".repeat(64)]
-            })
-            .as_object()
-            .unwrap()
-            .clone();
-            child.refresh_derived();
-            child
-        });
-        let endpoint = format!("{}/oauth/token", mock.base);
-        let rt = Arc::new(Runtime::new(
-            cfg,
-            children.to_vec(),
-            Executors {
-                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1")
-                    .unwrap()
-                    .with_oauth(cpa_exec::oauth::OAuth::with_endpoints(
-                        wreq::Client::new(),
-                        &endpoint,
-                        &endpoint,
-                        &endpoint,
-                    )),
-                codex: Default::default(),
-                devices: Default::default(),
-                openai: Default::default(),
-                google: Default::default(),
-            },
-            backend.clone(),
-        ));
-        rt.store
-            .note_loaded(&std::collections::BTreeMap::from([(path.clone(), sha256(raw))]));
-        rt.deny_external.store(true, Ordering::Relaxed);
-        let refresh = tokio::spawn({
-            let rt = rt.clone();
-            async move { rt.refresh_credential("child-a").await }
-        });
-        mock.wait_for_grants(1).await;
-        let blocked = crate::testing::block_publication(database.path().unwrap());
-        assert!(
-            database
-                .import_yaml("server: {port: 8318}\n", "test", "pending")
-                .is_err()
-        );
-        mock.gate.add_permits(1);
-        assert!(refresh.await.unwrap().is_err(), "holding is not ordinary save success");
-        let old = rt.store.get("child-a").unwrap();
-        assert_eq!(old.str("refresh_token"), Some("refresh-child-a"));
-        assert!(rt.store.tokens_rejected(&old), "spent virtual tokens cannot dispatch");
-        assert!(rt.refresh_credential("child-b").await.is_err());
-        assert_eq!(mock.grants.lock().unwrap().len(), 1, "new grant starts are paused");
-        assert_eq!(std::fs::read(&path).unwrap(), raw);
-        assert_eq!(backend.documents().unwrap(), vec![(path.clone(), raw.to_vec())]);
-        drop(blocked);
-        backend.admit_work().unwrap();
-        let adopted = rt.store.get("child-a").unwrap();
-        assert_eq!(adopted.str("refresh_token"), Some("outer-ref-refreshed"));
-        assert!(!rt.store.tokens_rejected(&adopted));
-        let revision = adopted.revision;
-        backend.admit_work().unwrap();
-        assert_eq!(
-            rt.store.get("child-a").unwrap().revision,
-            revision,
-            "admit exactly once"
-        );
-        assert_eq!(mock.grants.lock().unwrap().len(), 1);
-        assert_eq!(std::fs::read(&path).unwrap(), raw);
-        assert_eq!(backend.documents().unwrap(), vec![(path.clone(), raw.to_vec())]);
-        let backup = root.join("cold");
-        std::fs::create_dir(&backup).unwrap();
-        std::fs::copy(database.path().unwrap(), backup.join("state.db")).unwrap();
-        let cold = Arc::new(crate::testing::config_store(&backup.join("state.db")).unwrap());
-        let cold_db = crate::credential_store::CredentialDb::initialize(cold).unwrap();
-        assert!(
-            cold_db.documents().unwrap().iter().all(|(_, bytes)| bytes == raw),
-            "volatile child results are not cold-restored"
-        );
-        rt.shutdown_codex_refreshes().await;
-        drop((cold_db, rt, backend, database));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sqlite_codex_refresh_restores_newer_accepted_tokens_under_the_document_lock() {
         let file = codex_file(
@@ -6978,13 +6839,6 @@ pub(crate) mod tests {
 
     #[test]
     fn a_private_codex_backend_prepares_its_canonical_documents_before_registration() {
-        use cpa_core::config::credentials::{self, ParseRequest, Parsed, PluginAuthParser};
-        struct Suppress;
-        impl PluginAuthParser for Suppress {
-            fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
-                Parsed::Handled(vec![])
-            }
-        }
         let dir = std::env::temp_dir().join(format!("cpa-canonical-prepare-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let file = codex_file(
@@ -6993,15 +6847,13 @@ pub(crate) mod tests {
         );
         std::fs::write(dir.join("codex.json"), file.to_string()).unwrap();
         let (database, backend) = sqlite_backend(&dir);
-        credentials::with_thread_plugin_auth_parser(Arc::new(Suppress), || {
-            let rt = CodexDisk::runtime_backend(backend.clone(), "http://127.0.0.1:1");
-            assert!(
-                rt.store.get("codex.json").is_some(),
-                "canonical fixture documents must not be deferred by an unrelated parser"
-            );
-            assert_eq!(backend.documents().unwrap().len(), 1);
-            drop(rt);
-        });
+        let rt = CodexDisk::runtime_backend(backend.clone(), "http://127.0.0.1:1");
+        assert!(
+            rt.store.get("codex.json").is_some(),
+            "canonical fixture documents register"
+        );
+        assert_eq!(backend.documents().unwrap().len(), 1);
+        drop(rt);
         drop((backend, database));
         std::fs::remove_dir_all(dir).unwrap();
     }

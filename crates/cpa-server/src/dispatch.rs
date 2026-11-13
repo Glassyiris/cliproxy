@@ -403,11 +403,7 @@ const IMAGE_ONLY: [&str; 8] = [
 ];
 
 /// Go `getRequestDetails`: resolve `auto`, find the providers, keep the suffix.
-fn route(
-    rt: &Runtime,
-    registry: &Registry,
-    call: &Call,
-) -> Result<(Vec<String>, String), RunError> {
+fn route(rt: &Runtime, registry: &Registry, call: &Call) -> Result<(Vec<String>, String), RunError> {
     if let Some(provider) = &call.forced_provider {
         let model = gojson::trim(&call.model);
         check_route_only(gojson::trim(canonical_model_raw(model)), call)?;
@@ -954,9 +950,7 @@ async fn run_routed(
         &call.caller.principal,
     );
     // Go's usage reporter: one record per Generate attempt while the queue accepts.
-    let usage = (call.operation == Operation::Generate
-        && rt.usage_queue().accepts())
-    .then(|| {
+    let usage = (call.operation == Operation::Generate && rt.usage_queue().accepts()).then(|| {
         Arc::new(crate::usage_record::Facts::new(
             usage_client(&cfg, &call, trace, &session),
             call.entry,
@@ -1413,7 +1407,7 @@ async fn attempt(
             lease.credential = current;
             lease.redispatch();
             tracker = start(&lease.credential, &mut req);
-                executed = execute(lease.credential.clone(), req).await;
+            executed = execute(lease.credential.clone(), req).await;
         }
         if let (Ok(response), Some(t)) = (&executed, tracker.as_mut()) {
             t.arrived(&response.headers);

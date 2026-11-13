@@ -219,7 +219,9 @@ pub(super) fn stored_kind(name: &str) -> rusqlite::Result<Kind> {
             rusqlite::types::Type::Text,
             Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("unknown stored resource kind {name:?}; this build cannot open the database, start from a new one"),
+                format!(
+                    "unknown stored resource kind {name:?}; this build cannot open the database, start from a new one"
+                ),
             )),
         )
     })

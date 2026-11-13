@@ -19,20 +19,11 @@ const CLAUDE_MAX_OUTPUT: i64 = 64_000;
 /// clients (any `client_version` query key) the Codex client catalog, Anthropic clients
 /// (an `Anthropic-Version` header or a `claude-cli` User-Agent) the Anthropic catalog, and
 /// everyone else the OpenAI one.
-pub async fn unified(
-    State(rt): State<Arc<Runtime>>,
-    uri: OriginalUri,
-    headers: HeaderMap,
-) -> Response {
+pub async fn unified(State(rt): State<Arc<Runtime>>, uri: OriginalUri, headers: HeaderMap) -> Response {
     list(rt, uri, headers, None).await
 }
 
-async fn list(
-    rt: Arc<Runtime>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    detail: Option<&str>,
-) -> Response {
+async fn list(rt: Arc<Runtime>, OriginalUri(uri): OriginalUri, headers: HeaderMap, detail: Option<&str>) -> Response {
     let header = |name: &str| {
         headers
             .get(name)
