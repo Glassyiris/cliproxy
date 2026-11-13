@@ -197,11 +197,7 @@ mod tests {
     async fn release_cache_expires_after_twelve_hours() {
         let dir = std::env::temp_dir().join(format!("release-cache-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("auth")).unwrap();
-        let config = cpa_core::config::Config::parse(&format!(
-            "config-version: 8\noauth:\n  auth-dir: '{}'\n",
-            dir.join("auth").display()
-        ))
-        .unwrap();
+        let config = cpa_core::config::Config::parse("config-version: 8\n").unwrap();
         let rt = Arc::new(crate::testing::runtime(
             config,
             vec![],

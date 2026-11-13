@@ -90,7 +90,7 @@ Money clauses apply only where billing or a ledger exists.
 ### Verification
 
 - Use isolated VMs or network namespaces with disposable data when needed. Verify storage behaviour against a real private database; builds and unit tests alone do not prove it.
-- Tests use local mock upstreams and never send traffic to real provider accounts. Give every test a private SQLite database and any legacy import a private `auth-dir`; never import real logins from `~/.cli-proxy-api`.
+- Tests use local mock upstreams and never send traffic to real provider accounts. Give every test a private SQLite database and a private `auth-dir` for its credential files.
 - Build test runtimes with `cpa_server::testing::runtime`. `cpa_server::testing` compiles only in tests and with the `testing` feature enabled by dev-dependencies and harnesses.
 - The full suite is slow and memory-heavy because of BoringSSL and release linking. During iteration run the affected crate or filter, for example `cargo test -p cpa-exec kimi`. CI runs fmt, clippy with warnings denied and the full suite. On shared or small machines use `CARGO_BUILD_JOBS=2 nice -n 19`.
 - Go comparison tests run fully only in CI's network-denied namespace. For local Linux differential checks use `./harness/run`; see `harness/README.md`.

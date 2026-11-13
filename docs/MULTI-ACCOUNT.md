@@ -4,7 +4,7 @@ This guide covers routing across your own accounts and API keys, for use on your
 
 ## Add the accounts
 
-Sign in to each account once, from the dashboard (Connect account) or the command line. While the server runs, the command line goes through it: `cook-router --management-base-url http://127.0.0.1:8317 --claude-login` (or `--codex-login`), which reads the management key from `COOK_ROUTER_MANAGEMENT_KEY` or asks for it; with the server stopped, `cook-router --db /path/to/cook.db --claude-login` writes the server's database directly. Every sign-in becomes a credential in SQLite; `auth-dir` is a legacy import source, not a watched account directory.
+Sign in to each account once, from the dashboard (Connect account) or the command line. While the server runs, the command line goes through it: `cook-router --management-base-url http://127.0.0.1:8317 --claude-login` (or `--codex-login`), which reads the management key from `COOK_ROUTER_MANAGEMENT_KEY` or asks for it; with the server stopped, `cook-router --db /path/to/cook.db --claude-login` writes the server's database directly. Every sign-in becomes a credential in SQLite; no directory is watched for account files.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/credentials-dark.png">

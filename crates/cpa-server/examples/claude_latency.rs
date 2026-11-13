@@ -634,10 +634,7 @@ fn main() {
     // Proxy.
     let dir = std::env::temp_dir().join(format!("cpa-latency-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let mut yaml = format!(
-        "oauth:\n  auth-dir: {:?}\naccess:\n  api-keys:\n    - {KEY}\nrouting:\n  retry:\n    request-retry: 0\n",
-        dir.to_string_lossy()
-    );
+    let mut yaml = format!("access:\n  api-keys:\n    - {KEY}\nrouting:\n  retry:\n    request-retry: 0\n");
     if let Some(value) = &telemetry {
         yaml.push_str(&format!(
             "observability:\n  usage:\n    usage-statistics-enabled: true\n    claude-cache-telemetry: {}\n",

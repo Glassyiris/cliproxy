@@ -76,8 +76,7 @@ impl Fixture {
         std::fs::copy(built.join("recorder.so"), plugins.join("watcher.so")).unwrap();
         let codex = serve_codex().await;
         let yaml = format!(
-            "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key-1]\napi-keys:\n  codex:\n    - base-url: {codex}\n      models: [{{name: gpt-fixture}}]\n      keys: [{{api-key: sk-fake-codex, websockets: true}}]\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    watcher:\n      enabled: true\n      label: watcher\n      record: {}\n      caps: {caps}\n",
-            auths.display(),
+            "access:\n  api-keys: [client-key-1]\napi-keys:\n  codex:\n    - base-url: {codex}\n      models: [{{name: gpt-fixture}}]\n      keys: [{{api-key: sk-fake-codex, websockets: true}}]\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    watcher:\n      enabled: true\n      label: watcher\n      record: {}\n      caps: {caps}\n",
             plugins.display(),
             records.display()
         );

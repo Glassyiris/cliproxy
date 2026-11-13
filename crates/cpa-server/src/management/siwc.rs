@@ -987,8 +987,7 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("siwc-pre-cache-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir(&dir).unwrap();
             let owner = Arc::new(crate::testing::config_store(&dir.join("state.db")).unwrap());
-            let backend =
-                crate::credential_store::CredentialDb::initialize(owner.clone(), &dir.join("legacy")).unwrap();
+            let backend = crate::credential_store::CredentialDb::initialize(owner.clone()).unwrap();
             let file = backend.auth_dir().join("codex.json");
             backend.save(&file, codex_file("old").as_bytes()).unwrap();
             let mut cfg = owner.load().unwrap().config;
@@ -1134,11 +1133,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("codex.json");
         std::fs::write(&file, codex_file("old")).unwrap();
-        let store = Arc::new(crate::config_store::ConfigStore::memory_with(&format!(
-            "oauth: {{auth-dir: {}}}\n",
-            dir.display()
-        )));
-        let cfg = store.load().unwrap().config;
+        let store = Arc::new(crate::config_store::ConfigStore::memory_with(""));
+        let mut cfg = store.load().unwrap().config;
+        cfg.auth_dir = dir.clone();
         let rt = Arc::new(crate::testing::runtime(
             cfg.clone(),
             cpa_core::config::credentials::from_auth_dir(&cfg),

@@ -5,7 +5,7 @@
 //! texts, the success page). The first callback ends the wait, as in Go; a wrong state
 //! fails the login. After 15 seconds the CLI also accepts a pasted callback URL. The
 //! credential is written under Go's file name, merged with an existing file of that
-//! name and with a matching legacy file, which is then removed.
+//! name.
 
 use cpa_core::gostr::GoStr;
 use std::collections::BTreeMap;
@@ -124,18 +124,15 @@ impl ManagedLogin {
     }
 
     /// Writes an exchanged login as the CLI login does (Go file name, merged with an
-    /// existing file and a matching legacy file). Blocking. Returns the canonical path
-    /// and the legacy file the caller removes once the canonical one is stored (Go
-    /// `saveTokenRecord` deletes it through the store only after a successful save).
+    /// existing file of that name). Blocking. Returns the credential path.
     pub fn save(
         auth_dir: &Path,
         patch: MetadataPatch,
         save: Option<&crate::login_store::LoginSave>,
-    ) -> Result<(PathBuf, Option<PathBuf>), ExecError> {
-        let paths = login_paths(auth_dir, &patch)?;
+    ) -> Result<PathBuf, ExecError> {
+        let paths = [auth_dir.join(login_file_name(&patch)?)];
         crate::login_store::save_login(save, &paths, || {
-            write_canonical(auth_dir, patch, Some(&paths))
-                .map_err(|error| String::from_utf8_lossy(&error.body).into_owned())
+            write_login(auth_dir, patch).map_err(|error| String::from_utf8_lossy(&error.body).into_owned())
         })
         .map_err(login_error)
     }
@@ -232,10 +229,9 @@ pub async fn login_with(
         let patch = oauth.exchange(&callback.code, &state, &verifier).await?;
         let directory = auth_dir.to_owned();
         tokio::task::spawn_blocking(move || {
-            let paths = login_paths(&directory, &patch)?;
+            let paths = [directory.join(login_file_name(&patch)?)];
             crate::login_store::save_login(save.as_ref(), &paths, || {
-                write_login(&directory, patch, Some(&paths))
-                    .map_err(|error| String::from_utf8_lossy(&error.body).into_owned())
+                write_login(&directory, patch).map_err(|error| String::from_utf8_lossy(&error.body).into_owned())
             })
             .map_err(login_error)
         })
@@ -565,89 +561,6 @@ fn read_json(path: &Path) -> Option<serde_json::Map<String, Value>> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-fn json_files(directory: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            json_files(&path, out);
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) {
-            out.push(path);
-        }
-    }
-}
-
-/// `FindMatchingLegacyCredential` over the auth directory.
-fn legacy_credential(
-    directory: &Path,
-    target_name: &str,
-    target: &BTreeMap<String, Value>,
-    candidates: Option<&[PathBuf]>,
-) -> Option<PathBuf> {
-    let field = |key: &str| {
-        target
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_owned()
-    };
-    let (email, organization, account) = (field("email"), field("organization_uuid"), field("account_uuid"));
-    if email.is_empty()
-        || (organization.is_empty() && account.is_empty())
-        || !target_name.go_eq_fold(&credential_file_name(&email, &organization, &account))
-    {
-        return None;
-    }
-    let legacy_name = credential_file_name(&email, "", "");
-    let account_name = if !organization.is_empty() && !account.is_empty() {
-        credential_file_name(&email, "", &account)
-    } else {
-        String::new()
-    };
-    // CLI transactions only inspect their locked paths, so a concurrently added
-    // legacy document cannot be deleted outside the durable batch.
-    let mut files = candidates.map_or_else(Vec::new, <[PathBuf]>::to_vec);
-    if candidates.is_none() {
-        json_files(directory, &mut files);
-    }
-    files.sort();
-    files.into_iter().find(|path| {
-        let base = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let email_legacy = base.go_eq_fold(&legacy_name);
-        let account_predecessor = !account_name.is_empty() && base.go_eq_fold(&account_name);
-        if !email_legacy && !account_predecessor {
-            return false;
-        }
-        let Some(candidate) = read_json(path) else {
-            return false;
-        };
-        let get = |key: &str| {
-            candidate
-                .get(key)
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .trim()
-                .to_owned()
-        };
-        if !get("type").eq_ignore_ascii_case("claude") {
-            return false;
-        }
-        let (c_org, c_account) = (get("organization_uuid"), get("account_uuid"));
-        if !organization.is_empty() {
-            (!c_org.is_empty() && c_org.go_eq_fold(&organization))
-                || (c_org.is_empty() && account_predecessor && !c_account.is_empty() && c_account.go_eq_fold(&account))
-        } else {
-            email_legacy && c_org.is_empty() && !c_account.is_empty() && c_account.go_eq_fold(&account)
-        }
-    })
-}
-
 /// Go's `json.NewEncoder(f).Encode(map)`: sorted keys, HTML-escaped strings, newline.
 fn go_encode(value: &Value, out: &mut Vec<u8>) {
     match value {
@@ -679,23 +592,6 @@ fn go_encode(value: &Value, out: &mut Vec<u8>) {
     }
 }
 
-/// Builds the credential like `CreateTokenStorage` + `Manager.Login`, publishes it
-/// atomically (0600, which is stricter than Go's `os.Create`) and then removes the
-/// matching legacy file.
-pub(crate) fn write_login(
-    directory: &Path,
-    patch: MetadataPatch,
-    candidates: Option<&[PathBuf]>,
-) -> Result<PathBuf, ExecError> {
-    let (path, legacy) = write_canonical(directory, patch, candidates)?;
-    if let Some(legacy) = legacy {
-        std::fs::remove_file(&legacy).map_err(|_| {
-            login_error("cliproxy auth: canonical Claude credential saved but legacy credential cleanup failed")
-        })?;
-    }
-    Ok(path)
-}
-
 fn login_file_name(patch: &MetadataPatch) -> Result<String, ExecError> {
     let string = |key: &str| patch.set.get(key).and_then(Value::as_str).unwrap_or_default().trim();
     let email = string("email");
@@ -712,37 +608,10 @@ fn login_file_name(patch: &MetadataPatch) -> Result<String, ExecError> {
     ))
 }
 
-fn login_paths(directory: &Path, patch: &MetadataPatch) -> Result<Vec<PathBuf>, ExecError> {
-    let mut paths = vec![directory.join(login_file_name(patch)?)];
-    let string = |key: &str| patch.set.get(key).and_then(Value::as_str).unwrap_or_default().trim();
-    let email_legacy = credential_file_name(string("email"), "", "");
-    let account_legacy = credential_file_name(string("email"), "", string("account_uuid"));
-    for name in [&email_legacy, &account_legacy] {
-        let path = directory.join(name);
-        if !paths.contains(&path) {
-            paths.push(path);
-        }
-    }
-    let mut candidates = Vec::new();
-    json_files(directory, &mut candidates);
-    paths.extend(candidates.into_iter().filter(|path| {
-        path.file_name().is_some_and(|name| {
-            let name = name.to_string_lossy();
-            name.go_eq_fold(&email_legacy) || name.go_eq_fold(&account_legacy)
-        })
-    }));
-    Ok(paths)
-}
-
-/// [`write_login`] without the legacy removal: the canonical path and the legacy file
-/// it replaces.
-fn write_canonical(
-    directory: &Path,
-    patch: MetadataPatch,
-    candidates: Option<&[PathBuf]>,
-) -> Result<(PathBuf, Option<PathBuf>), ExecError> {
-    let name = login_file_name(&patch)?;
-    let path = directory.join(&name);
+/// Builds the credential like `CreateTokenStorage` + `Manager.Login` and publishes it
+/// atomically (0600, which is stricter than Go's `os.Create`).
+pub(crate) fn write_login(directory: &Path, patch: MetadataPatch) -> Result<PathBuf, ExecError> {
+    let path = directory.join(login_file_name(&patch)?);
     let mut metadata: BTreeMap<String, Value> = patch.set.clone().into_iter().collect();
     for key in &patch.remove {
         metadata.remove(key);
@@ -750,16 +619,11 @@ fn write_canonical(
     if let Some(existing) = read_json(&path) {
         merge_existing(&mut metadata, &existing);
     }
-    let legacy = legacy_credential(directory, &name, &metadata, candidates);
-    if let Some(existing) = legacy.as_ref().and_then(|p| read_json(p)) {
-        merge_existing(&mut metadata, &existing);
-    }
     let mut bytes = Vec::new();
     go_encode(&Value::Object(metadata.into_iter().collect()), &mut bytes);
     bytes.push(b'\n');
     publish(directory, &path, &bytes).map_err(|_| login_error("cannot publish Claude credential"))?;
-    let legacy = legacy.filter(|l| *l != path);
-    Ok((path, legacy))
+    Ok(path)
 }
 
 fn publish(directory: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {

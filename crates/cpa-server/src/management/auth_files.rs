@@ -2915,11 +2915,9 @@ mod tests {
         for (file, body) in files {
             std::fs::write(dir.join(file), body).unwrap();
         }
-        let store = Arc::new(crate::config_store::ConfigStore::memory_with(&format!(
-            "oauth: {{auth-dir: {}}}\n",
-            dir.display()
-        )));
-        let cfg = store.load().unwrap().config;
+        let store = Arc::new(crate::config_store::ConfigStore::memory_with(""));
+        let mut cfg = store.load().unwrap().config;
+        cfg.auth_dir = dir.clone();
         let mut scan = credentials::scan_auth_dir(&cfg);
         edit(&mut scan.credentials);
         let rt = Arc::new(crate::testing::runtime(
@@ -2946,18 +2944,14 @@ mod tests {
 
     fn sqlite_management() -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>, PathBuf) {
         let root = std::env::temp_dir().join(format!("cpa-management-sqlite-{}", uuid::Uuid::new_v4()));
-        let legacy = root.join("legacy");
-        std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::write(
-            legacy.join("a.json"),
+        let config = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
+        config.import_yaml("oauth: {}\n", "test", "").unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(config.clone()).unwrap();
+        db.save(
+            &db.auth_dir().join("a.json"),
             br#"{"type":"claude","access_token":"old","plugin_extra":{"keep":true}}"#,
         )
         .unwrap();
-        let config = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
-        config
-            .import_yaml(&format!("oauth: {{auth-dir: {}}}\n", legacy.display()), "test", "")
-            .unwrap();
-        let db = crate::credential_store::CredentialDb::initialize(config.clone(), &legacy).unwrap();
         let mut cfg = config.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let scan = credentials::scan_auth_dir(&cfg);
@@ -3044,17 +3038,16 @@ mod tests {
         drop(db);
         std::fs::remove_dir_all(&cache).unwrap();
         let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &root.join("legacy")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         assert_eq!(std::fs::read(&auth).unwrap(), bytes);
         std::fs::remove_file(&auth).unwrap();
         db.delete(&auth).unwrap();
         drop(db);
         drop(store);
         std::fs::remove_dir_all(&cache).unwrap();
-        let db = crate::credential_store::CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap()),
-            &root.join("legacy"),
-        )
+        let db = crate::credential_store::CredentialDb::initialize(Arc::new(
+            crate::testing::config_store(&root.join("cook.db")).unwrap(),
+        ))
         .unwrap();
         assert!(db.read(&auth).unwrap().is_none());
         assert!(!auth.exists());
@@ -3159,10 +3152,14 @@ mod tests {
     #[tokio::test]
     async fn config_key_toggles_are_stored_and_published() {
         let (state, dir) = management("config-toggle", &[]);
-        state.config_store().import_yaml(
-            &format!("oauth: {{auth-dir: {}}}\napi-keys:\n  claude:\n    - excluded-models: [hidden]\n      keys:\n        - api-key: test-key\n", dir.display()),
-            "test", "",
-        ).unwrap();
+        state
+            .config_store()
+            .import_yaml(
+                "api-keys:\n  claude:\n    - excluded-models: [hidden]\n      keys:\n        - api-key: test-key\n",
+                "test",
+                "",
+            )
+            .unwrap();
         crate::watching::reload(&state).unwrap();
         let id = state
             .rt

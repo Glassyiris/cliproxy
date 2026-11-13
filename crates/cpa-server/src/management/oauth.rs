@@ -981,16 +981,10 @@ async fn start_claude(state: Arc<Management>, webui: bool) -> Response {
             };
             let outcome = match exchanged {
                 Ok(patch) => {
-                    let legacy = Arc::new(Mutex::new(None));
-                    let slot = legacy.clone();
-                    let canonical_dir = worker.rt.config().auth_dir.clone();
-                    let write = move |dir: PathBuf, patch, save: LoginSave| {
-                        let (path, old) = ManagedLogin::save(&dir, patch, Some(&save)).map_err(|e| exec_text(&e))?;
-                        *slot.lock().unwrap_or_else(PoisonError::into_inner) =
-                            old.and_then(|old| old.file_name().map(|name| canonical_dir.join(name)));
-                        Ok(path)
+                    let write = |dir: PathBuf, patch, save: LoginSave| {
+                        ManagedLogin::save(&dir, patch, Some(&save)).map_err(|e| exec_text(&e))
                     };
-                    let saved = save_if_pending(
+                    save_if_pending(
                         &worker,
                         &login.state,
                         "anthropic",
@@ -998,12 +992,7 @@ async fn start_claude(state: Arc<Management>, webui: bool) -> Response {
                         write,
                         "Failed to save authentication tokens",
                     )
-                    .await;
-                    let old = legacy.lock().unwrap_or_else(PoisonError::into_inner).take();
-                    match (saved, old) {
-                        (Outcome::Saved, Some(old)) => remove_legacy_claude(&worker, old).await,
-                        (saved, _) => saved,
-                    }
+                    .await
                 }
                 Err(_) => Outcome::Failed("Failed to exchange authorization code for tokens".into()),
             };
@@ -1011,30 +1000,6 @@ async fn start_claude(state: Arc<Management>, webui: bool) -> Response {
         }
     });
     started(url, sid)
-}
-
-/// Removes the legacy document after the canonical Claude credential is durable.
-async fn remove_legacy_claude(state: &Arc<Management>, legacy: PathBuf) -> Outcome {
-    let worker = state.clone();
-    let removed = state
-        .work
-        .clone()
-        .spawn_blocking(move || {
-            let _guard = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
-            worker.store_delete(&legacy)
-        })
-        .await;
-    match removed {
-        Ok(Ok(())) => Outcome::Saved,
-        Ok(Err(e)) => {
-            tracing::error!("canonical Claude credential saved but legacy credential cleanup failed: {e}");
-            Outcome::Failed("Failed to save authentication tokens".into())
-        }
-        Err(e) => {
-            resume_panic(e);
-            Outcome::Failed("Failed to save authentication tokens".into())
-        }
-    }
 }
 
 /// Go `RequestCodexToken`.
@@ -1913,7 +1878,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("oauth-{label}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let config = Arc::new(crate::testing::config_store(&root.join("config.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(config.clone(), &root.join("legacy")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(config.clone()).unwrap();
         let mut cfg = config.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let rt = Arc::new(crate::testing::runtime_with_db(
@@ -2027,7 +1992,7 @@ mod tests {
         std::fs::remove_dir(&published).unwrap();
         std::fs::rename(root.join("old.db"), &published).unwrap();
         let resumed = Arc::new(crate::testing::config_store(&published).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(resumed.clone(), &root.join("unused")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(resumed.clone()).unwrap();
         assert_eq!(db.read(&path).unwrap().unwrap(), raw);
         drop(db);
         drop(resumed);
@@ -2135,9 +2100,7 @@ mod tests {
             "anthropic",
             patch,
             |dir, patch, save| {
-                cpa_exec::claude_login::ManagedLogin::save(&dir, patch, Some(&save))
-                    .map(|(path, _)| path)
-                    .map_err(|error| exec_text(&error))
+                cpa_exec::claude_login::ManagedLogin::save(&dir, patch, Some(&save)).map_err(|error| exec_text(&error))
             },
             "Failed to save authentication tokens",
         )

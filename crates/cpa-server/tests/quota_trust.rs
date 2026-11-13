@@ -98,35 +98,45 @@ async fn serve(app: axum::Router) -> String {
 
 /// A proxy over the private `auth_dir` with one API-key credential at `upstream_url`.
 async fn proxy(auth_dir: &Path, upstream_url: &str, save: bool) -> (String, Arc<cpa_server::Runtime>) {
-    proxy_with(auth_dir, upstream_url, save, &format!("{}s", BOUND.as_secs())).await
+    proxy_with(
+        auth_dir,
+        upstream_url,
+        save,
+        &format!("{}s", BOUND.as_secs()),
+        Vec::new(),
+    )
+    .await
 }
 
+/// `cooldowns` are stored in the private database before the runtime starts.
 async fn proxy_with(
-    auth_dir: &Path,
+    dir: &Path,
     upstream_url: &str,
     save: bool,
     bound: &str,
+    cooldowns: Vec<cpa_server::cooldown_store::Record>,
 ) -> (String, Arc<cpa_server::Runtime>) {
     let yaml = format!(
         "access:\n\
          \x20 api-keys: [client-key]\n\
-         oauth:\n\
-         \x20 auth-dir: {dir}\n\
          routing:\n\
          \x20 cooldown:\n\
          \x20   save-cooldown-status: {save}\n\
          \x20   max-trusted-cooldown: \"{bound}\"\n",
-        dir = auth_dir.display(),
     );
-    // The private legacy credential is imported once into the runtime's SQLite database.
+    let store = Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap());
+    let db = cpa_server::credential_store::CredentialDb::initialize(store).unwrap();
     let meta = json!({"type": "claude", "api_key": "sk-fake-claude", "base_url": upstream_url});
-    std::fs::write(auth_dir.join(FILE), meta.to_string()).unwrap();
-    let mut credential =
-        Credential::from_file(auth_dir, &auth_dir.join(FILE), meta.as_object().unwrap().clone()).unwrap();
+    let path = db.auth_dir().join(FILE);
+    db.save(&path, meta.to_string().as_bytes()).unwrap();
+    Backend::save(&*db, cooldowns, SystemTime::now()).unwrap();
+    let mut credential = Credential::from_file(&db.auth_dir(), &path, meta.as_object().unwrap().clone()).unwrap();
     credential.attributes.insert("api_key".into(), "sk-fake-claude".into());
     credential.attributes.insert("base_url".into(), upstream_url.into());
-    let rt = Arc::new(cpa_server::testing::runtime(
-        Config::parse(&yaml).unwrap(),
+    let mut config = Config::parse(&yaml).unwrap();
+    config.auth_dir = db.auth_dir();
+    let rt = Arc::new(cpa_server::testing::runtime_with_db(
+        config,
         vec![credential],
         Executors {
             claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
@@ -135,6 +145,7 @@ async fn proxy_with(
             openai: Default::default(),
             google: Default::default(),
         },
+        db,
     ));
     let app = cpa_server::app(rt.clone(), axum::Router::new());
     (serve(app).await, rt)
@@ -270,8 +281,8 @@ async fn early_reset_is_noticed_after_the_bound_with_save_cooldown_status() {
     early_reset_is_noticed_after_the_bound(true).await;
 }
 
-/// A legacy bounded cooldown imports into SQLite in its third window (count 2, 4 h)
-/// and restores as it is: 4 h left, the six-day stated reset kept.
+/// A stored bounded cooldown in its third window (count 2, 4 h) restores as it is:
+/// 4 h left, the six-day stated reset kept.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_saved_trust_count_restores_its_window() {
     use cpa_server::cooldown_store::{Quota, Record};
@@ -291,11 +302,9 @@ async fn a_saved_trust_count_restores_its_window() {
             trust_windows: Some(3),
             ..Default::default()
         },
-        auth_file: Some(dir.join(FILE)),
         ..Default::default()
     };
-    cpa_server::cooldown_store::save(&dir, vec![record], SystemTime::now()).unwrap();
-    let (_url, rt) = proxy_with(&dir, "http://127.0.0.1:9", true, "").await;
+    let (_url, rt) = proxy_with(&dir, "http://127.0.0.1:9", true, "", vec![record]).await;
     let restored = rt.store().cooldowns(FILE);
     let left = restored.iter().map(|c| c.remaining).max().expect("restored");
     let four_hours = Duration::from_secs(4 * 3600);

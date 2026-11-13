@@ -149,7 +149,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
         store.import_yaml("oauth: {}\n", "test", "").unwrap();
-        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         let mut config = store.load().unwrap().config;
         config.auth_dir = db.auth_dir();
         let rt = Arc::new(crate::testing::runtime_with_db(
@@ -279,8 +279,7 @@ mod tests {
         // Construct an independent artifact; replacing the published file is not
         // an online command and cannot import either changed or additional rows.
         let external = Arc::new(crate::testing::config_store(&root.join("incoming.db")).unwrap());
-        let external_db =
-            crate::credential_store::CredentialDb::initialize(external.clone(), &root.join("missing")).unwrap();
+        let external_db = crate::credential_store::CredentialDb::initialize(external.clone()).unwrap();
         external_db
             .save(
                 &external_db.auth_dir().join("sub/nested.json"),
@@ -352,8 +351,7 @@ mod tests {
         let copy = root.join("cold.db");
         std::fs::copy(root.join("cook.db"), &copy).unwrap();
         let recovered_store = Arc::new(crate::testing::config_store(&copy).unwrap());
-        let recovered =
-            crate::credential_store::CredentialDb::initialize(recovered_store.clone(), &root.join("missing")).unwrap();
+        let recovered = crate::credential_store::CredentialDb::initialize(recovered_store.clone()).unwrap();
         assert_eq!(
             recovered
                 .read(&recovered.auth_dir().join("sub/nested.json"))

@@ -4,6 +4,8 @@
 //! (exit code, output, the execute request and the auth files written). The recorded
 //! argv and error lines were rewritten to the double-dash form; cases that exercised
 //! Go's flag syntax (single dash, `-bool=false`, last value wins, operands) were dropped.
+//! The recording is otherwise untouched: replay drops its `oauth.auth-dir` line and saves the
+//! recorded auth files to the database the binary opens.
 
 // Native plugins load only on Unix (the host's `native` module).
 #![cfg(unix)]
@@ -73,8 +75,11 @@ fn plugin_command_line_matches_go() {
         for (key, dir) in &dirs {
             text = text.replace(key, &dir.to_string_lossy());
         }
-        std::fs::write(&config, text).unwrap();
+        // The recorded config names `oauth.auth-dir`, which no longer exists: replay drops
+        // that line and saves the recorded credentials to the database the binary opens.
+        std::fs::write(&config, cpa_server::testing::without_auth_dir(&text)).unwrap();
         let db = work.join("cook.db");
+        cpa_server::testing::seed_database(&db, &dirs[2].1);
         let credential_dir = work.join("cook.db.credentials");
         let args: Vec<String> = case["args"]
             .as_array()

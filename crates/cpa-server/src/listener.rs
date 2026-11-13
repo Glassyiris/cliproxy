@@ -635,15 +635,12 @@ mod tests {
             let store = Arc::new(crate::testing::config_store(&dir.join(format!("{scheme}.db"))).unwrap());
             store
                 .import_yaml(
-                    &format!(
-                        "oauth: {{auth-dir: '{}'}}\nobservability: {{logs: {{request-log: true}}}}\n",
-                        dir.join("legacy").display()
-                    ),
+                    "observability: {logs: {request-log: true}}\n",
                     "test",
                     "owned websocket",
                 )
                 .unwrap();
-            let db = crate::credential_store::CredentialDb::initialize(store.clone(), &dir.join("legacy")).unwrap();
+            let db = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
             let mut config = store.load().unwrap().config;
             config.auth_dir = db.auth_dir();
             let rt = Arc::new(crate::testing::runtime_with_db(

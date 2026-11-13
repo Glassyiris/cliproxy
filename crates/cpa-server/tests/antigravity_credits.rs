@@ -49,20 +49,11 @@ async fn serve(app: axum::Router) -> String {
     url
 }
 
-/// A private `auth-dir`, so nothing reads or writes the user's `~/.cli-proxy-api`.
-fn auth_dir(id: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("cpa-{id}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
-async fn proxy(credits: bool, id: &str) -> (String, Arc<Seen>) {
+async fn proxy(credits: bool) -> (String, Arc<Seen>) {
     let seen = Arc::new(Seen::default());
     let up = serve(axum::Router::new().fallback(upstream).with_state(seen.clone())).await;
     let config = Config::parse(&format!(
-        "oauth:\n  auth-dir: {}\n  providers:\n    antigravity:\n      antigravity-credits: {credits}\naccess:\n  api-keys: [client-key]\n",
-        auth_dir(id).display()
-    ))
+        "oauth:\n  providers:\n    antigravity:\n      antigravity-credits: {credits}\naccess:\n  api-keys: [client-key]\n"))
     .unwrap();
     let mut metadata = serde_json::Map::new();
     for (k, v) in [
@@ -75,8 +66,7 @@ async fn proxy(credits: bool, id: &str) -> (String, Arc<Seen>) {
         metadata.insert(k.into(), v.into());
     }
     let dir = std::path::Path::new("/fixture");
-    let mut credential =
-        cpa_core::credential::Credential::from_file(dir, &dir.join(format!("{id}.json")), metadata).unwrap();
+    let mut credential = cpa_core::credential::Credential::from_file(dir, &dir.join("credits.json"), metadata).unwrap();
     credential.attributes.insert("base_url".into(), up);
     let executors = Executors {
         claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
@@ -113,7 +103,7 @@ fn generate_bodies(seen: &Seen) -> Vec<String> {
 
 #[tokio::test]
 async fn claude_quota_falls_back_to_credits() {
-    let (url, seen) = proxy(true, "ag-credits-claude").await;
+    let (url, seen) = proxy(true).await;
     let (status, body) = messages(&url, "claude-sonnet-4-6").await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("paid with credits"), "{body}");
@@ -129,7 +119,7 @@ async fn claude_quota_falls_back_to_credits() {
 
 #[tokio::test]
 async fn gemini_quota_does_not_use_credits() {
-    let (url, seen) = proxy(true, "ag-credits-gemini").await;
+    let (url, seen) = proxy(true).await;
     let (status, body) = messages(&url, "gemini-3-flash").await;
     assert_eq!(status, 429, "{body}");
     assert_eq!(generate_bodies(&seen).len(), 1);
@@ -137,7 +127,7 @@ async fn gemini_quota_does_not_use_credits() {
 
 #[tokio::test]
 async fn credits_switch_off_keeps_the_quota_error() {
-    let (url, seen) = proxy(false, "ag-credits-off").await;
+    let (url, seen) = proxy(false).await;
     let (status, body) = messages(&url, "claude-sonnet-4-6").await;
     assert_eq!(status, 429, "{body}");
     assert_eq!(generate_bodies(&seen).len(), 1);
@@ -147,7 +137,7 @@ async fn credits_switch_off_keeps_the_quota_error() {
 /// quota returns the 429 after one countTokens request.
 #[tokio::test]
 async fn token_counts_do_not_use_credits() {
-    let (url, seen) = proxy(true, "ag-credits-count").await;
+    let (url, seen) = proxy(true).await;
     let res = wreq::Client::new()
         .post(format!("{url}/v1/messages/count_tokens"))
         .header("x-api-key", "client-key")

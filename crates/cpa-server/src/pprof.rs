@@ -566,11 +566,7 @@ mod tests {
         let config = |enabled, addr: &str, touched| {
             let pprof = format!("pprof: {{enable: {enabled}, addr: '{addr}'}}");
             let logs = if touched { "logs: {debug: false}\n  " } else { "" };
-            Config::parse(&format!(
-                "oauth: {{auth-dir: '{}'}}\nobservability:\n  {logs}{pprof}\n",
-                dir.display()
-            ))
-            .unwrap()
+            Config::parse(&format!("observability:\n  {logs}{pprof}\n")).unwrap()
         };
         let executors = cpa_exec::Executors {
             claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),

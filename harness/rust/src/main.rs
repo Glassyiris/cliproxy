@@ -3,7 +3,8 @@
 //! two hooks: the ephemeral test CA replaces the trust store, and the logical
 //! first-party hosts are dialed at 127.0.0.3. The executor still builds its production
 //! native and OAuth clients (TLS profile, header order, session caches), including for
-//! refresh, and its Go standard-transport clients for other origins.
+//! refresh, and its Go standard-transport clients for other origins. The credential files
+//! in CREDENTIALS are saved to the database first, as the management API would.
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -16,12 +17,13 @@ use wreq::tls::trust::CertStore;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    anyhow::ensure!(args.len() == 3, "usage: driver CONFIG TEST_CA");
+    anyhow::ensure!(args.len() == 4, "usage: driver CONFIG TEST_CA CREDENTIALS");
     let config_path = Path::new(&args[1]);
     let store = Arc::new(cpa_server::testing::config_store(&config_path.with_extension("db"))?);
     store.import_yaml(&std::fs::read_to_string(config_path)?, "harness", "fixture")?;
     let mut config = store.load().map_err(|e| anyhow::anyhow!("{e}"))?.config;
-    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &config.auth_dir)?;
+    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone())?;
+    cpa_server::testing::seed_credentials(&db, Path::new(&args[3]));
     config.auth_dir = db.auth_dir();
     let mut credentials = db.scan(&config)?.credentials;
     credentials.extend(cpa_core::config::credentials::from_config(&config));

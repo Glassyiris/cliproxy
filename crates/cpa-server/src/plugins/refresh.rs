@@ -536,10 +536,9 @@ mod tests {
     fn a_late_refresh_result_leaves_no_schedule_behind() {
         let dir = std::env::temp_dir().join(format!("cpa-late-refresh-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let db = crate::credential_store::CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&dir.join("test.db")).unwrap()),
-            &dir.join("legacy"),
-        )
+        let db = crate::credential_store::CredentialDb::initialize(Arc::new(
+            crate::testing::config_store(&dir.join("test.db")).unwrap(),
+        ))
         .unwrap();
         let credential = |id: &str| {
             let metadata = serde_json::json!({"type":"pp","access_token":"t","refresh_interval":"1h"});
@@ -598,10 +597,9 @@ mod tests {
     fn a_refresh_commit_publishes_its_schedule_with_the_credential() {
         let dir = std::env::temp_dir().join(format!("cpa-refresh-commit-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let db = crate::credential_store::CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&dir.join("test.db")).unwrap()),
-            &dir.join("legacy"),
-        )
+        let db = crate::credential_store::CredentialDb::initialize(Arc::new(
+            crate::testing::config_store(&dir.join("test.db")).unwrap(),
+        ))
         .unwrap();
         let credential = |token: &str, disabled: bool| {
             let metadata =

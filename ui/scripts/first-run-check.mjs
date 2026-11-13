@@ -19,7 +19,7 @@
 // own answer for a disabled management API is faked in the browser: the dashboard maps a 404.
 //
 // Usage: CHROME_PATH=... node scripts/first-run-check.mjs <page-url> <management-key> [capture-dir]
-import { assertPrivateAuthDir } from "./private-auth-dir.mjs";
+import { assertPrivateCredentialStore } from "./private-credential-store.mjs";
 import { chromium } from "playwright-core";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -42,10 +42,10 @@ async function api(method, path, body) {
   return { headers: r.headers, json: await r.json() };
 }
 
-// A real server signs in and stores accounts: its auth-dir must be private, not the ~/.cli-proxy-api
-// fallback. The mock keeps accounts in memory and says so in X-Cook-Version.
+// A real server signs in and stores accounts: its credential store must be private, not a real database.
+// The mock keeps accounts in memory and says so in X-Cook-Version.
 const probe = await api("GET", "admin/v1/effective/config");
-if (probe.headers.get("x-cook-version") !== "cook-router-mock") await assertPrivateAuthDir(root, secret);
+if (probe.headers.get("x-cook-version") !== "cook-router-mock") await assertPrivateCredentialStore(root, secret);
 const present = (await api("GET", "credentials")).json.files.length;
 assert.equal(present, 0, `not an empty server: it already has ${present} accounts (restart the mock with --accounts 0)`);
 

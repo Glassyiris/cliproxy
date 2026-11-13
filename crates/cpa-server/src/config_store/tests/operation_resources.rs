@@ -116,7 +116,7 @@ mod linux {
         assert!(!store.commit(&[op], "test", "", true).unwrap().written);
         assert_eq!(std::fs::read(&path).unwrap(), before);
         assert_closed(&dir);
-        let db = CredentialDb::initialize(store.clone(), &dir.join("legacy")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         assert_closed(&dir);
         let credential = db.auth_dir().join("fixture.json");
         db.save(&credential, b"{\"refresh_token\":\"fixture-only\"}").unwrap();

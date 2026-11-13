@@ -39,11 +39,11 @@ async fn plugin_auth_callbacks_read_and_save_the_credential_store() {
         r#"{"type":"codex","email":"c@example.invalid","disabled":true}"#,
     )
     .unwrap();
-    let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&format!(
-        "config-version: 8\noauth:\n  auth-dir: {}\nrouting:\n  session-affinity: true\n",
-        auths.display()
-    )));
-    let config = store.load().unwrap().config;
+    let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(
+        "config-version: 8\nrouting:\n  session-affinity: true\n",
+    ));
+    let mut config = store.load().unwrap().config;
+    config.auth_dir = auths.clone();
     let credentials = cpa_core::config::credentials::load(&config);
     let rt = Arc::new(cpa_server::testing::runtime(
         config,

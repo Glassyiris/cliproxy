@@ -6,7 +6,6 @@
 //! dropped). Streams wrap their lease in [`Completing`].
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::pin::Pin;
@@ -4717,43 +4716,6 @@ pub(crate) fn credentials_changed(a: &Credential, b: &Credential) -> bool {
         || use_siwc(a) != use_siwc(b)
 }
 
-/// Replaces `path` with `bytes` through an exclusively created, uniquely named 0600
-/// sibling and a rename. The temp name does not end in `.json`, so a crash never leaves
-/// a loadable credential.
-pub(crate) fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    #[cfg(test)]
-    tests::stall_write(path);
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let dir = path.parent().unwrap_or(Path::new("."));
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let (tmp, mut file) = loop {
-        let tmp = dir.join(format!(
-            ".{name}.{}.{}.tmp",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        // create_new is O_CREAT|O_EXCL: it never follows or reuses an existing path.
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        // Go's 0600; on Windows Go ignores mode bits and creates the file plainly.
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        match options.open(&tmp) {
-            Ok(file) => break (tmp, file),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
-        }
-    };
-    let result = file
-        .write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .and_then(|()| std::fs::rename(&tmp, path));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
-}
-
 /// A response stream that reports its lease's outcome on end, on the first error (after
 /// which it yields nothing more), or as `Cancelled` when dropped early. The upstream body
 /// closes before the lease ends: `inner` is declared, and so dropped, before `lease`.
@@ -5123,22 +5085,23 @@ pub(crate) mod tests {
     }
 
     fn sqlite_backend(
-        legacy: &Path,
+        dir: &Path,
     ) -> (
         Arc<crate::config_store::ConfigStore>,
         Arc<crate::credential_store::CredentialDb>,
     ) {
-        let path = legacy.to_string_lossy();
+        let path = dir.to_string_lossy();
         let database = path
             .strip_suffix(".credentials")
             .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| legacy.join("config.db"));
+            .unwrap_or_else(|| dir.join("config.db"));
         let store = Arc::new(crate::testing::config_store(&database).unwrap());
-        let backend = crate::credential_store::CredentialDb::initialize(store.clone(), legacy).unwrap();
+        let backend = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
+        crate::testing::seed_credentials(&backend, dir);
         (store, backend)
     }
 
-    /// Seeds only explicit private fixtures; never imports Config's default auth-dir.
+    /// Seeds only explicit private fixtures.
     fn private_backend(credentials: &[Credential]) -> Arc<crate::credential_store::CredentialDb> {
         let dir = std::env::temp_dir().join(format!("cpa-runtime-db-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -6298,7 +6261,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// SQLite cooldown snapshots survive restart, reset, and an explicit legacy import.
+    /// SQLite cooldown snapshots survive restart and reset, and restore Go-format records.
     #[test]
     fn cooldowns_persist_restore_and_reset_through_sqlite() {
         let dir = std::env::temp_dir().join(format!(
@@ -6311,11 +6274,9 @@ pub(crate) mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let config = || {
-            Config::parse(&format!(
-                "oauth:\n  auth-dir: {}\nrouting:\n  cooldown:\n    save-cooldown-status: true\n",
-                dir.display()
-            ))
-            .unwrap()
+            let mut config = Config::parse("routing:\n  cooldown:\n    save-cooldown-status: true\n").unwrap();
+            config.auth_dir = dir.clone();
+            config
         };
         let creds = || {
             let metadata = |p: &str| {
@@ -6394,14 +6355,10 @@ pub(crate) mod tests {
             soon = at(60),
             past = at(-5),
         );
-        std::fs::write(dir.join("b.cds"), go).unwrap();
+        let mut go: serde_json::Value = serde_json::from_str(&go).unwrap();
+        let records: Vec<crate::cooldown_store::Record> = serde_json::from_value(go["records"].take()).unwrap();
         drop(rt);
-        crate::cooldown_store::Backend::save(
-            &*backend,
-            crate::cooldown_store::load(&dir).unwrap(),
-            std::time::SystemTime::now(),
-        )
-        .unwrap();
+        crate::cooldown_store::Backend::save(&*backend, records, std::time::SystemTime::now()).unwrap();
         let rt = Runtime::new(config(), creds(), executors(), backend.clone());
         let b = rt.store.get("b.json").unwrap();
         let now = Instant::now();
@@ -6432,7 +6389,9 @@ pub(crate) mod tests {
         assert!(rewritten.iter().all(|r| r.auth_id != "gone.json" && r.model != "m3"));
 
         // Turning the option off persists the final state and stops writing.
-        rt.publish_config(Config::parse(&format!("oauth:\n  auth-dir: {}\n", dir.display())).unwrap());
+        let mut disabled = Config::parse("").unwrap();
+        disabled.auth_dir = dir.clone();
+        rt.publish_config(disabled);
         rt.store.reset_cooldown("b.json");
         rt.store.flush_cooldowns();
         assert!(
@@ -6443,7 +6402,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn cooldown_sqlite_constructor_ignores_workspace_cds_files_and_flushes_on_shutdown() {
+    async fn cooldown_sqlite_constructor_flushes_on_shutdown() {
         let dir = std::env::temp_dir().join(format!("cpa-cooldown-sqlite-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let (database, backend) = sqlite_backend(&dir);
@@ -6453,20 +6412,6 @@ pub(crate) mod tests {
             .unwrap();
         let mut config = Config::parse("routing: {cooldown: {save-cooldown-status: true}}\n").unwrap();
         config.auth_dir = backend.auth_dir();
-        crate::cooldown_store::save(
-            &config.auth_dir,
-            vec![crate::cooldown_store::Record {
-                auth_id: "a.json".into(),
-                provider: "claude".into(),
-                model: "m1".into(),
-                status: "cooling".into(),
-                reason: "quota".into(),
-                next_retry_after: Some(std::time::SystemTime::now() + Duration::from_secs(120)),
-                ..Default::default()
-            }],
-            std::time::SystemTime::now(),
-        )
-        .unwrap();
         let scan = scan_private(&backend, &config);
         let rt = Runtime::with_cooldown_backend(
             config,
@@ -6948,7 +6893,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// A runtime over Codex credential files in a private auth-dir, refreshing against a
+    /// A runtime over Codex credential files in a private credential directory, refreshing against a
     /// loopback mock that records each grant as (partition, refresh token, client ID).
     struct CodexDisk {
         database: Arc<crate::config_store::ConfigStore>,
@@ -7267,7 +7212,7 @@ pub(crate) mod tests {
         let copy = root.join("copy.db");
         std::fs::copy(database.path().unwrap(), &copy).unwrap();
         let cold = Arc::new(crate::testing::config_store(&copy).unwrap());
-        let recovered = crate::credential_store::CredentialDb::initialize(cold.clone(), &root.join("missing")).unwrap();
+        let recovered = crate::credential_store::CredentialDb::initialize(cold.clone()).unwrap();
         assert_eq!(cold.load().unwrap().config.port, 8318);
         for name in ["a.json", "b.json"] {
             let bytes = recovered.read(&recovered.auth_dir().join(name)).unwrap().unwrap();
@@ -7560,7 +7505,7 @@ pub(crate) mod tests {
         std::fs::create_dir(&backup).unwrap();
         std::fs::copy(database.path().unwrap(), backup.join("state.db")).unwrap();
         let cold = Arc::new(crate::testing::config_store(&backup.join("state.db")).unwrap());
-        let cold_db = crate::credential_store::CredentialDb::initialize(cold, &backup.join("absent-auth")).unwrap();
+        let cold_db = crate::credential_store::CredentialDb::initialize(cold).unwrap();
         assert!(
             cold_db.documents().unwrap().iter().all(|(_, bytes)| bytes == raw),
             "volatile child results are not cold-restored"
@@ -7787,7 +7732,7 @@ pub(crate) mod tests {
         let dir = f.dir.clone();
         drop((rt, backend, database, f));
         std::fs::remove_dir_all(&workspace).unwrap();
-        // The legacy file still contains the spent token; it must not be imported again.
+        // The working copy is gone; the reopened store restores the refreshed token.
         let (_, reopened) = sqlite_backend(&dir);
         let restored: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(restored, durable);
@@ -9396,7 +9341,7 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// A Claude runtime over one credential file in a private auth-dir whose token
+    /// A Claude runtime over one credential file in a private credential directory whose token
     /// endpoint answers every refresh with `answer`; counts the exchanges.
     async fn claude_refusing(
         name: &str,
@@ -10019,12 +9964,12 @@ pub(crate) mod tests {
         )
         .unwrap();
         let yaml = format!(
-            "oauth:\n  auth-dir: {}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    acme:\n      enabled: true\n      label: acme\n      record: {}\n      caps: auth_provider\n",
-            auths.display(),
+            "plugins:\n  enabled: true\n  dir: {}\n  configs:\n    acme:\n      enabled: true\n      label: acme\n      record: {}\n      caps: auth_provider\n",
             plugins.display(),
             records.display()
         );
-        let cfg = Config::parse(&yaml).unwrap();
+        let mut cfg = Config::parse(&yaml).unwrap();
+        cfg.auth_dir = auths.clone();
         let mut credentials = cpa_core::config::credentials::from_config(&cfg);
         credentials.extend(crate::testing::builtin_auth_files(&cfg));
         let rt = Arc::new(test_runtime(

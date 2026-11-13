@@ -461,7 +461,7 @@ fn wal_conflict_preserves_sidecars_and_recovers_opaque_state_after_close() {
     std::fs::copy(&path, &copy).unwrap();
     assert_eq!(&std::fs::read(&copy).unwrap()[18..20], &[1, 1]);
     let restored = Arc::new(crate::testing::config_store(&copy).unwrap());
-    let db = crate::credential_store::CredentialDb::initialize(restored.clone(), &dir.join("absent")).unwrap();
+    let db = crate::credential_store::CredentialDb::initialize(restored.clone()).unwrap();
     assert_eq!(db.read(&db.auth_dir().join("private.json")).unwrap().unwrap(), raw);
     let conn = restored.conn().unwrap();
     assert_eq!(
@@ -666,7 +666,7 @@ fn recovery_uses_native_ownership_not_stale_process_markers() {
         store
             .import_yaml("server: {port: 8381}\n", "test", "original state")
             .unwrap();
-        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &dir.join("absent")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         let raw = b"{\n \"type\":\"private\", \"opaque\":{\"keep\":[1,2]}\n}\n";
         db.save(&db.auth_dir().join("raw.json"), raw).unwrap();
         let cache = db.auth_dir();
@@ -691,7 +691,7 @@ fn recovery_uses_native_ownership_not_stale_process_markers() {
         assert_eq!(recovered.head().unwrap(), 1, "{kind}");
         assert_eq!(recovered.load().unwrap().config.port, 8381, "{kind}");
         assert_eq!(recovered.revisions(10, None).unwrap()[0].message, "original state");
-        let db = crate::credential_store::CredentialDb::initialize(recovered.clone(), &dir.join("absent")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(recovered.clone()).unwrap();
         assert_eq!(db.read(&db.auth_dir().join("raw.json")).unwrap().unwrap(), raw);
         assert_eq!(std::fs::read(db.auth_dir().join("raw.json")).unwrap(), raw);
         drop((db, recovered));

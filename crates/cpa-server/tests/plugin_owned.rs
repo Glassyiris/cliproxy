@@ -109,8 +109,7 @@ async fn env_with(
         std::fs::create_dir_all(d).unwrap();
     }
     let mut yaml = format!(
-        "oauth:\n  auth-dir: {}\n{extra_yaml}plugins:\n  enabled: true\n  dir: {}\n  configs:\n",
-        auth_dir.display(),
+        "{extra_yaml}plugins:\n  enabled: true\n  dir: {}\n  configs:\n",
         plugin_dir.display()
     );
     for (label, caps) in plugins {
@@ -126,7 +125,8 @@ async fn env_with(
     prepare(&records);
     let config_store = Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap());
     config_store.import_yaml(&yaml, "test", "").unwrap();
-    let db = cpa_server::credential_store::CredentialDb::initialize(config_store.clone(), &auth_dir).unwrap();
+    let db = cpa_server::credential_store::CredentialDb::initialize(config_store.clone()).unwrap();
+    cpa_server::testing::seed_credentials(&db, &auth_dir);
     let mut cfg = Config::parse(&yaml).unwrap();
     cfg.auth_dir = db.auth_dir();
     // Deliberately provisional, as before plugins start in main. Do not consume a

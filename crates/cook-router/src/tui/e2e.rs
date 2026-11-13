@@ -28,10 +28,10 @@ async fn serve(dir: &std::path::Path) -> (String, Arc<Management>) {
     )
     .unwrap();
     let store = Arc::new(ConfigStore::memory_with(&format!(
-        "config-version: 8\nmanagement:\n  secret-key: '{SECRET_HASH}'\noauth:\n  auth-dir: {}\naccess:\n  api-keys: [fake-key-a]\nobservability:\n  logs:\n    logging-to-file: false\n",
-        auth_dir.display()
+        "config-version: 8\nmanagement:\n  secret-key: '{SECRET_HASH}'\naccess:\n  api-keys: [fake-key-a]\nobservability:\n  logs:\n    logging-to-file: false\n",
     )));
-    let config = store.load().unwrap().config;
+    let mut config = store.load().unwrap().config;
+    config.auth_dir = auth_dir.clone();
     let credentials = cpa_core::config::credentials::load(&config);
     let rt = Arc::new(cpa_server::testing::runtime(
         config,

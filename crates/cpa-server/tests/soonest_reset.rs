@@ -110,12 +110,9 @@ struct Proxy {
     _dir: std::path::PathBuf,
 }
 
-/// A private `auth-dir`: without one, credential loading reads the user's real
-/// `~/.cli-proxy-api`.
-fn yaml(base: &str, strategy: &str, auth_dir: &std::path::Path) -> String {
+fn yaml(base: &str, strategy: &str) -> String {
     format!(
-        "oauth:\n  auth-dir: {}\naccess:\n  api-keys:\n    - client-key\nrouting:\n  strategy: {strategy}\napi-keys:\n  claude:\n  - name: claude-1\n    base-url: {base}\n    keys:\n      - api-key: sk-fake-1\n  - name: claude-2\n    base-url: {base}\n    keys:\n      - api-key: sk-fake-2\n",
-        auth_dir.display()
+        "access:\n  api-keys:\n    - client-key\nrouting:\n  strategy: {strategy}\napi-keys:\n  claude:\n  - name: claude-1\n    base-url: {base}\n    keys:\n      - api-key: sk-fake-1\n  - name: claude-2\n    base-url: {base}\n    keys:\n      - api-key: sk-fake-2\n"
     )
 }
 
@@ -123,9 +120,8 @@ async fn proxy(name: &str, strategy: &str) -> Proxy {
     let up = Arc::new(Upstream::default());
     let base = serve(axum::Router::new().fallback(upstream).with_state(up.clone())).await;
     let dir = std::env::temp_dir().join(format!("cpa-soonest-{name}-{}", std::process::id()));
-    let auth_dir = dir.join("auths");
-    std::fs::create_dir_all(&auth_dir).unwrap();
-    let yaml = yaml(&base, strategy, &auth_dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let yaml = yaml(&base, strategy);
     let store = Arc::new(ConfigStore::memory_with(&yaml));
     let config = store.load().unwrap().config;
     let mut credentials = cpa_core::config::credentials::load(&config);
@@ -265,7 +261,7 @@ async fn management_api_and_reload_switch_the_strategy() {
     assert_eq!(p.route(3).await, ["y", "y", "y"]);
     p.state
         .config_store()
-        .import_yaml(&yaml(&p.base, "round-robin", &p._dir.join("auths")), "test", "")
+        .import_yaml(&yaml(&p.base, "round-robin"), "test", "")
         .unwrap();
     cpa_server::watching::reload(&p.state).unwrap();
     assert_eq!(p.rt.policy().strategy, Strategy::RoundRobin);
@@ -278,7 +274,7 @@ async fn management_api_and_reload_switch_the_strategy() {
 async fn reloading_to_an_unset_strategy_selects_soonest_reset() {
     let p = proxy("reload-default", "round-robin").await;
     assert_eq!(p.rt.policy().strategy, Strategy::RoundRobin);
-    let unset = yaml(&p.base, "", &p._dir.join("auths"));
+    let unset = yaml(&p.base, "");
     p.state.config_store().import_yaml(&unset, "test", "").unwrap();
     cpa_server::watching::reload(&p.state).unwrap();
     assert_eq!(p.rt.policy().strategy, Strategy::SoonestReset);

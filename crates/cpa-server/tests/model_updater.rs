@@ -193,10 +193,7 @@ async fn refresh_skips_failing_sources_and_swaps_a_changed_catalog() {
     let auth = std::env::temp_dir().join(format!("model-updater-{}", std::process::id()));
     std::fs::create_dir_all(&auth).unwrap();
     let hash = bcrypt::hash("fake-management-only", 4).unwrap();
-    let yaml = format!(
-        "access:\n  api-keys:\n    - fake-client-key\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-        auth.display()
-    );
+    let yaml = format!("access:\n  api-keys:\n    - fake-client-key\nmanagement:\n  secret-key: '{hash}'\n");
     let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&yaml));
     let rt = Arc::new(cpa_server::testing::runtime(
         store.load().unwrap().config,

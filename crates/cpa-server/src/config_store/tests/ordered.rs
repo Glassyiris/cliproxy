@@ -37,7 +37,7 @@ impl Fixture {
         store
             .import_yaml("routing: {strategy: round-robin}\n", "test", "")
             .unwrap();
-        let db = CredentialDb::initialize(store.clone(), &dir.join("legacy")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         let rt = Arc::new(crate::testing::runtime_with_db(
             store.load().unwrap().config,
             vec![],

@@ -332,6 +332,11 @@ def wait_ready(process, port, registration_log=None):
     raise TimeoutError("proxy did not become ready")
 
 
+def persisted_credential(directory, side):
+    """Go rewrites its auth-dir file; Rust's copy of the database row is beside config.db."""
+    return directory / side / ("auth/fixture.json" if side == "go" else "config.db.credentials/fixture.json")
+
+
 def run_case(root, output, upstream, case):
     directory = output / case["name"]
     directory.mkdir()
@@ -354,9 +359,12 @@ def run_case(root, output, upstream, case):
                 credential["disabled"] = True
             write_json(auth_dir / "fixture.json", credential)
             config = working / "config.yaml"
+            # Go reads the credential from its auth-dir; Rust has no such setting, so the
+            # driver saves the same file to its database before it starts.
+            auth = f'oauth:\n  auth-dir: "{auth_dir}"\n' if side == "go" else ""
             config.write_text(f'config-version: 8\nserver:\n  host: "127.0.0.1"\n  port: {port}\n'
                               'access:\n  api-keys: [fixture-client-key]\n'
-                              f'oauth:\n  auth-dir: "{auth_dir}"\n'
+                              f'{auth}'
                               'management:\n  disable-control-panel: true\n  disable-auto-update-panel: true\n'
                               'routing:\n  retry:\n    request-retry: 0\n    max-retry-interval: 0\n')
             # Whitelist environment: no real credentials, storage backends, proxy
@@ -368,7 +376,7 @@ def run_case(root, output, upstream, case):
                 command = [str(root / "harness/.cache/go-reference"), "-config", str(config), "-local-model"]
             else:
                 command = [str(root / "harness/rust/target/debug/cpa-differential-driver"),
-                           str(config), str(output / "certs/ca.pem")]
+                           str(config), str(output / "certs/ca.pem"), str(auth_dir)]
             log = (working / "process.log").open("wb")
             handles.append(log)
             process = subprocess.Popen(command, cwd=working, env=env, stdout=log, stderr=log)
@@ -380,7 +388,7 @@ def run_case(root, output, upstream, case):
             for side in ports:
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
-                    persisted = json.loads((directory / side / "auth/fixture.json").read_text())
+                    persisted = json.loads(persisted_credential(directory, side).read_text())
                     if persisted["access_token"] != CREDENTIAL["access_token"]:
                         break
                     time.sleep(0.05)
@@ -394,7 +402,7 @@ def run_case(root, output, upstream, case):
         # Snapshot before shutdown; namespace cleanup/process exit is not cancellation.
         for side in ports:
             observations[side]["upstream"] = copy.deepcopy(upstream.observations[side])
-            observations[side]["credential_after"] = json.loads((directory / side / "auth/fixture.json").read_text())
+            observations[side]["credential_after"] = json.loads(persisted_credential(directory, side).read_text())
             write_json(directory / f"{side}.json", observations[side])
         diff = differences(comparable(observations["go"]), comparable(observations["rust"]))
         write_json(directory / "diff.json", diff)

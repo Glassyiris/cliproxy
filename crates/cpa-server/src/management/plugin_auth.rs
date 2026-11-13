@@ -578,7 +578,7 @@ mod tests {
     fn written_saves_are_durable_and_sql_failures_do_not_publish() {
         let work = cpa_plugin::testing::scratch(&std::env::temp_dir(), "plugin-written-sqlite");
         let store = Arc::new(crate::testing::config_store(&work.join("config.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &work.join("legacy")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         let mut cfg = store.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let rt = Arc::new(crate::testing::runtime_with_db(
@@ -643,10 +643,9 @@ mod tests {
         }
         drop(blocked);
         drop((manager, state, db));
-        let reopened = crate::credential_store::CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&work.join("config.db")).unwrap()),
-            &work.join("legacy"),
-        )
+        let reopened = crate::credential_store::CredentialDb::initialize(Arc::new(
+            crate::testing::config_store(&work.join("config.db")).unwrap(),
+        ))
         .unwrap();
         assert_eq!(reopened.read(&path).unwrap().unwrap(), original);
         drop(reopened);
@@ -661,10 +660,7 @@ mod tests {
     fn a_plugin_save_waits_for_a_commit_holding_the_disk_lock() {
         let dir = std::env::temp_dir().join(format!("cpa-plugin-save-lock-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let store = Arc::new(crate::config_store::ConfigStore::memory_with(&format!(
-            "oauth: {{auth-dir: {}}}\n",
-            dir.display()
-        )));
+        let store = Arc::new(crate::config_store::ConfigStore::memory_with(""));
         let cfg = store.load().unwrap().config;
         let rt = Arc::new(crate::testing::runtime(
             cfg,

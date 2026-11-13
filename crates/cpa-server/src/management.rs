@@ -324,17 +324,6 @@ impl Management {
         cfg.auth_dir = self.rt.store().credential_backend().auth_dir();
     }
 
-    /// Deletes a canonical document before acknowledging its removal.
-    pub(crate) fn store_delete(&self, path: &std::path::Path) -> Result<(), String> {
-        self.rt
-            .store()
-            .credential_backend()
-            .delete(path)
-            .map_err(|e| format!("{e:#}"))?;
-        self.credential_changes.notify_one();
-        Ok(())
-    }
-
     /// Serializes Management's adapter work under `disk`. The service command
     /// itself owns persistence, runtime-view installation and ordered dispatch.
     /// Also reports whether a startup-only listener/TLS/proxy setting changed.

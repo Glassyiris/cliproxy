@@ -1,4 +1,4 @@
-// The auth-dir guard, on disposable directories only. TMPDIR is pointed at a fresh directory
+// The credential-store guard, on disposable directories only. TMPDIR is pointed at a fresh directory
 // so "outside the temp dir" is a sibling inside it; nothing outside it is touched.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,7 +12,7 @@ const outside = join(base, "outside");
 for (const d of [fakeTmp, outside, join(fakeTmp, "auth")]) mkdirSync(d, { recursive: true });
 symlinkSync(outside, join(fakeTmp, "link"));
 process.env.TMPDIR = fakeTmp;
-const { privateDir } = await import("./private-auth-dir.mjs");
+const { privateDir } = await import("./private-credential-store.mjs");
 
 test("a directory under the temp dir is accepted", () => {
   assert.equal(privateDir(join(fakeTmp, "auth")), join(fakeTmp, "auth"));

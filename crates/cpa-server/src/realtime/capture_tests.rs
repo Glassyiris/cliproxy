@@ -67,12 +67,8 @@ async fn start(dir: &Path, upstream_url: &str) -> String {
     )
     .unwrap();
     let rt = Arc::new(crate::testing::runtime(
-        // A private auth-dir: the test never reads the user's.
-        cpa_core::config::Config::parse(&format!(
-            "oauth:\n  auth-dir: '{}'\nobservability: {{logs: {{request-log: true}}}}\n",
-            dir.join("auths").display()
-        ))
-        .unwrap(),
+        // A private credential directory: the test never reads the user's.
+        cpa_core::config::Config::parse("observability: {logs: {request-log: true}}\n").unwrap(),
         vec![credential],
         cpa_exec::Executors {
             claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),

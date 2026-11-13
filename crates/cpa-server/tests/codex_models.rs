@@ -200,8 +200,7 @@ async fn model_detail_reads_the_intercepted_catalog() {
     }
     std::fs::copy(built.join("recorder.so"), plugins.join("catalog.so")).unwrap();
     let yaml = format!(
-        "oauth:\n  auth-dir: {}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    catalog:\n      enabled: true\n      label: catalog\n      record: {}\n      caps: response_interceptor,request_lifecycle_plugin\n",
-        auths.display(),
+        "plugins:\n  enabled: true\n  dir: {}\n  configs:\n    catalog:\n      enabled: true\n      label: catalog\n      record: {}\n      caps: response_interceptor,request_lifecycle_plugin\n",
         plugins.display(),
         records.display()
     );

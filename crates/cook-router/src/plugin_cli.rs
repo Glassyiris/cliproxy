@@ -303,11 +303,7 @@ mod tests {
         use cpa_plugin::auth::PluginAuth;
         let dir = std::env::temp_dir().join(format!("cook-cli-plugin-batch-{}", std::process::id()));
         let path = dir.join("cook.db");
-        let db = CredentialDb::initialize(
-            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
-            &dir.join("missing"),
-        )
-        .unwrap();
+        let db = CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&path).unwrap())).unwrap();
         let first = db.auth_dir().join("first.json");
         let old = b"{\"type\":\"acme\",\"token\":\"old\",\"unknown\":[1,2]}";
         db.save(&first, old).unwrap();
@@ -334,11 +330,7 @@ mod tests {
         let workspace = db.auth_dir();
         drop(db);
         std::fs::remove_dir_all(workspace).unwrap();
-        let db = CredentialDb::initialize(
-            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
-            &dir.join("missing"),
-        )
-        .unwrap();
+        let db = CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&path).unwrap())).unwrap();
         assert_eq!(std::fs::read(&first).unwrap(), old);
         assert!(!db.auth_dir().join("second.json").exists());
         drop(db);
@@ -358,17 +350,16 @@ mod tests {
             ..Default::default()
         };
         let (host, _) = host_with(&dir, [("cli", script)].into()).await;
-        let db = CredentialDb::initialize(
-            Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap()),
-            &dir.join("missing"),
-        )
+        let db = CredentialDb::initialize(Arc::new(
+            cpa_server::testing::config_store(&dir.join("cook.db")).unwrap(),
+        ))
         .unwrap();
-        let config = Config::parse(&format!(
-            "oauth:\n  auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
-            db.auth_dir().display(),
+        let mut config = Config::parse(&format!(
+            "plugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
             dir.display()
         ))
         .unwrap();
+        config.auth_dir = db.auth_dir();
         host.apply_config(Arc::new(config)).await;
         host.register_command_line_flags(&|_| false).await;
         host.set_command_line_flag("plugin-save", "true").unwrap();
@@ -396,17 +387,16 @@ mod tests {
             ..Default::default()
         };
         let (host, calls) = host_with(&dir, [("cli", script)].into()).await;
-        let db = CredentialDb::initialize(
-            Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap()),
-            &dir.join("missing"),
-        )
+        let db = CredentialDb::initialize(Arc::new(
+            cpa_server::testing::config_store(&dir.join("cook.db")).unwrap(),
+        ))
         .unwrap();
-        let config = Config::parse(&format!(
-            "oauth:\n  auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
-            db.auth_dir().display(),
+        let mut config = Config::parse(&format!(
+            "plugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
             dir.display()
         ))
         .unwrap();
+        config.auth_dir = db.auth_dir();
         host.apply_config(Arc::new(config)).await;
         host.register_command_line_flags(&|_| false).await;
         assert_eq!(execute(&host, &[], &db).await, None);
@@ -438,11 +428,7 @@ mod tests {
             ..Default::default()
         };
         let (host, _) = host_with(&dir, [("cli", script)].into()).await;
-        let db = CredentialDb::initialize(
-            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
-            &dir.join("missing"),
-        )
-        .unwrap();
+        let db = CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&path).unwrap())).unwrap();
         use cpa_plugin::hostauth::{AuthManager as _, SavedAuths};
         let nested = db.auth_dir().join("nested.json");
         let raw = b"{\"type\":\"acme\",\"opaque\":[1,2]}";
@@ -456,12 +442,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(db.read(&nested).unwrap().unwrap(), raw);
-        let config = Config::parse(&format!(
-            "oauth:\n  auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
-            db.auth_dir().display(),
+        let mut config = Config::parse(&format!(
+            "plugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
             dir.display()
         ))
         .unwrap();
+        config.auth_dir = db.auth_dir();
         host.apply_config(Arc::new(config)).await;
         host.register_command_line_flags(&|_| false).await;
         host.set_command_line_flag("plugin-save", "true").unwrap();
@@ -474,7 +460,7 @@ mod tests {
         std::fs::remove_file(&explicit).unwrap();
         std::fs::remove_dir_all(&workspace).unwrap();
         let owner = Arc::new(cpa_server::testing::config_store(&path).unwrap());
-        let db = CredentialDb::initialize(owner.clone(), &dir.join("missing")).unwrap();
+        let db = CredentialDb::initialize(owner.clone()).unwrap();
         assert_eq!(std::fs::read(&explicit).unwrap(), bytes);
         let mut previous: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         previous["token"] = "before-failed-save".into();

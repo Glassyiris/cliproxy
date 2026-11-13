@@ -1,5 +1,7 @@
 //! Replays expectations recorded from the pinned Go reference
 //! (tests/reference/manage/main.go -> tests/fixtures/manage_go.json).
+//! The recording is untouched; replay drops its `oauth.auth-dir` line (`without_auth_dir`) and
+//! stages the recorded credentials in `Config::auth_dir`, since the setting no longer exists.
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -461,7 +463,7 @@ mod access {
         if let Some(t) = scenario["trusted"].as_array() {
             yaml += &format!("server:\n  trusted-proxies: {}\n", Value::Array(t.clone()));
         }
-        yaml += &format!("oauth:\n  auth-dir: '{}'\n", dir.join("auth").display());
+        yaml += "";
         let store = Arc::new(ConfigStore::memory_with(&yaml));
         let rt = Arc::new(cpa_server::testing::runtime(
             store.load().unwrap().config,
@@ -547,14 +549,7 @@ mod routes {
             let name = scenario["name"].as_str().unwrap();
             let dir = std::env::temp_dir().join(format!("cpa-routes-{name}-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
-            let auth = dir.join("auth");
-            let yaml = |text: &str| {
-                format!(
-                    "{}\noauth: {{auth-dir: '{}'}}\n",
-                    text.replace("$HASH", &hash),
-                    auth.display()
-                )
-            };
+            let yaml = |text: &str| format!("{}\n", text.replace("$HASH", &hash));
             let store = Arc::new(ConfigStore::memory_with(&yaml(scenario["yaml"].as_str().unwrap())));
             let cfg = store.load().unwrap().config;
             let rt = Arc::new(cpa_server::testing::runtime(
@@ -779,8 +774,9 @@ mod creds {
                 .unwrap()
                 .replace("$HASH", &hash)
                 .replace("$AUTH", &auth.display().to_string());
-            let store = Arc::new(ConfigStore::memory_with(&yaml));
-            let cfg = store.load().unwrap().config;
+            let store = Arc::new(ConfigStore::memory_with(&cpa_server::testing::without_auth_dir(&yaml)));
+            let mut cfg = store.load().unwrap().config;
+            cfg.auth_dir = auth.clone();
             let scan = credentials::scan_auth_dir(&cfg);
             let mut loaded = scan.credentials;
             loaded.extend(credentials::from_config(&cfg));
@@ -1183,8 +1179,9 @@ mod creds {
             .unwrap()
             .replace("$HASH", &hash)
             .replace("$AUTH", &auth.display().to_string());
-        let store = Arc::new(ConfigStore::memory_with(&yaml));
-        let cfg = store.load().unwrap().config;
+        let store = Arc::new(ConfigStore::memory_with(&cpa_server::testing::without_auth_dir(&yaml)));
+        let mut cfg = store.load().unwrap().config;
+        cfg.auth_dir = auth.clone();
         let rt = Arc::new(cpa_server::testing::runtime(
             cfg.clone(),
             credentials::load(&cfg),

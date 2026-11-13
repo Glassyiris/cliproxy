@@ -129,8 +129,7 @@ struct Conductor {
     _auth_dir: AuthDir,
 }
 
-/// A private, empty `auth-dir`, removed when dropped: credential loading never falls back
-/// to `~/.cli-proxy-api`.
+/// A private, empty `auth-dir`, removed when dropped.
 struct AuthDir(std::path::PathBuf);
 
 impl AuthDir {
@@ -150,10 +149,7 @@ impl Drop for AuthDir {
 impl Conductor {
     fn new(upstream: &str, keys: &[&str], model: &str, session: &str) -> Self {
         let auth_dir = AuthDir::new();
-        let mut yaml = format!(
-            "oauth:\n  auth-dir: {}\nupstream:\n  codex:\n    response-steering: true\napi-keys:\n  codex:\n",
-            auth_dir.0.display()
-        );
+        let mut yaml = "upstream:\n  codex:\n    response-steering: true\napi-keys:\n  codex:\n".to_owned();
         for (i, key) in keys.iter().enumerate() {
             yaml.push_str(&format!(
                 "  - name: codex-{}\n    base-url: {upstream}\n    priority: {}\n    models:\n      - name: {model}\n    keys:\n      - api-key: {key}\n        websockets: true\n",

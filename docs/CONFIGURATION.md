@@ -192,7 +192,6 @@ observability:
 
 | Setting | What it does |
 |---|---|
-| `auth-dir` | Legacy credential import source only. The first local server start or credential/plugin CLI use imports its top-level JSON credential files, including symlinks to files, once into the selected SQLite database; nested directories are not scanned. This happens even if `config import` initialized configuration earlier. A separate durable import marker prevents later starts from reimporting leftover files or resurrecting deleted credentials. Sign-ins, refreshes, edits and revocations then use SQLite, separately from config revisions. |
 | `providers.codex.signin-with-chatgpt-identifier` | The agent name sent when binding Sign in with ChatGPT tokens to a Codex credential (`POST /v8/management/oauth/siwc/bind`), `CLIProxyAPI` when empty. Legacy spelling: `codex.signin-with-chatgpt-identifier`. Go also uses it as the SIWC request User-Agent prefix; cook-router does not send SIWC requests yet. |
 | `providers.codex.chatgpt-keep-alive` | `false` by default. `true` keeps up to 2 idle connections to `chatgpt.com` per proxy for 90 seconds, so Codex HTTP requests skip the TCP and TLS handshake. Off, every Codex request opens its own connection. A published change applies from the next request, without a restart. |
 

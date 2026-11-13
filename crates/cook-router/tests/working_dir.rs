@@ -19,7 +19,7 @@ fn working_dir_applies_before_dotenv_config_and_log_paths() {
     std::fs::create_dir_all(work.join("auth")).unwrap();
     std::fs::write(
         work.join("config.yaml"),
-        "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: ./auth\nobservability:\n  logs:\n    logging-to-file: true\n",
+        "config-version: 8\nserver:\n  port: 0\nobservability:\n  logs:\n    logging-to-file: true\n",
     )
     .unwrap();
     std::fs::write(work.join(".env"), "COOK_WRITABLE_PATH=from-dotenv\n").unwrap();
@@ -62,11 +62,7 @@ fn working_dir_applies_before_dotenv_config_and_log_paths() {
 fn a_warning_before_the_runtime_starts_goes_to_the_log_file() {
     let root = scratch("early-log");
     std::fs::create_dir_all(root.join("auth")).unwrap();
-    std::fs::write(
-        root.join("config.yaml"),
-        "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: ./auth\n",
-    )
-    .unwrap();
+    std::fs::write(root.join("config.yaml"), "config-version: 8\nserver:\n  port: 0\n").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_cook-router"))
         .args([
             "--local-model",

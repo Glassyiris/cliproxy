@@ -8,12 +8,8 @@ use cpa_server::config_store::ConfigStore;
 use cpa_server::management::{self, Management, Options};
 use serde_json::Value;
 
-async fn serve(dir: &std::path::Path) -> (String, tokio::task::JoinHandle<()>) {
-    let auth = dir.join("auth");
-    let yaml = format!(
-        "config-version: 8\nmanagement:\n  secret-key: fake-secret\noauth:\n  auth-dir: '{}'\n",
-        auth.display()
-    );
+async fn serve() -> (String, tokio::task::JoinHandle<()>) {
+    let yaml = "config-version: 8\nmanagement:\n  secret-key: fake-secret\n".to_owned();
     let store = Arc::new(ConfigStore::memory_with(&yaml));
     let config = store.load().unwrap().config;
     let rt = Arc::new(cpa_server::testing::runtime(
@@ -54,9 +50,7 @@ async fn serve(dir: &std::path::Path) -> (String, tokio::task::JoinHandle<()>) {
 
 #[tokio::test]
 async fn v0_auth_import_and_log_aliases_match_v8() {
-    let dir = std::env::temp_dir().join(format!("cpa-legacy-alias-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let (base, server) = serve(&dir).await;
+    let (base, server) = serve().await;
     let client = wreq::Client::new();
     let get = |method: &str, path: &str| {
         client
@@ -109,5 +103,4 @@ async fn v0_auth_import_and_log_aliases_match_v8() {
         (b.status(), b.text().await.unwrap())
     );
     server.abort();
-    let _ = std::fs::remove_dir_all(&dir);
 }

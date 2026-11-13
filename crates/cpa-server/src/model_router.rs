@@ -1344,13 +1344,8 @@ mod tests {
     /// The config of a proxy whose OpenAI-compatible provider at `upstream_url` serves
     /// `cheap`, `top` and `judge`, with `extra` appended.
     fn config(upstream_url: &str, extra: &str) -> Config {
-        // A private auth-dir: without one, credential loading reads the real ~/.cli-proxy-api.
-        let auth_dir = std::env::temp_dir().join(format!("cpa-router-auths-{}", std::process::id()));
-        std::fs::create_dir_all(&auth_dir).unwrap();
         Config::parse(&format!(
-            "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key]\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      models:\n        - {{name: up-cheap, alias: cheap, display-name: Cheap One}}\n        - {{name: up-top, alias: top, display-name: Top One}}\n        - {{name: up-judge, alias: judge}}\n      keys:\n        - api-key: sk-fake-upstream\n{extra}",
-            auth_dir.display()
-        ))
+            "access:\n  api-keys: [client-key]\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      models:\n        - {{name: up-cheap, alias: cheap, display-name: Cheap One}}\n        - {{name: up-top, alias: top, display-name: Top One}}\n        - {{name: up-judge, alias: judge}}\n      keys:\n        - api-key: sk-fake-upstream\n{extra}"))
         .unwrap()
     }
 
@@ -1506,10 +1501,7 @@ mod tests {
 
     #[tokio::test]
     async fn unrated_fallback_stays_within_filtered_candidates() {
-        let auth = std::env::temp_dir().join(format!("router-regression-{}", std::process::id()));
-        let cfg = Config::parse(&format!(
-            "oauth:\n  auth-dir: {}\napi-keys:\n  openai-compatibility:\n    - name: local\n      base-url: http://127.0.0.1:1/v1\n      models:\n        - {{name: small, max-context-length: 8000}}\n        - {{name: large, max-context-length: 128000}}\n      keys:\n        - api-key: test\nmodel-routers:\n  - name: smart\n    judge: smart\n", auth.display()
-        )).unwrap();
+        let cfg = Config::parse("api-keys:\n  openai-compatibility:\n    - name: local\n      base-url: http://127.0.0.1:1/v1\n      models:\n        - {name: small, max-context-length: 8000}\n        - {name: large, max-context-length: 128000}\n      keys:\n        - api-key: test\nmodel-routers:\n  - name: smart\n    judge: smart\n").unwrap();
         let credentials = cpa_core::config::credentials::load(&cfg);
         let rt = Arc::new(crate::testing::runtime(
             cfg.clone(),
@@ -1536,12 +1528,10 @@ mod tests {
 
     #[tokio::test]
     async fn bound_effort_follows_reloaded_candidates() {
-        let auth = std::env::temp_dir().join(format!("router-regression-{}", std::process::id()));
         let mut cfg = config(
             "http://127.0.0.1:1",
             "model-routers:\n  - name: smart\n    judge: smart\n    models: [top(high)]\n",
         );
-        cfg.document["auth-dir"] = Value::String(auth.to_string_lossy().into_owned());
         let credentials = cpa_core::config::credentials::load(&cfg);
         let rt = Arc::new(crate::testing::runtime(
             cfg.clone(),

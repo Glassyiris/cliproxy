@@ -1687,7 +1687,7 @@ mod tests {
 
     fn management(dir: &Path, enabled: bool, commercial: bool) -> Arc<Management> {
         let config = cpa_core::config::Config::parse(&format!(
-            "oauth: {{auth-dir: {}}}\nobservability: {{logs: {{request-log: {enabled}}}}}\nserver: {{commercial-mode: {commercial}}}\n", dir.display()
+            "observability: {{logs: {{request-log: {enabled}}}}}\nserver: {{commercial-mode: {commercial}}}\n"
         ))
         .unwrap();
         let rt = Arc::new(crate::testing::runtime(

@@ -56,7 +56,7 @@ sleep 0.5
 url="http://127.0.0.1:$UP_PORT/v1/messages"
 if [[ $LABEL != direct ]]; then
   dir="$OUT/run/$LABEL"
-  rm -rf "$dir" && mkdir -p "$dir/auth"
+  rm -rf "$dir" && mkdir -p "$dir"
   cat > "$dir/config.yaml" <<EOF
 config-version: 8
 server:
@@ -65,8 +65,6 @@ server:
 access:
   api-keys:
     - "$KEY"
-oauth:
-  auth-dir: "$dir/auth"
 api-keys:
   claude:
     - name: bench

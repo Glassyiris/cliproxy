@@ -29,10 +29,7 @@ async fn server_with(management_password: Option<&str>, credentials: Vec<cpa_cor
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("cpa-resp-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let yaml = format!(
-        "oauth:\n  auth-dir: {}\nobservability:\n  usage:\n    usage-statistics-enabled: true\n",
-        dir.join("auth").display()
-    );
+    let yaml = "observability:\n  usage:\n    usage-statistics-enabled: true\n".to_owned();
     let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&yaml));
     let executors = Executors {
         claude: ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),

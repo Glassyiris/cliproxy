@@ -33,7 +33,7 @@ On a new server, the Overview shows a short Get started card with three steps: c
   <img src="img/connect-light.png" alt="The Connect an account dialog: sign in to Claude, Codex, Antigravity, Kimi, xAI, Devin or Meta, or add Vertex AI or a provider API key" width="880">
 </picture>
 
-In the dashboard, choose Connect account and pick a provider. Claude and ChatGPT (Codex) open the provider's own sign-in page; Kimi, Meta, xAI and Devin show a device code to enter on their site. The proxy stores sign-in and refresh tokens in SQLite, not `auth-dir`. It never sees your password.
+In the dashboard, choose Connect account and pick a provider. Claude and ChatGPT (Codex) open the provider's own sign-in page; Kimi, Meta, xAI and Devin show a device code to enter on their site. The proxy stores sign-in and refresh tokens in SQLite, not in files. It never sees your password.
 
 You can also sign in from a terminal, which helps on a server without a browser. The running proxy owns its database, so the terminal sign-in goes through it:
 

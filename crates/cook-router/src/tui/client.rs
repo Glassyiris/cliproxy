@@ -1285,7 +1285,7 @@ mod tests {
                 "direct owner receipt",
             )
             .unwrap();
-        let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &root.join("legacy")).unwrap();
+        let db = cpa_server::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         let mut config = store.load().unwrap().config;
         config.auth_dir = db.auth_dir();
         let rt = Arc::new(cpa_server::testing::runtime_with_db(

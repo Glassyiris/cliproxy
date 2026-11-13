@@ -363,9 +363,7 @@ async fn request_log_records_the_websocket_timeline_and_each_turn() {
     let dir = std::env::temp_dir().join(format!("cpa-ws-timeline-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
-        "oauth:\n  auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n",
-        dir.join("auths").display()
-    ))
+        "observability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n"))
     .unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
     let executors = Executors {
@@ -570,9 +568,7 @@ async fn logging_proxy(servers: &mut Servers, dir: &std::path::Path, status: u16
         }))
         .await;
     let cfg = Config::parse(&format!(
-        "oauth:\n  auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n",
-        dir.join("auths").display()
-    ))
+        "observability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n"))
     .unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
     let executors = Executors {
@@ -786,9 +782,7 @@ async fn interrupt_diagnostics_are_sanitized() {
     let dir = std::env::temp_dir().join(format!("cpa-ws-interrupt-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
-        "oauth:\n  auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n",
-        dir.join("auths").display()
-    ))
+        "observability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n"))
     .unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
     let executors = Executors {
@@ -944,9 +938,7 @@ async fn uninterrupted_claude_turns_send_masters_bytes() {
     };
     let dir = std::env::temp_dir().join(format!("cpa-ws-claude-{}", uuid::Uuid::new_v4()));
     let cfg = Config::parse(&format!(
-        "oauth:\n  auth-dir: {}\napi-keys:\n  claude:\n  - name: claude-1\n    base-url: http://{upstream}\n    models:\n      - name: claude-opus-5-5\n    keys:\n      - api-key: sk-FAKE\n",
-        dir.join("auths").display()
-    ))
+        "api-keys:\n  claude:\n  - name: claude-1\n    base-url: http://{upstream}\n    models:\n      - name: claude-opus-5-5\n    keys:\n      - api-key: sk-FAKE\n"))
     .unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
     let executors = Executors {
@@ -1050,9 +1042,7 @@ async fn pinned_continuation_failure(shown: &'static [&'static str], failure: &'
     let dir = std::env::temp_dir().join(format!("cpa-ws-pinned-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
-        "oauth:\n  auth-dir: {}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n",
-        dir.display()
-    ))
+        "api-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n"))
     .unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
     let executors = Executors {
@@ -1182,9 +1172,7 @@ async fn an_upstream_error_that_loses_the_socket_still_cools_the_credential() {
         let dir = std::env::temp_dir().join(format!("cpa-ws-6503-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = Config::parse(&format!(
-            "oauth:\n  auth-dir: {}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n",
-            dir.display()
-        ))
+            "api-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n"))
         .unwrap();
         let credentials = cpa_core::config::credentials::from_config(&cfg);
         let executors = Executors {
@@ -1420,13 +1408,7 @@ async fn removal_closes_only_its_sockets(section: &str) {
             "    - base-url: http://{upstream}\n      models:\n        - name: gpt-{key}\n      keys:\n        - api-key: {key}\n          websockets: true\n"
         )
     };
-    let cfg = Config::parse(&format!(
-        "oauth:\n  auth-dir: {}\napi-keys:\n  {section}:\n{}{}",
-        dir.join("auths").display(),
-        entry("keep"),
-        entry("drop")
-    ))
-    .unwrap();
+    let cfg = Config::parse(&format!("api-keys:\n  {section}:\n{}{}", entry("keep"), entry("drop"))).unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
     let keep = credentials
         .iter()

@@ -1013,7 +1013,8 @@ async fn tool_search_responses_match_go() {
             .unwrap()
             .replace("AUTH_DIR", dir.join("auth").to_str().unwrap())
             .replace("http://gateway.invalid", &base);
-        let cfg = Config::parse(&text).unwrap();
+        let mut cfg = Config::parse(&text).unwrap();
+        cfg.auth_dir = dir.join("auth");
         let credential = cpa_core::config::credentials::load(&cfg)
             .into_iter()
             .find(|c| c.provider == "claude")
@@ -1196,7 +1197,8 @@ async fn scenarios_match_go(fixture: &str, run: &str, selected: fn(&str) -> bool
             // dates, and whichever ran first used to pin its date for the other.
             std::fs::write(dir.join("auth").join(format!("fixture-{run}.json")), auth).unwrap();
         }
-        let cfg = Config::parse(&text).unwrap();
+        let mut cfg = Config::parse(&text).unwrap();
+        cfg.auth_dir = dir.join("auth");
         let credential = cpa_core::config::credentials::load(&cfg)
             .into_iter()
             .find(|c| c.provider == "claude")
@@ -2180,7 +2182,8 @@ async fn compat_replay_sequence_matches_go() {
             .as_str()
             .unwrap()
             .replace("AUTH_DIR", root.to_str().unwrap());
-        let cfg = Config::parse(&text).unwrap();
+        let mut cfg = Config::parse(&text).unwrap();
+        cfg.auth_dir = root.clone();
         let credential = cpa_core::config::credentials::load(&cfg)
             .into_iter()
             .find(|c| c.provider == "claude")

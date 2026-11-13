@@ -276,8 +276,8 @@ pub struct Policy {
     /// routing.session-affinity-ttl: duration string, default 1h.
     pub session_affinity_ttl: Duration,
     pub session_affinity_subagents: bool,
-    /// routing.cooldown.save-cooldown-status: persist cooldowns as `.cds` files in
-    /// `auth-dir` (cooldown_store.rs), never in credential files.
+    /// routing.cooldown.save-cooldown-status: persist cooldowns in the config database
+    /// (cooldown_store.rs), never in credential files.
     pub save_cooldown_status: bool,
     /// routing.cooldown.max-trusted-cooldown (cook-router only): the first bound on a
     /// quota reset an upstream states ([`trusted`]); zero trusts every reset, as Go does.
@@ -1786,10 +1786,6 @@ impl Scheduler {
                         ..LastError::default()
                     }),
                     updated_at: Some(state.since),
-                    auth_file: match &c.source {
-                        cpa_core::credential::Source::File(path) => Some(path.clone()),
-                        _ => None,
-                    },
                 }
             })
             .collect();
@@ -3240,7 +3236,7 @@ mod tests {
         }
     }
 
-    /// `.cds` records: the probe time is the retry, the stated reset Go's recovery time,
+    /// Stored records: the probe time is the retry, the stated reset Go's recovery time,
     /// and the count is its own field. Restores never escalate, and Go's records get
     /// the first bound whatever their backoff level.
     #[test]
