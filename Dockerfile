@@ -66,17 +66,37 @@ FROM deps AS dashboard
 COPY --chown=builder:builder . .
 RUN cd ui && npm run check
 
-# The tree with the dashboard build that the binary embeds (crates/cpa-server/build.rs), and
-# every dependency fetched, so the stages below build offline.
-FROM deps AS source
-COPY --chown=builder:builder . .
-COPY --from=dashboard --chown=builder:builder /src/ui/dist ui/dist
-RUN --mount=type=cache,id=cook-router-cargo-registry,target=/usr/local/cargo/registry,uid=1000,gid=1000 \
-    --mount=type=cache,id=cook-router-go-mod,target=/home/builder/go/pkg/mod,uid=1000,gid=1000 \
-    cargo fetch --locked \
+# The Cargo manifests and lock files, the Go module files, and an empty file for each crate
+# root cargo looks for, so the fetch below reruns only when one of them changes.
+FROM base AS manifests
+RUN --mount=type=bind,target=/tmp/tree <<'EOF'
+shopt -s nullglob
+cd /tmp/tree
+for f in Cargo.toml Cargo.lock {crates/*,vendor/*,harness/rust}/Cargo.{toml,lock} \
+    crates/cpa-plugin/tests/goplugins/go.{mod,sum}; do
+  if [ -e "$f" ]; then install -D -m 0644 "$f" "/home/builder/manifests/$f"; fi
+done
+for f in {crates/*,vendor/*,harness/rust}/src/{lib,main}.rs; do
+  if [ -e "$f" ]; then install -D -m 0644 /dev/null "/home/builder/manifests/$f"; fi
+done
+EOF
+
+# Every crate and Go module the stages below build with, in this layer rather than a cache
+# mount: the Actions layer cache does not keep cache mounts, so a runner that restores this
+# layer from it must find them here to build offline.
+FROM deps AS fetch
+COPY --from=manifests --chown=builder:builder /home/builder/manifests/ ./
+RUN cargo fetch --locked \
  && cargo fetch --locked --manifest-path vendor/gjson/Cargo.toml \
  && cargo fetch --locked --manifest-path harness/rust/Cargo.toml \
  && (cd crates/cpa-plugin/tests/goplugins && go mod download)
+
+# The tree with the dashboard build that the binary embeds (crates/cpa-server/build.rs), over
+# the empty crate roots above. Cargo unpacks the fetched crates into registry/src, a cache
+# mount in each stage below, so the unpacked sources stay out of the layers.
+FROM fetch AS source
+COPY --chown=builder:builder . .
+COPY --from=dashboard --chown=builder:builder /src/ui/dist ui/dist
 # No debug info in test builds: linking about 55 test binaries with full debug info was most
 # of a warm build. Panic messages keep their file and line.
 ENV CARGO_NET_OFFLINE=true CARGO_PROFILE_TEST_DEBUG=0 GOPROXY=off
@@ -98,7 +118,7 @@ RUN echo "commit ${CI_COMMIT:-local}" \
 
 FROM source AS check
 COPY --from=requirements /tmp/requirements-ok /tmp/
-RUN --mount=type=cache,id=cook-router-cargo-registry,target=/usr/local/cargo/registry,uid=1000,gid=1000 \
+RUN --mount=type=cache,id=cook-router-cargo-src-check,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
     --mount=type=cache,id=cook-router-target-check,target=/src/target,uid=1000,gid=1000 <<'EOF'
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -127,8 +147,7 @@ FROM source AS test
 ARG SHARD=1 SHARDS=1 CI_COMMIT= TEST_THREADS
 ENV CPA_TEST_NO_SKIP=1
 RUN --network=none \
-    --mount=type=cache,id=cook-router-cargo-registry,target=/usr/local/cargo/registry,uid=1000,gid=1000 \
-    --mount=type=cache,id=cook-router-go-mod,target=/home/builder/go/pkg/mod,uid=1000,gid=1000 \
+    --mount=type=cache,id=cook-router-cargo-src-test,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
     --mount=type=cache,id=cook-router-target-test,target=/src/target,uid=1000,gid=1000 <<'EOF'
 echo "commit ${CI_COMMIT:-local}, shard $SHARD of $SHARDS"
 out=/home/builder/out && mkdir -p "$out"
@@ -154,7 +173,7 @@ COPY --from=test /home/builder/out/ /
 # The release binary. The default build excludes the CPU profiler and its symbol resolver.
 FROM source AS build
 ARG BUILD_JOBS
-RUN --mount=type=cache,id=cook-router-cargo-registry,target=/usr/local/cargo/registry,uid=1000,gid=1000 \
+RUN --mount=type=cache,id=cook-router-cargo-src-release,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
     --mount=type=cache,id=cook-router-target-release,target=/src/target,uid=1000,gid=1000 <<'EOF'
 if cargo tree --locked -p cook-router --edges normal --prefix none | grep -E '^(pprof|backtrace) v'; then
   echo 'Release binaries must exclude CPU profiling and symbol resolution'
@@ -169,7 +188,7 @@ EOF
 FROM build AS perf
 ARG CI_COMMIT=
 RUN --network=none \
-    --mount=type=cache,id=cook-router-cargo-registry,target=/usr/local/cargo/registry,uid=1000,gid=1000 <<'EOF'
+    --mount=type=cache,id=cook-router-cargo-src-release,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 <<'EOF'
 echo "commit ${CI_COMMIT:-local}"
 target=$(rustc -vV | sed -n 's/^host: //p')
 # Every gate runs, so one failure does not hide another's numbers.

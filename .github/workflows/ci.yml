@@ -13,8 +13,9 @@
 # are grouped per pull request (or per ref outside one), and a newer push cancels the older
 # run.
 # Layer caches live in the Actions cache, one scope per stage, written by pushes to master
-# only. Cargo's target directories are BuildKit cache mounts, which the Actions cache does not
-# keep, so each run compiles the workspace again.
+# only. The fetched crates and Go modules are a layer (the Dockerfile's fetch stage), so a run
+# that restores it builds offline. Cargo's target directories are BuildKit cache mounts, which
+# the Actions cache does not keep, so each run compiles the workspace again.
 name: CI
 
 on:
