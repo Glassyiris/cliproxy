@@ -740,7 +740,7 @@ impl Connection {
         if !explicit_model.is_empty() && !use_upstream_ws {
             self.passthrough_model.clear();
         }
-        // ponytail: Go also tracks observed compaction per route/plugin; with only Codex
+        // ponytail: Go also tracks observed compaction per route; with only Codex
         // credentials on this route the pinned/all-Codex rule below gives the same answer.
         let allow_bypass = !native
             && match self.credential(&self.pinned) {
@@ -1123,11 +1123,7 @@ impl Connection {
         };
         // The upgrade's log captures every turn's upstream traffic under its request ID.
         let trace = dispatch::Trace::with_request_id(self.request_id.clone()).with_capture(self.capture.clone());
-        let result = crate::plugins::execution::with_query(
-            &self.query,
-            dispatch::run_with_bootstrap_retries(&self.rt, call, &trace),
-        )
-        .await;
+        let result = dispatch::run_with_bootstrap_retries(&self.rt, call, &trace).await;
         {
             let s = selected.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             ctx.last_attempted.clone_from(&s.last);

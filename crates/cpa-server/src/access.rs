@@ -19,14 +19,8 @@ use crate::runtime::Runtime;
 /// Go `AuthMiddleware` over the config access provider: open without client keys, else
 /// one of them must match. A matched caller carries the provider name Go records.
 pub async fn require_client_key(State(rt): State<Arc<Runtime>>, mut req: Request, next: Next) -> Response {
-    let config = rt.config();
-    let query = req.uri().query().unwrap_or_default();
-    let caller = match authenticate(&config.api_keys, req.headers(), query) {
-        Ok(caller) if config.api_keys.is_empty() => caller,
-        Ok(caller) => Caller {
-            provider: CONFIG_PROVIDER.to_owned(),
-            ..caller
-        },
+    let caller = match client_caller(&rt, req.headers(), req.uri().query().unwrap_or_default()) {
+        Ok(caller) => caller,
         // gin `AbortWithStatusJSON(401, gin.H{"error": msg})`.
         Err(message) => {
             let body = crate::gojson::Obj::new().str("error", message).finish();
@@ -39,6 +33,21 @@ pub async fn require_client_key(State(rt): State<Arc<Runtime>>, mut req: Request
 
 /// Go `configaccess` provider name, recorded on callers a client key admitted.
 pub(crate) const CONFIG_PROVIDER: &str = "config-inline";
+
+/// The caller the configured client keys admit: an anonymous one without keys, else
+/// the matching key with [`CONFIG_PROVIDER`]; the 401 message otherwise.
+pub(crate) fn client_caller(rt: &Runtime, headers: &HeaderMap, query: &str) -> Result<Caller, &'static str> {
+    let config = rt.config();
+    let caller = authenticate(&config.api_keys, headers, query)?;
+    Ok(if config.api_keys.is_empty() {
+        caller
+    } else {
+        Caller {
+            provider: CONFIG_PROVIDER.to_owned(),
+            ..caller
+        }
+    })
+}
 
 pub(crate) fn authenticate(keys: &[String], headers: &HeaderMap, query: &str) -> Result<Caller, &'static str> {
     if keys.is_empty() {

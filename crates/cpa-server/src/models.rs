@@ -3,12 +3,10 @@
 
 use std::sync::Arc;
 
-use axum::Extension;
 use axum::extract::{OriginalUri, Path, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use cpa_common::gostr::GoStr;
-use cpa_core::exec::Caller;
 use serde_json::{Map, Value, json};
 
 use crate::registry::Spec;
@@ -23,16 +21,14 @@ const CLAUDE_MAX_OUTPUT: i64 = 64_000;
 /// everyone else the OpenAI one.
 pub async fn unified(
     State(rt): State<Arc<Runtime>>,
-    Extension(caller): Extension<Caller>,
     uri: OriginalUri,
     headers: HeaderMap,
 ) -> Response {
-    list(rt, caller, uri, headers, None).await
+    list(rt, uri, headers, None).await
 }
 
 async fn list(
     rt: Arc<Runtime>,
-    caller: Caller,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     detail: Option<&str>,
@@ -53,44 +49,72 @@ async fn list(
             .and_then(serde_yaml_ng::Value::as_bool)
             .unwrap_or(false)
     };
-    // Go `WriteModelListResponse`: plugin response interceptors see every list.
-    let intercept = |source: &'static str, response: Response| {
-        let rt = rt.clone();
-        let headers = headers.clone();
-        let caller = caller.clone();
-        async move { crate::plugins::interceptors::model_list(&rt, &caller, source, &headers, response, detail).await }
-    };
     if header("user-agent").is_some_and(|ua| ua.go_lower().contains("grok-shell")) {
         let registry = rt.registry();
         let list = grok_list(registry.available_with(|c, m| rt.suspension(c, m)));
-        return intercept("openai", respond::gin_json(200, list)).await;
+        return answer(respond::gin_json(200, list), detail).await;
     }
     if let Some(version) = query_value(&uri, "client_version") {
-        return intercept("openai", crate::codex_models::response(&rt, &version)).await;
+        return answer(crate::codex_models::response(&rt, &version), detail).await;
     }
     let registry = rt.registry();
     // Model routers (cook-router only) list after the registry's models.
     let routers = crate::model_router::listed(&rt.config());
     let models = registry.available_with(|c, m| rt.suspension(c, m)).chain(&routers);
-    let (source, body) = if anthropic {
-        ("claude", claude_list(models, disable_cloaking()))
+    let body = if anthropic {
+        claude_list(models, disable_cloaking())
     } else {
-        ("openai", openai_list(models))
+        openai_list(models)
     };
-    intercept(source, respond::gin_json(200, body)).await
+    answer(respond::gin_json(200, body), detail).await
+}
+
+/// Go `WriteModelListResponse`: with `detail`, the answer is that model's entry from the
+/// final list.
+async fn answer(response: Response, detail: Option<&str>) -> Response {
+    let Some(id) = detail else {
+        return response;
+    };
+    if response.status() != axum::http::StatusCode::OK {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let Ok(body) = axum::body::to_bytes(body, usize::MAX).await else {
+        return Response::from_parts(parts, axum::body::Body::empty());
+    };
+    let (status, body) = model_detail(body, id);
+    parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+    parts.status = axum::http::StatusCode::from_u16(status).unwrap_or_default();
+    Response::from_parts(parts, axum::body::Body::from(body))
+}
+
+/// The status and body Go writes for a model detail lookup in a final model list.
+fn model_detail(body: bytes::Bytes, id: &str) -> (u16, bytes::Bytes) {
+    match select_detail(&body, id) {
+        Ok(Some(entry)) => (200, body.slice_ref(entry)),
+        Ok(None) => (
+            404,
+            bytes::Bytes::from_static(
+                br#"{"error":{"code":"model_not_found","message":"Model not found","type":"invalid_request_error"}}"#,
+            ),
+        ),
+        Err(()) => (
+            502,
+            bytes::Bytes::from_static(br#"{"error":{"message":"Invalid model catalog","type":"api_error"}}"#),
+        ),
+    }
 }
 
 /// `GET /v1/models/*model`: the entry for `model` from the catalog `GET /v1/models` would
-/// answer this client, after plugin interceptors (Go `ModelDetailIDContextKey`).
+/// answer this client (Go `ModelDetailIDContextKey`).
 pub async fn detail(
     State(rt): State<Arc<Runtime>>,
-    Extension(caller): Extension<Caller>,
     model: Option<Path<String>>,
     uri: OriginalUri,
     headers: HeaderMap,
 ) -> Response {
     let id = model.map(|Path(model)| model).unwrap_or_default();
-    list(rt, caller, uri, headers, Some(&id)).await
+    list(rt, uri, headers, Some(&id)).await
 }
 
 /// Go `WriteModelListResponse` with a detail ID: the first entry of `data`, then
@@ -325,11 +349,7 @@ fn gemini_entry(m: &Spec) -> Map<String, Value> {
 }
 
 /// `GET /v1beta/models` (Go `GeminiModels`).
-pub async fn gemini_list(
-    State(rt): State<Arc<Runtime>>,
-    Extension(caller): Extension<Caller>,
-    headers: HeaderMap,
-) -> Response {
+pub async fn gemini_list(State(rt): State<Arc<Runtime>>) -> Response {
     let registry = rt.registry();
     let models: Vec<Value> = registry
         .available_with(|c, m| rt.suspension(c, m))
@@ -353,8 +373,7 @@ pub async fn gemini_list(
             Value::Object(entry)
         })
         .collect();
-    let response = respond::gin_json(200, gojson::sorted(&json!({ "models": models })));
-    crate::plugins::interceptors::model_list(&rt, &caller, "gemini", &headers, response, None).await
+    respond::gin_json(200, gojson::sorted(&json!({ "models": models })))
 }
 
 /// `GET /v1beta/models/*action` (Go `GeminiGetHandler`).
