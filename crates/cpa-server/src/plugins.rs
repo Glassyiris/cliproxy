@@ -146,7 +146,7 @@ pub async fn reload_plugin_auth_files(rt: &Arc<Runtime>) {
         }
     }
     let end = EndBootstrap(rt.clone());
-    if rt.store().is_home() || !credentials::plugin_auth_parser_active() {
+    if !credentials::plugin_auth_parser_active() {
         return;
     }
     let rt = rt.clone();
@@ -326,17 +326,6 @@ async fn native_executor_providers(rt: &Runtime) -> HashSet<String> {
         }
         native.insert(key);
     }
-    if rt.remote_dispatch().is_some() {
-        // Go `baselineExecutorAuths`: the built-in providers but `kimi.com`, plus the
-        // OpenAI-compatible executor.
-        native.extend(
-            BUILTIN
-                .iter()
-                .filter(|p| **p != "kimi.com")
-                .chain(&["openai-compatibility"])
-                .map(|p| (*p).to_owned()),
-        );
-    }
     native
 }
 
@@ -387,7 +376,7 @@ pub(crate) fn scheduler_request(
     admit: &crate::runtime::Admit<'_>,
 ) -> Result<Option<cpa_plugin::api::SchedulerPickRequest>, crate::runtime::AcquireError> {
     let host = rt.plugins();
-    if rt.remote_dispatch().is_some() || !host.has_scheduler() {
+    if !host.has_scheduler() {
         return Ok(None);
     }
     let across = host.scheduler_wants_across_priorities();

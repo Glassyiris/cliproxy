@@ -108,18 +108,6 @@
               "Type": "",
               "Value": "3"
             },
-            "home-disable-cluster-discovery": {
-              "Name": "home-disable-cluster-discovery",
-              "Set": false,
-              "Type": "",
-              "Value": "false"
-            },
-            "home-jwt": {
-              "Name": "home-jwt",
-              "Set": false,
-              "Type": "",
-              "Value": ""
-            },
             "kimi-ai-login": {
               "Name": "kimi-ai-login",
               "Set": false,
@@ -378,18 +366,6 @@
               "Set": false,
               "Type": "",
               "Value": "3"
-            },
-            "home-disable-cluster-discovery": {
-              "Name": "home-disable-cluster-discovery",
-              "Set": false,
-              "Type": "",
-              "Value": "false"
-            },
-            "home-jwt": {
-              "Name": "home-jwt",
-              "Set": false,
-              "Type": "",
-              "Value": ""
             },
             "kimi-ai-login": {
               "Name": "kimi-ai-login",
@@ -661,18 +637,6 @@
               "Set": false,
               "Type": "",
               "Value": "3"
-            },
-            "home-disable-cluster-discovery": {
-              "Name": "home-disable-cluster-discovery",
-              "Set": false,
-              "Type": "",
-              "Value": "false"
-            },
-            "home-jwt": {
-              "Name": "home-jwt",
-              "Set": false,
-              "Type": "",
-              "Value": ""
             },
             "kimi-ai-login": {
               "Name": "kimi-ai-login",
@@ -1013,18 +977,6 @@
               "Type": "",
               "Value": "3"
             },
-            "home-disable-cluster-discovery": {
-              "Name": "home-disable-cluster-discovery",
-              "Set": false,
-              "Type": "",
-              "Value": "false"
-            },
-            "home-jwt": {
-              "Name": "home-jwt",
-              "Set": false,
-              "Type": "",
-              "Value": ""
-            },
             "kimi-ai-login": {
               "Name": "kimi-ai-login",
               "Set": false,
@@ -1269,18 +1221,6 @@
               "Type": "",
               "Value": "3"
             },
-            "home-disable-cluster-discovery": {
-              "Name": "home-disable-cluster-discovery",
-              "Set": false,
-              "Type": "",
-              "Value": "false"
-            },
-            "home-jwt": {
-              "Name": "home-jwt",
-              "Set": false,
-              "Type": "",
-              "Value": ""
-            },
             "kimi-ai-login": {
               "Name": "kimi-ai-login",
               "Set": false,
@@ -1523,18 +1463,6 @@
               "Type": "",
               "Value": "3"
             },
-            "home-disable-cluster-discovery": {
-              "Name": "home-disable-cluster-discovery",
-              "Set": false,
-              "Type": "",
-              "Value": "false"
-            },
-            "home-jwt": {
-              "Name": "home-jwt",
-              "Set": false,
-              "Type": "",
-              "Value": ""
-            },
             "kimi-ai-login": {
               "Name": "kimi-ai-login",
               "Set": false,
@@ -1775,18 +1703,6 @@
               "Set": false,
               "Type": "",
               "Value": "3"
-            },
-            "home-disable-cluster-discovery": {
-              "Name": "home-disable-cluster-discovery",
-              "Set": false,
-              "Type": "",
-              "Value": "false"
-            },
-            "home-jwt": {
-              "Name": "home-jwt",
-              "Set": false,
-              "Type": "",
-              "Value": ""
             },
             "kimi-ai-login": {
               "Name": "kimi-ai-login",

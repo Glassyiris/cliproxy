@@ -6,9 +6,6 @@
 //! agent or session), behind a marker that fingerprints the request input and the
 //! assistant message, and re-inserts them before the matching turn of later requests.
 //! An upstream `thinking_signature_invalid` rejection clears the entry.
-//!
-//! In Home mode the entry lives in Home KV (`cpa:codex:reasoning-replay:*`) as Go's
-//! `json.Marshal([][]byte)`, appended by compare-and-swap.
 
 use cpa_core::gostr::GoStr;
 use std::collections::{HashMap, HashSet};
@@ -49,7 +46,7 @@ struct Entry {
     touched: Instant,
 }
 
-/// The in-process replay store (Go's non-Home mode).
+/// The in-process replay store.
 // ponytail: expired entries are dropped when read and evicted at capacity; Go also purges
 // them on a timer.
 #[derive(Default)]
@@ -119,93 +116,6 @@ impl Cache {
 fn normalize_turn(items: &[Vec<u8>]) -> Option<Vec<Vec<u8>>> {
     let normalized = trim(items.iter().filter_map(|i| normalize(i)).collect());
     (!normalized.is_empty()).then_some(normalized)
-}
-
-/// `codexReasoningReplayKVKey`.
-fn kv_key(model: &str, session: &str) -> String {
-    format!(
-        "cpa:codex:reasoning-replay:{}:{}",
-        cpa_home::kv::hash_key_part(model.trim()),
-        cpa_home::kv::hash_key_part(session.trim())
-    )
-}
-
-/// Go `json.Marshal([][]byte)` / `json.Unmarshal`: base64 strings.
-fn encode_items(items: &[Vec<u8>]) -> Vec<u8> {
-    use base64::Engine;
-    let encoded: Vec<String> = items
-        .iter()
-        .map(|item| base64::engine::general_purpose::STANDARD.encode(item))
-        .collect();
-    serde_json::to_vec(&encoded).unwrap_or_default()
-}
-
-fn decode_items(raw: &[u8]) -> Result<Vec<Vec<u8>>, String> {
-    cpa_home::kv::decode_byte_slices(raw)
-}
-
-/// Go `GetCodexReasoningReplayItemsRequired` in Home mode; a failed TTL renewal is an
-/// error, as in Go.
-async fn home_get(client: &cpa_home::Client, model: &str, session: &str) -> Result<Option<Vec<Vec<u8>>>, String> {
-    if cache_key(model, session).is_none() {
-        return Ok(None);
-    }
-    let key = kv_key(model, session);
-    let Some(raw) = client.kv_get(&key).await.map_err(|e| e.to_string())? else {
-        return Ok(None);
-    };
-    let items = decode_items(&raw)?;
-    client.kv_expire(&key, TTL).await.map_err(|e| e.to_string())?;
-    Ok(Some(items))
-}
-
-/// Go `AppendCodexReasoningReplayItemsBestEffort` in Home mode: read, append, and
-/// compare-and-swap, up to 32 attempts against racing writers.
-async fn home_append(client: &cpa_home::Client, model: &str, session: &str, items: &[Vec<u8>]) -> bool {
-    if cache_key(model, session).is_none() {
-        return false;
-    }
-    let Some(normalized) = normalize_turn(items) else {
-        return false;
-    };
-    let key = kv_key(model, session);
-    let failed = |error: String| {
-        tracing::error!("home kv best-effort codex reasoning replay append failed prefix=cpa:codex:*: {error}");
-        false
-    };
-    for _ in 0..32 {
-        let existing = match client.kv_get(&key).await {
-            Ok(existing) => existing,
-            Err(error) => return failed(error.to_string()),
-        };
-        let current = match existing.as_deref().map(decode_items).transpose() {
-            Ok(current) => current.unwrap_or_default(),
-            Err(error) => return failed(error),
-        };
-        let combined = encode_items(&append_turn(current, normalized.clone()));
-        match client
-            .kv_compare_and_swap(&key, existing.as_deref(), &combined, TTL)
-            .await
-        {
-            Ok(true) => return true,
-            Ok(false) => {}
-            Err(error) => return failed(error.to_string()),
-        }
-    }
-    tracing::warn!("home kv best-effort codex reasoning replay append exhausted compare-and-swap attempts");
-    false
-}
-
-/// Go `DeleteCodexReasoningReplayItemRequired` in Home mode.
-async fn home_delete(client: &cpa_home::Client, model: &str, session: &str) -> Result<(), String> {
-    if cache_key(model, session).is_none() {
-        return Ok(());
-    }
-    client
-        .kv_del(&[&kv_key(model, session)])
-        .await
-        .map(drop)
-        .map_err(|e| e.to_string())
 }
 
 /// `appendCodexReasoningReplayTurn`: a turn whose marker id is already stored is not
@@ -336,8 +246,6 @@ pub(crate) struct Scope {
     model: String,
     session: String,
     request_fingerprint: String,
-    /// Home writes the response waits for.
-    pub(crate) writes: crate::home_replay::Writes,
 }
 
 impl Scope {
@@ -360,7 +268,6 @@ fn scope(req: &ExecRequest, body: &[u8]) -> Scope {
         model,
         session: session_key(req, body),
         request_fingerprint: prefix_fingerprint(&items, items.len()),
-        writes: Default::default(),
     }
 }
 
@@ -381,18 +288,12 @@ fn session_key(req: &ExecRequest, body: &[u8]) -> String {
 
 /// `applyCodexReasoningReplayCacheRequired`: cached turns inserted into the upstream
 /// body. The scope is returned for caching and clearing.
-pub(crate) async fn apply(cache: &Cache, req: &ExecRequest, body: String) -> (String, Scope) {
+pub(crate) fn apply(cache: &Cache, req: &ExecRequest, body: String) -> (String, Scope) {
     let scope = scope(req, body.as_bytes());
     if !scope.valid() {
         return (body, scope);
     }
-    // Go's HTTP executor ignores a failed read (`applyCodexReasoningReplayCache`).
-    let items = match cpa_home::kv::current_client() {
-        Ok(None) => cache.get(&scope.model, &scope.session),
-        Ok(Some(client)) => home_get(&client, &scope.model, &scope.session).await.ok().flatten(),
-        Err(_) => None,
-    };
-    let Some(items) = items else {
+    let Some(items) = cache.get(&scope.model, &scope.session) else {
         return (body, scope);
     };
     match insert_turns(body.as_bytes(), &items).and_then(|b| String::from_utf8(b).ok()) {
@@ -460,20 +361,7 @@ pub(crate) fn cache_completed(cache: &Cache, scope: &Scope, completed: &[u8]) {
     let mut items = Vec::with_capacity(replay.len() + 1);
     items.push(marker);
     items.extend(replay);
-    match cpa_home::kv::current_client() {
-        Ok(None) => {
-            cache.append(&scope.model, &scope.session, &items);
-        }
-        Ok(Some(client)) => {
-            let (model, session) = (scope.model.clone(), scope.session.clone());
-            scope.writes.spawn(async move {
-                home_append(&client, &model, &session, &items).await;
-            });
-        }
-        Err(error) => {
-            tracing::error!("home kv best-effort codex reasoning replay append failed prefix=cpa:codex:*: {error}");
-        }
-    }
+    cache.append(&scope.model, &scope.session, &items);
 }
 
 /// `clearCodexReasoningReplayOnInvalidSignature`.
@@ -482,18 +370,7 @@ pub(crate) fn clear_on_invalid_signature(cache: &Cache, scope: &Scope, status: u
         && crate::codex_response::classification(status, &String::from_utf8_lossy(body))
             .is_some_and(|(code, _)| code == "thinking_signature_invalid")
     {
-        match cpa_home::kv::current_client() {
-            Ok(None) => cache.delete(&scope.model, &scope.session),
-            Ok(Some(client)) => {
-                let (model, session) = (scope.model.clone(), scope.session.clone());
-                scope.writes.spawn(async move {
-                    if let Err(error) = home_delete(&client, &model, &session).await {
-                        tracing::warn!("codex reasoning replay cache delete failed: {error}");
-                    }
-                });
-            }
-            Err(error) => tracing::warn!("codex reasoning replay cache delete failed: {error}"),
-        }
+        cache.delete(&scope.model, &scope.session);
     }
 }
 

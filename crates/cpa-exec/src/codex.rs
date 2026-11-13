@@ -348,7 +348,7 @@ impl CodexExecutor {
             finalize,
             ..
         } = request::shape(&req, view, settings, Call::Stream)?;
-        let (body, scope) = crate::codex_replay::apply(&self.replay, &req, body).await;
+        let (body, scope) = crate::codex_replay::apply(&self.replay, &req, body);
         let (body, cache) = request::prompt_cache(&req, body, ws_session, false);
         let body = finalize.apply(&req, settings, request::sanitize_input_ids(body));
         report_request(&req, Format::Codex, &body);
@@ -356,9 +356,7 @@ impl CodexExecutor {
         let url = format!("{}/responses", view.base_url);
         let started = Instant::now();
         let wire = Wire::new(req.capture(), view.credential);
-        // The response waits for the Home replay writes it caused (Go writes inline).
-        let writes = scope.writes.clone();
-        let sent = self
+        let res = self
             .send(
                 view,
                 settings,
@@ -369,14 +367,7 @@ impl CodexExecutor {
                 &wire,
                 ErrorBody::Strict,
             )
-            .await;
-        let res = match sent {
-            Ok(res) => res,
-            Err(error) => {
-                writes.settle().await;
-                return Err(error);
-            }
-        };
+            .await?;
         let upstream = events(res.body);
         let processor = Processor::new(request::is_native(&req), settings.model_level_cooling)
             .grok_keepalive(&req.headers)
@@ -386,10 +377,7 @@ impl CodexExecutor {
             .capturing(wire);
         let stream = if settings.bootstrap_buffering {
             match response::bootstrap(upstream, processor, settings.bootstrap_timeout, started).await {
-                Bootstrap::Reject(error) => {
-                    writes.settle().await;
-                    return Err(error);
-                }
+                Bootstrap::Reject(error) => return Err(error),
                 Bootstrap::Stream(stream) => stream,
             }
         } else {
@@ -398,7 +386,7 @@ impl CodexExecutor {
         Ok(ExecResponse {
             status: res.status,
             headers: res.headers,
-            body: ResponseBody::Stream(writes.gate(client_stream(&req, &body, stream))),
+            body: ResponseBody::Stream(client_stream(&req, &body, stream)),
         })
     }
 
@@ -415,16 +403,14 @@ impl CodexExecutor {
             finalize,
             ..
         } = request::shape(&req, view, settings, Call::NonStream)?;
-        let (body, scope) = crate::codex_replay::apply(&self.replay, &req, body).await;
+        let (body, scope) = crate::codex_replay::apply(&self.replay, &req, body);
         let (body, cache) = request::prompt_cache(&req, body, None, false);
         let body = finalize.apply(&req, settings, request::sanitize_input_ids(body));
         report_request(&req, Format::Codex, &body);
         let headers = request::http_headers(view, settings, &req.headers, &body, &model, cache.as_deref(), true);
         let url = format!("{}/responses", view.base_url);
         let wire = Wire::new(req.capture(), view.credential);
-        // The response waits for the Home replay writes it caused (Go writes inline).
-        let writes = scope.writes.clone();
-        let result = async {
+        async {
             let res = self
                 .open(
                     view,
@@ -468,9 +454,7 @@ impl CodexExecutor {
             }
             Err(response::request_scoped(408, response::INCOMPLETE_MESSAGE))
         }
-        .await;
-        writes.settle().await;
-        result
+        .await
     }
 
     async fn compact(&self, view: &View<'_>, settings: &Settings, req: ExecRequest) -> Result<ExecResponse, ExecError> {
@@ -530,12 +514,7 @@ impl CodexExecutor {
         })
     }
 
-    /// The URL an Alpha Search on `credential` posts to; `None` for an API key without
-    /// a base URL.
-    pub fn alpha_search_url(&self, credential: &Credential, cfg: &Config) -> Option<String> {
-        self.alpha_search_url_for(&View::for_request(credential, cfg))
-    }
-
+    /// The URL an Alpha Search posts to; `None` for an API key without a base URL.
     fn alpha_search_url_for(&self, view: &View<'_>) -> Option<String> {
         if !view.api_key {
             return Some(format!("{}/alpha/search", self.alpha_base_url));

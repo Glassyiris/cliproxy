@@ -473,14 +473,6 @@ struct CredentialDocument {
 /// One authorized immutable source view, including documents not yet parsed.
 pub(crate) async fn credential_sources(State(state): State<Arc<Management>>) -> Result<Response, AdminError> {
     blocking(state, |state| {
-        if state.rt.store().is_home() {
-            return Err(AdminError::new(
-                state,
-                404,
-                "not_available",
-                "credentials belong to the remote authority",
-            ));
-        }
         let db = state.rt.store().credential_backend();
         let root = db.auth_dir();
         let documents = db
@@ -516,7 +508,7 @@ pub(crate) async fn credential_batch(
 ) -> Result<Response, AdminError> {
     let batch: CredentialBatch = body.json(&state, None)?;
     let invalid = || AdminError::new(&state, 400, "invalid_credential_batch", "invalid credential batch");
-    if (batch.documents.is_empty() && batch.deletions.is_empty()) || state.rt.store().is_home() {
+    if batch.documents.is_empty() && batch.deletions.is_empty() {
         return Err(invalid());
     }
     let db = state.rt.store().credential_backend();

@@ -47,8 +47,8 @@ const BUILD_DATE: &str = match option_env!("CPA_BUILD_DATE") {
 const SUPPORT_PLUGIN: &str = cpa_plugin::SUPPORT_PLUGIN;
 
 const EXPOSED_HEADERS: &str = "X-CPA-TRACE-ID, X-CPA-VERSION, X-CPA-COMMIT, X-CPA-BUILD-DATE, \
-X-CPA-SUPPORT-PLUGIN, X-CPA-HOME-VERSION, X-CPA-HOME-BUILD-DATE, X-SERVER-VERSION, \
-X-SERVER-BUILD-DATE, Location, Retry-After, ETag, X-Request-Id, OpenAI-Request-Id";
+X-CPA-SUPPORT-PLUGIN, X-SERVER-VERSION, X-SERVER-BUILD-DATE, Location, Retry-After, ETag, \
+X-Request-Id, OpenAI-Request-Id";
 
 #[derive(Clone, Copy)]
 pub(super) struct AdminResponse;

@@ -130,9 +130,6 @@ pub struct SessionTurn {
     /// Called with each credential right before it is attempted
     /// (`WithSelectedAuthIDCallback`); the last call before success is the serving one.
     pub on_selected: Option<OnSelected>,
-    /// The Home pick the connection's pooled upstream socket keeps between turns; none
-    /// keeps every Home pick to its turn.
-    pub home: Option<Arc<crate::home_session::SessionHome>>,
 }
 
 /// The [`SessionTurn::on_selected`] callback.
@@ -182,9 +179,6 @@ pub enum Done {
 pub enum Failure {
     /// An executor or upstream error, rendered by the route's error shape.
     Exec(ExecError),
-    /// A trusted control-plane rejection (Go `HomeConcurrencyBusyError`): rendered like
-    /// `Exec`, with the `Retry-After` seconds it may expose.
-    Remote { error: ExecError, retry_after: Option<u64> },
     /// No provider registered the model (Go `getRequestDetails`).
     UnknownModel(String),
     /// An image-only model on a non-image route.
@@ -211,7 +205,7 @@ pub enum Failure {
 impl Failure {
     pub fn status(&self) -> u16 {
         match self {
-            Failure::Exec(e) | Failure::Remote { error: e, .. } => classify::response_status(e),
+            Failure::Exec(e) => classify::response_status(e),
             Failure::UnknownModel(_) | Failure::SpeechOnly(_) => 400,
             Failure::ImageOnly(_) | Failure::Unavailable { .. } => 503,
             Failure::Cooldown { .. } => 429,
@@ -221,7 +215,7 @@ impl Failure {
     /// Go `err.Error()`: what route error writers render.
     pub fn text(&self) -> String {
         match self {
-            Failure::Exec(e) | Failure::Remote { error: e, .. } => classify::error_text(e),
+            Failure::Exec(e) => classify::error_text(e),
             Failure::UnknownModel(model) => {
                 let message = gojson::sjson_string(&format!("unknown provider for model {model}"));
                 format!(
@@ -281,7 +275,6 @@ impl Failure {
     pub fn retry_after(&self) -> Option<u64> {
         match self {
             Failure::Cooldown { wait, .. } => Some(ceil_seconds(*wait)),
-            Failure::Remote { retry_after, .. } => *retry_after,
             Failure::Unavailable {
                 retry_after: Some(wait),
                 ..
@@ -292,9 +285,8 @@ impl Failure {
 
     /// An error the route returns untouched (claude_executor_fast_error.go).
     pub fn direct(&self) -> Option<&ExecError> {
-        // Go finds the direct response through any wrapper, a Home round marker included.
         match self {
-            Failure::Exec(e) | Failure::Remote { error: e, .. } if e.direct => Some(e),
+            Failure::Exec(e) if e.direct => Some(e),
             _ => None,
         }
     }
@@ -441,9 +433,7 @@ fn route(
         Some(i) if model.ends_with(')') => &model[..i],
         _ => model,
     };
-    // Go Home mode: no `auto` resolution; Home routes the model as sent.
-    let remote = rt.remote_dispatch().is_some();
-    let resolved = if base == "auto" && !remote {
+    let resolved = if base == "auto" {
         let first = registry
             .resolve_auto(|client, model| rt.suspension(client, model))
             .unwrap_or_else(|| "auto".into());
@@ -453,9 +443,6 @@ fn route(
     };
     let base = gojson::trim(canonical_model_raw(&resolved)).to_owned();
     check_route_only(&base, call)?;
-    if remote {
-        return Ok((vec!["home".to_owned()], resolved));
-    }
     let mut providers = registry.providers(&base);
     if providers.is_empty() && base != resolved {
         providers = registry.providers(&resolved);
@@ -511,8 +498,7 @@ where
         nonstream_keepalive(&call, &rt.config())
     };
     let trace = Arc::new(Trace::with_request_id(crate::observability::current_request_id()));
-    // A keep-alive moves `run` into the response body, past the request's gate.
-    let mut run = Box::pin(crate::remote::keep_query_credential({
+    let mut run = Box::pin({
         let (rt, trace) = (rt.clone(), trace.clone());
         async move {
             let result = run_with_bootstrap_retries(&rt, call, &trace).await;
@@ -535,7 +521,7 @@ where
             };
             (result, upstream)
         }
-    }));
+    });
     // Upstream headers and the trace ID go on a rendered response; once a keep-alive
     // committed the headers they are lost, as in Go.
     let traced = {
@@ -775,8 +761,7 @@ async fn retry_bootstrap(
     scope: Option<Arc<crate::provider_policy::Providers>>,
     hooks: Option<&Arc<crate::plugins::interceptors::Hooks>>,
 ) -> Result<Done, Failure> {
-    // Go `maxBootstrapRetries = 0` while Home is enabled: Home's own rounds decide.
-    let max = if call.stream && rt.remote_dispatch().is_none() {
+    let max = if call.stream {
         bootstrap_retries(&rt.config())
     } else {
         0
@@ -1071,11 +1056,8 @@ async fn run_routed(
         &call.caller.principal,
     );
     // Go's usage reporter: one record per Generate attempt while the queue accepts.
-    // Home count-tokens attempts record only their upstream 401s (`reportHomeUnauthorized`).
-    let home_count = call.operation == Operation::CountTokens && rt.remote_dispatch().is_some();
-    let facts = ((call.operation == Operation::Generate
+    let usage = (call.operation == Operation::Generate
         && (rt.usage_queue().accepts() || rt.plugins().has_usage_plugins()))
-        || (home_count && rt.usage_queue().accepts()))
     .then(|| {
         Arc::new(crate::usage_record::Facts::new(
             usage_client(&cfg, &call, trace, &session),
@@ -1087,11 +1069,9 @@ async fn run_routed(
             trace,
         ))
     });
-    let (usage, unauthorized) = if home_count { (None, facts) } else { (facts, None) };
     // `WithPinnedAuthID`: every other credential is excluded in every round.
-    // A remote dispatcher receives the pinned ID itself.
     let mut pinned_exclusion: Vec<String> = match call.pinned() {
-        Some(pinned) if !pinned.is_empty() && rt.remote_dispatch().is_none() => rt
+        Some(pinned) if !pinned.is_empty() => rt
             .store()
             .snapshot()
             .iter()
@@ -1101,7 +1081,6 @@ async fn run_routed(
         _ => Vec::new(),
     };
     // `WithDisallowFreeAuth`: free-plan Codex credentials are ineligible in every round.
-    // ponytail: Home mode selects remotely and does not see this flag.
     if call.media.as_ref().is_some_and(|m| m.disallow_free) {
         for credential in rt.store().snapshot() {
             let free = credential.provider.trim().eq_ignore_ascii_case("codex")
@@ -1154,22 +1133,6 @@ async fn run_routed(
         caller: call.caller.clone(),
     };
     let compact = call.alt.as_deref() == Some("responses/compact");
-    if let Some(remote) = rt.remote_dispatch() {
-        let context = RemoteContext {
-            rt,
-            cfg: &cfg,
-            policy: &policy,
-            call: &call,
-            request: &request,
-            usage: usage.as_ref(),
-            unauthorized: unauthorized.as_ref(),
-            aliases: &aliases,
-            compact,
-            trace,
-            user_key: Default::default(),
-        };
-        return run_remote(context, remote, selection).await;
-    }
     // Go `pickLCP`: with session affinity, an authenticated request without an explicit
     // session binds by its conversation prefix.
     if policy.session_affinity && !session.explicit {
@@ -1258,7 +1221,6 @@ async fn run_routed(
                 alias: &alias,
                 compact,
                 keep_model: call.selection_model.is_some(),
-                unauthorized: None,
             };
             match attempt(rt, &cfg, &policy, &call, &request, usage.as_ref(), lease, target, hooks).await {
                 Attempt::Done(done) => return Ok(done),
@@ -1348,708 +1310,6 @@ async fn run_routed(
         }
         selection.retry_round += 1;
         selection.exclude.clone_from(&pinned_exclusion);
-    }
-}
-
-/// What a remote round needs from [`run`].
-struct RemoteContext<'a> {
-    rt: &'a Arc<Runtime>,
-    cfg: &'a Config,
-    policy: &'a Arc<crate::scheduler::Policy>,
-    call: &'a Call,
-    request: &'a ExecRequest,
-    usage: Option<&'a Arc<crate::usage_record::Facts>>,
-    /// Home count-tokens requests: the facts their upstream 401s are recorded with.
-    unauthorized: Option<&'a Arc<crate::usage_record::Facts>>,
-    aliases: &'a std::collections::HashMap<String, Vec<cpa_core::registry::dynamic::OAuthAlias>>,
-    compact: bool,
-    trace: &'a Trace,
-    /// The client key Home authenticated on the latest pick that sent one (Go
-    /// `setHomeUserAPIKeyOnGinContext`, which keeps it for the rest of the request).
-    user_key: std::sync::Mutex<String>,
-}
-
-/// Go `homeRetryRoundExhaustedError`: the round ended; its timing decides the next.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Exhausted {
-    retry_after: Option<Duration>,
-    retry_now: bool,
-}
-
-/// One failure in Home mode with what Go's Home retry decisions read from it.
-#[derive(Debug, Clone)]
-struct RemoteFault {
-    failure: Failure,
-    bootstrap: bool,
-    /// The failure reached upstream (Go `hasUpstreamExecutionAttempt`).
-    upstream: bool,
-    /// A matched request-scoped stop: ends the request at once.
-    stop: bool,
-    /// Go `isRequestInvalidError`: never starts another round.
-    invalid: bool,
-    kind: crate::remote::RemoteErrorKind,
-    exhausted: Option<Exhausted>,
-}
-
-impl RemoteFault {
-    fn from_pick(error: crate::remote::RemoteError) -> Self {
-        Self {
-            failure: Failure::Exec(error.error),
-            bootstrap: false,
-            upstream: false,
-            stop: false,
-            invalid: false,
-            kind: error.kind,
-            exhausted: None,
-        }
-    }
-
-    /// `stop` is [`attempt`]'s verdict (a matched stop rule, or an unmatched
-    /// request-invalid error); a matched `continue` comes back as `Next`.
-    fn from_attempt(fault: Fault, stop: bool) -> Self {
-        Self {
-            upstream: classify::upstream_attempted(&fault.error),
-            invalid: classify::is_request_invalid(&fault.error),
-            failure: Failure::Exec(fault.error),
-            bootstrap: fault.bootstrap.is_some(),
-            stop,
-            kind: crate::remote::RemoteErrorKind::Plain,
-            exhausted: None,
-        }
-    }
-
-    fn local(failure: Failure) -> Self {
-        Self {
-            failure,
-            bootstrap: false,
-            upstream: false,
-            stop: false,
-            invalid: false,
-            kind: crate::remote::RemoteErrorKind::Plain,
-            exhausted: None,
-        }
-    }
-
-    /// Go `SafeResponseHeaders`: busy, then the round marker, then a Home cooldown.
-    fn safe_retry_after(&self) -> Option<u64> {
-        let seconds = |d: Duration| (!d.is_zero()).then(|| ceil_seconds(d).max(1));
-        match (&self.kind, self.exhausted) {
-            (crate::remote::RemoteErrorKind::Busy { header }, _) => *header,
-            (_, Some(exhausted)) => exhausted.retry_after.and_then(seconds),
-            (crate::remote::RemoteErrorKind::Cooldown { retry_after, .. }, None) => retry_after.and_then(seconds),
-            _ => None,
-        }
-    }
-
-    /// Go `markHomeRetryRoundExhausted`.
-    fn exhausted(mut self, retry_after: Option<Duration>, retry_now: bool) -> Self {
-        self.exhausted = Some(Exhausted { retry_after, retry_now });
-        self
-    }
-
-    /// Go `retryAfterFromError`: the round marker's timing, else the error's own.
-    fn retry_after(&self) -> Option<Duration> {
-        if let Some(exhausted) = self.exhausted {
-            return exhausted.retry_after;
-        }
-        match (&self.kind, &self.failure) {
-            (crate::remote::RemoteErrorKind::Cooldown { retry_after, .. }, _) => *retry_after,
-            (_, Failure::Exec(e)) => e.retry_after,
-            _ => None,
-        }
-    }
-
-    /// Go's status for retry decisions: transport faults have none.
-    fn status(&self) -> u16 {
-        match &self.failure {
-            Failure::Exec(e) | Failure::Remote { error: e, .. } => classify::go_status(e),
-            other => other.status(),
-        }
-    }
-
-    /// Go `isRequestRetryRoundError`.
-    fn retry_round(&self) -> bool {
-        match &self.failure {
-            Failure::Exec(e) | Failure::Remote { error: e, .. } => classify::is_retry_round(e),
-            other => matches!(other.status(), 403 | 408 | 429 | 500 | 502 | 503 | 504),
-        }
-    }
-
-    fn into_run_error(self) -> RunError {
-        let retry_after = self.safe_retry_after();
-        let failure = match (retry_after, self.failure) {
-            (Some(_), Failure::Exec(error)) => Failure::Remote { error, retry_after },
-            (_, failure) => failure,
-        };
-        RunError {
-            failure,
-            bootstrap: self.bootstrap,
-        }
-    }
-}
-
-/// Go `preferredExecutionAttemptError`: the latest upstream failure, under the current
-/// round marker when the fallback ended a round.
-fn preferred(fallback: RemoteFault, upstream: Option<&RemoteFault>) -> RemoteFault {
-    let Some(upstream) = upstream else {
-        return fallback;
-    };
-    let mut preferred = upstream.clone();
-    preferred.exhausted = fallback.exhausted;
-    preferred.upstream = true;
-    preferred
-}
-
-/// Go `homeRetryRoundTiming`: the shortest positive retry-after seen in a round; zero
-/// makes the next round immediate and a negative one invalid.
-#[derive(Default)]
-struct RoundTiming {
-    retry_after: Option<Duration>,
-    immediate: bool,
-}
-
-impl RoundTiming {
-    fn observe(&mut self, fault: &RemoteFault) {
-        if self.immediate {
-            return;
-        }
-        match fault.retry_after() {
-            Some(d) if d.is_zero() => {
-                self.retry_after = None;
-                self.immediate = true;
-            }
-            Some(d) if self.retry_after.is_none_or(|current| d < current) => self.retry_after = Some(d),
-            _ => {}
-        }
-    }
-
-    fn retry_after(&self) -> Option<Duration> {
-        if self.immediate { None } else { self.retry_after }
-    }
-}
-
-/// Go `executeHome`: rounds of [`remote_round`], retried within Home's request-retry
-/// limit and the configured maximum wait.
-async fn run_remote(
-    cx: RemoteContext<'_>,
-    remote: Arc<dyn crate::remote::RemoteDispatch>,
-    base: Selection,
-) -> Result<Done, RunError> {
-    let pinned = cx.call.pinned().is_some_and(|p| !p.trim().is_empty());
-    let max_wait = cx.policy.max_retry_interval;
-    let default_retry = cx.policy.request_retry as i64;
-    let allowed = |attempt: i64, limit: i64| home_retry_allowed(default_retry, attempt, limit);
-    let mut limit: i64 = -1;
-    let mut attempt: i64 = 0;
-    let (mut pending, mut waited) = (false, false);
-    let mut preferred_upstream: Option<RemoteFault> = None;
-    loop {
-        let error = match remote_round(&cx, remote.as_ref(), &base, attempt, &mut limit, pinned).await {
-            Ok(done) => return Ok(done),
-            Err(error) => *error,
-        };
-        if error.upstream {
-            preferred_upstream = Some(error.clone());
-        }
-        if pending {
-            // Go `pendingHomeRetryRoundDelay`: one wait for a round Home put on cooldown.
-            if error.exhausted.is_none()
-                && let crate::remote::RemoteErrorKind::Cooldown {
-                    retry_after,
-                    request_retry,
-                } = error.kind
-            {
-                if !pinned && let Some(remote_limit) = request_retry {
-                    limit = remote_limit;
-                }
-                if let Some(wait) = retry_after.filter(|w| !w.is_zero() && !max_wait.is_zero() && *w <= max_wait)
-                    && allowed(attempt - 1, limit)
-                {
-                    if waited {
-                        return Err(error.into_run_error());
-                    }
-                    tokio::time::sleep(wait).await;
-                    waited = true;
-                    continue;
-                }
-            }
-        }
-        // Go clears `retryRoundPending` here; every path below sets it again or returns.
-        waited = false;
-        if error.stop {
-            return Err(error.into_run_error());
-        }
-        match remote_retry_wait(&error, attempt, max_wait, limit, pinned, &allowed) {
-            Some(wait) => {
-                if !wait.is_zero() {
-                    tokio::time::sleep(wait).await;
-                }
-                attempt += 1;
-                pending = true;
-            }
-            None => {
-                let error = match (&preferred_upstream, error.exhausted) {
-                    (Some(upstream), Some(_)) => preferred(error, Some(upstream)),
-                    _ => error,
-                };
-                return Err(error.into_run_error());
-            }
-        }
-    }
-}
-
-/// Go `homeRetryAllowed`: `attempt` is below the round limit, Home's when one was
-/// observed (`limit >= 0`), else the configured request-retry.
-fn home_retry_allowed(default_retry: i64, attempt: i64, limit: i64) -> bool {
-    let limit = if limit < 0 { default_retry.max(0) } else { limit };
-    attempt >= 0 && attempt < limit
-}
-
-/// Go `shouldRetryAfterErrorWithHomeRetryLimit` in Home mode.
-fn remote_retry_wait(
-    error: &RemoteFault,
-    attempt: i64,
-    max_wait: Duration,
-    mut limit: i64,
-    pinned: bool,
-    allowed: &dyn Fn(i64, i64) -> bool,
-) -> Option<Duration> {
-    if matches!(error.kind, crate::remote::RemoteErrorKind::Busy { .. })
-        || error.status() == 200
-        || error.invalid
-        || error.stop
-    {
-        return None;
-    }
-    if let crate::remote::RemoteErrorKind::Cooldown {
-        request_retry: Some(remote_limit),
-        ..
-    } = error.kind
-        && !pinned
-    {
-        limit = remote_limit;
-    }
-    let beyond = |wait: Duration| !wait.is_zero() && (max_wait.is_zero() || wait > max_wait);
-    if let Some(exhausted) = error.exhausted {
-        if !error.retry_round() || !allowed(attempt, limit) {
-            return None;
-        }
-        if exhausted.retry_now {
-            return Some(Duration::ZERO);
-        }
-        return match exhausted.retry_after {
-            Some(wait) if beyond(wait) => None,
-            Some(wait) => Some(wait),
-            // Home answers with a cooldown next round if every credential still cools.
-            None => Some(Duration::ZERO),
-        };
-    }
-    if error.status() != 429 || !allowed(attempt, limit) {
-        return None;
-    }
-    match error.retry_after() {
-        Some(wait) if !wait.is_zero() && !beyond(wait) => Some(wait),
-        _ => None,
-    }
-}
-
-/// Go `executeHomeOnce`: picks until one credential succeeds, the round is exhausted,
-/// or a failure ends the request. A failed credential's release is acknowledged before
-/// anything else happens (Go `endHomeSelectionBeforeRedispatch`).
-async fn remote_round(
-    cx: &RemoteContext<'_>,
-    remote: &dyn crate::remote::RemoteDispatch,
-    base: &Selection,
-    round: i64,
-    limit: &mut i64,
-    pinned: bool,
-) -> Result<Done, Box<RemoteFault>> {
-    // An async block: the fault is boxed once at the boundary.
-    let round = async {
-        let releases = crate::remote::PendingReleases::default();
-        let settle = |releases: crate::remote::PendingReleases| async move {
-            releases.settle().await.map_err(|error| {
-                RemoteFault::local(Failure::Exec(ExecError::local(
-                    503,
-                    cpa_core::exec::FailureScope::Credential,
-                    format!("home_unavailable: Home did not acknowledge credential release: {error}"),
-                )))
-            })
-        };
-        let max_credentials = cx.policy.max_retry_credentials;
-        // Go's streaming Home loop: only `excluded` goes to Home, and a credential whose
-        // stream died of a connection-lifecycle error (or a downstream-WebSocket 426)
-        // may come back once. Buffered calls exclude everything tried.
-        let stream = cx.call.stream;
-        let websocket = cx.call.turn.is_some();
-        let mut tried: Vec<String> = Vec::new();
-        let mut excluded: Vec<String> = Vec::new();
-        let mut same_retries: std::collections::HashMap<String, u32> = Default::default();
-        let mut last_id = String::new();
-        let mut same_pending = false;
-        let mut last: Option<RemoteFault> = None;
-        let mut upstream: Option<RemoteFault> = None;
-        let mut timing = RoundTiming::default();
-        // Go `homeAuthCount`: the buffered loop counts every pick; the streaming loop
-        // counts only failed executions, so a same-credential retry still advances it.
-        let mut count: i64 = 0;
-        loop {
-            if !stream || count == 0 {
-                count += 1;
-            }
-            let allow_same =
-                stream && same_pending && !last_id.is_empty() && same_retries.get(&last_id).copied().unwrap_or(0) == 0;
-            let capped = max_credentials > 0 && tried.len() >= max_credentials;
-            if capped && !allow_same {
-                return Err(match last {
-                    Some(last) => preferred(last, upstream.as_ref()).exhausted(timing.retry_after(), true),
-                    None => RemoteFault::local(no_auth(base)),
-                });
-            }
-            let mut selection = base.clone();
-            selection.retry_round = round.max(0) as usize;
-            selection.exclude = if stream { excluded.clone() } else { tried.clone() };
-            let request = remote_request(cx.call, &selection, count, cx.trace);
-            // Go `retainedHomeSessionSelection`: a WebSocket turn runs on the pick its
-            // session's pooled socket kept, when it still fits.
-            let kept = cx
-                .call
-                .turn
-                .as_ref()
-                .and_then(|turn| turn.home.as_ref())
-                .and_then(|home| {
-                    home.reuse(
-                        count <= 1 && round <= 0,
-                        &selection.model,
-                        &selection.exclude,
-                        cx.call.pinned().as_deref(),
-                        &releases,
-                    )
-                });
-            let picked = match kept {
-                Some((lease, user_key, request_retry)) => Ok((lease, request_retry, user_key)),
-                None => {
-                    let home = cx.call.turn.as_ref().and_then(|turn| turn.home.as_ref());
-                    // Go `endHomeSelectionBeforeRedispatch` for a kept pick that ended.
-                    if home.is_some() {
-                        settle(releases.clone()).await?;
-                    }
-                    let picked = cx
-                        .rt
-                        .acquire_remote(remote, selection.clone(), request, &releases)
-                        .await;
-                    if let (Some(home), Ok((_, request_retry, _))) = (home, &picked) {
-                        home.granted(*request_retry);
-                    }
-                    picked
-                }
-            };
-            let (lease, request_retry, user_key) = match picked {
-                Ok(picked) => picked,
-                Err(error) => {
-                    let code = error.code.clone();
-                    let pick = RemoteFault::from_pick(error);
-                    let Some(previous) = last else {
-                        return Err(pick);
-                    };
-                    let fallback = preferred(previous, upstream.as_ref());
-                    if let crate::remote::RemoteErrorKind::Cooldown {
-                        retry_after,
-                        request_retry,
-                    } = pick.kind
-                    {
-                        if !pinned && let Some(remote_limit) = request_retry {
-                            *limit = remote_limit;
-                        }
-                        return Err(fallback.exhausted(retry_after, false));
-                    }
-                    // Go `shouldReturnLastErrorOnPickFailure` in Home mode.
-                    if matches!(
-                        code.go_lower().as_str(),
-                        "auth_not_found" | "auth_unavailable" | "request_retry_exceeded"
-                    ) {
-                        return Err(
-                            fallback.exhausted(timing.retry_after(), code.eq_ignore_ascii_case("auth_unavailable"))
-                        );
-                    }
-                    return Err(pick);
-                }
-            };
-            // Go `observeHomeRetryLimit`.
-            match request_retry.filter(|_| !pinned) {
-                Some(home_limit) => *limit = home_limit,
-                None => {
-                    let local = cx.policy.retry_limit(&lease.credential) as i64;
-                    if *limit < 0 || local > *limit {
-                        *limit = local;
-                    }
-                }
-            }
-            let id = lease.credential.id.clone();
-            if capped && id != last_id {
-                // The cap allowed only the pending same-credential retry.
-                drop(lease);
-                settle(releases.clone()).await?;
-                return Err(match last {
-                    Some(last) => preferred(last, upstream.as_ref()).exhausted(timing.retry_after(), true),
-                    None => RemoteFault::local(no_auth(base)),
-                });
-            }
-            if stream && !last_id.is_empty() && id != last_id {
-                same_pending = false;
-            }
-            if tried.contains(&id) {
-                if !stream || excluded.contains(&id) {
-                    drop(lease);
-                    settle(releases.clone()).await?;
-                    return Err(match last {
-                        Some(last) => preferred(last, upstream.as_ref()).exhausted(timing.retry_after(), false),
-                        None => RemoteFault::local(Failure::Exec(ExecError::local(
-                            503,
-                            cpa_core::exec::FailureScope::Credential,
-                            "request_retry_exceeded: home returned a previously tried auth",
-                        ))),
-                    });
-                }
-                let retries = same_retries.entry(id.clone()).or_default();
-                *retries += 1;
-                if *retries > 1 {
-                    // Once only: repeated failures still rotate away.
-                    excluded.push(id);
-                    drop(lease);
-                    settle(releases.clone()).await?;
-                    continue;
-                }
-            } else {
-                tried.push(id.clone());
-            }
-            cx.trace.selected(&lease.credential);
-            // Go `setHomeUserAPIKeyOnGinContext`: in Home mode the local client keys are
-            // cleared, so the key Home authenticated is the caller for this attempt and
-            // every later one (usage records, caller-scoped executor state). A pick
-            // without one keeps the previous key.
-            if !user_key.is_empty() {
-                *cx.user_key.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = user_key;
-            }
-            let user_key = cx
-                .user_key
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
-            let home_caller = (!user_key.is_empty()).then(|| {
-                let mut request = cx.request.clone();
-                request.caller.principal = user_key.clone();
-                let usage = cx.usage.map(|facts| {
-                    let mut facts = (**facts).clone();
-                    facts.client.api_key = user_key.clone();
-                    Arc::new(facts)
-                });
-                // A count_tokens Home 401 record too: Go's handler context drops the
-                // middleware's usage key (`GetContextWithCancel` over a background
-                // context), so `usage.APIKeyFromContext` reads the gin key Home set.
-                let unauthorized = cx.unauthorized.map(|facts| {
-                    let mut facts = (**facts).clone();
-                    facts.client.api_key = user_key.clone();
-                    Arc::new(facts)
-                });
-                (request, usage, unauthorized)
-            });
-            let (request, usage, unauthorized) = match &home_caller {
-                Some((request, usage, unauthorized)) => (request, usage.as_ref(), unauthorized.as_ref()),
-                None => (cx.request, cx.usage, cx.unauthorized),
-            };
-            // Go `executeHomeOnce`: Home's upstream model when it chose one, and only the
-            // first model either way.
-            let (mut models, mut alias) = registry::execution_models(cx.aliases, &lease.credential, &selection.model);
-            if let Some(model) = lease
-                .credential
-                .attributes
-                .get(crate::remote::UPSTREAM_MODEL)
-                .map(|m| m.trim())
-                .filter(|m| !m.is_empty())
-            {
-                models = vec![model.to_owned()];
-            }
-            models.truncate(1);
-            // The dispatcher decided whether Home's alias mapping applies to this request
-            // (Go `homeForceMappingAliasResult`); the response then reports the route model.
-            if lease
-                .credential
-                .attributes
-                .get(crate::remote::FORCE_MAPPING)
-                .is_some_and(|v| v.trim().eq_ignore_ascii_case("true"))
-            {
-                alias.force_mapping = true;
-                alias.original_alias = selection.model.clone();
-            }
-            if models.is_empty() {
-                drop(lease);
-                settle(releases.clone()).await?;
-                let fault = RemoteFault::local(Failure::Exec(ExecError::local(
-                    503,
-                    cpa_core::exec::FailureScope::Credential,
-                    "auth_not_found: no execution models available",
-                )));
-                timing.observe(&fault);
-                last = Some(fault);
-                continue;
-            }
-            let selection_model = registry::selection_model(cx.aliases, &lease.credential, &selection.model);
-            let target = Target {
-                models: &models,
-                selection_model: &selection_model,
-                pooled: false,
-                alias: &alias,
-                compact: cx.compact,
-                keep_model: cx.call.selection_model.is_some(),
-                unauthorized,
-            };
-            let cancelled = lease
-                .remote_cancelled()
-                .unwrap_or_else(|| Box::pin(std::future::pending()));
-            // Go: draining the registry cancels the attempt context; the execution stops
-            // and the round moves on (the registry then refuses new picks). A failed
-            // preparation ends the attempt (Go reports it and redispatches), but it is
-            // not an upstream error and does not advance the streaming count.
-            let run = async {
-                let mut lease = lease;
-                match cx.rt.prepare_remote(&mut lease, cx.cfg).await {
-                    Ok(()) => (
-                        attempt(cx.rt, cx.cfg, cx.policy, cx.call, request, usage, lease, target, None).await,
-                        false,
-                    ),
-                    Err(error) => {
-                        lease.complete(Outcome::Failure(error.clone()));
-                        (Attempt::Next(Fault { error, bootstrap: None }), true)
-                    }
-                }
-            };
-            let (outcome, prepare_failed) = tokio::select! {
-                biased;
-                outcome = run => outcome,
-                _ = cancelled => (
-                    Attempt::Next(Fault {
-                        error: crate::remote::cancelled_error(),
-                        bootstrap: None,
-                    }),
-                    false,
-                ),
-            };
-            match outcome {
-                Attempt::Done(done) => return Ok(done),
-                Attempt::Stop(fault) => {
-                    // Go's streaming loop acknowledges the release before honouring a
-                    // stop; the buffered one ends without waiting.
-                    if stream {
-                        settle(releases.clone()).await?;
-                    }
-                    return Err(RemoteFault::from_attempt(fault, true));
-                }
-                Attempt::Next(fault) => {
-                    if stream {
-                        // Go `shouldExcludeHomeAuthAfterStreamError`.
-                        let error = &fault.error;
-                        let exclude = !(lifecycle(error) || (websocket && error.status == 426))
-                            || same_retries.get(&id).copied().unwrap_or(0) > 0;
-                        if exclude && !excluded.contains(&id) {
-                            excluded.push(id.clone());
-                        }
-                        last_id = id.clone();
-                        same_pending = !exclude;
-                        if !prepare_failed {
-                            count += 1;
-                        }
-                    }
-                    let mut fault = RemoteFault::from_attempt(fault, false);
-                    // A preparation never reached the upstream, in any round.
-                    fault.upstream &= !prepare_failed;
-                    if fault.upstream {
-                        upstream = Some(fault.clone());
-                    }
-                    timing.observe(&fault);
-                    last = Some(fault);
-                    settle(releases.clone()).await?;
-                }
-            }
-        }
-    };
-    round.await.map_err(Box::new)
-}
-
-/// Go `isConnectionLifecycleError` for a statusless error's text.
-fn lifecycle(e: &ExecError) -> bool {
-    if classify::go_status(e) != 0 {
-        return false;
-    }
-    let lower = classify::error_text(e).trim().go_lower();
-    matches!(
-        lower.as_str(),
-        "context canceled" | "context deadline exceeded" | "eof" | "unexpected eof"
-    ) || [
-        "websocket: close 1000",
-        "websocket: close 1001",
-        "websocket: close 1006",
-        "unexpected eof",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-}
-
-/// A plugin scheduler's reject, Go `&Error{Code, Message}`: an `auth_not_found` or
-/// `auth_unavailable` code is enriched like any selection failure
-/// (`enrichAuthSelectionError`, 503); another code keeps its `code: message` text and,
-/// without a status, answers 500.
-pub(crate) fn scheduler_rejection(code: String, message: String, providers: &[String], model: &str) -> Failure {
-    match code.as_str() {
-        // Request scope: the reject carries no status before enrichment, so it starts no
-        // retry round.
-        "auth_not_found" | "auth_unavailable" => Failure::Exec(ExecError::local(
-            503,
-            cpa_core::exec::FailureScope::Request,
-            unavailable_text(&code, &message, providers, model, None),
-        )),
-        _ => Failure::Exec(ExecError::local(
-            0,
-            cpa_core::exec::FailureScope::Model,
-            format!("{code}: {message}"),
-        )),
-    }
-}
-
-/// Go's `&Error{Code: "auth_not_found", Message: "no auth available"}`.
-fn no_auth(base: &Selection) -> Failure {
-    Failure::Unavailable {
-        code: "auth_not_found",
-        providers: base.providers.clone(),
-        model: base.model.clone(),
-        cause: None,
-        retry_after: None,
-    }
-}
-
-/// Go's RPOP request for one pick: the route model, session hierarchy, downstream
-/// headers (Home authenticates the client with them), and this round's exclusions.
-/// The dispatcher canonicalizes the session (Go `homeDispatchSessionIDs`).
-fn remote_request(call: &Call, selection: &Selection, count: i64, trace: &Trace) -> crate::remote::RemoteRequest {
-    let headers = crate::remote::home_headers(&call.headers, Some(&call.caller));
-    crate::remote::RemoteRequest {
-        model: selection.model.clone(),
-        session_id: selection.session.clone().unwrap_or_default(),
-        parent_session_id: selection.session_parent.clone().unwrap_or_default(),
-        headers,
-        count,
-        retry_round: selection.retry_round as i64,
-        excluded: selection.exclude.clone(),
-        pinned: call.pinned().unwrap_or_default().to_owned(),
-        request_id: trace.request_id(),
-        kind: if call.turn.is_some() {
-            "websocket"
-        } else if call.stream {
-            "stream"
-        } else {
-            "http"
-        },
-        credential_policy: String::new(),
     }
 }
 
@@ -2157,7 +1417,6 @@ impl Credits<'_> {
                 alias: &alias,
                 compact: self.compact,
                 keep_model: call.selection_model.is_some(),
-                unauthorized: None,
             };
             // Go's stream fallback runs the after-auth interceptor
             // (`executeStreamWithModelPool`); its non-stream fallback calls the executor
@@ -2192,9 +1451,6 @@ struct Target<'a> {
     /// The request model is not the selection model (Interactions agents): execute
     /// the request model, keep cooldown state on the selection model.
     keep_model: bool,
-    /// Record an upstream 401 as a Home result (Go `reportHomeUnauthorized` for Home
-    /// count-tokens attempts, which no executor reporter records).
-    unauthorized: Option<&'a Arc<crate::usage_record::Facts>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2212,32 +1468,10 @@ async fn attempt(
     let route_model = lease.selection.model.clone();
     let mut last = None;
     let mut refreshed = false;
-    // Go `Options.ExecutionLifecycle`: a session turn's Home pick, which a pooled
-    // upstream socket may keep beyond the turn.
-    let home = call
-        .turn
-        .as_ref()
-        .and_then(|turn| turn.home.as_ref())
-        .filter(|_| lease.is_remote());
-    let pick = home.map(|home| home.pick(&lease.credential.id));
-    let mut guard = pick.clone().map(crate::home_session::PickGuard::new);
-    let session = call.turn.as_ref().map(|turn| cpa_core::exec::ExecSession {
-        lease: pick.as_ref().map(crate::home_session::Pick::lease),
-        ..turn.session.clone()
-    });
+    let session = call.turn.as_ref().map(|turn| &turn.session);
     for (i, upstream) in target.models.iter().enumerate() {
-        // Go `stateModelForExecution`: the upstream model when Home chose one.
-        let home_model = lease
-            .credential
-            .attributes
-            .get(crate::remote::UPSTREAM_MODEL)
-            .map(|m| m.trim())
-            .filter(|m| !m.is_empty());
-        let state = match home_model {
-            Some(home) if upstream.trim().is_empty() => home.to_owned(),
-            Some(_) => upstream.trim().to_owned(),
-            None => registry::state_model(target.selection_model, &route_model, upstream, target.pooled),
-        };
+        // Go `stateModelForExecution`.
+        let state = registry::state_model(target.selection_model, &route_model, upstream, target.pooled);
         lease.execution_model = state.clone();
         let mut req = attempt_request(
             request,
@@ -2246,7 +1480,6 @@ async fn attempt(
             &route_model,
             upstream,
             target.keep_model,
-            call.stream,
         );
         // Go `syncMetadataSessionToContext`: an LCP pick's session is the attempt's
         // canonical session, for `$CPA-SESSION-ID` and the usage record.
@@ -2291,9 +1524,6 @@ async fn attempt(
         };
         let mut tracker = start(&lease.credential, &mut req);
         observe(&lease.credential, &mut req);
-        let session = session.as_ref();
-        let private = lease.home_private().map(|p| p.attributes.clone()).unwrap_or_default();
-        let private = &private;
         let execute = |credential: Arc<cpa_core::credential::Credential>, req: ExecRequest| async move {
             let credential = match crate::plugins::model_callbacks::context().filter(|c| !c.proxy_url.is_empty()) {
                 Some(context) => {
@@ -2305,8 +1535,7 @@ async fn attempt(
             };
             let credential = rt.for_executor(&credential);
             if let Some(adapter) = rt.plugin_runtime().executor(&credential, cfg) {
-                return crate::plugins::execution::execute_credential(rt, call, &adapter, &credential, private, req)
-                    .await;
+                return crate::plugins::execution::execute_credential(rt, call, &adapter, &credential, req).await;
             }
             match (session, call.media.as_ref().map(|m| m.kind)) {
                 (Some(session), _) => rt.executors.execute_in_session(&credential, req, cfg, session).await,
@@ -2328,12 +1557,9 @@ async fn attempt(
         // after preparation and the after-auth interceptor (Go `nextExecutionSeq`).
         lease.redispatch();
         let mut executed = execute(lease.credential.clone(), req.clone()).await;
-        // Go `tryRefreshAfterUnauthorized`: one refresh-and-retry per credential. Home
-        // credentials never refresh here (Go home_unauthorized_refresh): the 401 goes to
-        // Home and the round moves on, even when a local credential shares the ID.
+        // Go `tryRefreshAfterUnauthorized`: one refresh-and-retry per credential.
         if let Err(error) = &executed
             && !refreshed
-            && !lease.is_remote()
             && classify::is_unauthorized(error)
             && let Some(current) = rt.refresh_after_unauthorized(&lease.credential, cfg).await
         {
@@ -2358,10 +1584,6 @@ async fn attempt(
                         rewrite_model(done, &target.alias.original_alias)
                     } else {
                         done
-                    };
-                    let user_key = &request.caller.principal;
-                    let Some(lease) = keep_home(home, guard.take(), lease, user_key) else {
-                        return Attempt::Done(done);
                     };
                     return Attempt::Done(match done {
                         Done::Stream { headers, first, rest } => {
@@ -2395,18 +1617,6 @@ async fn attempt(
             }
         };
         let error = &fault.error;
-        if let Some(facts) = target.unauthorized
-            && classify::is_unauthorized(error)
-        {
-            crate::usage_record::publish_home_unauthorized(
-                rt,
-                facts,
-                &lease.credential,
-                &crate::remote::selection_provider(&lease.credential),
-                &state,
-                &classify::error_text(error),
-            );
-        }
         let action = policy.error_action(&lease.credential, error);
         let neutral = (target.compact && classify::is_compact_neutral(error) && !action.force_cooldown)
             || (call.operation == Operation::CountTokens
@@ -2434,8 +1644,6 @@ async fn attempt(
             fault.error.addon = Some(headers.clone());
         }
         if last_here {
-            // Go `End`: the socket that retained the pick closes before the release.
-            drop(guard.take());
             lease.complete(outcome);
             return if stop {
                 Attempt::Stop(fault)
@@ -2447,33 +1655,6 @@ async fn attempt(
         last = Some(fault);
     }
     Attempt::Next(last.expect("at least one model was attempted"))
-}
-
-/// Go `retainHomeWebsocketSelection`: after a successful turn, the Home lease moves to
-/// the pick a pooled upstream socket retained, which the session keeps for its next
-/// turn. Returns the lease when no socket retained the pick.
-fn keep_home(
-    home: Option<&Arc<crate::home_session::SessionHome>>,
-    guard: Option<crate::home_session::PickGuard>,
-    lease: Lease,
-    user_key: &str,
-) -> Option<Lease> {
-    let (Some(home), Some(mut guard)) = (home, guard) else {
-        return Some(lease);
-    };
-    let pick = guard.defuse()?;
-    let (credential, route) = (lease.credential.clone(), lease.selection.model.clone());
-    let availability = lease.home_private().map(|p| p.availability.clone()).unwrap_or_default();
-    match pick.keep(lease) {
-        None => {
-            home.keep(pick, &credential, availability, &route, user_key.to_owned());
-            None
-        }
-        Some(lease) => {
-            pick.close();
-            Some(lease)
-        }
-    }
 }
 
 /// Go's client request metadata for usage records (handlers.go `GetContextWithCancel`
@@ -2607,10 +1788,7 @@ impl futures_util::Stream for Tracked {
 }
 
 /// The request one upstream model attempt executes: the upstream model (unless the
-/// request keeps its own model), with Go's `attachResolvedExecutionModelInfo` binding,
-/// then `attachResolvedHomeModelInfo` for a Home credential executing the selection's
-/// model. Go's stream path binds Home's model before the local one, so the local
-/// binding never lends it configuration-update support there.
+/// request keeps its own model), with Go's `attachResolvedExecutionModelInfo` binding.
 fn attempt_request(
     request: &ExecRequest,
     cfg: &Config,
@@ -2618,7 +1796,6 @@ fn attempt_request(
     route_model: &str,
     upstream: &str,
     keep_model: bool,
-    stream: bool,
 ) -> ExecRequest {
     let mut req = request.clone();
     if !keep_model {
@@ -2631,10 +1808,6 @@ fn attempt_request(
         upstream,
         keep_model.then_some(request.model.as_str()),
     );
-    let local = req.resolved_model.as_ref().filter(|_| !stream);
-    if !keep_model && let Some(home) = crate::capabilities::bind_home(credential, local) {
-        req.resolved_model = Some(home);
-    }
     req
 }
 
@@ -2763,28 +1936,30 @@ fn rewrite_lines(payload: &Bytes, target: &str) -> Bytes {
     if changed { Bytes::from(out) } else { payload.clone() }
 }
 
+/// A plugin scheduler's reject, Go `&Error{Code, Message}`: an `auth_not_found` or
+/// `auth_unavailable` code is enriched like any selection failure
+/// (`enrichAuthSelectionError`, 503); another code keeps its `code: message` text and,
+/// without a status, answers 500.
+pub(crate) fn scheduler_rejection(code: String, message: String, providers: &[String], model: &str) -> Failure {
+    match code.as_str() {
+        // Request scope: the reject carries no status before enrichment, so it starts no
+        // retry round.
+        "auth_not_found" | "auth_unavailable" => Failure::Exec(ExecError::local(
+            503,
+            cpa_core::exec::FailureScope::Request,
+            unavailable_text(&code, &message, providers, model, None),
+        )),
+        _ => Failure::Exec(ExecError::local(
+            0,
+            cpa_core::exec::FailureScope::Model,
+            format!("{code}: {message}"),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Go finds a direct response through the Home round marker: the raw upstream
-    /// answer goes out unchanged, without the safe `Retry-After`.
-    #[test]
-    fn direct_errors_stay_direct_under_a_home_round_marker() {
-        let mut raw = ExecError::local(429, cpa_core::exec::FailureScope::Credential, "raw fast-mode body");
-        raw.direct = true;
-        raw.headers
-            .insert(axum::http::header::CONTENT_TYPE, "text/plain".parse().unwrap());
-        let failure = Failure::Remote {
-            error: raw,
-            retry_after: Some(2),
-        };
-        assert!(failure.direct().is_some());
-        let response = crate::errors::write(&failure, |_, _| unreachable!());
-        assert_eq!(response.status().as_u16(), 429);
-        assert_eq!(response.headers()["content-type"], "text/plain");
-        assert!(response.headers().get("retry-after").is_none());
-    }
 
     /// A stream's usage record publishes once its upstream stream is gone, so it has the
     /// upstream body size the stream reports when dropped: on an error the stream
@@ -2867,22 +2042,6 @@ mod tests {
             let record: serde_json::Value = serde_json::from_slice(&records[0]).unwrap();
             assert_eq!(record["upstream_response_bytes"], 42, "{ending}: {record}");
         }
-    }
-
-    /// Go `isConnectionLifecycleError` on the texts executors produce.
-    #[test]
-    fn lifecycle_errors_follow_go() {
-        let transport = |text: &str| ExecError::local(502, cpa_core::exec::FailureScope::Transport, text);
-        assert!(lifecycle(&transport("websocket: close 1000 (normal)")));
-        assert!(lifecycle(&transport(
-            "websocket: close 1006 (abnormal closure): unexpected EOF"
-        )));
-        assert!(lifecycle(&transport("EOF")));
-        assert!(!lifecycle(&transport("websocket: close 1011 (internal server error)")));
-        assert!(!lifecycle(&transport("read failed")));
-        // A status keeps the credential/status path, whatever the text says.
-        let statused = ExecError::local(500, cpa_core::exec::FailureScope::Credential, "unexpected EOF");
-        assert!(!lifecycle(&statused));
     }
 
     /// Go starts the non-stream keep-alive in the non-stream generate handlers only, and
@@ -2972,47 +2131,17 @@ mod tests {
             resolved_model: None,
             usage: Default::default(),
         };
-        let req = attempt_request(&request, &cfg, &credential, "sol", "gpt-6-sol", false, false);
+        let req = attempt_request(&request, &cfg, &credential, "sol", "gpt-6-sol", false);
         assert_eq!(req.model, "gpt-6-sol");
         let bound = req.resolved_model.unwrap();
         assert_eq!(
             (bound.info.id.as_str(), bound.source, bound.is_compat()),
             ("gpt-6-sol", cpa_core::exec::ResolvedSource::ApiKey, true)
         );
-        let kept = attempt_request(&request, &cfg, &credential, "selection", "gpt-6-sol", true, false);
+        let kept = attempt_request(&request, &cfg, &credential, "selection", "gpt-6-sol", true);
         assert_eq!(kept.model, "sol");
         let bound = kept.resolved_model.unwrap();
         assert_eq!((bound.info.id.as_str(), bound.is_compat()), ("sol", false));
-
-        // Go `attachResolvedHomeModelInfo` after the local binding: Home's definition
-        // replaces it, lends local configuration-update support only off the stream path,
-        // and is skipped when the attempt keeps the request's own model.
-        let mut home = credential.clone();
-        home.attributes
-            .insert(crate::remote::MODEL_INFO.into(), r#"{"id":"gpt-6-sol"}"#.into());
-        let caps = |req: &ExecRequest| {
-            let bound = req.resolved_model.as_ref().unwrap();
-            let caps = cpa_common::thinking::ModelCaps::from(&bound.info);
-            (bound.source, caps.support_configuration_update, bound.is_compat())
-        };
-        let cfg = Config::parse(
-            "config-version: 8\napi-keys:\n  codex:\n    - base-url: https://codex.example\n      models:\n        - name: gpt-6-sol\n          alias: sol\n          is-compat: true\n          support-configuration-update: true\n      keys:\n        - api-key: xk1\n",
-        )
-        .unwrap();
-        let home_source = cpa_core::exec::ResolvedSource::Home;
-        let buffered = attempt_request(&request, &cfg, &home, "sol", "gpt-6-sol", false, false);
-        assert_eq!(
-            caps(&buffered),
-            (home_source, true, false),
-            "local is-compat never carries"
-        );
-        let streamed = attempt_request(&request, &cfg, &home, "sol", "gpt-6-sol", false, true);
-        assert_eq!(caps(&streamed), (home_source, false, false));
-        let kept = attempt_request(&request, &cfg, &home, "selection", "gpt-6-sol", true, false);
-        assert_eq!(
-            kept.resolved_model.unwrap().source,
-            cpa_core::exec::ResolvedSource::ApiKey
-        );
     }
 
     #[test]
@@ -3076,107 +2205,6 @@ mod tests {
         // Go trims a bare JSON stream chunk.
         let bare = Bytes::from_static(b" {\"modelVersion\":\"up\"}\n");
         assert_eq!(rewrite_event(&bare, "alias"), r#"{"modelVersion":"alias"}"#);
-    }
-
-    /// A Home `model_cooldown` pick failure.
-    fn home_cooldown(retry_after: Duration, request_retry: Option<i64>) -> RemoteFault {
-        RemoteFault::from_pick(crate::remote::RemoteError {
-            error: ExecError::local(
-                429,
-                cpa_core::exec::FailureScope::Credential,
-                "model_cooldown: all Home credentials are cooling down",
-            ),
-            code: "model_cooldown".into(),
-            kind: crate::remote::RemoteErrorKind::Cooldown {
-                retry_after: Some(retry_after),
-                request_retry,
-            },
-        })
-    }
-
-    /// [`remote_retry_wait`] as Go `shouldRetryAfterErrorWithHomeRetryLimit` asks it,
-    /// with `request-retry` configured.
-    fn retry_wait(
-        error: &RemoteFault,
-        request_retry: i64,
-        attempt: i64,
-        max_wait: Duration,
-        limit: i64,
-        pinned: bool,
-    ) -> Option<Duration> {
-        let allowed = |attempt: i64, limit: i64| home_retry_allowed(request_retry, attempt, limit);
-        remote_retry_wait(error, attempt, max_wait, limit, pinned, &allowed)
-    }
-
-    /// Go `TestHomeRetryPolicyAllowsRemoteCooldownWithoutLocalCredentials`: a Home
-    /// cooldown is retried within request-retry and the maximum wait, and an exhausted
-    /// round without timing starts the next one at once, even with no maximum wait.
-    #[test]
-    fn home_cooldowns_retry_within_request_retry_and_the_maximum_wait() {
-        let ms = Duration::from_millis;
-        let cooldown = home_cooldown(ms(10), None);
-        assert_eq!(
-            retry_wait(&cooldown, 1, 0, Duration::from_secs(1), -1, false),
-            Some(ms(10))
-        );
-        assert_eq!(
-            retry_wait(&cooldown, 1, 1, Duration::from_secs(1), -1, false),
-            None,
-            "after the configured round"
-        );
-        assert_eq!(
-            retry_wait(&cooldown, 1, 0, Duration::ZERO, -1, false),
-            None,
-            "no maximum wait"
-        );
-        let unavailable = ExecError::local(502, cpa_core::exec::FailureScope::Credential, "upstream unavailable");
-        let round = RemoteFault::local(Failure::Exec(unavailable)).exhausted(None, false);
-        assert_eq!(
-            retry_wait(&round, 1, 0, Duration::ZERO, -1, false),
-            Some(Duration::ZERO)
-        );
-        // ponytail: Go's negative-retry-after case (`homeRetryRoundTiming.invalid`) has no
-        // Rust counterpart: Duration is unsigned, Home's `retry_after_ms` is kept only
-        // when positive (as in Go `home_concurrency.go`), and the upstream Retry-After
-        // parsers drop negative values; only Go's test-made errors carry one.
-    }
-
-    /// Go `TestHomeRetryPolicyUsesRemoteCredentialOverrideBeforeSelection`: a cooldown's
-    /// request_retry replaces the configured one before any credential was picked,
-    /// including an explicit 0, but never for a pinned request.
-    #[test]
-    fn a_cooldown_request_retry_overrides_the_configured_one_unless_pinned() {
-        let ms = Duration::from_millis;
-        let second = Duration::from_secs(1);
-        let one = home_cooldown(ms(10), Some(1));
-        assert_eq!(retry_wait(&one, 0, 0, second, -1, false), Some(ms(10)));
-        assert_eq!(
-            retry_wait(&one, 0, 1, second, -1, false),
-            None,
-            "one additional round only"
-        );
-        assert_eq!(
-            retry_wait(&one, 0, 0, second, -1, true),
-            None,
-            "pinned keeps its own limit"
-        );
-        let zero = home_cooldown(ms(10), Some(0));
-        assert_eq!(retry_wait(&zero, 3, 0, second, -1, false), None, "an explicit 0 wins");
-    }
-
-    /// Go `TestHomeRetryRoundCredentialLimitStartsNextRoundImmediately`: a round ended
-    /// by max-retry-credentials starts the next one at once, while the client still
-    /// sees the round's retry-after.
-    #[test]
-    fn a_credential_limit_starts_the_next_round_immediately() {
-        let mut limited = ExecError::local(429, cpa_core::exec::FailureScope::Credential, "credential rate limited");
-        limited.retry_after = Some(Duration::from_secs(5));
-        let round = RemoteFault::local(Failure::Exec(limited)).exhausted(Some(Duration::from_secs(5)), true);
-        assert_eq!(
-            retry_wait(&round, 1, 0, Duration::from_secs(1), -1, false),
-            Some(Duration::ZERO)
-        );
-        assert_eq!(round.safe_retry_after(), Some(5));
     }
 
     #[test]

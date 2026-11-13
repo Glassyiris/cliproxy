@@ -464,9 +464,9 @@ pub(super) fn login_client(state: &Management) -> wreq::Client {
 }
 
 /// New grant work recovers publication before network I/O, without carrying the
-/// owner gate over a provider call. Home has no local persistence authority.
+/// owner gate over a provider call.
 pub(super) async fn admit_grant_work(state: &Arc<Management>) -> bool {
-    if state.rt.store().is_home() || state.stopping.is_cancelled() {
+    if state.stopping.is_cancelled() {
         return false;
     }
     let backend = state.rt.store().credential_backend();
@@ -582,9 +582,6 @@ async fn import_vertex(
         .spawn_blocking(move || {
             let _guard = state.disk.lock().unwrap_or_else(PoisonError::into_inner);
             let mut upload = import_upload(&auth_dir, &file.data, &location)?;
-            if state.rt.store().is_home() {
-                return Err(UploadError::Save("Home owns its credentials remotely".into()));
-            }
             state
                 .rt
                 .store()
@@ -741,9 +738,6 @@ async fn save_if_pending<T: Clone + Send + Sync + 'static>(
         };
         session.identity.clone()
     };
-    if state.rt.store().is_home() {
-        return Outcome::Failed(save_error.to_owned());
-    }
     let backend = state.rt.store().credential_backend();
     let expected = Arc::new(Mutex::new(None));
     let db = Arc::downgrade(&backend);

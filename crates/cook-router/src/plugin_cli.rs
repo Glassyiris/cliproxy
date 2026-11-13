@@ -11,7 +11,6 @@ use cpa_core::config::Config;
 use cpa_plugin::Host;
 use cpa_plugin::cli::{CliFlag, Output};
 use cpa_server::credential_store::CredentialDb;
-use cpa_server::runtime::CredentialAuthority;
 
 /// Plugin-declared flags as Go's `flag` package sees them: a `flag.Value` looked up by
 /// name, `IsBoolFlag` for bools, and `Set` called for every occurrence as it is parsed.
@@ -112,27 +111,16 @@ pub fn builtin_values(cmd: &clap::Command, matches: &clap::ArgMatches) -> Vec<(S
 /// Go's `ExecuteCommandLine` step in main, once the loaded config is applied: runs the
 /// plugins whose flags were given, writing their output and saving the auths they
 /// produce to the auth directory. Returns the exit code when a plugin handled the run.
-pub async fn execute(host: &Host, builtin: &[(String, String)], backend: &CredentialAuthority) -> Option<i32> {
+pub async fn execute(host: &Host, builtin: &[(String, String)], backend: &Arc<CredentialDb>) -> Option<i32> {
     if !host.has_triggered_command_line_flags() {
         return None;
     }
     let raw: Vec<String> = std::env::args().collect();
     let program = raw.first().cloned().unwrap_or_default();
     let auth_dir = host.host_config_summary().auth_dir;
-    let home_rejected = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let refused = home_rejected.clone();
-    let backend = (*backend).clone();
-    let persist = Arc::new(move |auths: Vec<cpa_plugin::auth::PluginAuth>| {
-        let CredentialAuthority::Local(backend) = &backend else {
-            if auths.is_empty() {
-                return Ok(Vec::new());
-            }
-            refused.store(true, std::sync::atomic::Ordering::Relaxed);
-            return Err(HOME_CREDENTIAL_ERROR.into());
-        };
-        save_auths(auths, &auth_dir, backend)
-    });
-    let (code, handled, mut output) = host
+    let backend = backend.clone();
+    let persist = Arc::new(move |auths: Vec<cpa_plugin::auth::PluginAuth>| save_auths(auths, &auth_dir, &backend));
+    let (code, handled, output) = host
         .execute_command_line(
             &program,
             raw.get(1..).unwrap_or_default(),
@@ -143,9 +131,6 @@ pub async fn execute(host: &Host, builtin: &[(String, String)], backend: &Creden
             persist,
         )
         .await;
-    if home_rejected.load(std::sync::atomic::Ordering::Relaxed) {
-        output.push(Output::Stderr(format!("{HOME_CREDENTIAL_ERROR}\n").into()));
-    }
     write_output(output);
     handled.then_some(code)
 }
@@ -188,13 +173,10 @@ fn write_output(output: Vec<Output>) {
     }
 }
 
-pub const HOME_CREDENTIAL_ERROR: &str =
-    "Home owns credentials; run without a Home JWT against a local --db to log in or import credentials";
-
 /// CLI plugins keep their file-based listing and raw document behavior; saves
-/// acknowledge SQLite. Home commands may run but cannot save local credentials.
-pub fn attach_credentials(host: &Host, authority: CredentialAuthority) {
-    host.set_auth_manager(Some(Arc::new(CliCredentials::Owner(authority))));
+/// acknowledge SQLite.
+pub fn attach_credentials(host: &Host, db: Arc<CredentialDb>) {
+    host.set_auth_manager(Some(Arc::new(CliCredentials::Owner(db))));
 }
 
 pub fn attach_online_credentials(host: &Host, root: std::path::PathBuf, save: cpa_exec::login_store::LoginSave) {
@@ -202,7 +184,7 @@ pub fn attach_online_credentials(host: &Host, root: std::path::PathBuf, save: cp
 }
 
 enum CliCredentials {
-    Owner(CredentialAuthority),
+    Owner(Arc<CredentialDb>),
     Online {
         root: std::path::PathBuf,
         save: cpa_exec::login_store::LoginSave,
@@ -224,11 +206,10 @@ impl cpa_plugin::hostauth::AuthManager for CliCredentials {
 
     fn read_file(&self, path: &std::path::Path) -> std::io::Result<Vec<u8>> {
         match self {
-            Self::Owner(CredentialAuthority::Local(db)) => db
+            Self::Owner(db) => db
                 .read(path)
                 .map_err(std::io::Error::other)?
                 .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound)),
-            Self::Owner(CredentialAuthority::Home) => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
             Self::Online { root, .. } => {
                 let path = cpa_server::credential_store::credential_path_key(path)?;
                 if path.parent() != Some(root.as_path()) {
@@ -245,9 +226,6 @@ impl cpa_plugin::hostauth::AuthManager for CliCredentials {
         write: &mut dyn FnMut() -> Result<(), String>,
     ) -> Result<(), String> {
         use cpa_plugin::hostauth::SavedAuths;
-        if matches!(self, Self::Owner(CredentialAuthority::Home)) {
-            return Err(HOME_CREDENTIAL_ERROR.into());
-        }
         let path = match auths {
             SavedAuths::BuiltIn(auth) => {
                 std::path::PathBuf::from(auth.attributes.get("path").ok_or("auth file path unavailable")?)
@@ -255,10 +233,9 @@ impl cpa_plugin::hostauth::AuthManager for CliCredentials {
             SavedAuths::Plugin { path, .. } | SavedAuths::Written { path, .. } => path,
         };
         match self {
-            Self::Owner(CredentialAuthority::Local(backend)) => backend
+            Self::Owner(backend) => backend
                 .write_files(&[path], || write().map_err(anyhow::Error::msg))
                 .map_err(|error| format!("commit plugin CLI credential to SQLite: {error:#}")),
-            Self::Owner(CredentialAuthority::Home) => Err(HOME_CREDENTIAL_ERROR.into()),
             Self::Online { root, save } => {
                 if path.parent() != Some(root.as_path()) {
                     return Err("online plugin target escaped its private scratch directory".into());
@@ -327,55 +304,6 @@ fn save_auths(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn home_cli_rejects_host_saves_before_writing() {
-        use cpa_plugin::hostauth::{AuthManager as _, SavedAuths};
-        let mut called = false;
-        let error = CliCredentials::Owner(CredentialAuthority::Home)
-            .save(
-                SavedAuths::Written {
-                    path: "unused.json".into(),
-                    data: b"{}".to_vec(),
-                },
-                &mut || {
-                    called = true;
-                    Ok(())
-                },
-            )
-            .unwrap_err();
-        assert!(!called);
-        assert_eq!(error, HOME_CREDENTIAL_ERROR);
-    }
-
-    #[tokio::test]
-    async fn home_cli_rejects_plugin_auth_results_before_writing() {
-        use cpa_plugin::testing::scripted::{Script, host_with};
-        let dir = std::env::temp_dir().join(format!("cook-cli-plugin-home-{}", std::process::id()));
-        let script = Script {
-            caps: r#""command_line_plugin":true"#,
-            results: [
-                ("command_line.register", r#"{"Flags":[{"Name":"plugin-save","Type":"bool"}]}"#),
-                ("command_line.execute", r#"{"Auths":[{"Provider":"acme","ID":"first","FileName":"first.json","Metadata":{"token":"secret"}}]}"#),
-            ].into(),
-            ..Default::default()
-        };
-        let (host, _) = host_with(&dir, [("cli", script)].into()).await;
-        let auth_dir = dir.join("auth");
-        let config = Config::parse(&format!(
-            "auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
-            auth_dir.display(),
-            dir.display()
-        ))
-        .unwrap();
-        attach_credentials(&host, CredentialAuthority::Home);
-        host.apply_config(Arc::new(config)).await;
-        host.register_command_line_flags(&|_| false).await;
-        host.set_command_line_flag("plugin-save", "true").unwrap();
-        assert_eq!(execute(&host, &[], &CredentialAuthority::Home).await, Some(1));
-        assert!(!auth_dir.exists());
-        std::fs::remove_dir_all(dir).unwrap();
-    }
 
     #[test]
     fn a_failed_later_plugin_auth_restores_the_whole_command_batch() {
@@ -451,10 +379,7 @@ mod tests {
         host.apply_config(Arc::new(config)).await;
         host.register_command_line_flags(&|_| false).await;
         host.set_command_line_flag("plugin-save", "true").unwrap();
-        assert_eq!(
-            execute(&host, &[], &CredentialAuthority::Local(db.clone())).await,
-            Some(1)
-        );
+        assert_eq!(execute(&host, &[], &db).await, Some(1));
         assert!(db.documents().unwrap().is_empty());
         assert!(!db.auth_dir().join("first.json").exists());
         drop(db);
@@ -478,17 +403,22 @@ mod tests {
             ..Default::default()
         };
         let (host, calls) = host_with(&dir, [("cli", script)].into()).await;
+        let db = CredentialDb::initialize(
+            Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap()),
+            &dir.join("missing"),
+        )
+        .unwrap();
         let config = Config::parse(&format!(
             "auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
-            dir.join("auth").display(),
+            db.auth_dir().display(),
             dir.display()
         ))
         .unwrap();
         host.apply_config(Arc::new(config)).await;
         host.register_command_line_flags(&|_| false).await;
-        assert_eq!(execute(&host, &[], &CredentialAuthority::Home).await, None);
+        assert_eq!(execute(&host, &[], &db).await, None);
         host.set_command_line_flag("plugin-run", "true").unwrap();
-        assert_eq!(execute(&host, &[], &CredentialAuthority::Home).await, Some(17));
+        assert_eq!(execute(&host, &[], &db).await, Some(17));
         assert!(
             calls
                 .lock()
@@ -497,6 +427,7 @@ mod tests {
                 .any(|call| call == "cli command_line.execute")
         );
         assert!(!dir.join("config.yaml").exists());
+        drop(db);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -522,7 +453,7 @@ mod tests {
         use cpa_plugin::hostauth::{AuthManager as _, SavedAuths};
         let nested = db.auth_dir().join("nested.json");
         let raw = b"{\"type\":\"acme\",\"opaque\":[1,2]}";
-        CliCredentials::Owner(CredentialAuthority::Local(db.clone()))
+        CliCredentials::Owner(db.clone())
             .save(
                 SavedAuths::Written {
                     path: nested.clone(),
@@ -541,10 +472,7 @@ mod tests {
         host.apply_config(Arc::new(config)).await;
         host.register_command_line_flags(&|_| false).await;
         host.set_command_line_flag("plugin-save", "true").unwrap();
-        assert_eq!(
-            execute(&host, &[], &CredentialAuthority::Local(db.clone())).await,
-            Some(0)
-        );
+        assert_eq!(execute(&host, &[], &db).await, Some(0));
         let explicit = dir.join("explicit.token");
         let bytes = std::fs::read(&explicit).unwrap();
         assert_eq!(db.read(&explicit).unwrap().unwrap(), bytes);
@@ -560,7 +488,7 @@ mod tests {
         let previous = serde_json::to_vec(&previous).unwrap();
         db.save(&explicit, &previous).unwrap();
         let blocker = cpa_server::testing::block_checkpoint_install(&owner);
-        let code = execute(&host, &[], &CredentialAuthority::Local(db.clone())).await;
+        let code = execute(&host, &[], &db).await;
         drop(blocker);
         assert_eq!(code, Some(1));
         assert_eq!(db.read(&explicit).unwrap().unwrap(), previous);

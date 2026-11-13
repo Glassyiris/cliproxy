@@ -557,115 +557,9 @@ async fn a_client_close_cancels_a_stalled_steering_turn() {
     servers.shutdown().await;
 }
 
-/// Home with a gated request-log forward and a refused pick: the turn fails and the
-/// server closes the connection.
-struct GatedHome(Arc<tokio::sync::Notify>);
-
-impl crate::remote::RemoteDispatch for GatedHome {
-    fn available(&self) -> bool {
-        true
-    }
-    fn dispatch(
-        &self,
-        _: crate::remote::RemoteRequest,
-    ) -> futures_util::future::BoxFuture<'_, Result<crate::remote::RemoteGrant, crate::remote::RemoteError>> {
-        Box::pin(async {
-            Err(crate::remote::RemoteError::plain(
-                cpa_core::exec::ExecError::local(503, cpa_core::exec::FailureScope::Credential, "busy"),
-                "busy",
-            ))
-        })
-    }
-    fn models(
-        &self,
-        _: Vec<(String, String)>,
-        _: Vec<(String, String)>,
-    ) -> futures_util::future::BoxFuture<'_, Result<Vec<u8>, crate::remote::ModelsError>> {
-        Box::pin(async { Err(crate::remote::ModelsError::Unavailable) })
-    }
-    fn request_log(&self, _: Vec<u8>) -> futures_util::future::BoxFuture<'_, Result<(), String>> {
-        let gate = self.0.clone();
-        Box::pin(async move {
-            gate.notified().await;
-            Ok(())
-        })
-    }
-}
-
-/// Go closes the socket as soon as the connection ends and writes its request log in a
-/// deferred step: a slow log delivery must not hold the client's connection open.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_socket_closes_before_the_request_log_is_delivered() {
-    use futures_util::StreamExt;
-    let mut servers = Servers::default();
-    let dir = std::env::temp_dir().join(format!("cpa-ws-gated-log-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let cfg = Config::parse(&format!(
-        "auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://127.0.0.1:1\n    models:\n      - name: gpt-fixture\n",
-        dir.join("auths").display()
-    ))
-    .unwrap();
-    let credentials = cpa_core::config::credentials::from_config(&cfg);
-    let executors = Executors {
-        claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
-        codex: cpa_exec::codex::CodexExecutor::new().unwrap(),
-        devices: Default::default(),
-        openai: Default::default(),
-        google: Default::default(),
-    };
-    let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
-    let gate = Arc::new(tokio::sync::Notify::new());
-    rt.set_remote_dispatch(Some(Arc::new(GatedHome(gate.clone()))));
-    let management = crate::management::Management::with_options(
-        rt.clone(),
-        Arc::new(crate::config_store::ConfigStore::memory_with(
-            &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
-        )),
-        crate::management::Options {
-            log_dir: Some(dir.clone()),
-            management_password: Some(String::new()),
-            ..Default::default()
-        },
-    );
-    let proxy = servers
-        .serve(crate::request_logging::router(&management, router(rt)))
-        .await;
-    let mut socket = wreq::Client::new()
-        .websocket(format!("ws://{proxy}/v1/responses"))
-        .send()
-        .await
-        .unwrap()
-        .into_websocket()
-        .await
-        .unwrap();
-    socket
-        .send(wreq::ws::message::Message::text(
-            r#"{"type":"response.create","model":"gpt-fixture","input":[]}"#,
-        ))
-        .await
-        .unwrap();
-    // Every frame until the connection ends, while the log forward is still held.
-    let closed = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            match socket.next().await {
-                Some(Ok(wreq::ws::message::Message::Close(_))) | Some(Err(_)) | None => break,
-                Some(Ok(_)) => {}
-            }
-        }
-    })
-    .await;
-    gate.notify_one();
-    drop(socket);
-    servers.shutdown().await;
-    let _ = std::fs::remove_dir_all(&dir);
-    assert!(closed.is_ok(), "the socket stayed open while the request log was held");
-}
-
-/// One Responses WebSocket turn through the request-log layer against an upstream that
-/// answers `status` with `body`: the text frames the client saw and the written log.
-async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String) {
-    use futures_util::StreamExt;
-    let mut servers = Servers::default();
+/// A Responses WebSocket proxy through the request-log layer, logging into `dir`, whose
+/// one Codex key goes to an upstream that answers `status` with `body`.
+async fn logging_proxy(servers: &mut Servers, dir: &std::path::Path, status: u16, body: &'static str) -> String {
     let upstream = servers
         .serve(axum::Router::new().fallback(move || async move {
             (
@@ -675,8 +569,6 @@ async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String
             )
         }))
         .await;
-    let dir = std::env::temp_dir().join(format!("cpa-ws-timeline-error-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
         "auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n",
         dir.join("auths").display()
@@ -697,14 +589,18 @@ async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String
             &cpa_core::config::yaml_string(&rt.config().document).unwrap(),
         )),
         crate::management::Options {
-            log_dir: Some(dir.clone()),
+            log_dir: Some(dir.to_owned()),
             management_password: Some(String::new()),
             ..Default::default()
         },
     );
-    let proxy = servers
+    servers
         .serve(crate::request_logging::router(&management, router(rt)))
-        .await;
+        .await
+}
+
+/// A client connected to `proxy` that has sent one `response.create` for `gpt-fixture`.
+async fn sent_turn(proxy: &str) -> wreq::ws::WebSocket {
     let mut socket = wreq::Client::new()
         .websocket(format!("ws://{proxy}/v1/responses"))
         .send()
@@ -719,6 +615,71 @@ async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String
         ))
         .await
         .unwrap();
+    socket
+}
+
+/// Go closes the socket as soon as the connection ends and writes its request log in a
+/// deferred step: a slow log delivery must not hold the client's connection open.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_socket_closes_before_the_request_log_is_delivered() {
+    use futures_util::StreamExt;
+    let mut servers = Servers::default();
+    let dir = std::env::temp_dir().join(format!("cpa-ws-gated-log-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let gate = Arc::new(tokio::sync::Notify::new());
+    crate::request_logging::HELD_DELIVERIES
+        .lock()
+        .unwrap()
+        .push((dir.clone(), gate.clone()));
+    let proxy = logging_proxy(
+        &mut servers,
+        &dir,
+        400,
+        r#"{"error":{"message":"bad input","type":"invalid_request_error","code":"invalid_value"}}"#,
+    )
+    .await;
+    let mut socket = sent_turn(&proxy).await;
+    // Every frame until the connection ends, while the log delivery is still held. The
+    // held delivery never ends on its own, so the bound only absorbs a loaded test host.
+    let closed = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            match socket.next().await {
+                Some(Ok(wreq::ws::message::Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await;
+    let unwritten = !std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .any(|e| e.path().extension().is_some_and(|e| e == "log"));
+    gate.notify_one();
+    drop(socket);
+    let log = written_log(&dir).await;
+    servers.shutdown().await;
+    crate::request_logging::HELD_DELIVERIES
+        .lock()
+        .unwrap()
+        .retain(|(held, _)| *held != dir);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(closed.is_ok(), "the socket stayed open while the request log was held");
+    assert!(
+        unwritten,
+        "the request log was written before its delivery was released"
+    );
+    assert!(log.contains("=== WEBSOCKET TIMELINE ==="), "\n{log}");
+}
+
+/// One Responses WebSocket turn through the request-log layer against an upstream that
+/// answers `status` with `body`: the text frames the client saw and the written log.
+async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String) {
+    use futures_util::StreamExt;
+    let mut servers = Servers::default();
+    let dir = std::env::temp_dir().join(format!("cpa-ws-timeline-error-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let proxy = logging_proxy(&mut servers, &dir, status, body).await;
+    let mut socket = sent_turn(&proxy).await;
     let mut frames = Vec::new();
     while let Ok(Some(Ok(message))) = tokio::time::timeout(Duration::from_secs(10), socket.next()).await {
         match message {
@@ -1028,137 +989,6 @@ async fn uninterrupted_claude_turns_send_masters_bytes() {
     let _ = std::fs::remove_dir_all(&dir);
     let seen = seen.lock().unwrap().clone();
     assert_eq!(seen, [FIRST, SECOND]);
-}
-
-/// Grants one Codex WebSocket credential that only this connection's session knows.
-struct HomeGrant(cpa_core::credential::Credential);
-
-impl crate::remote::RemoteDispatch for HomeGrant {
-    fn available(&self) -> bool {
-        true
-    }
-    fn dispatch(
-        &self,
-        _: crate::remote::RemoteRequest,
-    ) -> futures_util::future::BoxFuture<'_, Result<crate::remote::RemoteGrant, crate::remote::RemoteError>> {
-        let credential = self.0.clone();
-        Box::pin(async move {
-            Ok(crate::remote::RemoteGrant {
-                credential,
-                end: Box::new(|| None),
-                cancel: None,
-                request_retry: None,
-                user_api_key: String::new(),
-                private: Default::default(),
-            })
-        })
-    }
-    fn models(
-        &self,
-        _: Vec<(String, String)>,
-        _: Vec<(String, String)>,
-    ) -> futures_util::future::BoxFuture<'_, Result<Vec<u8>, crate::remote::ModelsError>> {
-        Box::pin(async { Err(crate::remote::ModelsError::Unavailable) })
-    }
-}
-
-/// Go `TestResponsesInterruptUsesHomeSessionAuth`: a Home credential lives on the
-/// execution session, not in the store, and still passes the interrupt's account check.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn interrupt_accepts_the_sessions_home_credential() {
-    use wreq::ws::message::Message as WsMessage;
-    let mut servers = Servers::default();
-    const INTERRUPT: &str =
-        r#"{"type":"response.interrupt","response_id":"r1","mode":"discard_partial_items","extension":"keep"}"#;
-    let frames: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
-    let upstream = {
-        let frames = frames.clone();
-        servers
-            .serve(axum::Router::new().fallback(move |ws: WebSocketUpgrade| {
-                let frames = frames.clone();
-                async move {
-                    ws.on_upgrade(move |mut socket: AxSocket| async move {
-                    while let Some(Ok(AxMessage::Text(text))) = socket.recv().await {
-                        frames.lock().unwrap().push(text.as_str().to_owned());
-                        // The create starts r1; only the interrupt finishes it.
-                        let reply = if gjson::get(text.as_str(), "type").str() == "response.interrupt" {
-                            r#"{"type":"response.completed","response":{"id":"r1","status":"completed","output":[]}}"#
-                        } else {
-                            r#"{"type":"response.created","response":{"id":"r1","output":[]}}"#
-                        };
-                        if socket.send(AxMessage::Text(reply.into())).await.is_err() {
-                            return;
-                        }
-                    }
-                })
-                }
-            }))
-            .await
-    };
-    let dir = std::env::temp_dir().join(format!("cpa-ws-home-interrupt-{}", uuid::Uuid::new_v4()));
-    let cfg = Config::parse(&format!(
-        "auth-dir: {}\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://127.0.0.1:1\n    models:\n      - name: gpt-fixture\n",
-        dir.join("auths").display()
-    ))
-    .unwrap();
-    let credentials = cpa_core::config::credentials::from_config(&cfg);
-    let executors = Executors {
-        claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1").unwrap(),
-        codex: cpa_exec::codex::CodexExecutor::new().unwrap(),
-        devices: Default::default(),
-        openai: Default::default(),
-        google: Default::default(),
-    };
-    let rt = Arc::new(crate::testing::runtime(cfg, credentials, executors));
-    let mut home = cpa_core::credential::Credential::from_file(
-        std::path::Path::new("/fake"),
-        std::path::Path::new("/fake/home-interrupt-auth.json"),
-        serde_json::json!({"type": "codex"}).as_object().unwrap().clone(),
-    )
-    .unwrap();
-    home.id = "home-interrupt-auth".into();
-    for (k, v) in [
-        ("api_key", "sk-FAKE-HOME"),
-        ("base_url", &format!("http://{upstream}")),
-        ("websockets", "true"),
-    ] {
-        home.attributes.insert(k.into(), v.into());
-    }
-    rt.set_remote_dispatch(Some(Arc::new(HomeGrant(home))));
-    let proxy = servers.serve(router(rt.clone())).await;
-    let mut socket = wreq::Client::new()
-        .websocket(format!("ws://{proxy}/v1/responses"))
-        .send()
-        .await
-        .unwrap()
-        .into_websocket()
-        .await
-        .unwrap();
-    socket
-        .send(WsMessage::text(
-            r#"{"type":"response.create","model":"gpt-fixture","input":[]}"#,
-        ))
-        .await
-        .unwrap();
-    let created = read_text(&mut socket).await;
-    assert_eq!(gjson::get(&created, "type").str(), "response.created", "{created}");
-    assert!(
-        rt.store().get("home-interrupt-auth").is_none(),
-        "the Home credential stays out of the store"
-    );
-    socket.send(WsMessage::text(INTERRUPT)).await.unwrap();
-    let completed = read_text(&mut socket).await;
-    assert_eq!(
-        gjson::get(&completed, "type").str(),
-        "response.completed",
-        "{completed}"
-    );
-    let frames = frames.lock().unwrap().clone();
-    assert_eq!(frames.len(), 2, "{frames:?}");
-    assert_eq!(frames[1], INTERRUPT, "the interrupt reaches upstream unchanged");
-    drop(socket);
-    servers.shutdown().await;
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The request log once it is complete: the writer streams into the `.log` file, so the
@@ -1645,7 +1475,7 @@ async fn removal_closes_only_its_sockets(section: &str) {
     turn(&mut dropped, "drop", "").await;
     assert_eq!(*dials.lock().unwrap(), ["keep", "drop"], "{section}");
 
-    rt.store().replace_config(vec![keep]);
+    rt.store().reconcile(vec![keep]);
     let started = Instant::now();
     while ended.lock().unwrap().is_empty() && started.elapsed() < Duration::from_secs(5) {
         tokio::time::sleep(Duration::from_millis(20)).await;

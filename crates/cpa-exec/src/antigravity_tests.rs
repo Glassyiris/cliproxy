@@ -1008,7 +1008,7 @@ async fn pooled_mode_scopes_connections_by_credential() {
 }
 
 /// TestAntigravityHomeModelThinkingLevelRemainsLevel: with the attempt's bound model
-/// info (Go's Home `model_info`) listing thinking levels, an OpenAI `reasoning_effort`
+/// info listing thinking levels, an OpenAI `reasoning_effort`
 /// reaches the upstream as that level, without a budget.
 #[tokio::test]
 async fn bound_level_model_keeps_the_thinking_level() {

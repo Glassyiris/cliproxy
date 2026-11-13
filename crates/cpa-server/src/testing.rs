@@ -473,10 +473,16 @@ mod tests {
             google: Default::default(),
         };
         let c = credential(&[], serde_json::json!({}));
-        let plain = Runtime::home(Config::default(), Vec::new(), executors());
+        let dir = std::env::temp_dir().join(format!("cpa-plain-runtime-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let store = Arc::new(config_store(&dir.join("test.db")).unwrap());
+        let db = crate::credential_store::CredentialDb::initialize(store, &dir.join("legacy")).unwrap();
+        let plain = Runtime::new(Config::default(), Vec::new(), executors(), db);
         assert!(Arc::ptr_eq(&plain.for_executor(&c), &c));
         let test = runtime(Config::default(), Vec::new(), executors());
         assert_eq!(test.for_executor(&c).attributes["proxy_url"], DENY_PROXY);
+        drop(plain);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
 

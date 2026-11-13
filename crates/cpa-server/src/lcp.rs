@@ -1213,7 +1213,7 @@ impl Matcher {
         }
         let group = self.groups.get_mut(&id).expect("indexed group");
         if group.auth != auth {
-            if group.auth == "home-pending" || group.auth.is_empty() {
+            if group.auth.is_empty() {
                 group.auth = auth.to_owned();
             } else {
                 // A delayed success never overwrites a failover's newer binding.

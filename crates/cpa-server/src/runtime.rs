@@ -90,13 +90,6 @@ impl ConfigFanout {
     }
 }
 
-/// Durable ownership of credentials: local SQLite or the remote Home service.
-#[derive(Clone)]
-pub enum CredentialAuthority {
-    Local(Arc<crate::credential_store::CredentialDb>),
-    Home,
-}
-
 pub struct Runtime {
     config: RwLock<Arc<Config>>,
     store: Arc<CredentialStore>,
@@ -114,8 +107,6 @@ pub struct Runtime {
     local_model: std::sync::atomic::AtomicBool,
     /// The native plugin host, synced with each published config (see [`crate::plugins`]).
     plugins: crate::plugins::PluginRuntime,
-    /// The remote dispatcher that replaces local selection (Go Home mode).
-    remote: RwLock<Option<Arc<dyn crate::remote::RemoteDispatch>>>,
     /// Set by test runtime fixtures: executor calls get credentials that
     /// cannot leave the machine.
     pub(crate) deny_external: std::sync::atomic::AtomicBool,
@@ -180,41 +171,18 @@ impl Runtime {
         executors: Executors,
         backend: Arc<crate::credential_store::CredentialDb>,
     ) -> Self {
-        Self::with_cooldown_backend(
-            config,
-            credentials,
-            executors,
-            CredentialAuthority::Local(backend.clone()),
-            backend,
-        )
-    }
-
-    /// Home owns remote credentials; preparation changes only an attempt's copy.
-    pub fn home(config: Config, credentials: Vec<Credential>, executors: Executors) -> Self {
-        Self::build(config, credentials, executors, CredentialAuthority::Home, None)
+        Self::with_cooldown_backend(config, credentials, executors, backend.clone(), backend)
     }
 
     /// Installs a cooldown backend before restoring state, including test backends.
     pub fn with_cooldown_backend(
-        config: Config,
-        credentials: Vec<Credential>,
-        executors: Executors,
-        authority: CredentialAuthority,
-        backend: Arc<dyn crate::cooldown_store::Backend>,
-    ) -> Self {
-        Self::build(config, credentials, executors, authority, Some(backend))
-    }
-
-    fn build(
         mut config: Config,
         credentials: Vec<Credential>,
         executors: Executors,
-        authority: CredentialAuthority,
-        backend: Option<Arc<dyn crate::cooldown_store::Backend>>,
+        db: Arc<crate::credential_store::CredentialDb>,
+        backend: Arc<dyn crate::cooldown_store::Backend>,
     ) -> Self {
-        if let CredentialAuthority::Local(db) = &authority {
-            config.auth_dir = db.auth_dir();
-        }
+        config.auth_dir = db.auth_dir();
         let mut policy = crate::management::policy(&config);
         policy.compat_disable_cooling = crate::scheduler::compat_cooling(&config);
         for problem in crate::provider_policy::Providers::problems(&config, &credentials) {
@@ -227,7 +195,7 @@ impl Runtime {
         let rt = Self {
             config_changes: Mutex::new(ConfigFanout::new(config.clone())),
             config: RwLock::new(config),
-            store: CredentialStore::new(credentials, authority),
+            store: CredentialStore::new(credentials, db),
             executors,
             refresh_task: Mutex::default(),
             refresh_state: Mutex::default(),
@@ -237,7 +205,6 @@ impl Runtime {
             usage: Arc::default(),
             local_model: Default::default(),
             plugins: Default::default(),
-            remote: RwLock::default(),
             deny_external: Default::default(),
             refresh_done: tokio::sync::watch::Sender::new(()),
             codex_refreshes: CodexRefreshes::default(),
@@ -247,9 +214,7 @@ impl Runtime {
             model_router: Default::default(),
         };
         rt.publish_policy(policy);
-        if let Some(backend) = backend {
-            rt.store.set_cooldown_backend(backend);
-        }
+        rt.store.set_cooldown_backend(backend);
         rt.store.configure_cooldown_store(cooldown_dir);
         // Failed attempts publish Go's error events on the RESP `errors` channel.
         let _ = rt.store.error_events.set(rt.usage.clone());
@@ -356,7 +321,7 @@ impl Runtime {
         fanout.subscribers.retain(|sender| sender.send(change.clone()).is_ok());
     }
 
-    /// Replaces standalone/Home configuration and its derived scheduler policy.
+    /// Replaces standalone configuration and its derived scheduler policy.
     /// Once Management binds a persistent owner this volatile port returns false,
     /// without effects: submit a configuration command to that owner instead.
     /// Requests already running retain their snapshot.
@@ -365,7 +330,7 @@ impl Runtime {
         self.publish_config_and_policy(config, policy)
     }
 
-    /// Standalone/Home counterpart accepting parsed routing settings. Returns false
+    /// Standalone counterpart accepting parsed routing settings. Returns false
     /// without effects for invalid config or a runtime bound to a persistent owner.
     pub fn publish_config_and_policy(&self, config: Config, policy: Policy) -> bool {
         self.install_config_and_policy(config, policy, None)
@@ -672,74 +637,8 @@ impl Runtime {
             reported: false,
             picked,
             seq,
-            remote: None,
             lcp: None,
         })
-    }
-
-    /// The installed remote dispatcher (Go Home mode), if any.
-    pub fn remote_dispatch(&self) -> Option<Arc<dyn crate::remote::RemoteDispatch>> {
-        self.remote.read().unwrap_or_else(PoisonError::into_inner).clone()
-    }
-
-    /// Routes every request through `dispatch` (Go Home mode) or back to the local
-    /// scheduler with `None` (additive API).
-    pub fn set_remote_dispatch(&self, dispatch: Option<Arc<dyn crate::remote::RemoteDispatch>>) {
-        *self.remote.write().unwrap_or_else(PoisonError::into_inner) = dispatch;
-    }
-
-    /// One remote pick (Go `pickHomeDispatchSelection`): the lease ends through the
-    /// dispatcher, and its release joins `releases`. Also returns Home's request-retry
-    /// limit and the client key Home authenticated (empty when it sent none).
-    pub(crate) async fn acquire_remote(
-        &self,
-        dispatch: &dyn crate::remote::RemoteDispatch,
-        selection: Selection,
-        request: crate::remote::RemoteRequest,
-        releases: &crate::remote::PendingReleases,
-    ) -> Result<(Lease, Option<i64>, String), crate::remote::RemoteError> {
-        let grant = dispatch.dispatch(request).await?;
-        let lease = Lease {
-            store: self.store.clone(),
-            credential: Arc::new(grant.credential),
-            execution_model: selection.model.clone(),
-            selection,
-            attempt: self.store.attempts.fetch_add(1, Ordering::Relaxed),
-            policy: self.policy(),
-            reported: false,
-            picked: 0,
-            seq: 0,
-            remote: Some(crate::remote::RemoteEnd {
-                end: Some(grant.end),
-                releases: releases.clone(),
-                cancel: grant.cancel,
-                private: grant.private,
-            }),
-            // ponytail: Go's Home dispatch keys its own session aliases on LCP matches
-            // (home_session_alias.go); remote picks here carry no LCP binding.
-            lcp: None,
-        };
-        Ok((lease, grant.request_retry, grant.user_api_key))
-    }
-
-    /// Go `prepareHomeRequestAuth`: a dispatched credential that requests must wait for
-    /// (a Claude identity, a Meta mint) is prepared on this attempt's copy only,
-    /// serialized per credential ID. Home owns the stored credential, so nothing is
-    /// committed locally.
-    pub(crate) async fn prepare_remote(&self, lease: &mut Lease, cfg: &Config) -> Result<(), ExecError> {
-        if self.executors.readiness(&lease.credential, cfg) != Readiness::PrepareNow {
-            return Ok(());
-        }
-        let lock = self.store.prepare_lock(&lease.credential.id);
-        let _guard = lock.lock().await;
-        let patch = self
-            .executors
-            .prepare(&self.for_executor(&lease.credential), cfg)
-            .await?;
-        let mut prepared = (*lease.credential).clone();
-        patch.apply(&mut prepared.metadata);
-        lease.credential = Arc::new(prepared);
-        Ok(())
     }
 
     /// At shutdown: Codex refreshes still waiting for a credential file's lock (another
@@ -768,11 +667,7 @@ impl Runtime {
             .store
             .persistence_tasks
             .spawn_blocking(move || {
-                let admission = if store.is_home() {
-                    Ok(())
-                } else {
-                    store.credential_backend().admit_work()
-                };
+                let admission = store.credential_backend().admit_work();
                 // Stop and join the coalescing thread outside its registry lock.
                 let cooldown = store
                     .cooldown_write
@@ -781,9 +676,7 @@ impl Runtime {
                     .take();
                 let cooldown = cooldown.map_or(Ok(()), crate::cooldown_store::Writer::stop);
                 admission?;
-                if !store.is_home() {
-                    store.credential_backend().admit_work()?;
-                }
+                store.credential_backend().admit_work()?;
                 cooldown.map_err(|error| anyhow::anyhow!("final cooldown checkpoint failed: {error}"))?;
                 Ok::<_, anyhow::Error>(())
             })
@@ -837,13 +730,6 @@ impl Runtime {
                 "credential preparation is shutting down",
             ));
         }
-        if self.store.is_home() {
-            return Err(ExecError::local(
-                409,
-                FailureScope::Request,
-                "Home credentials require attempt-local preparation",
-            ));
-        }
         test_hook("prepare", id);
         // Owned: the commit below moves it into its blocking job, which a cancelled caller
         // cannot stop, so the lock covers the read through the commit either way.
@@ -855,17 +741,13 @@ impl Runtime {
                 "credential preparation is shutting down",
             ));
         }
-        if !self.store.is_home() {
-            let backend = self.store.credential_backend();
-            self.store
-                .persistence_tasks
-                .spawn_blocking(move || backend.admit_work())
-                .await
-                .map_err(|e| ExecError::local(500, FailureScope::Request, e.to_string()))?
-                .map_err(|e| {
-                    ExecError::local(500, FailureScope::Request, format!("pending credential recovery: {e}"))
-                })?;
-        }
+        let backend = self.store.credential_backend();
+        self.store
+            .persistence_tasks
+            .spawn_blocking(move || backend.admit_work())
+            .await
+            .map_err(|e| ExecError::local(500, FailureScope::Request, e.to_string()))?
+            .map_err(|e| ExecError::local(500, FailureScope::Request, format!("pending credential recovery: {e}")))?;
         if self.codex_refreshes.admission_closed.is_cancelled() {
             return Err(ExecError::local(
                 503,
@@ -939,7 +821,7 @@ impl Runtime {
         // including plugin refreshes and virtual children of one source document.
         // Codex above owns its lock in its cancellation-safe transaction instead.
         let document_lock = match &current.source {
-            Source::File(path) if !self.store.is_home() => {
+            Source::File(path) => {
                 let backend = self.store.credential_backend();
                 let lock = self.lock_codex_file(path).await.map_err(|e| {
                     ExecError::local(500, FailureScope::Request, format!("locking credential document: {e}"))
@@ -1843,93 +1725,46 @@ pub struct Lease {
     /// The scheduler generation at the pick (`Scheduler::reserve_probe`): bounded
     /// windows opened or probes reserved after it are not answered by this attempt.
     picked: u32,
-    /// The upstream dispatch stamp (`Scheduler::dispatch`); 0 for remote leases.
+    /// The upstream dispatch stamp (`Scheduler::dispatch`).
     seq: u64,
-    /// A credential from the remote dispatcher: its lease ends there, not in the local
-    /// scheduler.
-    remote: Option<crate::remote::RemoteEnd>,
     /// The LCP binding of the pick: the attempt's canonical session and lineage.
     pub lcp: Option<crate::lcp::Match>,
 }
 
 impl Lease {
-    /// Whether the credential came from the remote dispatcher (Go Home mode).
-    pub fn is_remote(&self) -> bool {
-        self.remote.is_some()
-    }
-
-    /// What a Home pick keeps outside the credential's attributes.
-    pub(crate) fn home_private(&self) -> Option<&crate::remote::Private> {
-        self.remote.as_ref().map(|remote| &remote.private)
-    }
-
-    /// Resolves when the dispatcher cancels this lease's execution.
-    pub(crate) fn remote_cancelled(&self) -> Option<futures_util::future::BoxFuture<'static, ()>> {
-        let signal = self.remote.as_ref()?.cancel.clone()?;
-        Some(crate::remote::cancelled(signal))
-    }
-
-    /// Whether the dispatcher cancelled this lease's execution (Go: its selection is
-    /// no longer `Active`).
-    pub(crate) fn remote_cancel_requested(&self) -> bool {
-        self.remote
-            .as_ref()
-            .and_then(|remote| remote.cancel.as_ref())
-            .is_some_and(|signal| *signal.borrow())
-    }
-
     /// A new upstream dispatch on this lease (a refresh-and-retry): a cooldown recorded
     /// before it no longer predates this attempt (Go `nextExecutionSeq` per dispatch).
     pub(crate) fn redispatch(&mut self) {
-        if self.remote.is_none() {
-            self.seq = self
-                .store
-                .scheduler
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .dispatch();
-        }
+        self.seq = self
+            .store
+            .scheduler
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .dispatch();
     }
 
     pub fn complete(mut self, outcome: Outcome) {
         self.report(outcome);
     }
 
-    /// Joins a remote lease's release to `releases`: a Home pick a session kept ends or
-    /// runs again during a later request, which awaits the release before its next pick.
-    pub(crate) fn release_into(&mut self, releases: &crate::remote::PendingReleases) {
-        if let Some(remote) = &mut self.remote {
-            remote.releases = releases.clone();
-        }
-    }
-
     /// The upstream accepted this attempt (a stream's first chunk arrived): an ended
     /// bounded window it probes has its answer, so other requests may use the account
-    /// while the stream runs (`Scheduler::accept_probe`). A no-op for remote leases.
+    /// while the stream runs (`Scheduler::accept_probe`).
     pub fn accepted(&self) {
-        if self.remote.is_none() {
-            self.store.accept_probe(self);
-        }
+        self.store.accept_probe(self);
     }
 
     /// Records an intermediate outcome for one model of a pooled alias without ending
     /// the lease.
     pub fn note(&self, model: &str, outcome: &Outcome) {
-        if self.remote.is_none() {
-            self.store.record_model(self, model, outcome);
-        }
+        self.store.record_model(self, model, outcome);
     }
 
     fn report(&mut self, outcome: Outcome) {
         if std::mem::replace(&mut self.reported, true) {
             return;
         }
-        match &mut self.remote {
-            // Go `reportHomeResult` leaves local cooldowns alone; the scope ends with
-            // its release.
-            Some(remote) => remote.finish(),
-            None => self.store.record(self, &outcome),
-        }
+        self.store.record(self, &outcome);
     }
 }
 
@@ -2114,7 +1949,8 @@ pub struct CredentialStore {
     cooldown_dir: RwLock<Option<std::path::PathBuf>>,
     /// Cooldowns persist through SQLite or an explicit test backend.
     cooldown_backend: RwLock<Option<Arc<dyn crate::cooldown_store::Backend>>>,
-    authority: CredentialAuthority,
+    /// The SQLite authority for file credentials.
+    backend: Arc<crate::credential_store::CredentialDb>,
     /// Serializes snapshot submission; SQLite writes happen on one coalescing worker.
     cooldown_write: Mutex<Option<crate::cooldown_store::Writer>>,
     activity: Mutex<HashMap<String, CredentialActivity>>,
@@ -2222,7 +2058,7 @@ pub(crate) fn sha256(bytes: &[u8]) -> [u8; 32] {
 }
 
 impl CredentialStore {
-    pub fn new(credentials: Vec<Credential>, authority: CredentialAuthority) -> Arc<Self> {
+    pub fn new(credentials: Vec<Credential>, backend: Arc<crate::credential_store::CredentialDb>) -> Arc<Self> {
         let mut inner = Inner {
             creds: Vec::new(),
             generation: 0,
@@ -2249,7 +2085,7 @@ impl CredentialStore {
             reload: RwLock::default(),
             cooldown_dir: RwLock::default(),
             cooldown_backend: RwLock::default(),
-            authority,
+            backend,
             cooldown_write: Mutex::default(),
             activity: Mutex::default(),
             persisted: Mutex::default(),
@@ -2265,37 +2101,20 @@ impl CredentialStore {
         })
     }
 
-    pub fn is_home(&self) -> bool {
-        matches!(self.authority, CredentialAuthority::Home)
-    }
-
-    /// The local authority. Home callers must use attempt-local preparation instead.
     pub fn credential_backend(&self) -> Arc<crate::credential_store::CredentialDb> {
-        match &self.authority {
-            CredentialAuthority::Local(backend) => backend.clone(),
-            CredentialAuthority::Home => panic!("Home credentials have no local database"),
-        }
+        self.backend.clone()
     }
 
     /// A successful save precedes publication, including when the working file already
     /// holds these bytes. SQLite commits synchronously with its materialized view.
-    fn credential_command(&self) -> Result<Option<crate::credential_store::CredentialCommand<'_>>, PatchError> {
-        match &self.authority {
-            CredentialAuthority::Local(backend) => {
-                backend.command().map(Some).map_err(|e| PatchError::Io(e.to_string()))
-            }
-            CredentialAuthority::Home => Ok(None),
-        }
+    fn credential_command(&self) -> Result<crate::credential_store::CredentialCommand<'_>, PatchError> {
+        self.backend.command().map_err(|e| PatchError::Io(e.to_string()))
     }
 
-    fn granted_command(&self) -> Result<Option<crate::credential_store::CredentialCommand<'_>>, PatchError> {
-        match &self.authority {
-            CredentialAuthority::Local(backend) => backend
-                .granted_command()
-                .map(Some)
-                .map_err(|e| PatchError::Io(e.to_string())),
-            CredentialAuthority::Home => Ok(None),
-        }
+    fn granted_command(&self) -> Result<crate::credential_store::CredentialCommand<'_>, PatchError> {
+        self.backend
+            .granted_command()
+            .map_err(|e| PatchError::Io(e.to_string()))
     }
 
     fn grant_blocks(&self, credential: &Credential) -> bool {
@@ -2314,10 +2133,8 @@ impl CredentialStore {
                     let adopted_replacement = self.provenance(&credential.id).is_some_and(|source| {
                         source.revision == credential.revision
                             && Some(source.sha256) != invalid.source
-                            && match (&self.authority, &credential.source) {
-                                (CredentialAuthority::Local(backend), Source::File(path)) => {
-                                    backend.required_source(path) == Some(Some(source.sha256))
-                                }
+                            && match &credential.source {
+                                Source::File(path) => self.backend.required_source(path) == Some(Some(source.sha256)),
                                 _ => false,
                             }
                     });
@@ -2329,10 +2146,10 @@ impl CredentialStore {
                 return true;
             }
         }
-        let (CredentialAuthority::Local(backend), Source::File(path)) = (&self.authority, &credential.source) else {
+        let Source::File(path) = &credential.source else {
             return false;
         };
-        backend.required_source(path).is_some_and(|required| {
+        self.backend.required_source(path).is_some_and(|required| {
             self.provenance(&credential.id)
                 .is_none_or(|source| source.revision != credential.revision || Some(source.sha256) != required)
         })
@@ -2639,8 +2456,7 @@ impl CredentialStore {
     }
 
     fn queue_persist_credential(self: &Arc<Self>, credential: &Arc<Credential>) {
-        if self.is_home()
-            || !matches!(&credential.source, Source::File(_))
+        if !matches!(&credential.source, Source::File(_))
             || credential.disabled
             || marked(credential, "runtime_only")
             || marked(credential, "plugin_virtual")
@@ -2697,11 +2513,7 @@ impl CredentialStore {
             return Ok(());
         };
         // Go also skips runtime-only credentials and plugin-virtual ones.
-        if self.is_home()
-            || credential.disabled
-            || marked(credential, "runtime_only")
-            || marked(credential, "plugin_virtual")
-        {
+        if credential.disabled || marked(credential, "runtime_only") || marked(credential, "plugin_virtual") {
             return Ok(());
         }
         {
@@ -2954,7 +2766,6 @@ impl CredentialStore {
             reported: false,
             picked,
             seq,
-            remote: None,
             lcp,
         })
     }
@@ -3338,11 +3149,11 @@ impl CredentialStore {
         after.refresh_derived();
         let changes_tokens = credentials_changed(&before, &after);
         // Only post-prepare token results may bypass failed publication admission.
-        let mut command = if changes_tokens || fence.completed_plugin_grant {
+        let mut command = Some(if changes_tokens || fence.completed_plugin_grant {
             self.granted_command()?
         } else {
             self.credential_command()?
-        };
+        });
         if fence.preserved_source.is_some() && fence.plugin_source.as_ref().is_some_and(|source| !source.current()) {
             return Err(PatchError::NotFound);
         }
@@ -3372,7 +3183,7 @@ impl CredentialStore {
         patch: &cpa_exec::codex_refresh::RefreshPatch,
     ) -> Result<CodexAdmission, PatchError> {
         let id = original.id.as_str();
-        let mut command = self.credential_command()?;
+        let mut command = Some(self.credential_command()?);
         let committed = loop {
             let revision = self.get(id).ok_or(PatchError::NotFound)?.revision;
             let mut discarded = None;
@@ -3495,7 +3306,7 @@ impl CredentialStore {
         patch: &MetadataPatch,
         edit: impl FnOnce(&mut Credential),
     ) -> Result<Arc<Credential>, PatchError> {
-        let mut command = self.credential_command()?;
+        let mut command = Some(self.credential_command()?);
         self.apply_patch_admitted(&mut command, (id, expected_revision), fence, patch, edit, |_| false)
             .map(|(credential, _)| credential)
     }
@@ -3668,7 +3479,7 @@ impl CredentialStore {
         ) -> Result<Option<(Option<std::path::PathBuf>, Vec<u8>, T)>, PatchError>,
         publish: impl FnOnce(&mut Inner, usize, &[u8], T) -> R,
     ) -> Result<Option<R>, PatchError> {
-        let mut command = self.credential_command()?;
+        let mut command = Some(self.credential_command()?);
         self.write_admitted(
             &mut command,
             (id, expected_revision),
@@ -3856,7 +3667,7 @@ impl CredentialStore {
         commit: Commit,
         next: Option<Credential>,
     ) -> Result<(), PatchError> {
-        let mut command = self.credential_command()?;
+        let mut command = Some(self.credential_command()?);
         self.commit_file_backed_admitted(&mut command, id, expected_revision, commit, next)
     }
 
@@ -4101,7 +3912,7 @@ impl CredentialStore {
                 let Some(&existing) = by_id.get(cred.id.as_str()) else {
                     continue;
                 };
-                if unchanged(existing, cred) || self.is_home() {
+                if unchanged(existing, cred) {
                     continue;
                 }
                 let on_disk = self
@@ -4171,52 +3982,6 @@ impl CredentialStore {
         self.clear_disabled_cooldowns();
         self.persist_cooldowns();
         rejected
-    }
-
-    /// Replaces the config-sourced credentials (Home config API keys, Go
-    /// `registerConfigAPIKeyAuths`) under a single write lock and keeps every other
-    /// current entry, so a concurrent [`Self::upsert`] or relay session change is never
-    /// undone the way a snapshot followed by [`Self::reconcile`] could undo it. An
-    /// unchanged key keeps its revision, as in `reconcile`.
-    pub fn replace_config(&self, keys: Vec<Credential>) {
-        let reload = self.reload.write().unwrap_or_else(PoisonError::into_inner);
-        let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
-        let mut next: Vec<_> = inner
-            .creds
-            .iter()
-            .filter(|c| !matches!(c.source, Source::Config { .. }))
-            .cloned()
-            .collect();
-        for mut key in keys {
-            match inner
-                .creds
-                .iter()
-                .find(|c| c.id == key.id && unchanged(c, &key))
-                .cloned()
-            {
-                Some(existing) => next.push(existing),
-                None => {
-                    inner.generation += 1;
-                    key.revision = inner.generation;
-                    next.push(Arc::new(key));
-                }
-            }
-        }
-        let removed = removed_ids(&inner.creds, &next);
-        self.register(&inner.creds, &next, &[]);
-        self.clear_replaced_unauthorized(&inner.creds, &next);
-        inner.creds = next;
-        inner.epoch += 1;
-        self.changed.send_replace(());
-        self.scheduler
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .reconcile(&inner.creds);
-        drop(inner);
-        drop(reload);
-        self.close_sessions(removed);
-        self.clear_disabled_cooldowns();
-        self.persist_cooldowns();
     }
 
     /// Inserts or replaces one credential (a plugin's `host.auth.save`) under a single
@@ -4722,17 +4487,15 @@ async fn refresh_codex_file(
                 // Go `refreshLocked` writes after a grant, whatever its manager then admits;
                 // an adopt-only refresh reaches the file only when admitted.
                 if patch.granted() {
-                    let mut command = store.granted_command()?;
+                    let command = store.granted_command()?;
                     let bytes = command
-                        .as_ref()
-                        .ok_or(PatchError::ConfigBacked)?
                         .read(&path)
                         .map_err(|e| PatchError::Io(e.to_string()))?
                         .ok_or(PatchError::NotFound)?;
                     let out = codex_patched(&bytes, &patch, true).ok_or_else(|| {
                         PatchError::Io(format!("invalid credential JSON in {} before write", path.display()))
                     })?;
-                    store.save_document(&mut command, &path, &out)?;
+                    store.save_document(&mut Some(command), &path, &out)?;
                 }
                 #[cfg(test)]
                 tests::before_admit(&path);
@@ -4992,61 +4755,18 @@ pub(crate) fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<(
 }
 
 /// A response stream that reports its lease's outcome on end, on the first error (after
-/// which it yields nothing more), or as `Cancelled` when dropped early.
-///
-/// A remote lease's cancellation (Go's selection-bound attempt context) is watched by
-/// its own task: a draining dispatcher closes the upstream body and ends the lease even
-/// while the client is not reading, and the reader then sees `context canceled`.
+/// which it yields nothing more), or as `Cancelled` when dropped early. The upstream body
+/// closes before the lease ends: `inner` is declared, and so dropped, before `lease`.
 pub struct Completing {
-    slot: Arc<Mutex<Slot>>,
-    watcher: Option<tokio::task::JoinHandle<()>>,
-}
-
-struct Slot {
     inner: ExecStream,
     lease: Option<Lease>,
-    /// The watcher ended the lease; the next poll yields the cancellation error.
-    cancelled: bool,
-    waker: Option<std::task::Waker>,
 }
 
 impl Completing {
     pub fn new(inner: ExecStream, lease: Lease) -> Self {
-        let cancelled = lease.remote_cancelled();
-        let slot = Arc::new(Mutex::new(Slot {
+        Self {
             inner,
             lease: Some(lease),
-            cancelled: false,
-            waker: None,
-        }));
-        let watcher = cancelled.map(|cancelled| {
-            let slot = Arc::downgrade(&slot);
-            tokio::spawn(async move {
-                cancelled.await;
-                let Some(slot) = slot.upgrade() else { return };
-                let (inner, lease, waker) = {
-                    let mut s = slot.lock().unwrap_or_else(PoisonError::into_inner);
-                    let Some(lease) = s.lease.take() else { return };
-                    s.cancelled = true;
-                    let inner = std::mem::replace(&mut s.inner, Box::pin(futures_util::stream::empty()));
-                    (inner, lease, s.waker.take())
-                };
-                // The upstream body closes first, then the lease ends.
-                drop(inner);
-                lease.complete(Outcome::Cancelled);
-                if let Some(waker) = waker {
-                    waker.wake();
-                }
-            })
-        });
-        Self { slot, watcher }
-    }
-}
-
-impl Drop for Completing {
-    fn drop(&mut self) {
-        if let Some(watcher) = &self.watcher {
-            watcher.abort();
         }
     }
 }
@@ -5055,25 +4775,17 @@ impl Stream for Completing {
     type Item = Result<Bytes, ExecError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut s = self.slot.lock().unwrap_or_else(PoisonError::into_inner);
-        if std::mem::take(&mut s.cancelled) {
-            return Poll::Ready(Some(Err(crate::remote::cancelled_error())));
-        }
-        if s.lease.is_none() {
+        let this = self.get_mut();
+        if this.lease.is_none() {
             return Poll::Ready(None);
         }
-        if self.watcher.is_some() {
-            s.waker = Some(cx.waker().clone());
-        }
-        let item = ready!(s.inner.poll_next_unpin(cx));
+        let item = ready!(this.inner.poll_next_unpin(cx));
         match &item {
             Some(Ok(_)) => {}
-            None => s.lease.take().unwrap().complete(Outcome::Success),
+            None => this.lease.take().unwrap().complete(Outcome::Success),
             Some(Err(e)) => {
-                // The upstream body closes before the lease ends: a remote lease's release
-                // must not reach the control plane while the response is still open.
-                s.inner = Box::pin(futures_util::stream::empty());
-                s.lease.take().unwrap().complete(Outcome::Failure(e.clone()));
+                this.inner = Box::pin(futures_util::stream::empty());
+                this.lease.take().unwrap().complete(Outcome::Failure(e.clone()));
             }
         }
         Poll::Ready(item)
@@ -5452,7 +5164,7 @@ pub(crate) mod tests {
 
     fn test_store(credentials: Vec<Credential>) -> Arc<CredentialStore> {
         let backend = private_backend(&credentials);
-        CredentialStore::new(credentials, CredentialAuthority::Local(backend))
+        CredentialStore::new(credentials, backend)
     }
 
     fn test_runtime(config: Config, credentials: Vec<Credential>, executors: Executors) -> Runtime {
@@ -5492,7 +5204,7 @@ pub(crate) mod tests {
             backend.preparse(&cfg).unwrap();
             backend.scan(&cfg).unwrap()
         });
-        let store = CredentialStore::new(scan.credentials, CredentialAuthority::Local(backend.clone()));
+        let store = CredentialStore::new(scan.credentials, backend.clone());
         store.note_loaded(&scan.read);
         let original = store.get("codex.json").unwrap();
         let path = cfg.auth_dir.join("codex.json");
@@ -5544,10 +5256,7 @@ pub(crate) mod tests {
         let (database, backend) = sqlite_backend(&dir);
         let mut cfg = Config::parse("").unwrap();
         cfg.auth_dir = backend.auth_dir();
-        let store = CredentialStore::new(
-            crate::testing::builtin_auth_files(&cfg),
-            CredentialAuthority::Local(backend.clone()),
-        );
+        let store = CredentialStore::new(crate::testing::builtin_auth_files(&cfg), backend.clone());
         let original = store.get("codex.json").unwrap();
         let path = cfg.auth_dir.join("codex.json");
         std::fs::remove_file(&path).unwrap();
@@ -5606,10 +5315,7 @@ pub(crate) mod tests {
         let (database, backend) = sqlite_backend(&dir);
         let mut cfg = Config::parse("").unwrap();
         cfg.auth_dir = backend.auth_dir();
-        let store = CredentialStore::new(
-            crate::testing::builtin_auth_files(&cfg),
-            CredentialAuthority::Local(backend.clone()),
-        );
+        let store = CredentialStore::new(crate::testing::builtin_auth_files(&cfg), backend.clone());
         let original = store.get("codex.json").unwrap();
         let epoch = store.epoch();
         let path = cfg.auth_dir.join("codex.json");
@@ -5694,7 +5400,7 @@ pub(crate) mod tests {
                 .collect(),
         )
         .unwrap();
-        let store = CredentialStore::new(children, CredentialAuthority::Local(backend.clone()));
+        let store = CredentialStore::new(children, backend.clone());
         let (current, registered) = store.get_registered("child-a").unwrap();
         assert!(marked(&current, "plugin_virtual"));
         let fresh = br#"{"type":"pp","child-a":"new-a","child-b":"new-b","unknown":[1,2]}"#;
@@ -5714,68 +5420,6 @@ pub(crate) mod tests {
         drop(backend);
         drop(database);
         std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[tokio::test]
-    async fn remote_preparation_updates_only_the_home_attempt_copy() {
-        let app = axum::Router::new().route(
-            "/profile",
-            axum::routing::get(|| async { axum::Json(serde_json::json!({"account":{"uuid":"home-account"}})) }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let profile = format!("http://{}/profile", listener.local_addr().unwrap());
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let dir = std::env::temp_dir().join(format!("cpa-home-prepare-{}", uuid::Uuid::new_v4()));
-        let path = dir.join("home-owned.json");
-        let remote = crate::testing::local(
-            Credential::from_file(
-                &dir,
-                &path,
-                serde_json::json!({"type":"claude", "access_token":"sk-ant-oat-home-fake",
-                "claude_device_ids":["b".repeat(64)]})
-                .as_object()
-                .unwrap()
-                .clone(),
-            )
-            .unwrap(),
-        );
-        let cfg = Config::parse("").unwrap();
-        let rt = Runtime::home(
-            cfg.clone(),
-            vec![],
-            Executors {
-                claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:1")
-                    .unwrap()
-                    .with_oauth(cpa_exec::oauth::OAuth::with_endpoints(
-                        wreq::Client::new(),
-                        &profile,
-                        &profile,
-                        &profile,
-                    )),
-                codex: Default::default(),
-                devices: Default::default(),
-                openai: Default::default(),
-                google: Default::default(),
-            },
-        );
-        rt.deny_external.store(true, Ordering::Relaxed);
-        let dispatched = CredentialStore::new(vec![remote], CredentialAuthority::Home);
-        let mut lease = dispatched.select(sel("claude")).unwrap();
-        lease.remote = Some(crate::remote::RemoteEnd {
-            end: Some(Box::new(|| None)),
-            releases: Default::default(),
-            cancel: None,
-            private: Default::default(),
-        });
-        assert!(rt.store().is_home(), "Home has no local credential backend");
-        assert_eq!(rt.executors.readiness(&lease.credential, &cfg), Readiness::PrepareNow);
-        rt.prepare_remote(&mut lease, &cfg).await.unwrap();
-        assert_eq!(lease.credential.str("account_uuid"), Some("home-account"));
-        assert!(rt.store().snapshot().is_empty());
-        assert!(dispatched.get("home-owned.json").unwrap().str("account_uuid").is_none());
-        assert!(!path.exists(), "a Home source path is not a locally owned document");
-        lease.complete(Outcome::Success);
-        assert_eq!(dispatched.stats(), AttemptStats::default());
     }
 
     #[test]
@@ -5892,57 +5536,6 @@ pub(crate) mod tests {
         assert_eq!(store.get("saved.json").unwrap().metadata["n"], 499);
         assert_eq!(store.snapshot().len(), 2);
         std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    /// Home config updates replacing the config keys never undo a concurrent plugin save
-    /// or relay session change, and unchanged keys keep their revision.
-    #[test]
-    fn replace_config_keeps_concurrent_changes_to_other_credentials() {
-        let keys = |key: &str| {
-            let cfg = cpa_core::config::Config::parse(&format!(
-                "codex-api-key:\n  - api-key: {key}\n    base-url: http://127.0.0.1:9\n"
-            ))
-            .unwrap();
-            cpa_core::config::credentials::from_config(&cfg)
-        };
-        let store = Arc::new(test_store(keys("sk-a")));
-        let mut saved = Credential::relay_session("saved");
-        saved.source = Source::File("saved.json".into());
-        saved.id = "saved.json".into();
-        // Each step checks that the previous one survived the concurrent replacements.
-        let changer = {
-            let store = store.clone();
-            std::thread::spawn(move || {
-                for n in 0..2000 {
-                    if n > 0 {
-                        assert_eq!(
-                            store.get("saved.json").unwrap().metadata["n"],
-                            n - 1,
-                            "a save was undone"
-                        );
-                        assert!(store.get("relay").is_none(), "a closed relay session came back");
-                    }
-                    let mut next = saved.clone();
-                    next.metadata.insert("n".into(), n.into());
-                    store.upsert(next);
-                    store.add_runtime(Credential::relay_session("relay"));
-                    store.remove_runtime("relay");
-                }
-            })
-        };
-        let mut n = 0;
-        while !changer.is_finished() {
-            store.replace_config(keys(if n % 2 == 0 { "sk-b" } else { "sk-a" }));
-            n += 1;
-        }
-        changer.join().unwrap();
-        store.replace_config(keys("sk-a"));
-        let revision = store.snapshot().iter().find(|c| c.id != "saved.json").unwrap().revision;
-        store.replace_config(keys("sk-a"));
-        let ids: Vec<_> = store.snapshot().iter().map(|c| (c.id.clone(), c.revision)).collect();
-        assert_eq!(ids.len(), 2, "{ids:?}");
-        assert!(ids.contains(&(keys("sk-a")[0].id.clone(), revision)), "{ids:?}");
-        assert_eq!(store.get("saved.json").unwrap().metadata["n"], 1999);
     }
 
     /// The next database save of `path` stops before committing its bytes,
@@ -6541,7 +6134,7 @@ pub(crate) mod tests {
         assert_eq!(policy.session_affinity_ttl, Duration::from_secs(3600));
     }
 
-    /// Standalone and Home publications reach runtime consumers one by one, in
+    /// Standalone publications reach runtime consumers one by one, in
     /// order, each with its own view; a dropped subscriber is pruned.
     #[test]
     fn runtime_consumers_receive_every_publication_in_order() {
@@ -6889,7 +6482,7 @@ pub(crate) mod tests {
                 google: Default::default(),
                 devices: Default::default(),
             },
-            CredentialAuthority::Local(backend.clone()),
+            backend.clone(),
             backend.clone(),
         );
         rt.deny_external.store(true, Ordering::Relaxed);
@@ -6938,7 +6531,7 @@ pub(crate) mod tests {
                 google: Default::default(),
                 devices: Default::default(),
             },
-            CredentialAuthority::Local(backend.clone()),
+            backend.clone(),
             backend.clone(),
         );
         rt.deny_external.store(true, Ordering::Relaxed);
@@ -8002,7 +7595,7 @@ pub(crate) mod tests {
             original.attributes.insert("plugin_virtual".into(), "true".into());
             original.metadata.insert("access_token".into(), "old-access".into());
             original.metadata.insert("refresh_token".into(), "old-refresh".into());
-            let store = CredentialStore::new(vec![original.clone()], CredentialAuthority::Local(backend.clone()));
+            let store = CredentialStore::new(vec![original.clone()], backend.clone());
             store.note_loaded(&std::collections::BTreeMap::from([(path.clone(), sha256(raw))]));
             let weak = Arc::downgrade(&store);
             let projection_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -10618,111 +10211,59 @@ pub(crate) mod tests {
         assert_eq!(store.stats(), stats(2, 1, 2));
     }
 
-    /// A remote lease ends once, never through the local scheduler, and only after the
-    /// upstream body it was streaming has been dropped.
+    /// A lease ends once, and only after the upstream body it was streaming has been
+    /// dropped, both on an upstream error and when the client stops reading.
     #[tokio::test]
-    async fn remote_leases_end_after_the_upstream_body_closes() {
-        use std::sync::atomic::AtomicBool;
-        struct Probe(Arc<AtomicBool>);
+    async fn leases_end_after_the_upstream_body_closes() {
+        struct Probe(Arc<CredentialStore>, Arc<Mutex<Vec<AttemptStats>>>);
         impl Drop for Probe {
             fn drop(&mut self) {
-                self.0.store(true, Ordering::SeqCst);
+                self.1.lock().unwrap().push(self.0.stats());
             }
         }
+        let stats = |s, f, c| AttemptStats {
+            success: s,
+            failure: f,
+            cancelled: c,
+        };
         let store = test_store(vec![cred("a.json", "claude", false)]);
-        let dropped = Arc::new(AtomicBool::new(false));
         let observed = Arc::new(Mutex::new(Vec::new()));
-        let mut lease = store.select(sel("claude")).unwrap();
-        let (seen, probe) = (observed.clone(), dropped.clone());
-        lease.remote = Some(crate::remote::RemoteEnd {
-            end: Some(Box::new(move || {
-                seen.lock().unwrap().push(probe.load(Ordering::SeqCst));
-                None
-            })),
-            releases: Default::default(),
-            cancel: None,
-            private: Default::default(),
-        });
-        let guard = Probe(dropped.clone());
+        let body = |items: Vec<Result<Bytes, ExecError>>| {
+            let guard = Probe(store.clone(), observed.clone());
+            futures_util::stream::iter(items)
+                .chain(futures_util::stream::pending())
+                .map(move |item| {
+                    let _ = &guard;
+                    item
+                })
+                .boxed()
+        };
+
         let err = ExecError::local(502, FailureScope::Transport, "boom");
-        let inner = futures_util::stream::iter(vec![Ok(Bytes::from_static(b"a")), Err(err)])
-            .chain(futures_util::stream::pending())
-            .map(move |item| {
-                let _ = &guard;
-                item
-            })
-            .boxed();
-        let mut stream = Completing::new(inner, lease);
+        let mut stream = Completing::new(
+            body(vec![Ok(Bytes::from_static(b"a")), Err(err)]),
+            store.select(sel("claude")).unwrap(),
+        );
         assert!(stream.next().await.unwrap().is_ok());
         assert!(observed.lock().unwrap().is_empty(), "still streaming");
         assert!(stream.next().await.unwrap().is_err());
         assert_eq!(
             *observed.lock().unwrap(),
-            vec![true],
-            "body dropped first, then one end"
+            vec![stats(0, 0, 0)],
+            "body dropped before the lease ended"
         );
+        assert_eq!(store.stats(), stats(0, 1, 0));
         drop(stream);
-        assert_eq!(observed.lock().unwrap().len(), 1);
-        assert_eq!(
-            store.stats(),
-            AttemptStats::default(),
-            "the local scheduler saw nothing"
-        );
-    }
-    /// Go binds the attempt's cancellation to the Home selection: a drain closes the
-    /// upstream body and ends the lease while the client has stopped reading
-    /// (backpressure), and the reader then sees the cancellation once.
-    #[tokio::test]
-    async fn a_drain_ends_a_remote_stream_the_client_stopped_reading() {
-        use std::sync::atomic::AtomicBool;
-        struct Probe(Arc<AtomicBool>);
-        impl Drop for Probe {
-            fn drop(&mut self) {
-                self.0.store(true, Ordering::SeqCst);
-            }
-        }
-        let store = test_store(vec![cred("a.json", "claude", false)]);
-        let dropped = Arc::new(AtomicBool::new(false));
-        let observed = Arc::new(Mutex::new(Vec::new()));
-        let mut lease = store.select(sel("claude")).unwrap();
-        let (seen, probe) = (observed.clone(), dropped.clone());
-        let (cancel_tx, cancel) = tokio::sync::watch::channel(false);
-        lease.remote = Some(crate::remote::RemoteEnd {
-            end: Some(Box::new(move || {
-                seen.lock().unwrap().push(probe.load(Ordering::SeqCst));
-                None
-            })),
-            releases: Default::default(),
-            cancel: Some(cancel),
-            private: Default::default(),
-        });
-        let guard = Probe(dropped.clone());
-        let inner = futures_util::stream::iter(vec![Ok(Bytes::from_static(b"a"))])
-            .chain(futures_util::stream::pending())
-            .map(move |item| {
-                let _ = &guard;
-                item
-            })
-            .boxed();
-        let mut stream = Completing::new(inner, lease);
+        assert_eq!(store.stats(), stats(0, 1, 0), "one end");
+
+        let mut stream = Completing::new(body(vec![Ok(Bytes::new())]), store.select(sel("claude")).unwrap());
         assert!(stream.next().await.unwrap().is_ok());
-        // The client stops polling; the dispatcher drains.
-        cancel_tx.send(true).unwrap();
-        for _ in 0..100 {
-            if !observed.lock().unwrap().is_empty() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert_eq!(
-            *observed.lock().unwrap(),
-            vec![true],
-            "body dropped first, then one end, without a poll"
-        );
-        let error = stream.next().await.unwrap().unwrap_err();
-        assert_eq!(String::from_utf8_lossy(&error.body), "context canceled");
-        assert!(stream.next().await.is_none());
         drop(stream);
-        assert_eq!(observed.lock().unwrap().len(), 1);
+        assert_eq!(
+            observed.lock().unwrap()[1],
+            stats(0, 1, 0),
+            "body dropped before the cancelled lease ended"
+        );
+        assert_eq!(store.stats(), stats(0, 1, 1));
     }
 }

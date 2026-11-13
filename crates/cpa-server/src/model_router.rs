@@ -762,8 +762,7 @@ struct Fallback {
     tokens: usize,
 }
 
-/// The decision of a router named by `call.model`; `None` when the call names no router
-/// (or in Home mode, where Home routes the model).
+/// The decision of a router named by `call.model`; `None` when the call names no router.
 /// Boxed: the judge's dispatch re-enters the dispatcher that called this router.
 pub(crate) fn resolve<'a>(
     rt: &'a Arc<Runtime>,
@@ -854,8 +853,8 @@ async fn route(rt: &Arc<Runtime>, call: &Call) -> Option<Routed> {
     let suffix = suffix.map(str::trim).filter(|s| !s.is_empty());
     let settings = settings(&rt.config());
     let router = settings.routers.iter().find(|r| r.name == base.trim())?;
-    // Home routes the model as sent; a media route needs a media model, not a chat one.
-    if rt.remote_dispatch().is_some() || call.media.is_some() {
+    // A media route needs a media model, not a chat one.
+    if call.media.is_some() {
         return None;
     }
     let tokens = estimate_tokens(&call.body);

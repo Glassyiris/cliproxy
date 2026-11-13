@@ -624,8 +624,6 @@ pub(crate) async fn no_route(State(state): State<Arc<Management>>, req: Request)
     // gin matches NoRoute prefixes on the decoded path.
     let path = super::percent_decode(req.uri().path());
     if path.starts_with("/v0/resource/plugins/") {
-        // Go also refuses resources in Home mode, which this server never runs in
-        // (`-home-jwt` is refused at startup); `home` in the YAML is ignored, as in Go.
         let (parts, _) = req.into_parts();
         let inbound = inbound(&parts, Bytes::new());
         return reply(state.rt.plugins().serve_resource(inbound).await);

@@ -261,7 +261,7 @@ pub(crate) async fn bind(
 
 /// [`bind`] after the request is read; callers hold `disk`.
 fn start(state: &Management, name: &str) -> Response {
-    if state.rt.store().is_home() || state.rt.store().credential_backend().admit_work().is_err() {
+    if state.rt.store().credential_backend().admit_work().is_err() {
         return fail(StatusCode::SERVICE_UNAVAILABLE, "credential recovery required");
     }
     let all = state.rt.store().snapshot();

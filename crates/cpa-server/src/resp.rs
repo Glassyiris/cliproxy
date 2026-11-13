@@ -2,9 +2,6 @@
 //! management clients `AUTH` with the management key, then `LPOP`/`RPOP` queued usage
 //! records or `SUBSCRIBE` to the `usage` and `errors` channels. The listener routes a
 //! connection here when its first byte is a RESP type prefix.
-//!
-//! In Home mode (a remote dispatcher is installed) Go refuses these connections with
-//! one error before reading a command.
 
 use cpa_core::gostr::GoStr;
 use std::net::SocketAddr;
@@ -209,15 +206,6 @@ where
         }
         _ => otherwise.to_owned(),
     };
-    if mgmt.rt.remote_dispatch().is_some() {
-        // Go's listener already buffered what arrived with the first byte (bufio
-        // `Peek`); reading it too keeps the close a FIN instead of a reset.
-        let _ = reader.fill_buf().await;
-        reply.error("ERR redis usage output disabled in home mode");
-        let _ = writer.write_all(&reply.0).await;
-        let _ = writer.flush().await;
-        return;
-    }
     loop {
         if !mgmt.routes_enabled() {
             return;

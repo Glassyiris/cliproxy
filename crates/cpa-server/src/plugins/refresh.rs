@@ -32,9 +32,7 @@ pub(crate) enum Route {
 /// serves takes [`Route::Executor`]; the rest are bound to the OpenAI-compatible
 /// executor, which Go wraps when a plugin auth provider matches the provider, the
 /// `provider_key` or `compat_name` attribute, or the executor's own key
-/// (`wrapOpenAICompatIfPluginAuth`). Go asks Home first when Home is enabled
-/// (`RefreshAuthViaHome`); that is not ported, so Home mode keeps the compat executor's
-/// refresh off.
+/// (`wrapOpenAICompatIfPluginAuth`).
 pub(crate) fn route(rt: &Runtime, c: &Credential, cfg: &Config) -> Option<Route> {
     let provider = c.provider.trim().go_lower();
     if super::BUILTIN.contains(&provider.as_str()) {
@@ -42,17 +40,6 @@ pub(crate) fn route(rt: &Runtime, c: &Credential, cfg: &Config) -> Option<Route>
     }
     if rt.plugin_runtime().executor(c, cfg).is_some() {
         return Some(Route::Executor);
-    }
-    // Home mode installs the remote dispatcher; the config may not carry `home.enabled`.
-    let home = rt.remote_dispatch().is_some()
-        || cfg
-            .document
-            .get("home")
-            .and_then(|h| h.get("enabled"))
-            .and_then(serde_yaml_ng::Value::as_bool)
-            .unwrap_or(false);
-    if home {
-        return None;
     }
     let attr = |k: &str| c.attributes.get(k).map_or("", |v| v.trim());
     // Go `openAICompatInfoFromAuth`, else the provider (`registerExecutorForAuth`).
@@ -547,17 +534,18 @@ mod tests {
     /// registered again under its ID keeps its own (Go's `RegistrationEpoch` check).
     #[test]
     fn a_late_refresh_result_leaves_no_schedule_behind() {
+        let dir = std::env::temp_dir().join(format!("cpa-late-refresh-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(
+            Arc::new(crate::testing::config_store(&dir.join("test.db")).unwrap()),
+            &dir.join("legacy"),
+        )
+        .unwrap();
         let credential = |id: &str| {
             let metadata = serde_json::json!({"type":"pp","access_token":"t","refresh_interval":"1h"});
-            Credential::from_file(
-                std::path::Path::new("/auths"),
-                &std::path::Path::new("/auths").join(id),
-                metadata.as_object().cloned().unwrap(),
-            )
-            .unwrap()
+            Credential::from_file(&dir, &dir.join(id), metadata.as_object().cloned().unwrap()).unwrap()
         };
-        let store =
-            crate::runtime::CredentialStore::new(vec![credential("a.json")], crate::runtime::CredentialAuthority::Home);
+        let store = crate::runtime::CredentialStore::new(vec![credential("a.json")], db);
         store.end_bootstrap();
         let now = Utc::now();
         let schedule = |id: &str| lock(store.refresh_schedules()).get(id).copied();
@@ -598,6 +586,8 @@ mod tests {
             commit(registration);
             assert_eq!(schedule("a.json").unwrap().last, Some(now), "disabled {disabled}");
         }
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Go publishes a refresh's `LastRefreshedAt` with the refreshed auth, under one
@@ -622,8 +612,7 @@ mod tests {
         let initial = credential("q", false);
         let path = dir.join("a.json");
         db.save(&path, &serde_json::to_vec(&initial.metadata).unwrap()).unwrap();
-        let store =
-            crate::runtime::CredentialStore::new(vec![initial], crate::runtime::CredentialAuthority::Local(db.clone()));
+        let store = crate::runtime::CredentialStore::new(vec![initial], db.clone());
         store.end_bootstrap();
         let schedule = || lock(store.refresh_schedules()).get("a.json").copied().unwrap();
         let mut patch = MetadataPatch::default();

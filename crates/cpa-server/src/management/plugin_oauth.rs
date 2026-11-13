@@ -253,9 +253,6 @@ fn save_records(
     consumed_login: Option<(&str, &str)>,
     authority: Option<&super::plugin_auth::ScopedSave>,
 ) -> Result<Vec<(std::path::PathBuf, Vec<cpa_core::credential::Credential>)>, String> {
-    if state.rt.store().is_home() {
-        return Err("credential saves unavailable in Home mode".into());
-    }
     let _guard = state.disk.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let cfg = state.rt.config();
     let auth_dir = &cfg.auth_dir;

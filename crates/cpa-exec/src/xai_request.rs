@@ -159,7 +159,7 @@ fn preserve_output_controls(mut body: Vec<u8>, source: &[u8], from: Format) -> V
 }
 
 /// `prepareResponsesRequestTo`.
-pub(crate) async fn prepare(
+pub(crate) fn prepare(
     req: &ExecRequest,
     cfg: &Config,
     stream: bool,
@@ -233,7 +233,7 @@ pub(crate) async fn prepare(
     }
     body = clamp_tools_limit(body, MAX_TOOLS, &namespace_tools);
     let replay_scope = replay::scope(req, &body, downstream_websocket);
-    body = replay::apply(replay_store, &replay_scope, body).await;
+    body = replay::apply(replay_store, &replay_scope, body);
     body = normalize_input_custom_tool_calls(body);
     body = normalize_input_namespace_tool_calls(body, fold);
     if !web_search_alias.is_empty() {

@@ -7,8 +7,7 @@
 //! Google One AI credits enabled (`enabledCreditTypes`). The dispatcher picks the
 //! credentials from the per-credential hints kept here, which the executor learns from
 //! `loadCodeAssist` and from credits-exhausted rejections.
-// ponytail: Go's Home KV copies of hints and balances, and the registration-epoch
-// check on hint refreshes, are not ported (the Rust Home client has no credits use).
+// ponytail: Go's registration-epoch check on hint refreshes is not ported.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, PoisonError};

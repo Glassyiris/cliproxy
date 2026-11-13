@@ -478,7 +478,7 @@ impl XaiExecutor {
         let base = chat_base_url(credential);
         let mut prepared = before_reporter(
             &req.usage,
-            request::prepare(&req, cfg, true, Format::Codex, &self.replay, downstream_websocket).await,
+            request::prepare(&req, cfg, true, Format::Codex, &self.replay, downstream_websocket),
         )?;
         // Execute and ExecuteStream publish only usage they parsed (no EnsurePublished).
         req.usage.usage_required();
@@ -499,16 +499,12 @@ impl XaiExecutor {
         let headers = upstream.headers.clone();
         let body = if req.stream {
             let lines = wire::lines(upstream, MAX_LINE);
-            let writes = prepared.replay_scope.writes.clone();
-            ResponseBody::Stream(writes.gate(Pipeline::new(&req, prepared, self.replay.clone(), capture).run(lines)))
+            ResponseBody::Stream(Pipeline::new(&req, prepared, self.replay.clone(), capture).run(lines))
         } else {
             let data = fail_if_canceled(&req.usage, wire::read_all(upstream)).await;
             capture.read(&data);
             let data = data?;
-            let writes = prepared.replay_scope.writes.clone();
-            let body = buffered(&req, prepared, &self.replay, &data);
-            writes.settle().await;
-            ResponseBody::Buffered(body?)
+            ResponseBody::Buffered(buffered(&req, prepared, &self.replay, &data)?)
         };
         Ok(ExecResponse {
             status: 200,
@@ -537,8 +533,7 @@ impl XaiExecutor {
                 Format::OpenAIResponse,
                 &self.replay,
                 downstream_websocket,
-            )
-            .await,
+            ),
         )?;
         let mut body = std::mem::take(&mut p.body);
         gj::delete(&mut body, "stream");
@@ -577,7 +572,7 @@ impl XaiExecutor {
         if req.usage.enabled() {
             req.usage.response_body(Format::OpenAIResponse, &data);
         }
-        replay::clear(&self.replay, &p.replay_scope).await;
+        replay::clear(&self.replay, &p.replay_scope);
         Ok((p, data, headers))
     }
 
@@ -632,7 +627,7 @@ impl XaiExecutor {
 
     /// CountTokens: O200kBase estimate of the prepared body, no upstream call.
     async fn count_tokens(&self, req: &ExecRequest, cfg: &Config) -> Result<ExecResponse, ExecError> {
-        let mut p = request::prepare(req, cfg, false, Format::Codex, &self.replay, false).await?;
+        let mut p = request::prepare(req, cfg, false, Format::Codex, &self.replay, false)?;
         p.finalize_body(cfg, req);
         let count = count_input_tokens(&p.body).map_err(|e| {
             ExecError::local(

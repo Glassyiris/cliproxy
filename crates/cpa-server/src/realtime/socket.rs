@@ -228,38 +228,12 @@ async fn sideband(inbound: Inbound, realtime: bool, style: Sideband, call_id: St
     }
     let cfg = rt.config();
     let selection_headers = principal.selection_headers(&headers);
-    // Go: the call's Home pick (a drained one ends the call), else a pick pinned to the
-    // call's credential that lasts as long as this relay.
-    // A reused pick carries no client key from Home: only this request's own pick does.
-    let (credential, lease, home_key) = match &call.home {
-        Some(hold) => match hold.active() {
-            Some(credential) => (credential, None, String::new()),
-            None => {
-                let mut guard = guard;
-                guard.consume = true;
-                return fail(503, "Codex live Home selection unavailable");
-            }
-        },
-        None => {
-            let (lease, home_key) = match select_oauth(
-                &rt,
-                &cfg,
-                Some(&call.auth_id),
-                &selection_headers,
-                &[],
-                Some(&call_id),
-                &call.model,
-                "websocket",
-            )
-            .await
-            {
-                Ok(picked) => picked,
-                Err(rejection) => return rejection.render(realtime),
-            };
-            (lease.credential.clone(), Some(lease), home_key)
-        }
+    // Go: a pick pinned to the call's credential that lasts as long as this relay.
+    let lease = match select_oauth(&rt, &cfg, Some(&call.auth_id), &selection_headers, &[], Some(&call_id)).await {
+        Ok(lease) => lease,
+        Err(rejection) => return rejection.render(realtime),
     };
-    let home = call.home.is_some() || lease.as_ref().is_some_and(|lease| lease.is_remote());
+    let credential = lease.credential.clone();
     let trace = trace(&credential);
     let target = LiveTarget {
         credential: &credential,
@@ -269,32 +243,13 @@ async fn sideband(inbound: Inbound, realtime: bool, style: Sideband, call_id: St
         capture: Default::default(),
     };
     let url = live::sideband_url(&rt.executors.codex.live_endpoints().api_base, style, &call_id);
-    let drained = match &lease {
-        Some(lease) => super::drained(Some(lease)),
-        None => call
-            .home
-            .as_ref()
-            .and_then(|hold| hold.drained())
-            .unwrap_or_else(|| Box::pin(std::future::pending())),
-    };
     let dial =
         rt.executors
             .codex
             .live_websocket(&target, &url, live::protocol_headers(&headers), subprotocols(&headers));
-    let upstream = match until_drained_dial(dial, drained).await {
+    let upstream = match dial.await {
         Ok(upstream) => upstream,
         Err(error) => {
-            if home {
-                report_dial_unauthorized(
-                    &rt,
-                    &principal,
-                    &home_key,
-                    &credential,
-                    &call.model,
-                    &error,
-                    (call.session_id.clone(), String::new()),
-                );
-            }
             return with_trace(
                 dial_failed(error, |status| fail(status, "Codex live sideband upstream unavailable")),
                 &trace,
@@ -308,15 +263,9 @@ async fn sideband(inbound: Inbound, realtime: bool, style: Sideband, call_id: St
         let mut guard = guard;
         guard.consume = true;
         guard.call.resources.add(relay.abort_handle());
-        // Go binds both sockets to the pick: Home draining it closes the relay.
-        if let Some(hold) = &guard.call.home {
-            hold.bind(relay.abort_handle());
-        }
-        let drained = super::drained(lease.as_ref());
         async move {
-            let _ = until_drained(relay, drained).await;
-            // Ending the call closes its media; a temporary pick ends once that close
-            // finished, as a stored call's selection does.
+            finish(relay).await;
+            // Ending the call closes its media; the pick ends once that close finished.
             let media = guard.call.media.clone();
             drop(guard);
             match media {
@@ -327,60 +276,9 @@ async fn sideband(inbound: Inbound, realtime: bool, style: Sideband, call_id: St
     })
 }
 
-/// An upstream dial on the pick's attempt context: Home draining the pick fails it as a
-/// dial without a response (Go cancels the handshake), dropping the half-open socket.
-async fn until_drained_dial(
-    dial: impl std::future::Future<Output = Result<LiveSocket, DialError>>,
-    drained: impl std::future::Future<Output = ()> + Unpin,
-) -> Result<LiveSocket, DialError> {
-    tokio::select! {
-        biased;
-        _ = drained => Err(DialError {
-            response: None,
-            status: None,
-            message: "context canceled".into(),
-        }),
-        dialed = dial => dialed,
-    }
-}
-
-/// Waits for `relay`, aborting it once `drained` resolves (Go binds the sockets to the
-/// Home selection).
-async fn until_drained(
-    relay: tokio::task::JoinHandle<()>,
-    drained: futures_util::future::BoxFuture<'static, ()>,
-) -> Result<(), tokio::task::JoinError> {
-    let mut relay = tokio_util::task::AbortOnDropHandle::new(relay);
-    tokio::select! {
-        result = &mut relay => result,
-        _ = drained => {
-            relay.abort();
-            let _ = relay.await;
-            Ok(())
-        }
-    }
-}
-
-/// Go `ReportHomeUnauthorized` for a rejected upstream handshake: the handshake body,
-/// else the dial error's text.
-fn report_dial_unauthorized(
-    rt: &Runtime,
-    principal: &Principal,
-    home_key: &str,
-    credential: &cpa_core::credential::Credential,
-    model: &str,
-    error: &DialError,
-    session: (String, String),
-) {
-    // An upstream 401, or Go's local 401 before dialling (`HTTPStatusFromErrorOr`).
-    if error.response.as_ref().map_or(error.status, |h| Some(h.status)) != Some(401) {
-        return;
-    }
-    let body = match error.response.as_ref().filter(|h| !h.body.is_empty()) {
-        Some(handshake) => &handshake.body[..],
-        None => error.message.as_bytes(),
-    };
-    super::report_unauthorized(rt, principal, home_key, credential, model, body, session);
+/// Waits for `relay`, aborting it when the wait is dropped first.
+async fn finish(relay: tokio::task::JoinHandle<()>) {
+    let _ = tokio_util::task::AbortOnDropHandle::new(relay).await;
 }
 
 /// `HandleDirectWebsocket`.
@@ -418,19 +316,8 @@ async fn direct(inbound: Inbound, model: String) -> Response {
     }
     let cfg = rt.config();
     let selection_headers = principal.selection_headers(&headers);
-    let (lease, home_key) = match select_oauth(
-        &rt,
-        &cfg,
-        None,
-        &selection_headers,
-        &[],
-        None,
-        &selection_model,
-        "websocket",
-    )
-    .await
-    {
-        Ok(picked) => picked,
+    let lease = match select_oauth(&rt, &cfg, None, &selection_headers, &[], None).await {
+        Ok(lease) => lease,
         Err(rejection) => return rejection.render(true),
     };
     let credential = lease.credential.clone();
@@ -444,25 +331,13 @@ async fn direct(inbound: Inbound, model: String) -> Response {
         capture: Default::default(),
     };
     let url = live::direct_url(&rt.executors.codex.live_endpoints().api_base, &requested);
-    let mut drained = super::drained(Some(&lease));
     let dial = rt
         .executors
         .codex
         .live_websocket(&target, &url, live::direct_headers(&headers), subprotocols(&headers));
-    let mut upstream = match until_drained_dial(dial, &mut drained).await {
+    let mut upstream = match dial.await {
         Ok(upstream) => upstream,
         Err(error) => {
-            if lease.is_remote() {
-                report_dial_unauthorized(
-                    &rt,
-                    &principal,
-                    &home_key,
-                    &credential,
-                    &selection_model,
-                    &error,
-                    super::session_ids(&selection_headers, &[]),
-                );
-            }
             return traced(dial_failed(error, |status| {
                 let (status, message, kind, code) = match status {
                     404 | 501 => (
@@ -501,13 +376,7 @@ async fn direct(inbound: Inbound, model: String) -> Response {
         update.extend_from_slice(&cpa_common::json::compact(&session, true));
         update.push(b'}');
         let update = String::from_utf8_lossy(&update).into_owned();
-        // The write runs on the pick's attempt context too.
-        let sent = tokio::select! {
-            biased;
-            _ = &mut drained => false,
-            sent = upstream.socket.send(up::Message::text(update)) => sent.is_ok(),
-        };
-        if !sent {
+        if upstream.socket.send(up::Message::text(update)).await.is_err() {
             return traced(realtime_error(
                 502,
                 "Failed to apply Realtime client secret session",
@@ -519,14 +388,10 @@ async fn direct(inbound: Inbound, model: String) -> Response {
     let Some(ws) = ws.ok().filter(|_| acceptable_handshake(&headers)) else {
         return traced(bad_handshake());
     };
-    // Go `selection.Retain()` until the session closes; Home draining the pick closes
-    // the sockets bound to it.
-    upgrade(ws, upstream, owner, move |relay| {
-        let drained = super::drained(Some(&lease));
-        async move {
-            let _ = until_drained(relay, drained).await;
-            drop(lease);
-        }
+    // Go `selection.Retain()` until the session closes.
+    upgrade(ws, upstream, owner, move |relay| async move {
+        finish(relay).await;
+        drop(lease);
     })
 }
 

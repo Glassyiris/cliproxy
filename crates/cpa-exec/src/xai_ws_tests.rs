@@ -296,7 +296,6 @@ async fn turns_match_go() {
                 let exec_session = ExecSession {
                     id: session.to_owned(),
                     continuation: turn["continuation"].as_bool().unwrap_or(false),
-                    lease: None,
                 };
                 match executor
                     .execute_in_session(credential, request(turn, session, usage), &cfg, &exec_session)
@@ -671,7 +670,6 @@ async fn terminal_error_survives_a_full_queue() {
     let session = ExecSession {
         id: "sess-full".into(),
         continuation: false,
-        lease: None,
     };
     let response = executor
         .execute_in_session(
@@ -760,7 +758,6 @@ async fn upstream_frames_reach_the_websocket_observer() {
     let session = ExecSession {
         id: "sess-observe".into(),
         continuation: false,
-        lease: None,
     };
     let seen = Arc::new(Seen::default());
     let usage = cpa_core::exec::UsageSink::default().with_websocket(Some(seen.clone()));
@@ -835,7 +832,6 @@ async fn missing_required_session_is_replay_without_attempt() {
     let session = ExecSession {
         id: "missing-xai-session".into(),
         continuation: true,
-        lease: None,
     };
     for payload in [
         r#"{"model":"grok-4","previous_response_id":"resp-1","input":[{"type":"message","role":"user","content":"hello"}]}"#,
@@ -883,7 +879,6 @@ async fn rejected_handshake_is_an_upstream_attempt() {
     let session = ExecSession {
         id: "sess-attempt".into(),
         continuation: false,
-        lease: None,
     };
     let Err(error) = executor
         .execute_in_session(
@@ -1131,7 +1126,6 @@ async fn ping_is_answered_while_the_writer_is_held() {
     let session = ExecSession {
         id: "test-xai-keepalive".into(),
         continuation: false,
-        lease: None,
     };
     let turn = serde_json::json!({"payload": r#"{"model":"grok-4","input":"ping"}"#});
     let response = executor
@@ -1198,7 +1192,6 @@ async fn turn_with(
     let exec_session = ExecSession {
         id: session.to_owned(),
         continuation,
-        lease: None,
     };
     let response = executor.execute_in_session(credential, req, cfg, &exec_session).await?;
     let ResponseBody::Stream(stream) = response.body else {
