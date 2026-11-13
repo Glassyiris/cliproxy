@@ -12,7 +12,7 @@ Split checks by cost and timing, without one giant run or one job per trivial ch
 | Tier | Existing implementation | Coverage |
 | --- | --- | --- |
 | Pre-commit | Not yet enforced | Read-only changed-file fast checks; adoption is tracked in `REQUIREMENTS.md`. |
-| Merge gate | `ci.yml` builds the `Dockerfile` stages `dashboard`, `check`, `test` (two shards) and `perf`, then smoke-tests and measures the `runtime` image; path selection in `.github/scripts/ci-lanes.py`, `ci-ok`; `changes.yml` supplies `fragments` and `title` | Pushes to `master`, manual runs, release calls and `ci:full` reruns select all lanes. |
+| Merge gate | `ci.yml` builds the `Dockerfile` stages `dashboard`, `check`, `test` (two shards) and `perf`, then smoke-tests and measures the `runtime` image, and builds `requirements` on every run; path selection in `.github/scripts/ci-lanes.py`, `ci-ok`; `changes.yml` supplies `fragments` and `title` | Pushes to `master`, manual runs, release calls and `ci:full` reruns select all lanes. |
 | Release | `release.yml` on a `v*` tag calls `ci.yml`, builds `runtime` on native amd64 and arm64 runners, checks the tag against `--version` and the image size, pushes the `<version>-rc` images and creates a draft release; a manual run with the tag promotes them after approval | Every CI lane, both image architectures, the version and size gates. Publication follows root Rule priority. |
 
 Lanes and their rules: `.github/scripts/ci-lanes.py`.

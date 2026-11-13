@@ -2,7 +2,8 @@
 # `docker buildx build --target <stage>`, the same command as locally: the dashboard's checks,
 # fmt/clippy/actionlint/notices/harness and the script tests (check), the workspace tests in
 # two shards (test), and the size and idle gates on the release binary followed by the image's
-# smoke test and size gate (perf). The lanes job runs the requirements check (REQUIREMENTS.md).
+# smoke test and size gate (perf). The requirements job builds the requirements stage
+# (REQUIREMENTS.md against the rule files) on every run, whatever changed.
 # Every push to master, every manual run and the call from release.yml (so a tagged release
 # runs the same checks before it builds anything) run all of them. A pull request runs the
 # lanes its changed paths can affect (.github/scripts/ci-lanes.py, which lists the rules);
@@ -58,18 +59,28 @@ jobs:
           fetch-depth: 2
       - name: Selector tests
         run: python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes*.py'
-      # REQUIREMENTS.md against the rule files: every rule group has a filled Enforcement
-      # row, and no deferral has expired. It reads files only and takes under a second, so
-      # it runs here on every run instead of in a lane; ci-ok fails when it does.
-      - name: Requirements check tests
-        run: python3 -I scripts/test_check_requirements.py
-      - name: Requirements check
-        run: python3 -I scripts/check-requirements.py
       - name: Select lanes
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/ci-lanes.py
+
+  # REQUIREMENTS.md against the rule files and its tests: every rule group has a filled
+  # Enforcement row, and no deferral has expired. A Due date can pass with no change at all,
+  # so this runs on every run instead of in a lane; ci-ok fails when it does. The stage reads
+  # files only and builds in seconds, so it keeps no layer cache.
+  requirements:
+    name: requirements check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: requirements
+          build-args: CI_COMMIT=${{ github.sha }}
 
   dashboard:
     name: dashboard
@@ -88,7 +99,7 @@ jobs:
           cache-to: ${{ github.ref == 'refs/heads/master' && 'type=gha,mode=max,scope=dashboard' || '' }}
 
   check:
-    name: fmt, clippy, actionlint, notices, harness
+    name: fmt, clippy, actionlint, notices, harness, requirements
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.check == 'true') }}
     runs-on: ubuntu-24.04
@@ -202,7 +213,7 @@ jobs:
         run: bench/gate.sh image cook-router:ci
 
   ci-ok:
-    needs: [changes, dashboard, check, test, test-counts, perf]
+    needs: [changes, requirements, dashboard, check, test, test-counts, perf]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -218,7 +229,9 @@ jobs:
                   "perf": ["perf"]}
           ok = needs["changes"]["result"] == "success"
           selected = set(json.loads(needs["changes"]["outputs"].get("lanes") or "null") or []) if ok else set()
-          rows = [f"| changes | lane selection | {needs['changes']['result']} | success |"]
+          ok &= needs["requirements"]["result"] == "success"
+          rows = [f"| changes | lane selection | {needs['changes']['result']} | success |",
+                  f"| requirements | every run | {needs['requirements']['result']} | success |"]
           for lane, names in jobs.items():
               want = "success" if lane in selected else "skipped"
               for name in names:

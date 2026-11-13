@@ -16,13 +16,13 @@ List every project `AGENTS.md`. Checked files supply `###` groups and tagged rul
 
 ## Commands
 
-One row per tier. Run commands with the setup and isolation defined in the named workflows. Set PR_TITLE to the proposed PR title before the title check. The requirements check and its self-tests run in the `changes` job on every run, so their failure fails `ci-ok`.
+One row per tier. Run commands with the setup and isolation defined in the named workflows. Set PR_TITLE to the proposed PR title before the title check. The requirements check and its self-tests are the `requirements` stage, which the `requirements` job builds on every run and the `check` stage includes, so their failure fails `ci-ok`.
 Measure three runs on the build host with date and load before setting a whole-tier limit with margin. Existing workflow timeouts and dashboard limits remain in force.
 
 | Tier | Command | Runs (where, when) | Wall-time limit | Baseline (date, host, load) |
 | --- | --- | --- | --- | --- |
 | Pre-commit | | No tier exists yet | | |
-| Merge gate | `docker buildx build --target dashboard .`; `docker buildx build --target check .`; `docker buildx build --target test-report --build-arg SHARD=1 --build-arg SHARDS=2 --output type=local,dest=out1 .` and the same with `SHARD=2`, then `python3 .github/scripts/test-counts.py total out1/counts-1.json out2/counts-2.json`; `docker buildx build --target perf .`; `docker buildx build --target runtime --load -t cook-router:ci .`; `docker run --rm cook-router:ci --version`; `bench/gate.sh image cook-router:ci`; `python3 -I tools/changelog.py check`; `python3 -I .github/scripts/pr-title.py "$PR_TITLE"`; `python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes*.py'`; `python3 -I scripts/check-requirements.py`; `python3 -I scripts/test_check_requirements.py` when scripts/ changes | ci.yml selects lanes on PRs; all lanes on master, manual/release calls and ci:full reruns. The stage contents are in `Dockerfile`. Changes workflow runs fragments/title. The requirements check must run on every PR, including rule-only and documentation-only changes; its self-tests run when scripts/ changes. Both contribute to the `ci-ok` result. | | |
+| Merge gate | `docker buildx build --target dashboard .`; `docker buildx build --target check .`; `docker buildx build --target test-report --build-arg SHARD=1 --build-arg SHARDS=2 --output type=local,dest=out1 .` and the same with `SHARD=2`, then `python3 .github/scripts/test-counts.py total out1/counts-1.json out2/counts-2.json`; `docker buildx build --target perf .`; `docker buildx build --target runtime --load -t cook-router:ci .`; `docker run --rm cook-router:ci --version`; `bench/gate.sh image cook-router:ci`; `python3 -I tools/changelog.py check`; `python3 -I .github/scripts/pr-title.py "$PR_TITLE"`; `python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes*.py'`; `docker buildx build --target requirements .` | ci.yml selects lanes on PRs; all lanes on master, manual/release calls and ci:full reruns. The stage contents are in `Dockerfile`. Changes workflow runs fragments/title. The requirements stage (the check and its self-tests) runs on every run, including rule-only and documentation-only changes, and contributes to the `ci-ok` result. | | |
 | Release | `git push origin vX.Y.Z`; after approval, `gh workflow run release.yml -f tag=vX.Y.Z` | The tag runs every CI lane, builds `runtime` natively for amd64 and arm64, checks the tag against `--version` and the image size, pushes the `X.Y.Z-rc` images and creates a draft release. The manual run tags the candidate `X.Y.Z` and `latest` and publishes the draft. Publishing follows root Rule priority. | | |
 
 Before opening a PR, run on the final tree:
@@ -30,7 +30,7 @@ Before opening a PR, run on the final tree:
 - `docker buildx build --target check .`
 - `docker buildx build --target test .`
 - `docker buildx build --target dashboard .`
-- `python3 -I scripts/check-requirements.py`; also `python3 -I scripts/test_check_requirements.py` when scripts/ changes.
+- `docker buildx build --target requirements .` when only rule or documentation files changed; the `check` stage includes it otherwise.
 - After changes to anything running while the server is idle, also run `docker buildx build --target perf .`.
 
 Before every release, run the dashboard performance harness using `ui/tools/perf/README.md` and compare its measurements with the recorded baseline. This is a measurement step, not a merge gate; exit 0 proves completion, not acceptable performance.

@@ -18,7 +18,8 @@ parent, the base branch tip: exactly what merging would change.
 
 Lanes and the jobs they run, each building the Dockerfile stage of the same name:
   dashboard  the dashboard's checks and build
-  check      fmt, clippy, actionlint, THIRD-PARTY-NOTICES, the harness build, script tests
+  check      fmt, clippy, actionlint, THIRD-PARTY-NOTICES, the harness build, script tests,
+             the requirements check
   test       the two test shards and the test counts
   perf       the size and idle gates on the release binary, the image smoke test and size
 """
@@ -48,9 +49,10 @@ RULES = (
     # stage their tests.
     (r"\.github/scripts/(pr-title|test_pr_title)\.py|tools/(changelog|test_changelog)\.py",
      frozenset({"check"})),
-    # The agent rule files and the requirements check over them; the changes job runs the
-    # check and its tests on every run. AGENTS.md and CLAUDE.md at any depth, except under
-    # vendor (vendored source), which keeps the rules below. No job builds or reads these files otherwise.
+    # The agent rule files and the requirements check over them; the requirements job builds
+    # the requirements stage, the check and its tests, on every run. AGENTS.md and CLAUDE.md
+    # at any depth, except under vendor (vendored source), which keeps the rules below. No
+    # lane builds or reads these files otherwise.
     (r"scripts/(check-requirements|test_check_requirements)\.py|REQUIREMENTS\.md|REVIEW\.md"
      r"|(?!vendor/)([^/]+/)*(AGENTS|CLAUDE)\.md", NONE),
     # Repository metadata that no job reads.

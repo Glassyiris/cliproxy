@@ -3,12 +3,14 @@
 # Every check and the image are stages of this file, so `docker buildx build --target <stage> .`
 # runs the same gate locally and in CI (.github/workflows/ci.yml):
 #
-#   dashboard  the dashboard's checks and build (npm run check)
-#   check      fmt, clippy, actionlint, THIRD-PARTY-NOTICES, the harness build and script tests
-#   test       the workspace tests with no network; SHARD and SHARDS split them
-#   build      the release binary, with the dashboard embedded
-#   perf       the size and idle gates on that binary
-#   runtime    the image that ships (the default target)
+#   dashboard     the dashboard's checks and build (npm run check)
+#   requirements  the requirements check (REQUIREMENTS.md) and its tests
+#   check         fmt, clippy, actionlint, THIRD-PARTY-NOTICES, the harness build, the script
+#                 tests and the requirements stage
+#   test          the workspace tests with no network; SHARD and SHARDS split them
+#   build         the release binary, with the dashboard embedded
+#   perf          the size and idle gates on that binary
+#   runtime       the image that ships (the default target)
 #
 # A failing gate fails its RUN, and so the build. On small machines pass
 # --build-arg BUILD_JOBS=1; the final link needs about 2 GB of memory.
@@ -79,7 +81,23 @@ RUN --mount=type=cache,id=cook-router-cargo-registry,target=/usr/local/cargo/reg
 # of a warm build. Panic messages keep their file and line.
 ENV CARGO_NET_OFFLINE=true CARGO_PROFILE_TEST_DEBUG=0 GOPROXY=off
 
+# REQUIREMENTS.md against the rule files and the tree (scripts/check-requirements.py), and the
+# check's own tests. It reads files only, so it needs Python and the tree and nothing else:
+# ci.yml builds it on every run, whatever changed, and the check stage below includes it.
+# A Due date can pass with no change to the tree, so CI_COMMIT keeps a cached pass from
+# standing in for a later commit's.
+FROM python:3.13.18-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72 AS requirements
+ARG CI_COMMIT=
+WORKDIR /src
+COPY . .
+USER nobody
+RUN echo "commit ${CI_COMMIT:-local}" \
+ && python3 -I scripts/test_check_requirements.py \
+ && python3 -I scripts/check-requirements.py \
+ && touch /tmp/requirements-ok
+
 FROM source AS check
+COPY --from=requirements /tmp/requirements-ok /tmp/
 RUN --mount=type=cache,id=cook-router-cargo-registry,target=/usr/local/cargo/registry,uid=1000,gid=1000 \
     --mount=type=cache,id=cook-router-target-check,target=/src/target,uid=1000,gid=1000 <<'EOF'
 cargo fmt --all --check
