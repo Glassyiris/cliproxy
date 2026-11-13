@@ -41,6 +41,23 @@ class Paths(unittest.TestCase):
         self.assertEqual(lanes("bench/results/x.md"), {"tests", "perf"})
         self.assertEqual(lanes("harness/README.md"), {"lint"})
 
+    def test_rule_files_and_the_requirements_check_run_no_lane(self):
+        for path in ("AGENTS.md", "CLAUDE.md", "REQUIREMENTS.md", "REVIEW.md",
+                     ".github/AGENTS.md", "crates/AGENTS.md", "crates/cpa-server/AGENTS.md",
+                     "crates/cpa-server/src/CLAUDE.md", "ui/AGENTS.md", "ui/src/AGENTS.md",
+                     "scripts/check-requirements.py", "scripts/test_check_requirements.py"):
+            with self.subTest(path=path):
+                self.assertEqual(lanes(path), set())
+        # The embedded bundle and vendored source keep their own rules.
+        self.assertEqual(lanes("ui/dist/AGENTS.md"), EMBED)
+        self.assertEqual(lanes("vendor/gjson/AGENTS.md"), DEPS)
+        # Only the exact names: a near miss, another script or a nested REQUIREMENTS.md is
+        # not covered.
+        self.assertEqual(lanes("crates/cpa-server/AGENTS.md.bak"), RUST)
+        self.assertEqual(lanes("crates/REQUIREMENTS.md"), RUST)
+        self.assertEqual(lanes("ui/MY-AGENTS.md"), {"dashboard"})
+        self.assertEqual(lanes("scripts/other.py"), ALL)
+
     def test_other_workflows_and_installers_run_on_their_own_filters(self):
         for path in ("install.sh", "install.ps1", "packaging/homebrew/cliproxy-rs.rb",
                      "packaging/README.md", "Dockerfile", ".dockerignore",

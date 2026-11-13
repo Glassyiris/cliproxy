@@ -53,6 +53,12 @@ RULES = (
     (r"\.github/workflows/[^/]+", frozenset({"workflows"})),
     # The pull request title check; changes.yml runs it and its tests.
     (r"\.github/scripts/(pr-title|test_pr_title)\.py", NONE),
+    # The agent rule files and the requirements check over them; the changes job runs the
+    # check and its tests on every run. AGENTS.md and CLAUDE.md at any depth, except under
+    # ui/dist (embedded into the binary) and vendor (vendored source), which keep the rules
+    # below. No job builds or reads these files otherwise.
+    (r"scripts/(check-requirements|test_check_requirements)\.py|REQUIREMENTS\.md|REVIEW\.md"
+     r"|(?!ui/dist/|vendor/)([^/]+/)*(AGENTS|CLAUDE)\.md", NONE),
     # Installers workflow (install.yml) only.
     (r"\.github/scripts/(test-installers\.py|installer-fixture\.rs)", NONE),
     # Repository metadata that no job reads.

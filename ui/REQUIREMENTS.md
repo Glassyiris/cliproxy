@@ -1,8 +1,6 @@
 # Dashboard requirements
 
-Numbers, gates and exceptions for the dashboard in `ui/` and its mapping to the Management API.
-When another file under `ui/` disagrees with this one on a number, a gate or an exception, this
-file wins. The Rust crates are governed by `CONTRIBUTING.md` and CI, not by this file.
+Current numbers, gates and exceptions are defined in ../REQUIREMENTS.md. This file retains historical measurement evidence only.
 
 ## Applies
 
@@ -67,7 +65,6 @@ Intentional designs that look like defects:
 | What | Why |
 | --- | --- |
 | Upstream error detail (provider status, message, OAuth failure reason) is shown in the dashboard | Allowed by the Security rule: operators of the upstream connection see that detail; the dashboard's user is the proxy's operator |
-| The management key is kept in the tab's session storage, so a reload stays signed in (a browser may restore it with the tab); in local storage only when "Remember on this device" is ticked; in the browser's password manager only when the operator saves it there. Sign-out, here or in another tab, clears both stores and cancels any sign-in in progress in any tab; a rejected key is removed only from the stores that hold that same key, so a newer key saved by another tab survives | Retyping the key on every reload was too much. Both stores are readable by any script on the page, so the protection against injected scripts is the same as before reload support existed, not stronger; the difference is how long the key lives, and that local storage sits on disk in the browser profile; see `PRODUCT.md` |
 | The sign-in form holds one raw `<input hidden>` carrying the host as the username | A password manager files a single-field sign-in under a username; Chromium's guidance for such forms is a hidden username field, and Astryx's `VisuallyHidden` is a span that must not wrap a control |
 | Live usage is opt-in and kept in the tab | Reading the usage queue removes its records for other consumers |
 | Write actions are probed before they are offered; unsupported ones render disabled | The server answers a missing route and a real one alike to OPTIONS |
