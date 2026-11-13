@@ -266,3 +266,14 @@ Compare `proxy.up_first_ms`, `proxy.process_cpu_ms`, `process_vmhwm_kb`, and
 (proxy, mock, and client), not an isolated proxy process. The media source is
 synthetic and is accepted only by the mock; it is not an Anthropic media validation
 test. These measurements do not substitute for host-specific deployment evidence.
+
+## Deployment check
+
+Mock tests do not prove that Core's collector retains the new fields.
+After an approved deployment, explicitly enable `observability.usage.claude-cache-telemetry` alongside usage statistics. Inspect the collector's protected JSONL file without printing legacy credential fields (hashes remain stable only until proxy restart):
+
+```sh
+jq -c 'select(.claude_cache.schema_version == 2) | {execution_id, usage_observed, tokens: {cache_read_tokens: .tokens.cache_read_tokens, cache_creation_5m_tokens: .tokens.cache_creation_5m_tokens, cache_creation_1h_tokens: .tokens.cache_creation_1h_tokens}, claude_cache}' "$USAGE_JSONL"
+```
+
+Confirm that normal existing Amp traffic produces ordered start, first-byte, and end timestamps, final TTLs, stable hashes, and returned TTL buckets. Check both buffered and streaming requests if both occur naturally. Do not send synthetic requests to a live login for telemetry-only deployment checks. This rule does not replace the required live cache-read/cache-write check for changes to cache semantics. The usage queue holds at most one hour, so a week-long study needs a continuous collector and a separate hashed schedule export. See "Offline replay" and "Deployment boundary" above for replay and limitations.

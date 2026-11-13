@@ -43,6 +43,9 @@ reviews:
       instructions: |
         - Check lock, refresh and reload code for races and deadlocks: lock order, locks held across an await or blocking I/O, waits that shutdown cannot cancel, and state read before a lock and used after it.
         - Check that a config reload or credential change during a request cannot mix two snapshots in one request.
+    - path: "**"
+      instructions: |
+        - Review method, severity and output format are in REVIEW.md; development rules are in AGENTS.md and REQUIREMENTS.md.
   tools:
     clippy:
       enabled: true

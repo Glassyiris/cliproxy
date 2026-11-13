@@ -39,8 +39,8 @@ src/i18n/        catalogs per area: <area>.ts (en), zh-CN/<area>.ts, zh-TW/<area
   keys they change. Polling uses `refetchInterval` with `refetchIntervalInBackground: false`.
 - UI state: component state, or the hash query string when it should survive reload or be
   shareable (tab, filter, search, open row).
-- Session (management key, server version, capabilities) lives in one React context and in
-  memory only — never in storage.
+- Session (management key, server version, capabilities) lives in one React context. How the
+  management key is stored is defined in [AGENTS.md](AGENTS.md), "Dashboard sessions".
 
 ## Styling
 
@@ -96,5 +96,5 @@ file that fails both when the count rises and when it falls without being lowere
 
 ## Commits
 
-Follow [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests). A subject may take an area prefix, e.g.
-`Dashboard: Accounts page for many accounts`. No AI attribution.
+Follow root [AGENTS.md](../AGENTS.md), "Commits and pull requests", and
+[CONTRIBUTING.md](../CONTRIBUTING.md#commits-and-pull-request-titles) for the title grammar.

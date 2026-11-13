@@ -1,6 +1,6 @@
 # cook-router dashboard
 
-The management dashboard for cook-router, written in React 19 with the Astryx design system. It talks to the v8 Management API defined by Go CLIProxyAPI. `dist/` is the build output, checked in: the Rust binary embeds it (`crates/cpa-server/build.rs`) and serves it at `/management.html`. The dashboard ships only inside that binary.
+The management dashboard for cook-router, written in React 19 with the Astryx design system. It talks to cook-router's management API under `/v8/management`, whose contract is the Rust router in `crates/cpa-server/src/management.rs`. `dist/` is the build output, checked in: the Rust binary embeds it (`crates/cpa-server/build.rs`) and serves it at `/management.html`. The dashboard ships only inside that binary.
 
 Product rules are in [PRODUCT.md](PRODUCT.md) and the visual system in [DESIGN.md](DESIGN.md).
 
