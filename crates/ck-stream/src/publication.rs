@@ -17,10 +17,45 @@ pub(crate) struct Frame {
     retained: bool,
 }
 
+// Generation belongs to Stream and sequence to the queue; neither is duplicated per record.
+#[derive(Clone, Copy)]
+pub(crate) struct Index {
+    start: u64,
+    end: u64,
+    kind: u32,
+    correlation: u32,
+}
+
+impl Index {
+    fn record(self, generation: u64, sequence: u64) -> Record {
+        Record {
+            sequence,
+            start: Position::at(generation, self.start),
+            end: Position::at(generation, self.end),
+            kind: self.kind,
+            correlation: self.correlation,
+        }
+    }
+}
+
+fn reserve_metadata<T>(entries: &mut VecDeque<T>, needed: usize, budget: usize) -> Result<(), Error> {
+    if needed <= entries.capacity() {
+        return Ok(());
+    }
+    let maximum = budget / std::mem::size_of::<T>();
+    if needed > maximum {
+        return Err(Error::StorageExhausted);
+    }
+    let capacity = needed.max(entries.capacity().saturating_mul(2)).min(maximum);
+    entries
+        .try_reserve_exact(capacity - entries.len())
+        .map_err(|_| Error::StorageExhausted)
+}
+
 pub(crate) struct State {
     frames: VecDeque<Frame>,
     base_frame: u64,
-    records: VecDeque<Record>,
+    records: VecDeque<Index>,
     base_sequence: u64,
     end: u64,
     terminal: Option<Terminal>,
@@ -63,7 +98,7 @@ impl Stream {
 
     fn metadata(state: &State) -> usize {
         state.frames.capacity() * std::mem::size_of::<Frame>()
-            + state.records.capacity() * std::mem::size_of::<Record>()
+            + state.records.capacity() * std::mem::size_of::<Index>()
             + state.readers * READER_BYTES
     }
 
@@ -180,8 +215,10 @@ impl Writer {
             .map_err(|_| Error::StorageExhausted)?;
         let old_count = state.frames.len();
         let extra = needed.saturating_sub(old_count);
-        let live = state.frames.iter().filter(|frame| frame.pool.is_some()).count();
-        if live + extra > self.inner.limits.max_frames as usize {
+        if extra > 0
+            && state.frames.iter().filter(|frame| frame.pool.is_some()).count() + extra
+                > self.inner.limits.max_frames as usize
+        {
             return Err(Error::StorageExhausted);
         }
         let record = Record {
@@ -191,20 +228,20 @@ impl Writer {
             kind,
             correlation,
         };
-        let projected = needed * std::mem::size_of::<Frame>()
-            + (state.records.len() + 1) * std::mem::size_of::<Record>()
-            + state.readers * READER_BYTES;
-        if projected > self.inner.limits.max_metadata_bytes {
-            return Err(Error::StorageExhausted);
-        }
-        state
-            .frames
-            .try_reserve_exact(extra)
-            .map_err(|_| Error::StorageExhausted)?;
-        state
-            .records
-            .try_reserve_exact(1)
-            .map_err(|_| Error::StorageExhausted)?;
+        let records = state.records.len() + 1;
+        let reader_bytes = state.readers * READER_BYTES;
+        let frame_budget = self
+            .inner
+            .limits
+            .max_metadata_bytes
+            .saturating_sub(state.records.capacity().max(records) * std::mem::size_of::<Index>() + reader_bytes);
+        reserve_metadata(&mut state.frames, needed, frame_budget)?;
+        let record_budget = self
+            .inner
+            .limits
+            .max_metadata_bytes
+            .saturating_sub(state.frames.capacity() * std::mem::size_of::<Frame>() + reader_bytes);
+        reserve_metadata(&mut state.records, records, record_budget)?;
         if Stream::metadata(&state) > self.inner.limits.max_metadata_bytes {
             return Err(Error::StorageExhausted);
         }
@@ -261,14 +298,13 @@ impl Writer {
         if end > state.end {
             return Err(Error::InvalidPosition);
         }
-        while state.records.front().is_some_and(|record| record.end <= position) {
+        while state.records.front().is_some_and(|record| record.end <= end) {
             state.records.pop_front();
             state.base_sequence += 1;
         }
-        let boundary = state
-            .records
-            .front()
-            .map_or(position.frame, |record| position.frame.min(record.start.frame));
+        let boundary = state.records.front().map_or(position.frame, |record| {
+            position.frame.min(record.start / FRAME_BYTES as u64)
+        });
         let count = boundary.saturating_sub(state.base_frame) as usize;
         for frame in state.frames.iter_mut().take(count) {
             frame.retained = false;
@@ -345,7 +381,12 @@ impl Reservation<'_> {
         if state.terminal.is_some() {
             return Err(Error::Closed);
         }
-        state.records.push_back(self.record);
+        state.records.push_back(Index {
+            start: self.record.start.byte(stream.id)?,
+            end: self.record.end.byte(stream.id)?,
+            kind: self.record.kind,
+            correlation: self.record.correlation,
+        });
         state.end = self.record.end.byte(stream.id)?;
         stream
             .pool
@@ -422,8 +463,9 @@ impl Reader {
             // The header is the publication authority; state supplies complete-record boundaries.
             let committed = stream.pool.header(stream.slot).committed.load(Ordering::Acquire);
             if let Some(record) = state.records.get((self.next - state.base_sequence) as usize).copied()
-                && record.end.byte(stream.id).expect("stored position") <= committed
+                && record.end <= committed
             {
+                let record = record.record(stream.id, self.next);
                 for number in record.start.frame..=last_frame(record) {
                     let index = (number - state.base_frame) as usize;
                     if state.frames[index].pool.is_none() {

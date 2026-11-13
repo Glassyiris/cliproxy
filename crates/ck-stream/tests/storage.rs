@@ -268,3 +268,31 @@ fn positions_from_another_pool_are_rejected() {
         Err(Error::InvalidPosition)
     ));
 }
+
+#[test]
+fn one_mib_of_small_records_replays_with_default_metadata_budget() {
+    let (_dir, store, _) = store(32);
+    let mut writer = store.create().unwrap();
+    for sequence in 0..16_384u32 {
+        let payload = [sequence as u8; 64];
+        let mut record = writer.begin_record(64, false, sequence % 7, sequence).unwrap();
+        record.write(&payload).unwrap();
+        record.commit().unwrap();
+    }
+    writer.finish(Terminal::Done);
+    let mut reader = store.reader(writer.id(), 0).unwrap();
+    for sequence in 0..16_384u32 {
+        let read = lease(&mut reader);
+        let record = read.record();
+        assert_eq!(record.sequence, u64::from(sequence));
+        assert_eq!((record.kind, record.correlation), (sequence % 7, sequence));
+        let mut count = 0;
+        read.visit(|bytes| {
+            assert!(bytes.iter().all(|byte| *byte == sequence as u8));
+            count += bytes.len();
+        })
+        .unwrap();
+        assert_eq!(count, 64);
+    }
+    terminal(&mut reader, Terminal::Done);
+}

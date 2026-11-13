@@ -130,7 +130,7 @@ impl Inner {
         loop {
             match self.pool.allocate() {
                 Ok(frame) => return Ok(frame),
-                Err(error) if error.kind() == io::ErrorKind::OutOfMemory => {
+                Err(error) if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() => {
                     if !self.evict_one(exclude) {
                         return Err(Error::StorageExhausted);
                     }

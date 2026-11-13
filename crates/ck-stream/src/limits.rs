@@ -1,6 +1,9 @@
 use std::{ffi::CString, io, os::unix::ffi::OsStrExt, path::PathBuf, time::Duration};
 
-use crate::{FRAME_BYTES, Record, publication::Frame};
+use crate::{
+    FRAME_BYTES,
+    publication::{Frame, Index},
+};
 
 pub const MAX_POOL_BYTES: usize = 4 * 1024 * 1024 * 1024;
 pub const MAX_STREAM_FRAMES: u32 = 5_368;
@@ -93,7 +96,7 @@ impl Config {
         }
         let minimum = (max_frames as usize)
             .checked_mul(std::mem::size_of::<Frame>())
-            .and_then(|n| n.checked_add(std::mem::size_of::<Record>()))
+            .and_then(|n| n.checked_add(std::mem::size_of::<Index>()))
             .and_then(|n| n.checked_add(crate::publication::READER_BYTES))
             .ok_or_else(|| invalid("metadata capacity overflow"))?;
         if self.max_metadata_bytes < minimum {
