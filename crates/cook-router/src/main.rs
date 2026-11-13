@@ -2771,8 +2771,9 @@ mod tests {
     }
 
     /// Go `TestSIWCManagementRouteAccessControl`: the v8 SIWC bind route answers its
-    /// own validation once authorized, 401 without the key, and 404 when management is
-    /// disabled.
+    /// own validation once authorized, 401 without the key, and 403 naming
+    /// COOK_MANAGEMENT_PASSWORD when no key exists (Go answers an empty 404; changed on
+    /// purpose, owner ruling 2026-11-13).
     #[tokio::test]
     async fn siwc_bind_route_follows_management_availability() {
         use tower::ServiceExt as _;
@@ -2783,7 +2784,7 @@ mod tests {
         for (name, enabled, authorized, want) in [
             ("authorized invalid target", true, true, 400),
             ("missing management key", true, false, 401),
-            ("management disabled", false, true, 404),
+            ("management disabled", false, true, 403),
         ] {
             let executors = Executors {
                 claude: ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
@@ -2823,8 +2824,11 @@ mod tests {
             assert_eq!(status, want, "{name}: {}", String::from_utf8_lossy(&body));
             match want {
                 400 => assert_eq!(&body[..], br#"{"error":"name is required"}"#, "{name}"),
-                // gin `AbortWithStatus`: no body.
-                404 => assert!(body.is_empty(), "{name}: {}", String::from_utf8_lossy(&body)),
+                403 => assert_eq!(
+                    &body[..],
+                    br#"{"error":"management key not set: start the server with COOK_MANAGEMENT_PASSWORD"}"#,
+                    "{name}"
+                ),
                 _ => {}
             }
         }

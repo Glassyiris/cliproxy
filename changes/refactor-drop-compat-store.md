@@ -5,3 +5,4 @@ Removed
 - The `oauth.auth-dir` setting is removed, since nothing reads it: import and every config write reject it as an unknown setting. Delete it from existing config files.
 - A Claude login no longer looks for, merges or removes an older `claude-<email>.json` file of the same account; it writes and merges only the file of its own name.
 - A first start without `--config` no longer fails when `./config.yaml` is missing: it creates the database with defaults and listens on port 8317. The Docker image no longer passes `--config /data/config.yaml`, so an empty `/data` volume starts; a first start still imports `/data/config.yaml` when it exists. A blank `./config.yaml` counts as missing. An explicit `--config` file must still exist.
+- Management requests no longer answer an empty 404 while no management key is set. They answer 403 with `management key not set: start the server with COOK_MANAGEMENT_PASSWORD`.

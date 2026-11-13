@@ -2,6 +2,9 @@
 //! (tests/reference/manage/main.go -> tests/fixtures/manage_go.json).
 //! The recording is untouched; replay drops its `oauth.auth-dir` line (`without_auth_dir`) and
 //! stages the recorded credentials in `Config::auth_dir`, since the setting no longer exists.
+//! Where Go answers an empty 404 because no management key exists, replay expects
+//! cook-router's 403 naming COOK_MANAGEMENT_PASSWORD: a deliberate divergence from Go
+//! (owner ruling 2026-11-13).
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -42,7 +45,8 @@ const GUARD_REFUSALS: [&str; 5] = [
     "missing management key",
     "invalid management key",
     "remote management disabled",
-    "remote management key not set",
+    // Also covers cook-router's "management key not set: ..." refusal.
+    "management key not set",
     "IP banned",
 ];
 
@@ -583,6 +587,22 @@ mod routes {
                     for key in ["status", "resp_body", "resp_headers"] {
                         step[key] = scenario["steps"][0][key].clone();
                     }
+                }
+                if name == "availability_follows_secret_across_reloads" && step["status"] == 404 {
+                    // Go hides management behind an empty 404 while no key exists. cook-router
+                    // answers 403 naming COOK_MANAGEMENT_PASSWORD instead: a deliberate change
+                    // (owner ruling 2026-11-13), so the recording is untouched and these steps
+                    // take the recorded 403 refusal's headers.
+                    let refusal = &fixture()["routes"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|s| s["name"] == "local_password_only_until_reload")
+                        .unwrap()["steps"][0];
+                    step["status"] = 403.into();
+                    step["resp_body"] =
+                        r#"{"error":"management key not set: start the server with COOK_MANAGEMENT_PASSWORD"}"#.into();
+                    step["resp_headers"] = refusal["resp_headers"].clone();
                 }
                 if let Some(update) = step["update"].as_str() {
                     state.config_store().import_yaml(&yaml(update), "test", "").unwrap();

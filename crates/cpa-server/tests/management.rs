@@ -938,7 +938,8 @@ async fn management_secret_keys_are_hashed_and_rotated() {
             .await
             .unwrap()
             .status(),
-        404
+        403,
+        "no key left: management is refused by name"
     );
     server.abort();
 }
@@ -996,7 +997,12 @@ async fn unreadable_auth_dir_never_blocks_secret_rotation_or_removal() {
         .unwrap();
     watching::reload(&f.state).unwrap();
     let r = get("fake-rotated").await.unwrap();
-    assert_eq!((r.status().as_u16(), r.text().await.unwrap()), (404, String::new()));
+    assert_eq!(r.status().as_u16(), 403);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(
+        body["message"],
+        "management key not set: start the server with COOK_MANAGEMENT_PASSWORD"
+    );
     server.abort();
 }
 
