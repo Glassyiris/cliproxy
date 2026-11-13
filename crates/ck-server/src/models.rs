@@ -49,7 +49,7 @@ async fn list(rt: Arc<Runtime>, OriginalUri(uri): OriginalUri, headers: HeaderMa
         return answer(crate::codex_models::response(&rt, &version), detail).await;
     }
     let registry = rt.registry();
-    // Model routers (cook-router only) list after the registry's models.
+    // Model routers (cooker only) list after the registry's models.
     let routers = crate::model_router::listed(&rt.config());
     let models = registry.available_with(|c, m| rt.suspension(c, m)).chain(&routers);
     let body = if anthropic {

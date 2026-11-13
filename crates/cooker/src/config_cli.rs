@@ -8,7 +8,7 @@ use ck_server::config_store::{ConfigStore, resources};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "cook-router")]
+#[command(name = "cooker")]
 pub struct Cli {
     /// Config database; defaults to COOK_DB or cook.db beside --config.
     #[arg(long, global = true, default_value = "")]
@@ -228,8 +228,8 @@ mod tests {
     #[test]
     fn config_commands_parse_global_database_before_or_after_command() {
         for args in [
-            vec!["cook-router", "--db", "selected.db", "config", "validate"],
-            vec!["cook-router", "config", "validate", "--db", "selected.db"],
+            vec!["cooker", "--db", "selected.db", "config", "validate"],
+            vec!["cooker", "config", "validate", "--db", "selected.db"],
         ] {
             let cli = Cli::try_parse_from(&args).unwrap();
             assert_eq!(cli.db, "selected.db");
@@ -249,7 +249,7 @@ mod tests {
         let yaml = dir.join("invalid.yaml");
         std::fs::write(&yaml, "server:\n  port: wrong\n").unwrap();
         let cli = Cli::try_parse_from([
-            "cook-router",
+            "cooker",
             "--db",
             db.to_str().unwrap(),
             "config",

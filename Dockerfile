@@ -54,7 +54,7 @@ ENV CARGO_INCREMENTAL=0 CARGO_TERM_COLOR=always
 # The dashboard's packages, in their own layer so a source edit does not reinstall them.
 FROM base AS deps
 COPY --chown=builder:builder ui/package.json ui/package-lock.json ui/
-RUN --mount=type=cache,id=cook-router-npm,target=/home/builder/.npm,uid=1000,gid=1000 \
+RUN --mount=type=cache,id=cooker-npm,target=/home/builder/.npm,uid=1000,gid=1000 \
     cd ui && npm ci --no-audit --no-fund
 
 # Type check, lint, API and i18n checks, unit tests, build, design and bundle-size gates. The
@@ -113,8 +113,8 @@ RUN echo "commit ${CI_COMMIT:-local}" \
 
 FROM source AS check
 COPY --from=requirements /tmp/requirements-ok /tmp/
-RUN --mount=type=cache,id=cook-router-cargo-src-check,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
-    --mount=type=cache,id=cook-router-target-check,target=/src/target,uid=1000,gid=1000 <<'EOF'
+RUN --mount=type=cache,id=cooker-cargo-src-check,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
+    --mount=type=cache,id=cooker-target-check,target=/src/target,uid=1000,gid=1000 <<'EOF'
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy -p ck-server --all-targets --features media-relay,pprof --locked -- -D warnings
@@ -143,8 +143,8 @@ FROM source AS test
 ARG SHARD=1 SHARDS=1 CI_COMMIT= TEST_THREADS
 ENV CPA_TEST_NO_SKIP=1
 RUN --network=none \
-    --mount=type=cache,id=cook-router-cargo-src-test,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
-    --mount=type=cache,id=cook-router-target-test,target=/src/target,uid=1000,gid=1000 <<'EOF'
+    --mount=type=cache,id=cooker-cargo-src-test,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
+    --mount=type=cache,id=cooker-target-test,target=/src/target,uid=1000,gid=1000 <<'EOF'
 echo "commit ${CI_COMMIT:-local}, shard $SHARD of $SHARDS"
 out=/home/builder/out && mkdir -p "$out"
 partition="--partition hash:$SHARD/$SHARDS"
@@ -169,14 +169,14 @@ COPY --from=test /home/builder/out/ /
 # The release binary. The default build excludes the CPU profiler and its symbol resolver.
 FROM source AS build
 ARG BUILD_JOBS
-RUN --mount=type=cache,id=cook-router-cargo-src-release,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
-    --mount=type=cache,id=cook-router-target-release,target=/src/target,uid=1000,gid=1000 <<'EOF'
+RUN --mount=type=cache,id=cooker-cargo-src-release,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
+    --mount=type=cache,id=cooker-target-release,target=/src/target,uid=1000,gid=1000 <<'EOF'
 if cargo tree --locked -p cooker --edges normal --prefix none | grep -E '^(pprof|backtrace) v'; then
   echo 'Release binaries must exclude CPU profiling and symbol resolution'
   exit 1
 fi
 cargo build --release --locked -p cooker ${BUILD_JOBS:+--jobs "$BUILD_JOBS"}
-install -D -m 0755 target/release/cooker /home/builder/out/cook-router
+install -D -m 0755 target/release/cooker /home/builder/out/cooker
 EOF
 
 # Bytes and counts against bench/budgets.txt, never elapsed time, with no network and nothing
@@ -184,14 +184,14 @@ EOF
 FROM build AS perf
 ARG CI_COMMIT=
 RUN --network=none \
-    --mount=type=cache,id=cook-router-cargo-src-release,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 <<'EOF'
+    --mount=type=cache,id=cooker-cargo-src-release,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 <<'EOF'
 echo "commit ${CI_COMMIT:-local}"
 target=$(rustc -vV | sed -n 's/^host: //p')
 # Every gate runs, so one failure does not hide another's numbers.
 failed=0
-bench/gate.sh size "$target" /home/builder/out/cook-router || failed=1
-bench/gate.sh idle linux /home/builder/out/cook-router 1 || failed=1
-bench/gate.sh idle linux /home/builder/out/cook-router 2000 || failed=1
+bench/gate.sh size "$target" /home/builder/out/cooker || failed=1
+bench/gate.sh idle linux /home/builder/out/cooker 1 || failed=1
+bench/gate.sh idle linux /home/builder/out/cooker 2000 || failed=1
 exit "$failed"
 EOF
 
@@ -199,22 +199,22 @@ EOF
 # that runs it unchanged.
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime
 # Links the GitHub package to this repository, so release.yml can push with its token.
-LABEL org.opencontainers.image.source=https://github.com/prep-cook/cook-router
+LABEL org.opencontainers.image.source=https://github.com/prep-cook/cooker
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
- && groupadd --system --gid 10001 cook-router \
- && useradd --system --uid 10001 --gid 10001 --home-dir /data --shell /usr/sbin/nologin cook-router \
+ && groupadd --system --gid 10001 cooker \
+ && useradd --system --uid 10001 --gid 10001 --home-dir /data --shell /usr/sbin/nologin cooker \
  && mkdir -p /data \
- && chown cook-router:cook-router /data
-COPY --from=build /home/builder/out/cook-router /usr/local/bin/cook-router
+ && chown cooker:cooker /data
+COPY --from=build /home/builder/out/cooker /usr/local/bin/cooker
 # The license, the MIT notices it carries forward, and the third-party licenses the binary needs.
-COPY LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES /usr/share/doc/cook-router/
-USER cook-router
+COPY LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES /usr/share/doc/cooker/
+USER cooker
 # The config database (/data/cook.db) and credentials live in /data; mount a volume there.
 # A first start imports /data/config.yaml when it exists, and otherwise starts with defaults
 # on port 8317. No VOLUME instruction: some hosts, Railway among them, refuse to build a
 # Dockerfile that has one.
 WORKDIR /data
 EXPOSE 8317
-ENTRYPOINT ["cook-router"]
+ENTRYPOINT ["cooker"]

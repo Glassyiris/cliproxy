@@ -125,11 +125,11 @@ func TestZZCmdFixture(t *testing.T) {
 		"server:\n  discovery:\n    interfaces:\n      <<: {exclude: [eth0]}\n",
 		"server:\n  discovery:\n    interfaces:\n      <<: {exclude: [!!binary ZXRoMA==]}\n      include: [wl*]\n",
 		"server:\n  discovery:\n    interfaces:\n      <<: [{exclude: [a], include: [x]}, {exclude: [b]}]\n      include: [c]\n",
-		// Invalid base64 on the path, then elsewhere: cook-router refuses both.
+		// Invalid base64 on the path, then elsewhere: cooker refuses both.
 		"server:\n  discovery:\n    interfaces:\n      include: [!!binary '!!!']\n",
 		"requests:\n  proxy-url: !!binary '!!!'\nserver:\n  discovery:\n    interfaces:\n      exclude: [eth0]\n",
 		// A quoted merge key (a plain key to yaml.v3) and an aliased sequence as a merge
-		// operand (a decode error): cook-router refuses both.
+		// operand (a decode error): cooker refuses both.
 		"server:\n  discovery:\n    interfaces:\n      '<<': {exclude: [eth0]}\n      include: [wl*]\n",
 		"seq: &s [{exclude: [eth0]}]\nserver:\n  discovery:\n    interfaces:\n      <<: *s\n      include: [wl*]\n",
 	} {

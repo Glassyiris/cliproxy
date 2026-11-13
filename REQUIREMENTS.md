@@ -1,6 +1,6 @@
 # REQUIREMENTS.md: numbers, gates and exceptions
 
-This file decides cook-router's commands, numbers, gates and exceptions. Rules live in `AGENTS.md`, `.github/AGENTS.md`, `ui/AGENTS.md` and `crates/AGENTS.md`.
+This file decides cooker's commands, numbers, gates and exceptions. Rules live in `AGENTS.md`, `.github/AGENTS.md`, `ui/AGENTS.md` and `crates/AGENTS.md`.
 The checker reads files and runs no gates. Write commands in backticks and escape cell-internal pipes as `\|`.
 
 ## Rule files
@@ -22,7 +22,7 @@ Measure three runs on the build host with date and load before setting a whole-t
 | Tier | Command | Runs (where, when) | Wall-time limit | Baseline (date, host, load) |
 | --- | --- | --- | --- | --- |
 | Pre-commit | | No tier exists yet | | |
-| Merge gate | `docker buildx build --target dashboard .`; `docker buildx build --target check .`; `docker buildx build --target test-report --build-arg SHARD=1 --build-arg SHARDS=2 --output type=local,dest=out1 .` and the same with `SHARD=2`, then `python3 .github/scripts/test-counts.py total out1/counts-1.json out2/counts-2.json`; `docker buildx build --target perf .`; `docker buildx build --target runtime --load -t cook-router:ci .`; `docker run --rm cook-router:ci --version`; `bench/gate.sh image cook-router:ci`; `python3 -I tools/changelog.py check`; `python3 -I .github/scripts/pr-title.py "$PR_TITLE"`; `python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes*.py'`; `docker buildx build --target requirements .` | ci.yml selects lanes on PRs; all lanes on master, manual/release calls and ci:full reruns. The stage contents are in `Dockerfile`. Changes workflow runs fragments/title. The requirements stage (the check and its self-tests) runs on every run, including rule-only and documentation-only changes, and contributes to the `ci-ok` result. | | |
+| Merge gate | `docker buildx build --target dashboard .`; `docker buildx build --target check .`; `docker buildx build --target test-report --build-arg SHARD=1 --build-arg SHARDS=2 --output type=local,dest=out1 .` and the same with `SHARD=2`, then `python3 .github/scripts/test-counts.py total out1/counts-1.json out2/counts-2.json`; `docker buildx build --target perf .`; `docker buildx build --target runtime --load -t cooker:ci .`; `docker run --rm cooker:ci --version`; `bench/gate.sh image cooker:ci`; `python3 -I tools/changelog.py check`; `python3 -I .github/scripts/pr-title.py "$PR_TITLE"`; `python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes*.py'`; `docker buildx build --target requirements .` | ci.yml selects lanes on PRs; all lanes on master, manual/release calls and ci:full reruns. The stage contents are in `Dockerfile`. Changes workflow runs fragments/title. The requirements stage (the check and its self-tests) runs on every run, including rule-only and documentation-only changes, and contributes to the `ci-ok` result. | | |
 | Release | `git push origin vX.Y.Z`; after approval, `gh workflow run release.yml -f tag=vX.Y.Z` | The tag runs every CI lane, builds `runtime` natively for amd64 and arm64, checks the tag against `--version` and the image size, pushes the `candidate-X.Y.Z-<commit>` images and creates a draft release recording the candidate's digest. The manual run checks that the tag still points at that commit and that the image reports `X.Y.Z`, tags that digest `X.Y.Z` and `latest` and publishes the draft. Publishing follows root Rule priority. | | |
 
 Before opening a PR, run on the final tree:
@@ -116,10 +116,10 @@ Names exactly match `###` headings and tags. Gate commands cover existing mechan
 | crates/AGENTS.md: Money and state (if present) | `cargo nextest run --workspace --locked` | `REVIEW.md`, Checking against the rules; state invariants in docs/STATE-AND-CONCURRENCY.md, conditional money clauses pending decision 8 | |
 | crates/AGENTS.md#money-idempotent | | | |
 | crates/AGENTS.md#ledger | | | |
-| crates/AGENTS.md: Background work (if present) | `bench/gate.sh idle linux "${CARGO_TARGET_DIR:-target}/release/cook-router" 1` | `REVIEW.md`, Review guidelines; lifecycle/shutdown proof remains review | |
+| crates/AGENTS.md: Background work (if present) | `bench/gate.sh idle linux "${CARGO_TARGET_DIR:-target}/release/cooker" 1` | `REVIEW.md`, Review guidelines; lifecycle/shutdown proof remains review | |
 | crates/AGENTS.md: Operations (if present) | | `REVIEW.md`, "Checking against the rules" and "CI, docs and commits"; inspect approval and restore evidence | |
 | crates/AGENTS.md: Admin panel (if present) | | | |
-| crates/AGENTS.md: Performance | `bench/gate.sh size x86_64-unknown-linux-gnu "${CARGO_TARGET_DIR:-target}/release/cook-router"`; `cargo nextest run --workspace --locked` | `REVIEW.md`, Review guidelines; linear preparation and prompt-cache live proof remain review | |
+| crates/AGENTS.md: Performance | `bench/gate.sh size x86_64-unknown-linux-gnu "${CARGO_TARGET_DIR:-target}/release/cooker"`; `cargo nextest run --workspace --locked` | `REVIEW.md`, Review guidelines; linear preparation and prompt-cache live proof remain review | |
 | crates/AGENTS.md: Verification | `cargo nextest run --workspace --locked` | `REVIEW.md`, Every finding has evidence and Review guidelines; isolation follows ci.yml setup | |
 | crates/AGENTS.md: Cargo workspace layout | `python3 -I tools/check-crate-deps.py` | `REVIEW.md`, Review guidelines; naming, test placement and `lib.rs` headers reviewed | |
 | crates/AGENTS.md: Management API contract | | `REVIEW.md`, "Checking against the rules"; mechanical coverage under Management response schemas | |
@@ -141,7 +141,7 @@ Intentional designs that look like defects:
 
 | What | Why | Owner ruling (date, quote) |
 | --- | --- | --- |
-| Compatibility: cook-router keeps no backward compatibility in any surface (config, database, CLI, environment, routes, responses, paths, crate names); the management API starts at EXPERIMENTAL `/admin/v0` | It is a full rewrite of an existing project. Valid until an owner sets a compatibility policy, for example at v1. | An owner, 2026-11-13: 「API 要不直接从 v0 开始计，不要向后兼容」; 「完全不需要考虑任何向后兼容性，我们是基于一个现有项目的完整重写」 |
+| Compatibility: cooker keeps no backward compatibility in any surface (config, database, CLI, environment, routes, responses, paths, crate names); the management API starts at EXPERIMENTAL `/admin/v0` | It is a full rewrite of an existing project. Valid until an owner sets a compatibility policy, for example at v1. | An owner, 2026-11-13: 「API 要不直接从 v0 开始计，不要向后兼容」; 「完全不需要考虑任何向后兼容性，我们是基于一个现有项目的完整重写」 |
 | Dashboard shows provider status/message and OAuth failure detail | Dashboard users operate the upstream connection; backend Security permits operator detail | Existing ui/REQUIREMENTS.md design; no dated owner quote supplied |
 | Sign-in has one raw hidden input carrying the host as username | Password managers need a username; Astryx VisuallyHidden is a span and must not wrap a control | Existing ui/REQUIREMENTS.md design; no dated owner quote supplied |
 | Live usage is opt-in and tab-local | Reading the queue consumes records other consumers could read | Existing ui/REQUIREMENTS.md design; preserve semantics during migration |

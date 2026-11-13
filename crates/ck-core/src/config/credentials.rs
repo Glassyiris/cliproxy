@@ -534,7 +534,7 @@ pub fn config_key_location(cfg: &Config, id: &str) -> Option<KeyLocation> {
 }
 
 /// The `name` of the `api-keys` entry each config-backed credential comes from, by
-/// credential ID, for cook-router provider selectors (`routing.providers`). Entries
+/// credential ID, for cooker provider selectors (`routing.providers`). Entries
 /// without a name are absent.
 pub fn entry_names(cfg: &Config) -> std::collections::HashMap<String, String> {
     synthesize(cfg)

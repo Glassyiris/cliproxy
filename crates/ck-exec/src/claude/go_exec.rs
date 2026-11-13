@@ -467,7 +467,7 @@ const GO_MAP_ORDER: &[&str] = &[
 ];
 
 /// Go v8.0.27 tests that send an API key's caller system text upstream top-level,
-/// where cook-router moves it after the leading user run as for every request
+/// where cooker moves it after the leading user run as for every request
 /// (docs/DIFFERENCES-FROM-GO.md): Rust's body is compared with Go's after
 /// `with_relocated_system`, which leaves 6fecc6e's recordings of them unchanged.
 const RELOCATES_API_KEY_SYSTEM: &[&str] = &[

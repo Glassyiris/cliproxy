@@ -7,9 +7,9 @@ SQLite is the sole durable authority for configuration and OAuth credentials. Se
 YAML is a first-import format, not a watched runtime file. A first start imports the selected `--config` file, or `./config.yaml` when the flag is absent; subsequent starts do not read it. Only the current layout is accepted: pre-v8 keys such as `port`, `auth-dir` or `claude-api-key` are rejected as unknown settings. Prefer an explicit import before starting the server:
 
 ```sh
-cook-router --db ~/.cook-router/cook.db config validate config.yaml
-cook-router --db ~/.cook-router/cook.db config import config.yaml
-cook-router --db ~/.cook-router/cook.db
+cooker --db ~/.cook-router/cook.db config validate config.yaml
+cooker --db ~/.cook-router/cook.db config import config.yaml
+cooker --db ~/.cook-router/cook.db
 ```
 
 There is no comment-preserving YAML save, file watcher or asynchronous YAML mirror. Change settings through the dashboard or `/admin/v1`; a successful atomic commit publishes the new runtime projection. Startup-only settings report `restart_required`, rather than silently claiming they are live. The settings and YAML examples below describe the YAML import and runtime projection shapes, **not the canonical persisted schema**. The store persists typed resources with stable IDs and revisions. Import preserves OAuth-only provider scope; unsupported or invalid input must be reviewed, not assumed to be silently dropped.
@@ -34,7 +34,7 @@ To import into a running service, explicitly select its management endpoint and 
 
 ```sh
 export COOK_ROUTER_MANAGEMENT_KEY=...   # or let the command prompt for it
-cook-router --management-base-url http://127.0.0.1:8317 config import config.yaml
+cooker --management-base-url http://127.0.0.1:8317 config import config.yaml
 ```
 
 Online commands take the management key from `--password`, else from `COOK_ROUTER_MANAGEMENT_KEY`, else from a prompt that does not echo when run in a terminal. Prefer the variable or the prompt: a `--password` value is visible to other local users' process listings while the command runs. Without a terminal and without either, the command sends no key and the service refuses it.
@@ -96,7 +96,7 @@ While a service owns the database, a terminal sign-in goes through it: a login f
 
 ```sh
 export COOK_ROUTER_MANAGEMENT_KEY=...   # the management.secret-key value
-cook-router --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
+cooker --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
 ```
 
 With the service stopped, the same login flag with `--db` writes the database directly.
@@ -105,9 +105,9 @@ Online built-in logins and Vertex import use the credential batch port:
 
 ```sh
 export COOK_ROUTER_MANAGEMENT_KEY=...
-cook-router --management-base-url https://proxy.example --vertex-import ./service-account.json
-cook-router --management-base-url https://proxy.example --codex-device-login --no-browser
-cook-router --management-base-url https://proxy.example --siwc-bind codex-account.json --no-browser
+cooker --management-base-url https://proxy.example --vertex-import ./service-account.json
+cooker --management-base-url https://proxy.example --codex-device-login --no-browser
+cooker --management-base-url https://proxy.example --siwc-bind codex-account.json --no-browser
 ```
 
 `--codex-login` uses the browser flow instead. These commands do not load the local `--db` or `--config`, even if they identify the running owner's database. Before provider work, an authenticated ordinary dry-run checks owner admission, built-in logins read only the `requests` setting with its secrets (the proxy URL can carry credentials) and the SIWC identifier from `oauth`, never the complete export, and compile through the SQL-free resource importer/compiler, and `GET /admin/v1/credentials` captures original managed bytes, hashes and the owner's managed directory descriptor from memory. The blocking writer hydrates only its needed files in private client scratch, preserving existing opaque metadata for Codex merges; one conditional batch saves the result. SIWC hydrates its captured target **before** file validation, device-ID selection or upstream work, preserving outer Codex tokens and opaque fields while replacing the SIWC partition. Use a managed filename, or an absolute native owner path whose direct parent matches the returned managed directory; unsupported aliases, nested/foreign paths and missing targets are rejected before authorization, without consulting client filesystem state. The caller's accepted destination is not silently replaced with a client-local file. A replacement or deletion since that captured view returns **412** instead of overwriting or resurrecting it.
@@ -118,7 +118,7 @@ The provider's save callback itself returns success only after the API acknowled
 
 Keep the `--db` snapshot in a private persistent directory writable by the service user (0700 on Unix). Containers require a persistent volume for that directory, not just a mount of an old YAML file. Snapshot publication creates a temporary file alongside it, syncs that file, atomically replaces the snapshot and syncs the directory before acknowledging a write. Database files, exports and backups must be private (0600, or equivalent Windows ACLs); they contain provider secrets, client keys and OAuth refresh tokens.
 
-The working checkpoint lives at `<TMPDIR>/cook-router/<canonical-db-path-hash>/live.db`. SQLite operations use DELETE journaling and transient connections; the checkpoint is rebuilt from canonical memory. Its directory is private (0700); database images and transient journals are private (0600). Published snapshots do not depend on WAL/SHM files.
+The working checkpoint lives at `<TMPDIR>/cooker/<canonical-db-path-hash>/live.db`. SQLite operations use DELETE journaling and transient connections; the checkpoint is rebuilt from canonical memory. Its directory is private (0700); database images and transient journals are private (0600). Published snapshots do not depend on WAL/SHM files.
 
 Only one service or offline command may own a selected database. Before workspace inspection or SQLite bootstrap, it takes a nonblocking native file lock under `<snapshot-parent>/.cook-router-owners/<database-name>.lock`, using the canonical database path. The guard is held through workspace cleanup, so another process cannot split ownership by using a different TMPDIR or racing shutdown. Guard files are generated ownership bookkeeping, **not backup or restore inputs**; workspace cleanup never unlinks them. Do not delete them beneath an active owner or contender.
 
@@ -135,7 +135,7 @@ A normal cold start seeds its temporary working database from the published snap
 **Replacing only the snapshot after an unclean exit can be ignored:** a surviving valid live database takes precedence and republishes over it. To force a cold restore:
 
 1. Stop every server and CLI process using the selected `--db` path.
-2. After the owner has stopped, ensure the old working database cannot resume. Either identify its exact `<TMPDIR>/cook-router/<canonical-db-path-hash>` directory and remove only that stopped owner's directory; or configure a fresh private, trusted OS temporary directory for the next start. Keep that namespace on later starts; switching back can resume old working state. PID references alone are not proof that ownership is free. Never delete ownership guards or an active workspace.
+2. After the owner has stopped, ensure the old working database cannot resume. Either identify its exact `<TMPDIR>/cooker/<canonical-db-path-hash>` directory and remove only that stopped owner's directory; or configure a fresh private, trusted OS temporary directory for the next start. Keep that namespace on later starts; switching back can resume old working state. PID references alone are not proof that ownership is free. Never delete ownership guards or an active workspace.
 3. Copy the backup over the selected `--db` file, preserving the service user's ownership and private permissions (0600 on Unix).
 4. Start the server with the selected temporary namespace. With no old checkpoint there, it seeds from the restored snapshot. Online imports use its management API; offline commands must wait for the service to stop and use the intended recovery namespace.
 
@@ -169,7 +169,7 @@ observability:
 | `port` | The port, `8317` by default. |
 | `tls.enable`, `tls.cert`, `tls.key` | Serve HTTPS on the same port with this certificate and key file. |
 | `max-request-body-bytes` | The largest request body accepted, in bytes; `0` (the default) or a negative value sets no limit. A larger body gets `413` before it is processed: on the client routes and the Management API. As in Go, a streamed body whose JSON value or multipart form ends before the limit is handled from the bytes before it. Changes apply to the next request. The client routes also stop at 64 MiB whatever this says. The older top-level `max-request-body-bytes` also works; the one under `server` wins. |
-| `github-token` | A GitHub token. cook-router retains the setting for import/runtime projection but does not send it on release checks; its dashboard is built in. Treat it as a secret; ordinary admin reads and exports are redacted. The older top-level `github-token` import spelling also works; the one under `server` wins. |
+| `github-token` | A GitHub token. cooker retains the setting for import/runtime projection but does not send it on release checks; its dashboard is built in. Treat it as a secret; ordinary admin reads and exports are redacted. The older top-level `github-token` import spelling also works; the one under `server` wins. |
 | `trusted-proxies` | Addresses of reverse proxies or tunnels whose `X-Forwarded-For` header is trusted. Set it when a tunnel on the same machine forwards requests, for example `[127.0.0.1, "::1"]`. See [running it safely](GETTING-STARTED.md#running-it-safely). |
 
 ## access
@@ -190,7 +190,7 @@ observability:
 
 | Setting | What it does |
 |---|---|
-| `providers.codex.signin-with-chatgpt-identifier` | The agent name sent when binding Sign in with ChatGPT tokens to a Codex credential (`POST /v8/management/oauth/siwc/bind`), `CLIProxyAPI` when empty. Legacy spelling: `codex.signin-with-chatgpt-identifier`. Go also uses it as the SIWC request User-Agent prefix; cook-router does not send SIWC requests yet. |
+| `providers.codex.signin-with-chatgpt-identifier` | The agent name sent when binding Sign in with ChatGPT tokens to a Codex credential (`POST /v8/management/oauth/siwc/bind`), `CLIProxyAPI` when empty. Legacy spelling: `codex.signin-with-chatgpt-identifier`. Go also uses it as the SIWC request User-Agent prefix; cooker does not send SIWC requests yet. |
 | `providers.codex.chatgpt-keep-alive` | `false` by default. `true` keeps up to 2 idle connections to `chatgpt.com` per proxy for 90 seconds, so Codex HTTP requests skip the TCP and TLS handshake. Off, every Codex request opens its own connection. A published change applies from the next request, without a restart. |
 
 The private `<canonical-db-path>.credentials` directory is a materialized credential cache and refresh-lock domain, not a supported edit/import source or independent durable authority. Do not edit or share it: credential state loads from SQLite, and cache edits are not imported. Before a provider writer merges existing settings, its affected files are restored from SQLite under the storage transaction; writes, token refreshes and startup can replace cache bytes. The server does not watch files or poll the database. Configuration and credential changes take effect when the owning service commits them, from the dashboard, `/admin/v1` or a `--management-base-url` command; an offline command cannot write a database that a running service owns. The service loads the database once at startup and opens SQLite again only to save a commit. Keep its contents private alongside SQLite. Credential tables are excluded from config export/history/restore; only a full database backup includes them.
@@ -254,12 +254,12 @@ How the server picks an account for each request. [MULTI-ACCOUNT.md](MULTI-ACCOU
 | `cooldown.disable-cooling` | `true` keeps failing accounts in rotation instead of resting them. |
 | `cooldown.transient-error-cooldown-seconds` | How long to rest an account after a temporary upstream error; `0` means 60 seconds, a negative value turns it off. |
 | `cooldown.save-cooldown-status` | `true` preserves cooldowns in SQLite's separate credential state across restarts. Saves are coalesced through one background writer, with pending writes drained on graceful shutdown. Cooldowns are read from and written to SQLite only; `.cds` files are never read. Cooldowns are not config revisions; config restore is neither a cooldown reset nor restoration of token state. |
-| `cooldown.max-trusted-cooldown` | A cook-router addition. When an account hits its usage limit, the provider says when it resets, sometimes days ahead, and the account rests until then. Providers often reset early, so cook-router trusts the stated time for at most this long (`"1h"` by default; a Go duration such as `"90m"`, or a bare number meaning seconds; at least 10 seconds), then lets the next request through to check. If the account is still limited, the next rest is twice as long, and never longer than the stated reset. `0` trusts the stated reset, as CLIProxyAPI does. An unreadable value is logged and the default is used. See [differences from Go](DIFFERENCES-FROM-GO.md#deliberate-differences). |
-| `providers.exclude`, `providers.order` | A cook-router addition: which providers a request may use and in what order. See [Provider scope and order](#provider-scope-and-order). |
+| `cooldown.max-trusted-cooldown` | A cooker addition. When an account hits its usage limit, the provider says when it resets, sometimes days ahead, and the account rests until then. Providers often reset early, so cooker trusts the stated time for at most this long (`"1h"` by default; a Go duration such as `"90m"`, or a bare number meaning seconds; at least 10 seconds), then lets the next request through to check. If the account is still limited, the next rest is twice as long, and never longer than the stated reset. `0` trusts the stated reset, as CLIProxyAPI does. An unreadable value is logged and the default is used. See [differences from Go](DIFFERENCES-FROM-GO.md#deliberate-differences). |
+| `providers.exclude`, `providers.order` | A cooker addition: which providers a request may use and in what order. See [Provider scope and order](#provider-scope-and-order). |
 
 ### Provider scope and order
 
-When several providers serve a model, `routing.providers` limits which may serve it and in what order (cook-router only). Without it, `priority` and `strategy` decide, as in CLIProxyAPI.
+When several providers serve a model, `routing.providers` limits which may serve it and in what order (cooker only). Without it, `priority` and `strategy` decide, as in CLIProxyAPI.
 
 ```yaml
 routing:
@@ -307,7 +307,7 @@ Uncomment the block to use it. `(?s).*` matches any body, including an empty one
 | Setting | What it does |
 |---|---|
 | `proxy-url` | An outbound proxy for every upstream request, such as `socks5://127.0.0.1:1080` or `http://proxy:3128`. A single account can use its own proxy instead; see [per-account proxies](MULTI-ACCOUNT.md#per-account-proxies-and-request-shaping). |
-| `tls-handshake-timeout-seconds` | Seconds a new connection to `api.anthropic.com` (Claude) or `chatgpt.com` (Codex) may take to be ready, so a server that accepts the connection but never answers the TLS handshake fails the attempt and request retry can engage. The default `0` waits indefinitely. It never limits a request once connected. In cook-router it also covers the DNS lookup, the TCP connect and a proxy's CONNECT, which Go leaves unbounded. |
+| `tls-handshake-timeout-seconds` | Seconds a new connection to `api.anthropic.com` (Claude) or `chatgpt.com` (Codex) may take to be ready, so a server that accepts the connection but never answers the TLS handshake fails the attempt and request retry can engage. The default `0` waits indefinitely. It never limits a request once connected. In cooker it also covers the DNS lookup, the TCP connect and a proxy's CONNECT, which Go leaves unbounded. |
 
 Claude accounts ignore `HTTPS_PROXY` and `HTTP_PROXY`. Without an explicit proxy, they connect directly. Set `requests.proxy-url` or the account's `proxy_url` when you need one. Claude API keys pointed at a custom, non-Anthropic base URL use the standard transport, which can inherit environment proxies.
 
@@ -342,11 +342,11 @@ service-name ports such as `:http` are not accepted.
 
 | Setting | What it does |
 |---|---|
-| `catalog`, `codex-catalog`, `devin-catalog` | Where the model catalog (`models.json`), the Codex client catalog and the Devin catalog come from: an absolute local path or an `http`/`https` URL. Empty keeps the default. Any other value, such as a relative path, `~/models.json` or a `file://` URL, refuses the config, as in CLIProxyAPI v8.0.35. cook-router checks and keeps these settings but does not use them yet; see [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md). |
+| `catalog`, `codex-catalog`, `devin-catalog` | Where the model catalog (`models.json`), the Codex client catalog and the Devin catalog come from: an absolute local path or an `http`/`https` URL. Empty keeps the default. Any other value, such as a relative path, `~/models.json` or a `file://` URL, refuses the config, as in CLIProxyAPI v8.0.35. cooker checks and keeps these settings but does not use them yet; see [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md). |
 
 ## worker-threads
 
-`worker-threads: 4` at the top level sets how many threads serve requests. Without it, cook-router uses the smaller of the CPU count and two, which is plenty for one person: a coding-agent request with a 300 KB prompt costs about 20 to 30 ms of CPU (a small chat request about 1 ms), and most of a request's time is spent waiting on the provider. Each extra thread can keep its own pool of freed memory, so more threads mean a larger resident size. The `TOKIO_WORKER_THREADS` environment variable overrides it.
+`worker-threads: 4` at the top level sets how many threads serve requests. Without it, cooker uses the smaller of the CPU count and two, which is plenty for one person: a coding-agent request with a 300 KB prompt costs about 20 to 30 ms of CPU (a small chat request about 1 ms), and most of a request's time is spent waiting on the provider. Each extra thread can keep its own pool of freed memory, so more threads mean a larger resident size. The `TOKIO_WORKER_THREADS` environment variable overrides it.
 
 The setting is read from SQLite before the request runtime starts. Changing it requires a restart; `TOKIO_WORKER_THREADS` overrides it. YAML edits after import have no effect. Remote-store environment settings do not provide an alternate source of thread configuration or runtime configuration.
 
@@ -395,11 +395,11 @@ How a request to `smart` is routed:
 - **Pick.** The grade maps linearly onto the index range of the candidates' cost/capability Pareto front, moved by -15% (`cost`), 0 or +20% (`quality`) of that range; the cheapest variant within 1 index point of it serves, since smaller gaps are benchmark noise. The client's suffix is kept when the route has none of its own. Without any rated candidate, the first available listed model serves, else the newest available model.
 - **Conversation.** A conversation (the session the server derives, see `session_source` in [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)) keeps its model for an hour after its last request, so its prompt cache stays warm. Tool-result requests always keep it; a new user message is graded again and moves the conversation only to a stronger model. It also moves when its model becomes unavailable, leaves `models` or is too small. `count_tokens` neither asks the judge nor binds; image, video and speech routes do not route. A Responses client chaining `previous_response_id` should send `prompt_cache_key`, `conversation_id` or a session header, or each turn can land on another model.
 
-The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-Cook-Routed-Model` names the model that served a request and `X-Cook-Routed-Provider` its provider; `GET /v1/models` lists the routers. Not covered yet: the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cook-router ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
+The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-Cook-Routed-Model` names the model that served a request and `X-Cook-Routed-Provider` its provider; `GET /v1/models` lists the routers. Not covered yet: the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cooker ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
 
 ## Extending
 
-cook-router has no plugin interface: the plugin API carried over from the Go gateway is poorly designed, so it was removed rather than kept. Until the maintainers design a new extension mechanism, add a provider, a route or other behaviour by modifying the source, then build and deploy your own image.
+cooker has no plugin interface: the plugin API carried over from the Go gateway is poorly designed, so it was removed rather than kept. Until the maintainers design a new extension mechanism, add a provider, a route or other behaviour by modifying the source, then build and deploy your own image.
 
 ## Environment
 

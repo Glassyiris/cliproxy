@@ -8,6 +8,6 @@ test("routing strategy values follow the server's parsing", () => {
   assert.equal(strategy("wrr"), "weighted-round-robin");
   assert.equal(strategy("reset-first"), "soonest-reset");
   assert.equal(strategy("random"), "round-robin");
-  // Unset is soonest reset on cook-router.
+  // Unset is soonest reset on cooker.
   for (const unset of [undefined, null, "", " "]) assert.equal(strategy(unset), "soonest-reset");
 });

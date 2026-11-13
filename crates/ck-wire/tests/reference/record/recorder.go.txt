@@ -1,5 +1,5 @@
 // Package recorder appends one JSON line per recorded call to $CPA_RECORD_DIR/<pid>.jsonl.
-// It exists only in the throwaway /tmp copy used to generate cook-router fixtures.
+// It exists only in the throwaway /tmp copy used to generate cooker fixtures.
 package recorder
 
 import (

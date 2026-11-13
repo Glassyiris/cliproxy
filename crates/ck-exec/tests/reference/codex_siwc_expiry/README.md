@@ -18,5 +18,5 @@ Regenerate with Go 1.26.4:
 cp zz_rsfix_siwc_expiry_test.go <CLIProxyAPI>/sdk/cliproxy/auth/
 cd <CLIProxyAPI>
 RSFIX_OUT=/tmp/rsfix-siwc-expiry go test -count=1 -run TestRSFixSIWCExpiry ./sdk/cliproxy/auth/
-cp /tmp/rsfix-siwc-expiry/codex_siwc_expiry_go.json <cook-router>/crates/ck-exec/tests/fixtures/
+cp /tmp/rsfix-siwc-expiry/codex_siwc_expiry_go.json <cooker>/crates/ck-exec/tests/fixtures/
 ```

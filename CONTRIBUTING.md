@@ -71,6 +71,6 @@ Pull requests are squash-merged: the pull request title becomes the commit subje
 
 ## Issues
 
-Search existing issues first, then pick a form: bug report or feature request, each in English and in Simplified Chinese. State your version (`cook-router --version`) and how you installed it. Remove keys, tokens and account files from logs and configuration before posting. Usage questions go through [SUPPORT.md](.github/SUPPORT.md), and vulnerabilities through [SECURITY.md](SECURITY.md), never a public issue. Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
+Search existing issues first, then pick a form: bug report or feature request, each in English and in Simplified Chinese. State your version (`cooker --version`) and how you installed it. Remove keys, tokens and account files from logs and configuration before posting. Usage questions go through [SUPPORT.md](.github/SUPPORT.md), and vulnerabilities through [SECURITY.md](SECURITY.md), never a public issue. Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
 
 By contributing you agree that your work is released under the [GNU Affero General Public License, version 3 or later](LICENSE).

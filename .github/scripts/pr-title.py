@@ -15,7 +15,7 @@ import sys
 
 TYPES = {"feat", "fix", "refactor", "test", "style", "chore", "docs", "deps", "ci", "release"}
 SCOPES = {
-    "cli": "the cook-router binary: command line, TUI, discovery (crates/cooker)",
+    "cli": "the cooker binary: command line, TUI, discovery (crates/cooker)",
     "server": "HTTP routes, client auth, credential selection, management API (crates/ck-server)",
     "exec": "upstream provider executors (crates/ck-exec)",
     "translate": "request and response translation (crates/ck-translate)",

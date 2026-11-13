@@ -32,7 +32,7 @@ boundary (the reference checkout is not modified):
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # at 6fecc6e
-crate=/absolute/path/to/cook-router/crates/ck-server
+crate=/absolute/path/to/cooker/crates/ck-server
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/server/main.go" "$tmp/main.go"
 (
@@ -59,7 +59,7 @@ the top-level key) only selects which sections are written:
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # at ae3ee3be
-crate=/absolute/path/to/cook-router/crates/ck-server
+crate=/absolute/path/to/cooker/crates/ck-server
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/server/main.go" "$tmp/main.go"
 (

@@ -44,7 +44,7 @@ checkout is not modified):
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # the patched tree below (tree cc013917), not plain 6fecc6e
-crate=/absolute/path/to/cook-router/crates/ck-exec
+crate=/absolute/path/to/cooker/crates/ck-exec
 tmp=$(mktemp -d)
 cp "$crate"/tests/reference/gemini/*.go "$tmp/"
 (
@@ -71,7 +71,7 @@ the test already normalizes.
 
 ```sh
 git checkout 6fecc6e && git cherry-pick a0d31924 68ea171d 58257007 202b8b8c \
-  && git am /absolute/path/to/cook-router/crates/ck-exec/tests/reference/gemini/6fecc6e-gemini-claude-test.patch
+  && git am /absolute/path/to/cooker/crates/ck-exec/tests/reference/gemini/6fecc6e-gemini-claude-test.patch
 git rev-parse 'HEAD^{tree}'   # cc01391700b600815d1a342bc4b8190a206b7e94
 ```
 

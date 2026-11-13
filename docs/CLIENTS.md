@@ -1,4 +1,4 @@
-# Use cook-router with your tools
+# Use cooker with your tools
 
 The examples use `http://127.0.0.1:8317` and `your-client-key`. Replace both with your installation's address and client key. The dashboard at `/management.html` has a Use with tools dialog, on the Client keys page, that shows these values with copy buttons. SQLite is the proxy's durable config authority; do not retrieve current settings from an old import YAML. Pick a model ID from the dashboard's Models page or `GET /v1/models`.
 
@@ -27,7 +27,7 @@ For a persistent personal setup, put this in `~/.claude/settings.json`:
 
 ### Claude Code versions
 
-With a Claude account, cook-router forwards Claude Code's own identity (its `User-Agent` and SDK and Node versions) when Claude Code is 2.1.280 or newer within major version 2. A release newer than 2.1.280 must send both its `X-Stainless-Package-Version` and `X-Stainless-Runtime-Version` headers, as Claude Code does; its session-title and quota-probe requests are forwarded the same way. With `stabilize-device-profile: true`, 2.1.x releases from 2.1.280 still count as Claude Code, so they are not cloaked, but they go upstream with the stabilized 2.1.280 identity; 2.2 and later are cloaked, and the Stainless requirement does not apply. Other clients, and older Claude Code, are sent upstream as Claude Code 2.1.280. When a `claude-cli` client is not forwarded, the log says so at most once per account and version, naming the account by its auth index (the one the dashboard and the Management API show), and says when missing Stainless headers are the reason:
+With a Claude account, cooker forwards Claude Code's own identity (its `User-Agent` and SDK and Node versions) when Claude Code is 2.1.280 or newer within major version 2. A release newer than 2.1.280 must send both its `X-Stainless-Package-Version` and `X-Stainless-Runtime-Version` headers, as Claude Code does; its session-title and quota-probe requests are forwarded the same way. With `stabilize-device-profile: true`, 2.1.x releases from 2.1.280 still count as Claude Code, so they are not cloaked, but they go upstream with the stabilized 2.1.280 identity; 2.2 and later are cloaked, and the Stainless requirement does not apply. Other clients, and older Claude Code, are sent upstream as Claude Code 2.1.280. When a `claude-cli` client is not forwarded, the log says so at most once per account and version, naming the account by its auth index (the one the dashboard and the Management API show), and says when missing Stainless headers are the reason:
 
 ```text
 claude: Claude Code 2.1.220 on credential 1f3a9c0b7d2e4a68 is not passed through; requests use the claude-cli/2.1.280 (external, cli) identity. ...
@@ -39,7 +39,7 @@ Anthropic refuses Claude Code releases that are too old for a model. The error r
 Claude Code 2.1.236 does not support this model; version 2.1.251 or newer is required. Run 'claude update', or update the Claude desktop app, then try again.
 ```
 
-Its `error.details.error_code` is `claude_code_version_too_old`. From Claude Code itself, run `claude update`. From another client, or a Claude Code release that is not forwarded, the identity cook-router sends is older than the model needs. Until a cook-router release raises it, update the corresponding settings through the dashboard or `/admin/v1`. The YAML below is the initial import/runtime projection shape, not a watched config file. Use the version that `claude --version` prints and the `X-Stainless-Package-Version` and `X-Stainless-Runtime-Version` headers that release sends:
+Its `error.details.error_code` is `claude_code_version_too_old`. From Claude Code itself, run `claude update`. From another client, or a Claude Code release that is not forwarded, the identity cooker sends is older than the model needs. Until a cooker release raises it, update the corresponding settings through the dashboard or `/admin/v1`. The YAML below is the initial import/runtime projection shape, not a watched config file. Use the version that `claude --version` prints and the `X-Stainless-Package-Version` and `X-Stainless-Runtime-Version` headers that release sends:
 
 ```yaml
 oauth:
@@ -78,10 +78,10 @@ Check the selected model's provider limit and use a compaction window below it. 
 
 ```toml
 model = "<model-id>"
-model_provider = "cook-router"
+model_provider = "cooker"
 
-[model_providers.cook-router]
-name = "cook-router"
+[model_providers.cooker]
+name = "cooker"
 base_url = "http://127.0.0.1:8317/v1"
 env_key = "COOK_ROUTER_CLIENT_KEY"
 wire_api = "responses"
@@ -128,15 +128,15 @@ amp config model-providers check-access --provider-model <provider/model>
 
 ## OpenCode
 
-[OpenCode's provider guide](https://opencode.ai/docs/providers#custom-provider) documents custom OpenAI-compatible providers. Add this to `opencode.json`, replace `<model-id>`, then select `cook-router/<model-id>` with `/models`. This uses OpenAI Chat Completions.
+[OpenCode's provider guide](https://opencode.ai/docs/providers#custom-provider) documents custom OpenAI-compatible providers. Add this to `opencode.json`, replace `<model-id>`, then select `cooker/<model-id>` with `/models`. This uses OpenAI Chat Completions.
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "provider": {
-    "cook-router": {
+    "cooker": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "cook-router",
+      "name": "cooker",
       "options": {
         "baseURL": "http://127.0.0.1:8317/v1",
         "apiKey": "your-client-key"
@@ -158,7 +158,7 @@ amp config model-providers check-access --provider-model <provider/model>
   "customModels": [
     {
       "model": "<model-id>",
-      "displayName": "cook-router",
+      "displayName": "cooker",
       "baseUrl": "http://127.0.0.1:8317/v1",
       "apiKey": "your-client-key",
       "provider": "generic-chat-completion-api"
@@ -203,12 +203,12 @@ Not verified against official docs: the current official guide does not document
 {
   "language_models": {
     "openai_compatible": {
-      "cook-router": {
+      "cooker": {
         "api_url": "http://127.0.0.1:8317/v1",
         "available_models": [
           {
             "name": "<model-id>",
-            "display_name": "cook-router",
+            "display_name": "cooker",
             "max_tokens": 128000
           }
         ]
@@ -229,11 +229,11 @@ Set `capabilities.chat_completions` to `false` in the model entry to use OpenAI 
 [Continue's OpenAI provider guide](https://docs.continue.dev/customize/model-providers/top-level/openai#openai-api-compatible-providers) uses `apiBase`, `apiKey`, and `model` in `config.yaml`. This setup uses OpenAI Chat Completions.
 
 ```yaml
-name: cook-router
+name: cooker
 version: 1.0.0
 schema: v1
 models:
-  - name: cook-router
+  - name: cooker
     provider: openai
     model: <model-id>
     apiBase: http://127.0.0.1:8317/v1

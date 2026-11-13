@@ -141,7 +141,7 @@ async fn body_limit_answers_match_go() {
             case["content_type"].as_str().unwrap().to_owned(),
             normalize(case["response"].as_str().unwrap()),
         );
-        // `/admin/v1` is cook-router's own API: its cases record this server's
+        // `/admin/v1` is cooker's own API: its cases record this server's
         // body-limit and authentication responses.
         if got != want {
             failures.push(format!("{name}: got {got:?}, want {want:?}"));

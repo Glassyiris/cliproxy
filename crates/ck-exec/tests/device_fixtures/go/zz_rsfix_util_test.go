@@ -1,6 +1,6 @@
 package executor
 
-// Fixture generator for cook-router device providers (Kimi, Meta, Devin).
+// Fixture generator for cooker device providers (Kimi, Meta, Devin).
 // Runs the real Go executors against a raw HTTP/1.1 capture server and records the
 // exact upstream request (ordered header lines, body) and the downstream result.
 // Enable with RSFIX_OUT=<dir>; otherwise every generator test is skipped.

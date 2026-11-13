@@ -1,6 +1,6 @@
 # Getting started
 
-This guide connects a coding tool to your own accounts or API keys through cook-router. For Codex CLI with API keys and mixed providers, start with the [README recipe](../README.md#api-keys-codex-cli-and-mixed-providers).
+This guide connects a coding tool to your own accounts or API keys through cooker. For Codex CLI with API keys and mixed providers, start with the [README recipe](../README.md#api-keys-codex-cli-and-mixed-providers).
 
 ## 1. Start it
 
@@ -9,7 +9,7 @@ Run the Docker image with a data directory and a dashboard password:
 ```sh
 mkdir -m 700 -p data
 sudo chown -R 10001:10001 data
-docker run -d --name cook-router -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e COOK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cook-router:latest
+docker run -d --name cooker -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e COOK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cooker:latest
 ```
 
 [INSTALL.md](INSTALL.md#docker) covers the volume, an optional initial `config.yaml` and upgrades. An empty volume starts with defaults on port 8317 and creates `/data/cook.db`; a `/data/config.yaml` that exists is imported on that first start, and later starts use the database. Two keys matter:
@@ -37,7 +37,7 @@ In the dashboard, choose Connect account and pick a provider. Claude and ChatGPT
 You can also sign in from a terminal, which helps on a server without a browser. The running proxy owns its database, so the terminal sign-in goes through it:
 
 ```sh
-docker exec -it cook-router cook-router --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
+docker exec -it cooker cooker --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
 ```
 
 When asked, type the management key; it is not shown as you type.
@@ -71,7 +71,7 @@ claude
 - Behind a tunnel or reverse proxy on the same machine (cloudflared, `tailscale serve`, Caddy, nginx), every request arrives from `127.0.0.1`, so the server treats every internet client as local. Then `allow-remote: false` no longer keeps them out, a local-only `--password` is accepted from the internet, and five wrong keys from anyone block the tunnel for everyone. Set `server.trusted-proxies` to the proxy's address, for example `[127.0.0.1, "::1"]` for a local cloudflared, and restart. The server then takes the client address from `X-Forwarded-For` from that proxy only. CLIProxyAPI behaves the same way.
 - The dashboard sends the management key once and then holds a session cookie the page's scripts cannot read. The session lasts 7 days, or 30 with "Remember on this device". Signing out, changing `management.secret-key` or restarting the server ends it. Behind a reverse proxy, list it in `server.trusted-proxies`: the server then reads its `X-Forwarded-Proto`, to mark the cookie `Secure` over HTTPS, and its `X-Forwarded-Host`, which dashboard changes must match when the proxy rewrites `Host`.
 - Do not send keys over plain HTTP across a network. Use a tunnel or reverse proxy with HTTPS, or serve HTTPS directly with `server.tls`.
-- The dashboard is built into the binary, and cook-router never downloads code to run. (CLIProxyAPI downloads its dashboard from GitHub every three hours by default.) cook-router does fetch model lists from the CLIProxyAPI project's mirrors at start and every three hours, as CLIProxyAPI does; they are JSON data, checked before use, and `--local-model` turns the fetch off.
+- The dashboard is built into the binary, and cooker never downloads code to run. (CLIProxyAPI downloads its dashboard from GitHub every three hours by default.) cooker does fetch model lists from the CLIProxyAPI project's mirrors at start and every three hours, as CLIProxyAPI does; they are JSON data, checked before use, and `--local-model` turns the fetch off.
 - SQLite holds configuration secrets, client keys and OAuth tokens. Keep its directory, published snapshot, temporary working databases and backups private. Copy the `--db` snapshot directly while the service runs for a complete backup, or use `config backup`. Config revisions do not contain credential state and never restore a revoked token. Logical deletion does not guarantee physical disk erasure. See [database safety](CONFIGURATION.md#database-safety-and-backup).
 
 ## Next

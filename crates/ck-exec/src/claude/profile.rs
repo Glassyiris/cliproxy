@@ -146,7 +146,7 @@ pub(crate) fn accepted_user_agent(headers: &HeaderMap, user_agent: &str, setting
         && (!newer_than_baseline(user_agent, settings) || stainless_versions_ok(headers))
 }
 
-/// The `cc_version` of a billing block cook-router adds: the forwarded release's own
+/// The `cc_version` of a billing block cooker adds: the forwarded release's own
 /// version for a confirmed caller newer than the baseline, else the baseline's.
 pub(crate) fn billing_version(user_agent: &str, confirmed: bool, settings: &Settings) -> String {
     match version(user_agent.trim()) {
@@ -224,7 +224,7 @@ pub(crate) fn note_refused(
         };
         format!(
             "It is missing a well-formed {missing}, which a release newer than that one needs. \
-             Claude Code sends {these}, so the client or a proxy in front of cook-router is \
+             Claude Code sends {these}, so the client or a proxy in front of cooker is \
              stripping or rewriting {them}."
         )
     } else {

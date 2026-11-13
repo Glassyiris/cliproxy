@@ -1,8 +1,8 @@
 export default {
   en: {
-    "app.brand.name": "cook-router",
-    "app.document.pageTitle": "{title} · cook-router",
-    "app.document.signInTitle": "Sign in · cook-router",
+    "app.brand.name": "cooker",
+    "app.document.pageTitle": "{title} · cooker",
+    "app.document.signInTitle": "Sign in · cooker",
 
     "app.signIn.managementKey": "Management key",
     "app.signIn.help":

@@ -1,7 +1,7 @@
 //! Replays outputs recorded from Go's discovery code at 6fecc6e
 //! (tests/reference/discovery -> tests/fixtures/discovery_*.json), with Go's product id
-//! `cliproxyapi` replaced by `cook-router` in the recordings. Go's scan read interface
-//! filters from the top-level `discovery` key; cook-router reads `server.discovery`, so the
+//! `cliproxyapi` replaced by `cooker` in the recordings. Go's scan read interface
+//! filters from the top-level `discovery` key; cooker reads `server.discovery`, so the
 //! replay moves each recorded `discovery:` section under `server:` (`under_server`).
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -403,12 +403,12 @@ fn terminal_sanitizing_and_filters_match_go() {
     for case in f["config_filters"].as_array().unwrap() {
         std::fs::write(&path, under_server(&s(&case["yaml"]))).unwrap();
         let got = cli::load_scan_filters(path.to_str().unwrap());
-        // Go ignored `server.discovery`; it is the only place cook-router reads.
+        // Go ignored `server.discovery`; it is the only place cooker reads.
         if s(&case["yaml"]).starts_with("server:") {
             assert_eq!(got, Ok((vec!["eth0".to_owned()], vec![])), "{case}");
             continue;
         }
-        // cook-router refuses invalid `!!binary` data anywhere in the file, where Go
+        // cooker refuses invalid `!!binary` data anywhere in the file, where Go
         // scans with no filters (on the path) or the file's (elsewhere).
         if s(&case["yaml"]).contains("!!binary '!!!'") {
             let e = got.unwrap_err();

@@ -1970,9 +1970,9 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
                 async move {
                     record.lock().unwrap().push((method, headers));
                     let location = match case.as_str() {
-                        "tag" => "https://github.com/prep-cook/cook-router/releases/tag/v1.2.3",
+                        "tag" => "https://github.com/prep-cook/cooker/releases/tag/v1.2.3",
                         "other" => "https://example.invalid/releases/tag/v9",
-                        "empty" => "https://github.com/prep-cook/cook-router/releases/tag/",
+                        "empty" => "https://github.com/prep-cook/cooker/releases/tag/",
                         _ => "",
                     };
                     (
@@ -2051,7 +2051,7 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
         (502, json!({"error": "unexpected_status", "message": "status 403"}))
     );
     assert!(seen.lock().unwrap().iter().all(|(method, h)| *method == Method::HEAD
-        && h["user-agent"] == "cook-router"
+        && h["user-agent"] == "cooker"
         && !h.contains_key("authorization")
         && !h.contains_key("proxy-authorization")
         && !h.contains_key("cookie")));
@@ -2123,10 +2123,7 @@ async fn latest_version_uses_configured_and_environment_proxies() {
             async {
                 (
                     axum::http::StatusCode::FOUND,
-                    [(
-                        "location",
-                        "https://github.com/prep-cook/cook-router/releases/tag/v4.5.6",
-                    )],
+                    [("location", "https://github.com/prep-cook/cooker/releases/tag/v4.5.6")],
                 )
             }
         });
@@ -2196,7 +2193,7 @@ async fn latest_version_uses_configured_and_environment_proxies() {
         );
         assert!(!headers.contains_key("authorization"));
         assert!(!headers.contains_key("cookie"));
-        assert_eq!(headers["user-agent"], "cook-router");
+        assert_eq!(headers["user-agent"], "cooker");
     }
 }
 
@@ -2247,10 +2244,7 @@ async fn latest_version_keeps_tls_verification_through_proxy() {
         axum::Router::new().fallback(|| async {
             (
                 axum::http::StatusCode::FOUND,
-                [(
-                    "location",
-                    "https://github.com/prep-cook/cook-router/releases/tag/v4.5.6",
-                )],
+                [("location", "https://github.com/prep-cook/cooker/releases/tag/v4.5.6")],
             )
         }),
         Some(Arc::new(tls.build())),
@@ -3643,7 +3637,7 @@ async fn kimi_channel_selects_kimi_ai_and_codex_exchange_errors_read_like_go() {
         ck_server::runtime::OAuthDelivery::Delivered
     );
     // Go appends the upstream body; session errors are readable by anyone holding
-    // the state, so cook-router stops at the status (deliberate hardening).
+    // the state, so cooker stops at the status (deliberate hardening).
     assert_eq!(
         final_status(&base, &state, 10).await,
         json!({"status": "error", "error":

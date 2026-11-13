@@ -271,7 +271,7 @@ mod tests {
     }
 
     /// A blank configured strategy shows the server's effective one (soonest-reset on
-    /// cook-router), round-robin when the server does not say (Go's reading); a
+    /// cooker), round-robin when the server does not say (Go's reading); a
     /// configured one is shown as configured.
     #[test]
     fn an_unset_strategy_shows_the_servers_effective_one() {

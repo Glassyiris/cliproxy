@@ -41,8 +41,8 @@ pub struct Quota {
     pub backoff_level: u32,
     #[serde(default, with = "go_time")]
     pub observed_at: Option<SystemTime>,
-    /// cook-router only (`max-trusted-cooldown`): bounded windows spent, 0 for none.
-    /// Written on every quota record cook-router saves, so its presence marks a record
+    /// cooker only (`max-trusted-cooldown`): bounded windows spent, 0 for none.
+    /// Written on every quota record cooker saves, so its presence marks a record
     /// whose deadline restores as it is. Go's decoder ignores it; records without it
     /// (Go's, or older) get the first bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]

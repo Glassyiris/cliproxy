@@ -9,8 +9,8 @@ version = "0.4.1"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 rust-version = "1.88"
-repository = "https://github.com/prep-cook/cook-router"
-homepage = "https://github.com/prep-cook/cook-router"
+repository = "https://github.com/prep-cook/cooker"
+homepage = "https://github.com/prep-cook/cooker"
 # No crate is published to crates.io.
 publish = false
 categories = ["network-programming", "web-programming"]

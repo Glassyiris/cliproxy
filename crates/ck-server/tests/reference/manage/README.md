@@ -9,7 +9,7 @@ complete `api.NewServer` driven through `httptest`. It opens no sockets and call
 provider, GitHub or OAuth endpoint. Secrets are `fake-*` strings; bcrypt hashes are
 regenerated on every run, so tests hash the same plaintext themselves.
 
-The checked-in management fixture is adapted to cook-router's SQLite resource API, not an unchanged Go recording. Regeneration below overwrites that adaptation: remove the entire `config_writes` group again and retarget config-read route steps to `/admin/v1/effective/config` before updating the fixture. Keep only the supported non-config management scenarios; do not restore removed v0/v8 config routes. Review the adapted fixture alongside its Rust replay when regenerating.
+The checked-in management fixture is adapted to cooker's SQLite resource API, not an unchanged Go recording. Regeneration below overwrites that adaptation: remove the entire `config_writes` group again and retarget config-read route steps to `/admin/v1/effective/config` before updating the fixture. Keep only the supported non-config management scenarios; do not restore removed v0/v8 config routes. Review the adapted fixture alongside its Rust replay when regenerating.
 
 Record with Go 1.26.4, the toolchain of the v8.0.35 release build (`GO_VERSION` in the reference's `.github/workflows/release.yaml`); from 1.26.4 `textproto` quotes MIME header diagnostics with `%q`. Regenerate with a temporary module inside the reference module's internal-package
 boundary (the reference checkout is not modified). Copying the reference's `go.sum`
@@ -19,7 +19,7 @@ temporary-path auth indexes change, and the replay normalizes all of them:
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # at ae3ee3be (v8.0.35)
-crate=/absolute/path/to/cook-router/crates/ck-server
+crate=/absolute/path/to/cooker/crates/ck-server
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/manage/main.go" "$tmp/main.go"
 (
@@ -39,4 +39,4 @@ recomputed for that path, so the fixture does not depend on the temp directory.
 `httptest` requests can carry header values a real HTTP parser would trim (for
 example `Authorization: "Bearer "`); the Rust replay skips those steps and covers
 the parsing rule with a unit test. Go reports `X-CPA-SUPPORT-PLUGIN: 1` because the
-reference is a cgo build; cook-router cannot load native plugins and reports `0`.
+reference is a cgo build; cooker cannot load native plugins and reports `0`.

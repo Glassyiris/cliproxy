@@ -182,7 +182,7 @@ pub trait UsageObserver: Send + Sync {
     /// Go returned before creating its usage reporter (Claude's `responses/compact`
     /// 501): this attempt publishes no record at all, whatever its outcome.
     fn discard(&self) {}
-    /// The attempt's upstream exchange reached `stage` now. Not in Go: cook-router adds
+    /// The attempt's upstream exchange reached `stage` now. Not in Go: cooker adds
     /// these timings and sizes to the usage record.
     fn upstream_stage(&self, stage: UpstreamStage) {
         let _ = stage;

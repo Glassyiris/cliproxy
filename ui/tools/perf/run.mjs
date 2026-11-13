@@ -261,7 +261,7 @@ async function main() {
   start("preview", process.execPath, [path.join(uiRoot, "node_modules/vite/bin/vite.js"), "preview", "--outDir", path.resolve(opt.dist), "--host", "127.0.0.1", "--port", String(port), "--strictPort"], { CPA_BACKEND: mockUrl });
   await until(async () => (await fetch(`${base}/`)).ok, 30_000, "vite preview");
   const probe = await fetch(`${base}/admin/v1/effective/config`, { headers: { Authorization: `Bearer ${opt.key}` } });
-  if (!probe.ok || !(probe.headers.get("x-cook-version") || "").startsWith("cook-router")) throw new HarnessError(`the /admin proxy to the mock does not work (HTTP ${probe.status})`);
+  if (!probe.ok || !(probe.headers.get("x-cook-version") || "").startsWith("cooker")) throw new HarnessError(`the /admin proxy to the mock does not work (HTTP ${probe.status})`);
   log(`mock ${mockUrl}  ui ${base}  dist ${opt.dist}`);
 
   const browser = await chromium.launch({

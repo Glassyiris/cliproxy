@@ -1,6 +1,6 @@
 package openai
 
-// Fixture post-processor for cook-router: adds `downstream.frames` to every executor
+// Fixture post-processor for cooker: adds `downstream.frames` to every executor
 // fixture under $RSFIX_OUT/<provider> that recorded stream chunks. Frames are the chunks
 // joined exactly as responsesSSEFramer.WriteChunk/Flush join them (Flush also runs
 // before a terminal error), before repairFrame

@@ -297,7 +297,7 @@ var payloadInputs = []payloadCase{
 	// gjson's parseUint wraps: 2^64 indexes element 0.
 	{Name: "wrapped_index", Model: "lnw-1", Protocol: "openai",
 		Payload: `{"a":[[{"k":1},{"k":1}]]}`, Tracked: []string{"a"}},
-	// gjson syntax the port does not read: cook-router ignores these rules
+	// gjson syntax the port does not read: cooker ignores these rules
 	// (REFUSED in tests/payload.rs).
 	{Name: "subselector_override", Model: "sub-1", Protocol: "openai",
 		Payload: `{"[a]":[{"k":1},{"k":1}],"a":[{"k":1}]}`, Tracked: []string{"[a]", "a"}},

@@ -1975,7 +1975,7 @@ mod tests {
     #[test]
     fn compat_provider_key_follows_go() {
         // DIFFERENCES-FROM-GO.md "Models of credentials with another provider": Go
-        // registers these under the `provider_key`, cook-router under the provider.
+        // registers these under the `provider_key`, cooker under the provider.
         const OTHER_PROVIDER: [&str; 2] = ["unnamed-provider-provider-key", "unmatched-provider-provider-key"];
         let go: Value = serde_json::from_str(include_str!("../../tests/fixtures/provider_key_go.json")).unwrap();
         for case in go["cases"].as_array().unwrap() {

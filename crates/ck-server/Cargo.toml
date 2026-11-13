@@ -1,6 +1,6 @@
 [package]
 name = "ck-server"
-description = "Part of cook-router: HTTP routes, client auth, credential selection and the management API"
+description = "Part of cooker: HTTP routes, client auth, credential selection and the management API"
 version.workspace = true
 publish.workspace = true
 edition.workspace = true
@@ -9,7 +9,7 @@ rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 exclude.workspace = true
-keywords = ["llm", "proxy", "cook-router", "api-gateway"]
+keywords = ["llm", "proxy", "cooker", "api-gateway"]
 categories.workspace = true
 
 [dependencies]

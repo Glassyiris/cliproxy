@@ -1,6 +1,6 @@
 package live
 
-// Golden vectors for cook-router. Runs only with RSFIX_OUT set; writes JSON produced
+// Golden vectors for cooker. Runs only with RSFIX_OUT set; writes JSON produced
 // by the real Go functions of this package.
 
 import (

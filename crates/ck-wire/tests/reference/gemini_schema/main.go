@@ -6,7 +6,7 @@
 // Run from a module whose import path sits inside the reference module (see
 // crates/ck-translate/tests/reference/README.md):
 //
-//	go run . /path/to/CLIProxyAPI /path/to/cook-router/crates/ck-wire/tests/fixtures/gemini_schema.json.gz
+//	go run . /path/to/CLIProxyAPI /path/to/cooker/crates/ck-wire/tests/fixtures/gemini_schema.json.gz
 //
 // The budget cases from Go's tests expand to its 256 KiB inlining limit, so the fixture is
 // gzipped.

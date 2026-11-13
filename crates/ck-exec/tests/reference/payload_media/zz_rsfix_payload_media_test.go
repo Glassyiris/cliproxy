@@ -16,7 +16,7 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
-// TestRSFixPayloadMedia records ApplyMediaPayloadConfig (868e137) for cook-router
+// TestRSFixPayloadMedia records ApplyMediaPayloadConfig (868e137) for cooker
 // (crates/ck-exec/tests/reference/payload_media). Go writes multipart parts in random
 // order under a random boundary, so a rebuilt form is recorded as its parts.
 func TestRSFixPayloadMedia(t *testing.T) {

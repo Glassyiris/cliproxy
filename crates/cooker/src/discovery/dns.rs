@@ -3,7 +3,7 @@
 //! Names and TXT strings use miekg/dns presentation form, as Go's zeroconf sees them:
 //! decoding escapes special bytes (`My\ Server`), encoding splits on unescaped dots and
 //! reads `\X` and `\DDD` escapes. Go's discovered `instance_name` and `raw_txt` values
-//! are those presentation strings, so cook-router reproduces them byte for byte.
+//! are those presentation strings, so cooker reproduces them byte for byte.
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 pub const TYPE_A: u16 = 1;

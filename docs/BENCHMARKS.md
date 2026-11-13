@@ -1,6 +1,6 @@
 # Benchmarks
 
-> These measurements retain the setup of the named historical releases. Their shared YAML, credential-folder and watcher descriptions are not current deployment instructions. SQLite is now the durable configuration and credential store; see [Configuration](CONFIGURATION.md).
+> These measurements retain the setup of the named historical releases. Their shared YAML, credential-folder and watcher descriptions are not current deployment instructions. SQLite is now the durable configuration and credential store; see [Configuration](CONFIGURATION.md). The product was named cook-router when these were measured; it is now cooker, and only the commands use the new name.
 
 Binary size, memory and throughput of cook-router and CLIProxyAPI on the same configuration, with a local fake upstream. The numbers come from one small machine and a synthetic load, so use them to compare the two servers with each other. They say little about how much traffic either one can carry on bigger hardware.
 

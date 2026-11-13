@@ -9,7 +9,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("cook-router-{name}-{}-{nanos}", std::process::id()))
+    std::env::temp_dir().join(format!("cooker-{name}-{}-{nanos}", std::process::id()))
 }
 
 #[test]

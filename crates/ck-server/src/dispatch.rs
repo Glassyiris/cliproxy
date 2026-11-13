@@ -516,7 +516,7 @@ where
             if let Some(value) = trace.header() {
                 response.headers_mut().insert("x-cook-trace-id", value);
             }
-            // The model a model router chose, and the provider that served (cook-router only).
+            // The model a model router chose, and the provider that served (cooker only).
             // Both are sent only when a router or `routing.providers` is in play, so a config
             // without them answers exactly as Go does.
             let routed_model = trace.routed_model();

@@ -1,6 +1,6 @@
 package auth
 
-// cook-router fixture generator: parseDevinManualPaste vectors (RSFIX_OUT=<dir>).
+// cooker fixture generator: parseDevinManualPaste vectors (RSFIX_OUT=<dir>).
 
 import (
 	"encoding/json"

@@ -39,7 +39,7 @@ cherry-picks cleanly. Rebuild and check the trees with:
 
 ```sh
 git checkout 6fecc6e && git cherry-pick a881c036 d510dccf 2c1dcc7c \
-  && git am /absolute/path/to/cook-router/crates/ck-exec/tests/reference/claude/0d18d3b3-on-6fecc6e.patch
+  && git am /absolute/path/to/cooker/crates/ck-exec/tests/reference/claude/0d18d3b3-on-6fecc6e.patch
 git rev-parse 'HEAD^{tree}'   # e3c8744a1617762452581257505d5d72a12700b1
 git checkout bf93416 && git cherry-pick 0d18d3b3
 git rev-parse 'HEAD^{tree}'   # f24923ca2defe533990dd22bd29ebad6e0ee07db
@@ -75,7 +75,7 @@ boundary (the reference checkout is not modified):
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # 6fecc6e with the commits above
-crate=/absolute/path/to/cook-router/crates/ck-exec
+crate=/absolute/path/to/cooker/crates/ck-exec
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/claude/main.go" "$tmp/main.go"
 (
@@ -118,13 +118,13 @@ Where a cloaked API key's caller system prompt goes stays as at `6fecc6e`
 (`docs/DIFFERENCES-FROM-GO.md`). The recordings in which Go v8.0.27 sends that prompt
 in the top-level `system` are listed by name (`RELOCATES_API_KEY_SYSTEM` in
 `claude/tests.rs` and `claude/go_exec.rs`) and compared with Go's body after
-`claude::tests::with_relocated_system` moves the prompt where cook-router sends it;
+`claude::tests::with_relocated_system` moves the prompt where cooker sends it;
 every other byte is compared as recorded. `6fecc6e`'s recordings of the same requests
 replay unchanged.
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # v8.0.27 with 0d18d3b3
-crate=/absolute/path/to/cook-router/crates/ck-exec
+crate=/absolute/path/to/cooker/crates/ck-exec
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/claude/main.go" "$tmp/main.go"
 (
@@ -217,7 +217,7 @@ and count_tokens) through v8.0.35's executor. The server, not the executor, publ
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # at v8.0.35
-crate=/absolute/path/to/cook-router/crates/ck-exec
+crate=/absolute/path/to/cooker/crates/ck-exec
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/claude/main.go" "$crate/tests/reference/claude/tool_search_hook.go" "$tmp/"
 (
@@ -236,7 +236,7 @@ cp "$crate/tests/reference/claude/main.go" "$crate/tests/reference/claude/tool_s
 `claude::go_unit::v8_0_35_tool_search` through the executor's real Execute, ExecuteStream
 and CountTokens paths. Go's tests set `upstream.claude.tool-search` process-wide;
 `unit/zz_rsfix_tool_search_test.go` (added with `RSFIX_EXTRA`) writes the value Go pinned
-for each call into its recorded config, where cook-router reads it.
+for each call into its recorded config, where cooker reads it.
 `TestClaudeExecutor_SupportsNativeToolSearch` and the local count of
 `TestClaudeExecutor_NativeToolSearchCountTokensLocalFallback` call the executor without a
 recorded wrapper; `native_tool_search_support_matches_go` and the `tool-search-fallback-count`

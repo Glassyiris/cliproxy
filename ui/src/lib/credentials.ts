@@ -71,7 +71,7 @@ export function credState(a: CredentialData, now = Date.now()): CredState {
     recover_at: string;
     retry_at: string;
   }[];
-  // cook-router: recover_at is the upstream's stated reset when the trust bound cut it.
+  // cooker: recover_at is the upstream's stated reset when the trust bound cut it.
   const limited = all
     .filter((c) => c.scope !== "model" && Date.parse(c.recover_at) > now)
     .map((c) => [Date.parse(c.recover_at), Date.parse(c.retry_at)])[0];

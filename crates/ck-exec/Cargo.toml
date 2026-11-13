@@ -1,6 +1,6 @@
 [package]
 name = "ck-exec"
-description = "Part of cook-router: upstream provider executors"
+description = "Part of cooker: upstream provider executors"
 version.workspace = true
 publish.workspace = true
 edition.workspace = true
@@ -9,7 +9,7 @@ rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 exclude.workspace = true
-keywords = ["llm", "proxy", "cook-router"]
+keywords = ["llm", "proxy", "cooker"]
 categories.workspace = true
 
 [dependencies]

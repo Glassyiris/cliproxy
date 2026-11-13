@@ -66,7 +66,7 @@ fn render(case: &Map<String, Value>) -> Vec<String> {
                 }).as_object().unwrap().clone()),
                 auth_files: objects(&input["files"]),
                 api_keys: strings(&input["keys"]).into_iter().map(|id| super::client::ClientKey { id, rev: 1 }).collect(),
-                // What cook-router answers for an unset strategy; a configured one is
+                // What cooker answers for an unset strategy; a configured one is
                 // shown as configured, as in Go.
                 strategy: Some("soonest-reset".into()),
                 err: None,

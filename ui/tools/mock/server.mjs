@@ -858,7 +858,7 @@ function clientModels(req, send) {
   const type = { "Content-Type": "application/json; charset=utf-8" };
   if (!given || !keys.some((entry) => entry.key === given)) return send(401, type, '{"error":{"message":"invalid api key","type":"authentication_error"}}'), 401;
   const ids = [...new Set(Object.values(MODELS).flat())];
-  send(200, type, JSON.stringify({ object: "list", data: ids.map((id) => ({ id, object: "model", created: 0, owned_by: "cook-router" })) }));
+  send(200, type, JSON.stringify({ object: "list", data: ids.map((id) => ({ id, object: "model", created: 0, owned_by: "cooker" })) }));
   return 200;
 }
 

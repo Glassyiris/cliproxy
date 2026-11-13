@@ -38,7 +38,7 @@ function readNotice(root: string): Notice {
 export function noticesPlugin(): Plugin {
   const out = process.env.COOK_ROUTER_NOTICES_OUT;
   return {
-    name: "cook-router-notices",
+    name: "cooker-notices",
     apply: "build",
     generateBundle(_options, bundle) {
       if (!out) return;

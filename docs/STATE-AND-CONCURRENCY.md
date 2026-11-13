@@ -1,6 +1,6 @@
 # State and concurrency
 
-**Accepted design contract; implementation is in progress.** This document records the configuration/state model agreed for cook-router. It is not a claim that every path in the current tree already conforms. [Configuration](CONFIGURATION.md) describes operational interfaces.
+**Accepted design contract; implementation is in progress.** This document records the configuration/state model agreed for cooker. It is not a claim that every path in the current tree already conforms. [Configuration](CONFIGURATION.md) describes operational interfaces.
 
 Function names, type names, method signatures and file layout can change. The ownership, persistence, data-flow, notification and lifecycle model below is not an implementation preference: a refactor must preserve it. Do not weaken it to accommodate a new caller or make a check pass. A change to the model requires an explicit architecture decision and corresponding contract/test updates before implementation.
 

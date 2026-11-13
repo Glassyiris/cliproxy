@@ -17,7 +17,7 @@ boundary (the reference checkout is not modified):
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # at ae3ee3be
-crate=/absolute/path/to/cook-router/crates/ck-wire
+crate=/absolute/path/to/cooker/crates/ck-wire
 tmp=$(mktemp -d)
 cp "$crate/tests/reference/payload/main.go" "$tmp/main.go"
 (

@@ -27,7 +27,7 @@ A workspace reorganization updates this list in the same PR.
 
 ### Compatibility
 
-- cook-router is a full rewrite and keeps no backward compatibility: config keys, database schema, CLI flags, environment variables, routes, response shapes, file paths, crate names and log targets change whenever a better design needs it. The ruling is in `REQUIREMENTS.md`, "Exceptions".
+- cooker is a full rewrite and keeps no backward compatibility: config keys, database schema, CLI flags, environment variables, routes, response shapes, file paths, crate names and log targets change whenever a better design needs it. The ruling is in `REQUIREMENTS.md`, "Exceptions".
 - Change every caller in the same PR: dashboard, TUI, tests, docs, scripts and installers. Leave no fallback, alias or shim for the old form.
 - Existing import features, such as first import of a CLIProxyAPI YAML config, stay only while they are useful and carry no compatibility guarantee.
 - Remove a replaced management route in the same PR as its replacement. The Go-era `/v0/management` and `/v8/management` families and the existing `/admin/v1` routes are removed as their areas migrate; they are not versions of the new `/admin/v0` API. Prove removal against the actual router, including fallback paths. Follow the root caller-migration rule.
@@ -71,7 +71,7 @@ Money clauses apply only where billing or a ledger exists.
 
 ### Operations (if present)
 
-- cook-router is one service, not a cluster. When memory, disk or file descriptors run out, fail visibly so downstream services see the error, and leave recovery to the operating system and the supervisor. Add no degradation or fallback path for resource exhaustion; degradation belongs to the cluster. Choosing another upstream or credential after an upstream failure is routing, not degradation.
+- cooker is one service, not a cluster. When memory, disk or file descriptors run out, fail visibly so downstream services see the error, and leave recovery to the operating system and the supervisor. Add no degradation or fallback path for resource exhaustion; degradation belongs to the cluster. Choosing another upstream or credential after an upstream failure is routing, not degradation.
 - Deploy production only from merged `master`; an override skipping that check must refuse the production target. Approval follows root Rule priority.
 - Backups need a written restore procedure covering work since the last backup and the location, never values, of required key files. Preserve the single-file recovery contract above.
 

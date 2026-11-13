@@ -85,7 +85,7 @@ for old, current in re.findall(r'\{"([^"]+)", "([^"]+)"\}', prefixes):
 schema["fields"].pop("credentials")
 # Plugins were removed; extending the gateway means changing its source.
 schema["fields"].pop("plugins")
-# cook-router keeps credentials in the database; nothing reads a credential directory setting.
+# cooker keeps credentials in the database; nothing reads a credential directory setting.
 schema["fields"]["oauth"]["fields"].pop("auth-dir")
 # Client aliases are removed, not part of the canonical writable schema.
 schema["fields"]["oauth"]["fields"]["providers"]["fields"]["codex"]["fields"].pop("optimize-multi-agent-v2", None)
@@ -105,7 +105,7 @@ for old, family in re.findall(r'\{"([^"]+)", "([^"]+)"\}', families):
         group["fields"]["keys"] = {"list": key}
     put("api-keys." + family, {"list": group})
 schema["fields"]["config-version"] = "version"
-# cook-router additions (docs/DIFFERENCES-FROM-GO.md). Go starts with them and ignores
+# cooker additions (docs/DIFFERENCES-FROM-GO.md). Go starts with them and ignores
 # them; a config edit through its v8 Management API moves them into comments.
 put("oauth.providers.codex.chatgpt-keep-alive", "bool")
 put("observability.usage.claude-cache-telemetry", "bool")

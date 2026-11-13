@@ -630,7 +630,7 @@ mod tests {
             domain: "local.".into(),
             port: 8317,
             subtypes: vec!["_responses".into()],
-            text_records: vec!["version=1".into(), "product=cook-router".into()],
+            text_records: vec!["version=1".into(), "product=cooker".into()],
             interfaces: vec![],
             advertised_ips: vec!["192.0.2.7".parse().unwrap(), "fe80::7".parse().unwrap()],
         }

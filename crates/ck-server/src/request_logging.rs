@@ -1263,7 +1263,7 @@ impl Record {
         write!(
             out,
             "=== REQUEST INFO ===\nVersion: {}\nURL: {}\nMethod: {}\nDownstream Transport: {downstream}\n",
-            concat!("cook-router-", env!("CARGO_PKG_VERSION")),
+            concat!("cooker-", env!("CARGO_PKG_VERSION")),
             self.url,
             self.method
         )?;
@@ -1681,7 +1681,7 @@ mod tests {
 
     fn capture_go() -> serde_json::Value {
         let text = include_str!("../tests/fixtures/capture_go.json")
-            .replace("cliproxy-rs-0.1.0", concat!("cook-router-", env!("CARGO_PKG_VERSION")));
+            .replace("cliproxy-rs-0.1.0", concat!("cooker-", env!("CARGO_PKG_VERSION")));
         serde_json::from_str(&text).unwrap()
     }
 

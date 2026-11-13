@@ -2,7 +2,7 @@
 
 ## 1. Purpose and scope
 
-Define the sole internal representation for cook-router inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search and AI Studio relay inference traffic. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion; authentication and transport remain boundary responsibilities, while SDP, session commands and media content are inside. Current route evidence: `crates/ck-server/src/lib.rs:81-146`, `crates/ck-server/src/realtime.rs:85-112`, `crates/ck-server/src/codex_alpha.rs:22-25`, `crates/ck-server/src/relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/ck-server/src/realtime.rs:12`. This is a normative target, not a claim of implementation; current-code citations refer to `prep-cook/cook-router` master `17608e94`.
+Define the sole internal representation for cooker inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search and AI Studio relay inference traffic. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion; authentication and transport remain boundary responsibilities, while SDP, session commands and media content are inside. Current route evidence: `crates/ck-server/src/lib.rs:81-146`, `crates/ck-server/src/realtime.rs:85-112`, `crates/ck-server/src/codex_alpha.rs:22-25`, `crates/ck-server/src/relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/ck-server/src/realtime.rs:12`. This is a normative target, not a claim of implementation; current-code citations refer to `prep-cook/cooker` master `17608e94`.
 
 ## 2. Decisions
 
@@ -680,7 +680,7 @@ Today's framer has a 16 MiB per-event default and a BytesMut buffer (`crates/ck-
 
 ## 8. Extension
 
-Plugins are deleted (owner ruling 2026-11-13, 「目前完全删除外挂功能，如果用户想要拓展功能，需要修改源码并自行编译部署」). There is no runtime plugin, interceptor, SDK or ABI boundary. Extending cook-router means changing the source and rebuilding.
+Plugins are deleted (owner ruling 2026-11-13, 「目前完全删除外挂功能，如果用户想要拓展功能，需要修改源码并自行编译部署」). There is no runtime plugin, interceptor, SDK or ABI boundary. Extending cooker means changing the source and rebuilding.
 Every stage that reads or rewrites stream content is in-process code. It follows the §3 grammar, the §6.2 publication protocol and the §6.4 quotas, and cannot change trusted request identity, attempt ownership, usage authority or commitment state.
 
 ## 9. Verification

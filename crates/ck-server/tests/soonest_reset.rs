@@ -1,4 +1,4 @@
-//! `routing.strategy: soonest-reset` (a cook-router addition) through the router, the
+//! `routing.strategy: soonest-reset` (a cooker addition) through the router, the
 //! Claude executor's quota observations and the management API, against a loopback
 //! upstream that reports a different weekly reset per account. Fake keys only.
 

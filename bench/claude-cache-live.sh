@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Live prompt-cache check for the cloaked Claude path. Run by hand against a running
-# cook-router whose Claude login is an OAuth subscription; it is not part of CI and it
+# cooker whose Claude login is an OAuth subscription; it is not part of CI and it
 # spends real tokens (about 75k input tokens on Opus, most of them cache reads).
 #
 #   CPA_URL=http://127.0.0.1:8317 CPA_KEY=<client key> bench/claude-cache-live.sh [results.jsonl]

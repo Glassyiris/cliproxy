@@ -21,7 +21,7 @@ pub enum Strategy {
     RoundRobin,
     FillFirst,
     WeightedRoundRobin,
-    /// cook-router addition (`soonest-reset`, alias `reset-first`) and the default for
+    /// cooker addition (`soonest-reset`, alias `reset-first`) and the default for
     /// an unset strategy: spend the account whose weekly window resets soonest first,
     /// until it cools or a usage window runs out, then the next soonest. Go has no such
     /// strategy and reads it, like an unset one, as round-robin.
@@ -279,7 +279,7 @@ pub struct Policy {
     /// routing.cooldown.save-cooldown-status: persist cooldowns in the config database
     /// (cooldown_store.rs), never in credential files.
     pub save_cooldown_status: bool,
-    /// routing.cooldown.max-trusted-cooldown (cook-router only): the first bound on a
+    /// routing.cooldown.max-trusted-cooldown (cooker only): the first bound on a
     /// quota reset an upstream states ([`trusted`]); zero trusts every reset, as Go does.
     pub max_trusted_cooldown: Duration,
     /// routing.force-model-prefix: bool, default false.
@@ -290,7 +290,7 @@ pub struct Policy {
     pub compat_disable_cooling: Vec<(String, Option<bool>)>,
     /// OAuth-only `oauth.request-scoped-errors` channels; API keys must not inherit these.
     pub oauth_request_scoped_errors: HashMap<String, Vec<ErrorRule>>,
-    /// `routing.providers` (cook-router only): the scope and order of requests without a
+    /// `routing.providers` (cooker only): the scope and order of requests without a
     /// router's own. Filled from the config on every publish.
     pub providers: Arc<crate::provider_policy::Providers>,
 }
@@ -617,7 +617,7 @@ pub(crate) struct Cooldown {
     /// A model quota inherited from a credential-wide quota (Go reason
     /// `credential_quota` on sibling model states).
     pub credential: bool,
-    /// Bounded trust of a stated quota reset (cook-router only); `level` stays Go's.
+    /// Bounded trust of a stated quota reset (cooker only); `level` stays Go's.
     pub trust: Trust,
     /// What the quota is when `quota` is set: the status that set it and its reason as
     /// `records` names it (a Cloudflare challenge can answer 429).
@@ -1802,7 +1802,7 @@ impl Scheduler {
         }
         let since = |at: SystemTime| at.duration_since(wall).unwrap_or_default();
         let (remaining, trust) = match (record.quota.exceeded && !cap.is_zero(), saved) {
-            // Written by cook-router: the saved retry is the deadline, as it is, whatever
+            // Written by cooker: the saved retry is the deadline, as it is, whatever
             // set it (a bounded window, a trusted reset, or a longer cooldown from another
             // cause that a credential-wide quota marked), so a restart never cuts or
             // escalates it. A stated reset after the retry marks a bounded window.
@@ -1955,7 +1955,7 @@ pub struct CooldownState {
     /// Until the next attempt (zero once a bounded window ended and the next request
     /// probes the account).
     pub remaining: Duration,
-    /// Until the upstream's stated reset, when the bound cut it (cook-router only).
+    /// Until the upstream's stated reset, when the bound cut it (cooker only).
     pub recover_in: Option<Duration>,
     pub level: u32,
     pub status: u16,
@@ -3308,7 +3308,7 @@ mod tests {
 
     /// A longer cooldown of another cause that a credential-wide quota marked as quota
     /// (model B's 12 h model-support cooldown during a six-day 429 on model A) keeps its
-    /// own deadline through a save and a restore: it is cook-router's record, not Go's.
+    /// own deadline through a save and a restore: it is cooker's record, not Go's.
     #[test]
     fn a_marked_sibling_restores_its_own_deadline() {
         let c = cred("a", serde_json::json!({}));
@@ -4001,7 +4001,7 @@ mod tests {
         }
     }
 
-    // ---- soonest-reset (cook-router addition) ----
+    // ---- soonest-reset (cooker addition) ----
 
     const DAY: u64 = 24 * 3600;
 

@@ -1,6 +1,6 @@
-# Installing cook-router
+# Installing cooker
 
-cook-router is one executable, `cook-router`, with the dashboard built in. It ships as the Docker image `ghcr.io/prep-cook/cook-router` (tags `<version>` such as `0.3.0`, and `latest`; linux/amd64 and linux/arm64). Configuration and OAuth credentials are persisted in SQLite. It needs a private, writable, persistent database directory. A YAML file is only an optional import on the first start; credentials enter through sign-in or the management API.
+cooker is one executable, `cooker`, with the dashboard built in. It ships as the Docker image `ghcr.io/prep-cook/cooker` (tags `<version>` such as `0.3.0`, and `latest`; linux/amd64 and linux/arm64). Configuration and OAuth credentials are persisted in SQLite. It needs a private, writable, persistent database directory. A YAML file is only an optional import on the first start; credentials enter through sign-in or the management API.
 
 ## Docker
 
@@ -9,10 +9,10 @@ The image runs as uid and gid 10001, exposes 8317, works in `/data` and runs `co
 ```sh
 mkdir -m 700 -p data
 sudo chown -R 10001:10001 data            # the container runs as uid and gid 10001
-docker run -d --name cook-router -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e COOK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cook-router:<version>
+docker run -d --name cooker -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e COOK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cooker:<version>
 ```
 
-To build the image yourself, run `docker build -t cook-router .` in a checkout and use `cook-router` as the image name. The build compiles BoringSSL and needs about 2 GB of memory; on a small machine add `--build-arg BUILD_JOBS=1`.
+To build the image yourself, run `docker build -t cooker .` in a checkout and use `cooker` as the image name. The build compiles BoringSSL and needs about 2 GB of memory; on a small machine add `--build-arg BUILD_JOBS=1`.
 
 On a fresh volume the first start creates `/data/cook.db` from `/data/config.yaml` when that file exists, and otherwise from the defaults with `server.port: 8317`. Later starts use `/data/cook.db`, not changes to the YAML. To set client keys before the first start, put a file like this in `data/`:
 
@@ -38,7 +38,7 @@ The service must write the snapshot directory for atomic replacement and its OS 
 Browser sign-in inside a container needs the OAuth callback ports (54545 for Claude, 1455 for Codex) published to your machine, so it is usually easier to sign in from the dashboard and paste the final callback URL, or to use `--codex-device-login`, Kimi or Meta, which use device codes:
 
 ```sh
-docker exec -it cook-router cook-router --management-base-url http://127.0.0.1:8317 --codex-device-login --no-browser
+docker exec -it cooker cooker --management-base-url http://127.0.0.1:8317 --codex-device-login --no-browser
 ```
 
 The running server owns `/data/cook.db`, so the sign-in goes through its management API and asks for the management key; `--db /data/cook.db` alone would be refused as `already owned`.
@@ -55,8 +55,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 Build the dashboard first, then the binary:
 
 ```sh
-git clone https://github.com/prep-cook/cook-router.git
-cd cook-router
+git clone https://github.com/prep-cook/cooker.git
+cd cooker
 (cd ui && npm ci && npm run build)
 cargo build --release -p cooker
 ./target/release/cooker --version
@@ -87,9 +87,9 @@ Set up the database by hand:
 2. Import once, then run the database-backed server:
 
    ```sh
-   cook-router --db ~/.cook-router/cook.db config validate config.yaml
-   cook-router --db ~/.cook-router/cook.db config import config.yaml
-   cook-router --db ~/.cook-router/cook.db
+   cooker --db ~/.cook-router/cook.db config validate config.yaml
+   cooker --db ~/.cook-router/cook.db config import config.yaml
+   cooker --db ~/.cook-router/cook.db
    ```
 
    `--db` overrides `COOK_DB`; without either the default is `cook.db` beside the config file (`./config.yaml` unless `--config` names another). `--config FILE` selects the file a first start imports and must exist. Without `--config`, a missing `./config.yaml` starts with the defaults on port 8317. Once the database exists, the server does not read or watch the file. Check `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
@@ -102,14 +102,14 @@ Change configuration through the dashboard or `/admin/v1`; old v0/v8 config endp
 On a Linux server, a system unit like this runs a source-built binary under a dedicated user:
 
 ```ini
-# /etc/systemd/system/cook-router.service
+# /etc/systemd/system/cooker.service
 [Unit]
-Description=cook-router
+Description=cooker
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=cook-router
+User=cooker
 WorkingDirectory=/var/lib/cook-router
 ExecStart=/usr/local/bin/cook-router --db /var/lib/cook-router/cook.db
 Restart=on-failure
@@ -123,8 +123,8 @@ WantedBy=multi-user.target
 
 ```sh
 sudo useradd --system --home /var/lib/cook-router --create-home cook-router
-sudo systemctl enable --now cook-router
-journalctl -u cook-router -f
+sudo systemctl enable --now cooker
+journalctl -u cooker -f
 ```
 
 Initialize the database under `/var/lib/cook-router` before starting the service, using the service user. The persistent directory must be writable for atomic snapshot publication, and OS tmp must be writable for the private working database; keep both private and set `UMask=0077` in the unit as defense in depth. While the service runs, CLI changes go through its management API (`--management-base-url`); offline CLI writes wait for it to stop. Keep the same user and OS temporary directory across restarts so a surviving working database can resume; with `PrivateTmp=yes` every service restart, and with a tmpfs `/tmp` every reboot, cold-starts from the published file instead, which already holds every acknowledged change. Mount this directory persistently in ephemeral deployments. No remote config store or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).

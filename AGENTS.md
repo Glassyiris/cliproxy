@@ -1,9 +1,9 @@
 # AGENTS.md: development rules
 
 Every agent planning, writing or reviewing a change follows this file and the applicable files below.
-If you are deploying cook-router rather than developing it, stop here: it ships only as a Docker image, described in the README.
+If you are deploying cooker rather than developing it, stop here: it ships only as a Docker image, described in the README.
 
-cook-router is an efficient AI gateway. Its focus is request routing and credential scheduling, built from clear modules with a sound structure; judge every feature and design by how it serves that focus. It began as a full rewrite of CLIProxyAPI and no longer tracks it. Go behaviour is not a target: change routes, config, response shapes and the Management API when a better design calls for it, and migrate every caller (dashboard, TUI, tests, docs) in the same change.
+cooker is an efficient AI gateway. Its focus is request routing and credential scheduling, built from clear modules with a sound structure; judge every feature and design by how it serves that focus. It began as a full rewrite of CLIProxyAPI and no longer tracks it. Go behaviour is not a target: change routes, config, response shapes and the Management API when a better design calls for it, and migrate every caller (dashboard, TUI, tests, docs) in the same change.
 
 ## Rule priority
 

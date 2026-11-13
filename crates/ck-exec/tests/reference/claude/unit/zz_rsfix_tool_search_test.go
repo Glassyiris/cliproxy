@@ -7,7 +7,7 @@ import (
 	responsesclaude "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/claude/openai/responses"
 )
 
-// Go's tool_search tests set upstream.claude.tool-search process-wide; cook-router reads
+// Go's tool_search tests set upstream.claude.tool-search process-wide; cooker reads
 // it from the config, so each call's config is recorded with the value the executor pins.
 func init() {
 	rsfixConfigHook = func(ctx context.Context, cfg *config.Config) *config.Config {

@@ -382,7 +382,7 @@ fn cooldown_view(cd: &crate::scheduler::CooldownState) -> Value {
         go_time(chrono::DateTime::<chrono::Utc>::from(retry_at)).into(),
     );
     view.insert("remaining_seconds".into(), seconds.into());
-    // cook-router only: the upstream's stated reset when `max-trusted-cooldown` cut it;
+    // cooker only: the upstream's stated reset when `max-trusted-cooldown` cut it;
     // `retry_at` is then the next check, which may already be due.
     if let Some(recover) = cd.recover_in {
         view.insert(

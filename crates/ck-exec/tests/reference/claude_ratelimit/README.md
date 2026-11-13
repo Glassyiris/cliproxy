@@ -23,7 +23,7 @@ network access:
 
 ```sh
 reference=/absolute/path/to/CLIProxyAPI   # at v8.0.35
-crate=/absolute/path/to/cook-router/crates/ck-exec
+crate=/absolute/path/to/cooker/crates/ck-exec
 tmp=$(mktemp -d)
 tar -C "$reference" --exclude=.git -cf - . | tar -C "$tmp" -xf -
 cp "$crate/tests/reference/claude_ratelimit/zz_rsfix_claude_ratelimit_test.go" "$tmp/internal/runtime/executor/"

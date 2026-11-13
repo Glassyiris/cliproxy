@@ -1462,7 +1462,7 @@ pub struct Selection {
     /// Credential IDs already tried in this request.
     pub exclude: Vec<String>,
     pub retry_round: usize,
-    /// A model router's provider scope and order (cook-router only); `None` follows
+    /// A model router's provider scope and order (cooker only); `None` follows
     /// `routing.providers`.
     pub scope: Option<Arc<crate::provider_policy::Providers>>,
 }

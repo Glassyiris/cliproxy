@@ -78,10 +78,10 @@ print(json.dumps({k.arg: k.value.value for n in ast.walk(ast.parse(sys.stdin.rea
     "import json, sys, tomllib; print(json.dumps(tomllib.loads(sys.stdin.read())))",
     toml,
   );
-  assert.equal(parsed.model_providers["cook-router"].base_url, `${base}/v1`);
+  assert.equal(parsed.model_providers["cooker"].base_url, `${base}/v1`);
   const odd = run(
     "import json, sys, tomllib; print(json.dumps(tomllib.loads(sys.stdin.read())))",
     snippet("Codex CLI", `http://h/p"\\q`, key, model).split("# then")[0],
   );
-  assert.equal(odd.model_providers["cook-router"].base_url, `http://h/p"\\q/v1`);
+  assert.equal(odd.model_providers["cooker"].base_url, `http://h/p"\\q/v1`);
 });

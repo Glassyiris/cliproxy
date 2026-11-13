@@ -3,9 +3,9 @@
 //! The recording is untouched; replay drops its `oauth.auth-dir` line (`without_auth_dir`) and
 //! stages the recorded credentials in `Config::auth_dir`, since the setting no longer exists.
 //! Where Go answers an empty 404 because no management key exists, replay expects
-//! cook-router's 403 naming COOK_MANAGEMENT_PASSWORD: a deliberate divergence from Go
+//! cooker's 403 naming COOK_MANAGEMENT_PASSWORD: a deliberate divergence from Go
 //! (owner ruling 2026-11-13).
-//! Go also sends and exposes `X-CPA-SUPPORT-PLUGIN`; cook-router has no plugins, so replay
+//! Go also sends and exposes `X-CPA-SUPPORT-PLUGIN`; cooker has no plugins, so replay
 //! drops that header from the recorded answers and from their CORS exposure list: a
 //! deliberate divergence (owner ruling 2026-11-13, plugin removal).
 use std::collections::BTreeMap;
@@ -48,7 +48,7 @@ const GUARD_REFUSALS: [&str; 5] = [
     "missing management key",
     "invalid management key",
     "remote management disabled",
-    // Also covers cook-router's "management key not set: ..." refusal.
+    // Also covers cooker's "management key not set: ..." refusal.
     "management key not set",
     "IP banned",
 ];
@@ -101,7 +101,7 @@ fn scalar_case_yaml(field: &str, spelling: &str) -> String {
 
 #[test]
 fn yaml_bool_spellings_and_durations_load_like_go() {
-    // The recording also covers Go's plugin entries, which cook-router does not have.
+    // The recording also covers Go's plugin entries, which cooker does not have.
     let cases: Vec<&Value> = fixture()["yaml_bools"]
         .as_array()
         .unwrap()
@@ -139,7 +139,7 @@ fn yaml_bool_spellings_and_durations_load_like_go() {
 #[test]
 fn typed_scalars_load_like_go() {
     let hash = bcrypt::hash("fake-secret", 4).unwrap();
-    // The recording also covers Go's plugin entries, which cook-router does not have.
+    // The recording also covers Go's plugin entries, which cooker does not have.
     let cases: Vec<&Value> = fixture()["typed_scalars"]
         .as_array()
         .unwrap()
@@ -266,7 +266,7 @@ fn trusted_proxy_validation_errors_match_go_text() {
     }
 }
 
-/// Go records OAuth-only fields by legacy name; cook-router by v8 path. Go's prefix
+/// Go records OAuth-only fields by legacy name; cooker by v8 path. Go's prefix
 /// table for `oauth.providers` (internal/config/config_v8.go buildV8Paths) maps them.
 /// Since Go 52d5507d, the shared Codex, Claude and xAI settings live under
 /// `upstream.*`, and Go records only fields whose current path stays under
@@ -570,7 +570,7 @@ mod routes {
                     }
                 }
                 if name == "availability_follows_secret_across_reloads" && step["status"] == 404 {
-                    // Go hides management behind an empty 404 while no key exists. cook-router
+                    // Go hides management behind an empty 404 while no key exists. cooker
                     // answers 403 naming COOK_MANAGEMENT_PASSWORD instead: a deliberate change
                     // (owner ruling 2026-11-13), so the recording is untouched and these steps
                     // take the recorded 403 refusal's headers.
@@ -967,7 +967,7 @@ mod creds {
                     }
                     // Go's harness registers models only for runtime credentials (as its
                     // service does on connect), so the cooldown-reset fallback list of a
-                    // file credential is empty there; cook-router reports the credential's
+                    // file credential is empty there; cooker reports the credential's
                     // registrations (none here: the credential is disabled by this step).
                     if step["path"] == "/routing/cooldown/reset" && status == 200 && scenario["runtime_auths"].is_null()
                     {
@@ -981,7 +981,7 @@ mod creds {
                         );
                         want["error"] = got["error"].clone();
                     }
-                    // Go lists a credential no executor serves as active; cook-router lists
+                    // Go lists a credential no executor serves as active; cooker lists
                     // it as an error, so it is not mistaken for a usable account.
                     for file in want
                         .get_mut("files")
@@ -1082,7 +1082,7 @@ mod creds {
     }
 
     /// Pending v8.0.35 drift outside the config saver. Each pin names its scenario and
-    /// steps, asserts Go's recorded value there, then expects cook-router's current
+    /// steps, asserts Go's recorded value there, then expects cooker's current
     /// (6fecc6e) value in just the differing fields, so porting the change, or losing
     /// the old behaviour some other way, fails here until the pin is removed.
     fn pin_pending_steps(mut step: Value, name: &str, i: usize, at: &str) -> Value {

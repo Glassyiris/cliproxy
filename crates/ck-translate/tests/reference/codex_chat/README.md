@@ -20,5 +20,5 @@ Regenerate (Go 1.26, no network beyond module download):
 cp zz_rsfix_codex_chat_test.go <CLIProxyAPI>/internal/translator/codex/openai/chat-completions/
 cd <CLIProxyAPI>
 RSFIX_OUT=/tmp/rsfix-cc go test -count=1 -run TestRSFixCodexChat ./internal/translator/codex/openai/chat-completions/
-cp /tmp/rsfix-cc/codex_chat_go.json <cook-router>/crates/ck-translate/tests/fixtures/
+cp /tmp/rsfix-cc/codex_chat_go.json <cooker>/crates/ck-translate/tests/fixtures/
 ```

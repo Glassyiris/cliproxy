@@ -52,7 +52,7 @@ The mock alone: `node tools/mock/server.mjs --port 8317 --accounts 1000 --seed 1
 
 Every route the dashboard calls, with response shapes taken from `crates/ck-server/src/management/`
 and the fields the dashboard's `src/lib/` modules read. `X-Cook-Version: cook-router-mock` makes the UI
-treat it as cook-router. Accounts spread over claude, codex, gemini, kimi, antigravity, xai, devin
+treat it as cooker. Accounts spread over claude, codex, gemini, kimi, antigravity, xai, devin
 and vertex, with twenty `recent_requests` buckets each, about 5% disabled, 5% cooling, 2% signed
 out, 3% with a model cooldown, and passive quota signals on most Claude, Codex and Devin accounts.
 Each `GET /credentials` gives about 5% of the accounts new request counts; the rest serialise to the

@@ -1,5 +1,5 @@
 //! Bounded trust for quota resets (`routing.cooldown.max-trusted-cooldown`, a
-//! cook-router addition): one Claude credential answers 429 with a weekly reset six
+//! cooker addition): one Claude credential answers 429 with a weekly reset six
 //! days away, then recovers early. The stated reset is trusted only up to the bound,
 //! so the next ordinary request after the bound reaches the upstream and succeeds.
 //! Run with and without `save-cooldown-status`; with it, a restart restores the bounded

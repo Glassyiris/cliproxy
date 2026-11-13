@@ -1,4 +1,4 @@
-# Publishes the image to GitHub Packages (ghcr.io/prep-cook/cook-router) for linux/amd64 and
+# Publishes the image to GitHub Packages (ghcr.io/prep-cook/cooker) for linux/amd64 and
 # linux/arm64. The image is the only release artifact.
 #
 # Pushing a tag such as v0.1.0 runs every CI lane, builds the Dockerfile's runtime stage on a
@@ -32,7 +32,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/prep-cook/cook-router
+  IMAGE: ghcr.io/prep-cook/cooker
 
 jobs:
   # Every lane of ci.yml: a call from a tag push selects all of them.
@@ -63,16 +63,16 @@ jobs:
           context: .
           target: runtime
           load: true
-          tags: cook-router:release
+          tags: cooker:release
           cache-from: type=gha,scope=runtime-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=runtime-${{ matrix.arch }}
-      # The first line is Go's startup banner; the last is "cook-router <version>".
+      # The first line is Go's startup banner; the last is "cooker <version>".
       - name: Version matches the tag
         run: |
           version="${GITHUB_REF_NAME#v}"
-          reported="$(docker run --rm cook-router:release --version | tail -n 1)"
+          reported="$(docker run --rm cooker:release --version | tail -n 1)"
           echo "$reported"
-          if [[ "$reported" != "cook-router $version" ]]; then
+          if [[ "$reported" != "cooker $version" ]]; then
             echo "::error::tag $GITHUB_REF_NAME does not match the binary version ($reported)"
             exit 1
           fi
@@ -82,9 +82,9 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           if [[ "$ARCH" == amd64 ]]; then
-            bench/gate.sh image cook-router:release
+            bench/gate.sh image cooker:release
           else
-            echo "image gzip bytes ($ARCH): $(docker save cook-router:release | gzip -c | wc -c)"
+            echo "image gzip bytes ($ARCH): $(docker save cooker:release | gzip -c | wc -c)"
           fi
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -96,7 +96,7 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           tag="$IMAGE:candidate-${GITHUB_REF_NAME#v}-$GITHUB_SHA-$ARCH"
-          docker tag cook-router:release "$tag"
+          docker tag cooker:release "$tag"
           docker push "$tag"
 
   candidate:
@@ -188,7 +188,7 @@ jobs:
           fi
           reported="$(docker run --rm "$IMAGE@$digest" --version | tail -n 1)"
           echo "$reported"
-          if [[ "$reported" != "cook-router ${TAG#v}" ]]; then
+          if [[ "$reported" != "cooker ${TAG#v}" ]]; then
             echo "::error::$TAG does not match the candidate's version ($reported)"; exit 1
           fi
           echo "digest=$digest" >> "$GITHUB_OUTPUT"

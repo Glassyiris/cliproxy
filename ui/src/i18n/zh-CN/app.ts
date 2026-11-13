@@ -1,8 +1,8 @@
 export default {
   "zh-CN": {
-    "app.brand.name": "cook-router",
-    "app.document.pageTitle": "{title} · cook-router",
-    "app.document.signInTitle": "登录 · cook-router",
+    "app.brand.name": "cooker",
+    "app.document.pageTitle": "{title} · cooker",
+    "app.document.signInTitle": "登录 · cooker",
 
     "app.signIn.managementKey": "管理密钥",
     "app.signIn.help":

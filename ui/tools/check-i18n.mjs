@@ -63,7 +63,7 @@ const isTextAttribute = (name) => TEXT_ATTRIBUTES.has(name) || TEXT_ATTRIBUTE_SU
 const HAS_TEXT = /[\p{L}\p{N}]/u;
 const TEST_FILE = /\.test(?:Support)?\.tsx?$/;
 // Product names that read the same in every locale and may stay in JSX.
-const UNTRANSLATED = new Set(["cook-router"]);
+const UNTRANSLATED = new Set(["cooker"]);
 // Characters OpenCC rewrites although Taiwan usage writes them as they are: 台灣, 了解.
 const ALSO_TRADITIONAL = new Set(["台", "了"]);
 const toTraditional = Converter({ from: "cn", to: "t" });

@@ -535,7 +535,7 @@ impl Management {
 
 /// `Policy::from(routing)` plus the provider-level rules Go reads from config:
 /// `oauth.request-scoped-errors`, sanitized like `SanitizeOAuthRequestScopedErrors`, and
-/// cook-router `routing.providers`.
+/// cooker `routing.providers`.
 pub fn policy(cfg: &Config) -> Policy {
     let mut policy = Policy::from(&cfg.routing);
     policy.providers = std::sync::Arc::new(crate::provider_policy::Providers::global(cfg));

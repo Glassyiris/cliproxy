@@ -20,7 +20,7 @@ use ck_server::listener::bind;
 use clap::{ArgAction, Parser};
 
 /// Same strings as the management `X-Cook-*` headers.
-const VERSION: &str = concat!("cook-router-", env!("CARGO_PKG_VERSION"));
+const VERSION: &str = concat!("cooker-", env!("CARGO_PKG_VERSION"));
 const COMMIT: &str = match option_env!("COOK_COMMIT") {
     Some(v) => v,
     None => "none",
@@ -1356,7 +1356,7 @@ async fn serve(
     rt.set_local_model(local_model);
     // Go `misc.StartAntigravityVersionUpdater` and `startModelCatalogUpdaters`.
     ck_server::model_updater::start(&rt);
-    // Model router benchmarks (cook-router only); idle without `artificial-analysis.api-key`.
+    // Model router benchmarks (cooker only); idle without `artificial-analysis.api-key`.
     ck_server::aa::start(&rt);
     // Translators and thinking validation read model capabilities through the global
     // overlay; without it they see only the static catalog.
@@ -2206,7 +2206,7 @@ mod tests {
             (vec!["--codex-login", "--claude-login"], BuiltinCommand::Codex, true),
             (vec!["--claude-login", "--kimi-login"], BuiltinCommand::Claude, true),
         ] {
-            let args = Args::try_parse_from(std::iter::once("cook-router").chain(flags.iter().copied())).unwrap();
+            let args = Args::try_parse_from(std::iter::once("cooker").chain(flags.iter().copied())).unwrap();
             assert_eq!(selected_command(&args), Some(selected), "{flags:?}");
             assert_eq!(online_command_supported(&args), online, "{flags:?}");
         }
