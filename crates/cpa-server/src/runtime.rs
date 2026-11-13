@@ -6008,8 +6008,8 @@ pub(crate) mod tests {
     /// `TestManagerBlockedSaveSerializesLoad`): while a refresh commit's file write is
     /// stalled on disk, snapshots and selection proceed, before and while a reload is
     /// pending; another credential's write proceeds; and neither the reload nor another
-    /// write of the same credential overtakes the stalled one. (A reload whose scan read
-    /// the file before the write is Go c4c1d43e's stale-snapshot check, not ported here.)
+    /// write of the same credential overtakes the stalled one. The reload checks each
+    /// credential against the bytes its scan read, as Go c4c1d43e's stale-snapshot check does.
     #[test]
     fn a_stalled_credential_write_blocks_commands_but_not_reads() {
         let (dir, cfg, store) = stalled_store("stalled-write", &["a.json", "b.json"]);
@@ -6060,14 +6060,21 @@ pub(crate) mod tests {
         );
         // A scan made now still reads A's old file, which is c4c1d43e's stale snapshot;
         // this reload carries what the write is about to publish, so the end state shows
-        // which one landed last.
-        let mut rescan = crate::testing::builtin_auth_files(&cfg);
-        let in_scan = rescan.iter_mut().find(|c| c.id == "a.json").unwrap();
+        // which one landed last. It also read B before B's queued write. Nothing orders
+        // that write against the reload once both are released, so the reload checks B
+        // against the bytes it read, as every production reload does, and B's write
+        // survives either order.
+        let backend = store.credential_backend();
+        backend.preparse(&cfg).unwrap();
+        let mut rescan = backend.scan(&cfg).unwrap();
+        rescan.read.remove(&dir.join("a.json")).expect("the scan read A");
+        assert!(rescan.read.contains_key(&dir.join("b.json")), "the scan read B");
+        let in_scan = rescan.credentials.iter_mut().find(|c| c.id == "a.json").unwrap();
         in_scan.metadata.insert("access_token".into(), "new".into());
         in_scan.metadata.insert("reloaded".into(), true.into());
         let reload = spawn_bounded({
             let store = store.clone();
-            move || store.reconcile(rescan)
+            move || store.reconcile_scanned(rescan.credentials, &rescan.read)
         });
         assert!(
             reload.recv_timeout(BLOCKED).is_err(),
