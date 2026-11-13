@@ -87,7 +87,8 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy -p cpa-server --all-targets --features media-relay,pprof --locked -- -D warnings
 cargo check --locked --manifest-path harness/rust/Cargo.toml --target-dir target
 actionlint -version
-actionlint
+# Every workflow by name: without .git in the context, actionlint finds no project.
+actionlint .github/workflows/*.yml
 python3 -I tools/third-party-notices.py --check
 python3 -I -m unittest discover -s tools
 python3 -I -m unittest discover -s .github/scripts -p 'test_*.py'
@@ -101,9 +102,11 @@ EOF
 # profiler tests. CPA_TEST_NO_SKIP turns a skip for a missing Go toolchain into a failure.
 # /home/builder/out holds the list and counts the test-report stage exports for
 # .github/scripts/test-counts.py. CI_COMMIT changes on every commit, so a cached run cannot
-# stand in for a new commit's.
+# stand in for a new commit's. Nextest runs one test per CPU; on a large shared machine pass
+# --build-arg TEST_THREADS=8, as tests with lock and wall-clock bounds time out when
+# dozens run at once.
 FROM source AS test
-ARG SHARD=1 SHARDS=1 CI_COMMIT=
+ARG SHARD=1 SHARDS=1 CI_COMMIT= TEST_THREADS
 ENV CPA_TEST_NO_SKIP=1
 RUN --network=none \
     --mount=type=cache,id=cook-router-cargo-registry,target=/usr/local/cargo/registry,uid=1000,gid=1000 \
@@ -112,7 +115,8 @@ RUN --network=none \
 echo "commit ${CI_COMMIT:-local}, shard $SHARD of $SHARDS"
 out=/home/builder/out && mkdir -p "$out"
 partition="--partition hash:$SHARD/$SHARDS"
-cargo nextest run --workspace --locked --profile ci $partition 2>&1 | tee "$out/test.log"
+threads=${TEST_THREADS:+--test-threads $TEST_THREADS}
+cargo nextest run --workspace --locked --profile ci $partition $threads 2>&1 | tee "$out/test.log"
 cargo nextest list --workspace --locked --profile ci $partition --message-format json > "$out/nextest-list.json"
 if [ "$SHARD" = "$SHARDS" ]; then
   cargo test --workspace --doc --locked 2>&1 | tee -a "$out/test.log"
@@ -120,7 +124,7 @@ if [ "$SHARD" = "$SHARDS" ]; then
   python3 bench/test-claude-cache-replay.py 2>&1 | tee -a "$out/test.log"
 fi
 if [ "$SHARD" = 1 ]; then
-  cargo nextest run -p cpa-server --features media-relay,pprof --lib --locked --profile ci
+  cargo nextest run -p cpa-server --features media-relay,pprof --lib --locked --profile ci $threads
 fi
 python3 .github/scripts/test-counts.py shard "$SHARD" "$out/nextest-list.json" "$out/test.log" > "$out/counts-$SHARD.json"
 cat "$out/counts-$SHARD.json"
@@ -150,9 +154,12 @@ RUN --network=none \
     --mount=type=cache,id=cook-router-cargo-registry,target=/usr/local/cargo/registry,uid=1000,gid=1000 <<'EOF'
 echo "commit ${CI_COMMIT:-local}"
 target=$(rustc -vV | sed -n 's/^host: //p')
-bench/gate.sh size "$target" /home/builder/out/cook-router
-bench/gate.sh idle linux /home/builder/out/cook-router 1
-bench/gate.sh idle linux /home/builder/out/cook-router 2000
+# Every gate runs, so one failure does not hide another's numbers.
+failed=0
+bench/gate.sh size "$target" /home/builder/out/cook-router || failed=1
+bench/gate.sh idle linux /home/builder/out/cook-router 1 || failed=1
+bench/gate.sh idle linux /home/builder/out/cook-router 2000 || failed=1
+exit "$failed"
 EOF
 
 # The image. The binary links glibc and libstdc++, so a slim Debian base is the smallest image
