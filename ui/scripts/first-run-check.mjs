@@ -17,7 +17,7 @@
 // the Management API instead) and a proxied request (the mock's accounts come with traffic), and the
 // mock's /v1/models always lists models, so the "no models yet" wording is not reached. The server's
 // own answer for a server without a management key is faked in the browser: a 403 that names
-// COOK_MANAGEMENT_PASSWORD.
+// CK_MANAGEMENT_PASSWORD.
 //
 // Usage: CHROME_PATH=... node scripts/first-run-check.mjs <page-url> <management-key> [capture-dir]
 import { assertPrivateCredentialStore } from "./private-credential-store.mjs";
@@ -44,9 +44,9 @@ async function api(method, path, body) {
 }
 
 // A real server signs in and stores accounts: its credential store must be private, not a real database.
-// The mock keeps accounts in memory and says so in X-Cook-Version.
+// The mock keeps accounts in memory and says so in X-Ck-Version.
 const probe = await api("GET", "admin/v1/effective/config");
-if (probe.headers.get("x-cook-version") !== "cook-router-mock") await assertPrivateCredentialStore(root, secret);
+if (probe.headers.get("x-ck-version") !== "cooker-mock") await assertPrivateCredentialStore(root, secret);
 const present = (await api("GET", "credentials")).json.files.length;
 assert.equal(present, 0, `not an empty server: it already has ${present} accounts (restart the mock with --accounts 0)`);
 
@@ -98,7 +98,7 @@ try {
       route.fulfill({
         status: 403,
         contentType: "application/json",
-        body: JSON.stringify({ error: "management key not set: start the server with COOK_MANAGEMENT_PASSWORD" }),
+        body: JSON.stringify({ error: "management key not set: start the server with CK_MANAGEMENT_PASSWORD" }),
       }),
     );
     await keyField(page).fill("anything");

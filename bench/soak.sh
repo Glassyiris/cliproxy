@@ -123,7 +123,7 @@ if [[ $MIX == field ]]; then
         - api-key: "sk-FAKE-bench-codex-key"
 EOF
 fi
-COOK_DB="$DB_DIR/cook.db" "$BIN" --config "$OUT/config.yaml" --local-model > "$OUT/server.log" 2>&1 &
+CK_DB="$DB_DIR/cook.db" "$BIN" --config "$OUT/config.yaml" --local-model > "$OUT/server.log" 2>&1 &
 SRV_PID=$!
 ready=false
 for _ in $(seq 1 400); do

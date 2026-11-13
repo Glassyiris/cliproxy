@@ -28,10 +28,7 @@ pub(crate) async fn latest_version(State(state): State<Arc<Management>>) -> Resp
             StatusCode::SERVICE_UNAVAILABLE,
             [
                 ("error", "update_check_disabled".into()),
-                (
-                    "message",
-                    "Update checks are disabled by COOK_NO_UPDATE_CHECK=1.".into(),
-                ),
+                ("message", "Update checks are disabled by CK_NO_UPDATE_CHECK=1.".into()),
             ],
         );
     }

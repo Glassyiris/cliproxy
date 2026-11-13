@@ -23,7 +23,7 @@ reference checkout (which stays unmodified):
 reference=/absolute/path/to/CLIProxyAPI   # at ae3ee3be
 here=$PWD                                 # this directory
 echo "{\"Replace\":{\"$reference/sdk/cliproxy/zz_vertex_openapi_models_test.go\":\"$here/zz_vertex_openapi_models_test.go\"}}" > /tmp/vom-overlay.json
-(cd "$reference" && CPA_FIXTURE_OUT=/tmp/vom.json \
+(cd "$reference" && CK_FIXTURE_OUT=/tmp/vom.json \
   go test -count=1 -overlay /tmp/vom-overlay.json -run TestZZVertexOpenAPIModels ./sdk/cliproxy/)
 python3 -c "import json; d = json.load(open('/tmp/vom.json')); open('$here/../../fixtures/vertex_openapi_models_go.json', 'w').write(json.dumps(d, indent=2, ensure_ascii=False) + '\n')"
 ```

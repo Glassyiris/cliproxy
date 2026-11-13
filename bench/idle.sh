@@ -83,7 +83,7 @@ MGMT=bench-management-key
   printf ']}'
 } > "$TMP/credentials.json"
 
-COOK_MANAGEMENT_PASSWORD="$MGMT" COOK_DB="$DIR/cook.db" "$BIN" --config "$DIR/config.yaml" > "$DIR/server.log" 2>&1 &
+CK_MANAGEMENT_PASSWORD="$MGMT" CK_DB="$DIR/cook.db" "$BIN" --config "$DIR/config.yaml" > "$DIR/server.log" 2>&1 &
 PID=$!
 ready=false
 for _ in $(seq 1 400); do

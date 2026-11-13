@@ -17,6 +17,6 @@ checkout (which stays unmodified):
 reference=/absolute/path/to/CLIProxyAPI   # at ae3ee3be
 here=$PWD                                 # this directory
 echo "{\"Replace\":{\"$reference/internal/config/zz_scalar_settings_test.go\":\"$here/zz_scalar_settings_test.go\"}}" > /tmp/scalar-settings-overlay.json
-(cd "$reference" && CPA_FIXTURE_OUT="$here/../../fixtures/scalar_settings_go.json" \
+(cd "$reference" && CK_FIXTURE_OUT="$here/../../fixtures/scalar_settings_go.json" \
   go test -count=1 -overlay /tmp/scalar-settings-overlay.json -run TestZZScalarSettings ./internal/config/)
 ```

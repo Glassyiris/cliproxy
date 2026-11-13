@@ -13,7 +13,7 @@ export type SessionHooks = {
   server(build: ServerBuild | null): void;
 };
 
-/** X-Cook-Version, X-Cook-Commit and X-Cook-Build-Date; empty when the header is absent. */
+/** X-Ck-Version, X-Ck-Commit and X-Ck-Build-Date; empty when the header is absent. */
 export type ServerBuild = { version: string; commit: string; built: string };
 
 let connected = false;
@@ -144,10 +144,10 @@ function url(route: Route, call: Call) {
 
 /**
  * The key goes only with the sign-in request; everything else rides the session cookie. The server
- * accepts the cookie only with X-Cook-Dashboard, which an image, form or other origin cannot send.
+ * accepts the cookie only with X-Ck-Dashboard, which an image, form or other origin cannot send.
  */
 function headersFor(call: Call) {
-  const headers: Record<string, string> = { "X-Cook-Dashboard": "1" };
+  const headers: Record<string, string> = { "X-Ck-Dashboard": "1" };
   if (call.outside?.key !== undefined) headers.Authorization = `Bearer ${call.outside.key}`;
   if (call.body !== undefined && !(call.body instanceof FormData))
     headers["Content-Type"] = "application/json";
@@ -184,9 +184,9 @@ async function send(route: Route, call: Call) {
   if (at !== revision) throw new ConnectionError("session-changed");
   const header = (name: string) => response.headers.get(name) ?? "";
   hooks.server({
-    version: header("x-cook-version"),
-    commit: header("x-cook-commit"),
-    built: header("x-cook-build-date"),
+    version: header("x-ck-version"),
+    commit: header("x-ck-commit"),
+    built: header("x-ck-build-date"),
   });
   return response;
 }

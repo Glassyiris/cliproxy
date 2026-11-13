@@ -13,6 +13,6 @@ checkout (which stays unmodified):
 reference=/absolute/path/to/CLIProxyAPI   # at ae3ee3be
 here=$PWD                                 # this directory
 echo "{\"Replace\":{\"$reference/sdk/cliproxy/zz_provider_key_test.go\":\"$here/zz_provider_key_test.go\"}}" > /tmp/provider-key-overlay.json
-(cd "$reference" && CPA_FIXTURE_OUT="$here/../../fixtures/provider_key_go.json" \
+(cd "$reference" && CK_FIXTURE_OUT="$here/../../fixtures/provider_key_go.json" \
   go test -count=1 -overlay /tmp/provider-key-overlay.json -run TestZZProviderKey ./sdk/cliproxy/)
 ```

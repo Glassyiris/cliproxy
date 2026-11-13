@@ -162,7 +162,7 @@ async function assertClientResources(read, apply, get) {
   const publicExport = await get("/admin/v1/export");
   const explicitPublic = await get("/admin/v1/export?include_secrets=false");
   assert.deepEqual(publicExport, explicitPublic);
-  assert.equal(publicExport.format, "cook-router-config");
+  assert.equal(publicExport.format, "cooker-config");
   const clientExport = publicExport.resources.find(
     ({ kind, id }) => kind === "client-key" && id === clients[0].id,
   );
@@ -337,7 +337,7 @@ test(
       assert.equal(response.status, expected, await response.clone().text());
       const body = await response.json();
       if (expected === 200)
-        assert.equal(response.headers.get("x-cook-revision"), String(body.revision));
+        assert.equal(response.headers.get("x-ck-revision"), String(body.revision));
       return body;
     };
     const get = async (path, expected = 200, extraHeaders = {}) => {

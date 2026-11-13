@@ -47,7 +47,7 @@ test("tool setup survives keys with shell and string metacharacters", (t) => {
   );
   const codex = snippet("Codex CLI", base, key, model);
   const exportLine = codex.split("\n").find((l) => l.startsWith("export "))!;
-  assert.equal(sh(`${exportLine}\nprintf '%s' "$COOK_ROUTER_API_KEY"`), key);
+  assert.equal(sh(`${exportLine}\nprintf '%s' "$CK_API_KEY"`), key);
   const curl = snippet("curl", `${base}/a b`, key, model).replace(/^curl /, "printf '%s\\n' ");
   assert.equal(sh(curl), `${base}/a b/v1/models\n-H\nAuthorization: Bearer ${key}\n`);
 

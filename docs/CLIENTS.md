@@ -83,12 +83,12 @@ model_provider = "cooker"
 [model_providers.cooker]
 name = "cooker"
 base_url = "http://127.0.0.1:8317/v1"
-env_key = "COOK_ROUTER_CLIENT_KEY"
+env_key = "CK_API_KEY"
 wire_api = "responses"
 ```
 
 ```bash
-export COOK_ROUTER_CLIENT_KEY=your-client-key
+export CK_API_KEY=your-client-key
 codex
 ```
 
@@ -219,7 +219,7 @@ Not verified against official docs: the current official guide does not document
 ```
 
 ```bash
-export COOK_ROUTER_API_KEY=your-client-key
+export CK_API_KEY=your-client-key
 ```
 
 Set `capabilities.chat_completions` to `false` in the model entry to use OpenAI Responses. Zed also documents `language_models.anthropic_compatible` with `api_url: "http://127.0.0.1:8317"` for Anthropic Messages.

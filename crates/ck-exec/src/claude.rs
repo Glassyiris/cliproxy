@@ -1523,7 +1523,7 @@ impl<'a> Ctx<'a> {
                     self.continuity_tags(&req.headers, &body, &session_id, &existing_prev, &existing_prompt);
             }
             let version = profile::default_version(&self.settings);
-            let workload = detect::header(&req.headers, "x-cook-claude-workload").to_owned();
+            let workload = detect::header(&req.headers, "x-ck-claude-workload").to_owned();
             // 6d57ac9: a session keeps the date of its first request. Without
             // continuity (probes, helpers, no session) the date is today's.
             let date = session::pin_date(&continuity.key, &self.today);
@@ -2057,7 +2057,7 @@ impl<'a> Ctx<'a> {
             version: &profile::billing_version(detect::header(headers, "user-agent"), confirmed, &self.settings),
             message: &message,
             entrypoint,
-            workload: detect::header(headers, "x-cook-claude-workload"),
+            workload: detect::header(headers, "x-ck-claude-workload"),
             subagent: signals::subagent(headers, body),
             prev_req: &prev,
             prompt_id: &prompt,

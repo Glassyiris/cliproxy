@@ -16,6 +16,6 @@ from `../vertex_models` into the reference checkout (which stays unmodified):
 reference=/absolute/path/to/CLIProxyAPI   # at ae3ee3be
 here=$PWD                                 # this directory
 echo "{\"Replace\":{\"$reference/sdk/cliproxy/zz_scalar_model_names_test.go\":\"$here/zz_scalar_model_names_test.go\",\"$reference/sdk/cliproxy/auth/zz_vertex_models_export.go\":\"$here/../vertex_models/zz_vertex_models_export.go\"}}" > /tmp/scalar-names-overlay.json
-(cd "$reference" && CPA_FIXTURE_OUT="$here/../../fixtures/scalar_model_names_go.json" \
+(cd "$reference" && CK_FIXTURE_OUT="$here/../../fixtures/scalar_model_names_go.json" \
   go test -count=1 -overlay /tmp/scalar-names-overlay.json -run TestZZScalarModelNames ./sdk/cliproxy/)
 ```

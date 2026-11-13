@@ -296,8 +296,8 @@ async fn realtime_http_matches_go() {
                 problems.push(format!("header {name} {ours:?}, Go {want:?}"));
             }
         }
-        if headers.contains_key("x-cook-trace-id") != !go_header("x-cpa-trace-id").is_empty() {
-            problems.push("X-Cook-Trace-Id presence differs".into());
+        if headers.contains_key("x-ck-trace-id") != !go_header("x-cpa-trace-id").is_empty() {
+            problems.push("X-Ck-Trace-Id presence differs".into());
         }
         let seen = std::mem::take(&mut mock.lock().unwrap().seen);
         let sent = case["sent"].as_array().unwrap();

@@ -133,7 +133,7 @@ EOF
 # of its name (.config/nextest.toml sets the exclusive tests); the last
 # shard also runs the doc tests, the patched gjson in vendor/, which is outside the
 # workspace, and the cache replay script's tests, and the first the media relay and CPU
-# profiler tests. CPA_TEST_NO_SKIP turns a skipped media relay IPv6 test into a failure.
+# profiler tests. CK_TEST_NO_SKIP turns a skipped media relay IPv6 test into a failure.
 # /home/builder/out holds the list and counts the test-report stage exports for
 # .github/scripts/test-counts.py. CI_COMMIT changes on every commit, so a cached run cannot
 # stand in for a new commit's. Nextest runs one test per CPU; on a large shared machine pass
@@ -141,7 +141,7 @@ EOF
 # dozens run at once.
 FROM source AS test
 ARG SHARD=1 SHARDS=1 CI_COMMIT= TEST_THREADS
-ENV CPA_TEST_NO_SKIP=1
+ENV CK_TEST_NO_SKIP=1
 RUN --network=none \
     --mount=type=cache,id=cooker-cargo-src-test,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
     --mount=type=cache,id=cooker-target-test,target=/src/target,uid=1000,gid=1000 <<'EOF'

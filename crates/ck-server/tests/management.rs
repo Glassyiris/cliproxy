@@ -1092,7 +1092,7 @@ async fn unreadable_auth_dir_never_blocks_secret_rotation_or_removal() {
     let body: Value = r.json().await.unwrap();
     assert_eq!(
         body["message"],
-        "management key not set: start the server with COOK_MANAGEMENT_PASSWORD"
+        "management key not set: start the server with CK_MANAGEMENT_PASSWORD"
     );
     server.abort();
 }
@@ -1918,7 +1918,7 @@ async fn config_reloads_never_publish_a_value_older_than_a_save() {
             .await
             .unwrap();
         assert_eq!(r.status(), 200);
-        assert_eq!(r.headers()["X-Cook-Revision"], r.headers()["X-Cook-Published-Revision"]);
+        assert_eq!(r.headers()["X-Ck-Revision"], r.headers()["X-Ck-Published-Revision"]);
         for _ in 0..5 {
             assert_eq!(retry().as_i64(), Some(i), "save {i} was replaced by an older reload");
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
@@ -2031,7 +2031,7 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
         get("tag", true).await,
         (
             503,
-            json!({"error": "update_check_disabled", "message": "Update checks are disabled by COOK_NO_UPDATE_CHECK=1."})
+            json!({"error": "update_check_disabled", "message": "Update checks are disabled by CK_NO_UPDATE_CHECK=1."})
         )
     );
     assert!(seen.lock().unwrap().is_empty(), "nothing is asked when disabled");
@@ -2065,8 +2065,8 @@ async fn latest_version_is_anonymous_cached_and_explicit() {
 async fn latest_version_uses_configured_and_environment_proxies() {
     use axum::http::{HeaderMap, Method, Uri};
     use std::sync::Mutex;
-    if let Ok(case) = std::env::var("COOK_ROUTER_TEST_RELEASE_PROXY") {
-        let configured = std::env::var("COOK_ROUTER_TEST_PROXY_URL").unwrap_or_default();
+    if let Ok(case) = std::env::var("CK_TEST_RELEASE_PROXY") {
+        let configured = std::env::var("CK_TEST_PROXY_URL").unwrap_or_default();
         let f = Fixture::from_yaml(&format!("release-proxy-{case}"), |_, hash| {
             format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\nrequests:\n  proxy-url: '{configured}'\n",)
         });
@@ -2141,9 +2141,9 @@ async fn latest_version_uses_configured_and_environment_proxies() {
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("SYSTEMROOT", std::env::var("SYSTEMROOT").unwrap_or_default())
             .env("HOME", std::env::temp_dir())
-            .env("COOK_ROUTER_TEST_RELEASE_PROXY", case)
+            .env("CK_TEST_RELEASE_PROXY", case)
             .env(
-                "COOK_ROUTER_TEST_PROXY_URL",
+                "CK_TEST_PROXY_URL",
                 match case {
                     "configured" => &proxy_url,
                     "direct" => "direct",
@@ -4752,7 +4752,7 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
 fn session_cookie(response: &wreq::Response) -> (String, String) {
     let cookie = response.headers()["set-cookie"].to_str().unwrap().to_owned();
     let id = cookie
-        .strip_prefix("cook_router_session=")
+        .strip_prefix("cooker_session=")
         .and_then(|rest| rest.split(';').next())
         .unwrap()
         .to_owned();
@@ -4773,8 +4773,8 @@ async fn sign_in(base: &str, body: Value) -> wreq::Response {
 async fn with_cookie(method: wreq::Method, url: String, id: &str, extra: &[(&str, &str)]) -> wreq::Response {
     let mut request = wreq::Client::new()
         .request(method, url)
-        .header("cookie", format!("cook_router_session={id}"))
-        .header("x-cook-dashboard", "1");
+        .header("cookie", format!("cooker_session={id}"))
+        .header("x-ck-dashboard", "1");
     for (name, value) in extra {
         request = request.header(*name, *value);
     }
@@ -4792,7 +4792,7 @@ async fn dashboard_session_cookie_signs_in_reads_and_signs_out() {
     assert_eq!(response.status(), 204);
     let (cookie, id) = session_cookie(&response);
     assert_eq!(
-        cookie.strip_prefix(&format!("cook_router_session={id}")).unwrap(),
+        cookie.strip_prefix(&format!("cooker_session={id}")).unwrap(),
         "; Path=/router/; Max-Age=604800; HttpOnly; SameSite=Strict",
         "no Secure over plain HTTP"
     );
@@ -4820,7 +4820,7 @@ async fn dashboard_session_cookie_signs_in_reads_and_signs_out() {
     let (cleared, _) = session_cookie(&out);
     assert_eq!(
         cleared,
-        "cook_router_session=; Path=/router/; Max-Age=0; HttpOnly; SameSite=Strict"
+        "cooker_session=; Path=/router/; Max-Age=0; HttpOnly; SameSite=Strict"
     );
     let refused = with_cookie(wreq::Method::GET, config, &id, &[]).await;
     assert_eq!(refused.status(), 401);
@@ -4892,8 +4892,8 @@ async fn changing_the_management_secret_ends_every_session() {
     let setting = format!("{base}/admin/v1/r/setting/management");
     let response = wreq::Client::new()
         .patch(&setting)
-        .header("cookie", format!("cook_router_session={id}"))
-        .header("x-cook-dashboard", "1")
+        .header("cookie", format!("cooker_session={id}"))
+        .header("x-ck-dashboard", "1")
         .json(&json!({"secret-key": "fake-rotated"}))
         .send()
         .await
@@ -4986,7 +4986,7 @@ async fn cookie_requests_must_come_from_the_same_origin() {
     ] {
         let response = bare
             .request(method, format!("{base}/{url}"))
-            .header("cookie", format!("cook_router_session={id}"))
+            .header("cookie", format!("cooker_session={id}"))
             .send()
             .await
             .unwrap();
@@ -5030,7 +5030,7 @@ async fn bearer_requests_ignore_cookies_and_fetch_metadata() {
     let response = client
         .get(format!("{base}/admin/v1/effective/config"))
         .bearer_auth("wrong")
-        .header("cookie", format!("cook_router_session={id}"))
+        .header("cookie", format!("cooker_session={id}"))
         .send()
         .await
         .unwrap();
@@ -5053,7 +5053,7 @@ async fn session_sign_in_counts_failures_and_stale_cookies_do_not() {
             assert_eq!(stale.status(), 401, "{url}");
             let bare = client
                 .get(format!("{base}/{url}"))
-                .header("cookie", "cook_router_session=stale")
+                .header("cookie", "cooker_session=stale")
                 .send()
                 .await
                 .unwrap();
@@ -5111,7 +5111,7 @@ async fn cookie_answers_stay_unreadable_to_other_origins() {
         .request(wreq::Method::OPTIONS, format!("{base}/admin/v1/effective/config"))
         .header("origin", "http://127.0.0.1:1")
         .header("access-control-request-method", "GET")
-        .header("access-control-request-headers", "x-cook-dashboard")
+        .header("access-control-request-headers", "x-ck-dashboard")
         .send()
         .await
         .unwrap();

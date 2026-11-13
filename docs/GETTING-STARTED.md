@@ -9,12 +9,12 @@ Run the Docker image with a data directory and a dashboard password:
 ```sh
 mkdir -m 700 -p data
 sudo chown -R 10001:10001 data
-docker run -d --name cooker -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e COOK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cooker:latest
+docker run -d --name cooker -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e CK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cooker:latest
 ```
 
 [INSTALL.md](INSTALL.md#docker) covers the volume, an optional initial `config.yaml` and upgrades. An empty volume starts with defaults on port 8317 and creates `/data/cook.db`; a `/data/config.yaml` that exists is imported on that first start, and later starts use the database. Two keys matter:
 
-- `COOK_MANAGEMENT_PASSWORD` (or `management.secret-key` in the imported config) is the dashboard password. With neither, the management API, and so the dashboard sign-in, answers every request with 403.
+- `CK_MANAGEMENT_PASSWORD` (or `management.secret-key` in the imported config) is the dashboard password. With neither, the management API, and so the dashboard sign-in, answers every request with 403.
 - An entry under `access.api-keys` is what your tools send to the proxy. Add it in the dashboard, or in the initial `config.yaml`.
 
 Check that the server answers with `curl http://127.0.0.1:8317/healthz`.
@@ -67,7 +67,7 @@ claude
 
 - Always set `access.api-keys`. With an empty list, anyone who can reach the proxy can use your accounts. The server logs a warning at start when the list is empty.
 - Keep `server.host` on `127.0.0.1` unless other machines need it. An empty host listens on every network interface. To use the proxy from your other machines, a private network such as Tailscale is the simplest safe option; see [MULTI-ACCOUNT.md](MULTI-ACCOUNT.md#reach-the-proxy-from-other-machines).
-- The management API answers 403 ("management key not set") until `management.secret-key` (or the `COOK_MANAGEMENT_PASSWORD` environment variable) is set. With `management.allow-remote: false`, the default, only requests from this computer are accepted. Five wrong keys from one address block that address for 30 minutes.
+- The management API answers 403 ("management key not set") until `management.secret-key` (or the `CK_MANAGEMENT_PASSWORD` environment variable) is set. With `management.allow-remote: false`, the default, only requests from this computer are accepted. Five wrong keys from one address block that address for 30 minutes.
 - Behind a tunnel or reverse proxy on the same machine (cloudflared, `tailscale serve`, Caddy, nginx), every request arrives from `127.0.0.1`, so the server treats every internet client as local. Then `allow-remote: false` no longer keeps them out, a local-only `--password` is accepted from the internet, and five wrong keys from anyone block the tunnel for everyone. Set `server.trusted-proxies` to the proxy's address, for example `[127.0.0.1, "::1"]` for a local cloudflared, and restart. The server then takes the client address from `X-Forwarded-For` from that proxy only. CLIProxyAPI behaves the same way.
 - The dashboard sends the management key once and then holds a session cookie the page's scripts cannot read. The session lasts 7 days, or 30 with "Remember on this device". Signing out, changing `management.secret-key` or restarting the server ends it. Behind a reverse proxy, list it in `server.trusted-proxies`: the server then reads its `X-Forwarded-Proto`, to mark the cookie `Secure` over HTTPS, and its `X-Forwarded-Host`, which dashboard changes must match when the proxy rewrites `Host`.
 - Do not send keys over plain HTTP across a network. Use a tunnel or reverse proxy with HTTPS, or serve HTTPS directly with `server.tls`.

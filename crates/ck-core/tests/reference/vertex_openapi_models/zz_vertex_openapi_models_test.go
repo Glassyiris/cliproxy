@@ -130,7 +130,7 @@ func TestZZVertexOpenAPIModels(t *testing.T) {
 		accounts = append(accounts, account{raw, a.AuthKind(), kind, value})
 	}
 	data, _ := json.MarshalIndent(map[string]any{"yaml": yaml, "files": outFiles, "accounts": accounts}, "", "  ")
-	if err := os.WriteFile(os.Getenv("CPA_FIXTURE_OUT"), append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(os.Getenv("CK_FIXTURE_OUT"), append(data, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

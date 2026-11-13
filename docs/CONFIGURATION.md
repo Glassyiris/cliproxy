@@ -2,7 +2,7 @@
 
 > **Design contract:** [State and concurrency](STATE-AND-CONCURRENCY.md) records the single-owner, memory-snapshot, callback, recovery and single-portable-file invariants of the configuration service. Interface names and code layout may evolve; that model must not drift. The operational details below describe the implemented behavior; the limits it does not prove are listed in that document.
 
-SQLite is the sole durable authority for configuration and OAuth credentials. Select the database with `--db PATH`, then `COOK_DB`; otherwise it is `cook.db` beside the `--config` path (whose default is `config.yaml`). Use the same database path for the server, login commands and config commands. While the server runs it owns that database: change it through the dashboard, `/admin/v1` or `--management-base-url`, not through an offline command.
+SQLite is the sole durable authority for configuration and OAuth credentials. Select the database with `--db PATH`, then `CK_DB`; otherwise it is `cook.db` beside the `--config` path (whose default is `config.yaml`). Use the same database path for the server, login commands and config commands. While the server runs it owns that database: change it through the dashboard, `/admin/v1` or `--management-base-url`, not through an offline command.
 
 YAML is a first-import format, not a watched runtime file. A first start imports the selected `--config` file, or `./config.yaml` when the flag is absent; subsequent starts do not read it. Only the current layout is accepted: pre-v8 keys such as `port`, `auth-dir` or `claude-api-key` are rejected as unknown settings. Prefer an explicit import before starting the server:
 
@@ -33,11 +33,11 @@ cook-router --db cook.db config listener                 # committed bind settin
 To import into a running service, explicitly select its management endpoint and key:
 
 ```sh
-export COOK_ROUTER_MANAGEMENT_KEY=...   # or let the command prompt for it
+export CK_MANAGEMENT_KEY=...   # or let the command prompt for it
 cooker --management-base-url http://127.0.0.1:8317 config import config.yaml
 ```
 
-Online commands take the management key from `--password`, else from `COOK_ROUTER_MANAGEMENT_KEY`, else from a prompt that does not echo when run in a terminal. Prefer the variable or the prompt: a `--password` value is visible to other local users' process listings while the command runs. Without a terminal and without either, the command sends no key and the service refuses it.
+Online commands take the management key from `--password`, else from `CK_MANAGEMENT_KEY`, else from a prompt that does not echo when run in a terminal. Prefer the variable or the prompt: a `--password` value is visible to other local users' process listings while the command runs. Without a terminal and without either, the command sends no key and the service refuses it.
 
 This submits the configuration through the existing authenticated API and waits for committed runtime publication. It never opens or writes a local `--db`, even if authentication, TLS, transport or persistence fails. The client uses the current global revision as `If-Match`; a concurrent change returns an error (**412**) instead of silently retrying over it. Use the final endpoint URL: owner mutations under `/admin/v1/` do not follow redirects, including responses without a `Location` header. Existing management access controls and TLS certificate verification still apply.
 
@@ -45,7 +45,7 @@ The TUI's setting and client-key commands acknowledge `/admin/v1/apply` only aft
 
 Among config commands the online context supports **import** only. `config export`, `config validate`, `config backup` and `config listener` stay local: while a service owns the database they read its published file read-only. Online logins, Vertex import and SIWC binding are described under [Online credential commands](#online-credential-commands).
 
-`config import` and file-based `config validate` accept YAML of the current layout or the versioned JSON resource envelope. `config export` emits that same management-compatible JSON envelope (`format: "cook-router-config"`, `version: 1`, `revision`, `resources`), not YAML. This preserves OAuth-only scope that canonical YAML would lose. Exports redact secrets by default; `--secrets` includes configuration secrets for a lossless full-config export. Protect it as credentials. New output files are private (0600 on Unix). A configuration export is not a credential backup; use `config backup` for the complete SQLite database, including history and credential secrets.
+`config import` and file-based `config validate` accept YAML of the current layout or the versioned JSON resource envelope. `config export` emits that same management-compatible JSON envelope (`format: "cooker-config"`, `version: 1`, `revision`, `resources`), not YAML. This preserves OAuth-only scope that canonical YAML would lose. Exports redact secrets by default; `--secrets` includes configuration secrets for a lossless full-config export. Protect it as credentials. New output files are private (0600 on Unix). A configuration export is not a credential backup; use `config backup` for the complete SQLite database, including history and credential secrets.
 
 Installers and health-probe scripts can use `config listener` without parsing YAML or printing secrets. It reads the committed SQLite config and outputs exactly three newline-terminated lines: host (an empty line means wildcard), decimal port (`0` means ephemeral), and TLS enabled (`true` or `false`). It performs no network access or certificate/key-file reads. These are committed startup settings, not proof of the currently bound address after an unapplied restart-only change; a wildcard probe should use loopback, and an ephemeral port needs the actual runtime address.
 
@@ -76,11 +76,11 @@ Use the strong quoted `ETag` from a read as `If-Match` when writing. A resource 
 
 Every configuration write supports `?dry_run=true` and `?message=...`; apply also accepts its dry-run field. A dry run validates the entire candidate and shows redacted changes without persisting or publishing it. Validation failures return **422** with structured `error`, `message`, `resource`, `pointer` and `pointers` fields. When validation identifies a resource field, `resource` names the affected resource and `pointer` locates the field relative to its `spec`; document-wide or parse failures can leave both null. `pointers` is empty for ordinary validation errors; secret-resubmission errors populate it. `secret_destination_changed` means an edit changed where a retained secret would be sent: review the destination and explicitly resubmit plaintext secrets at every JSON Pointer in `pointers` (`pointer` names the first), rather than forwarding the redaction marker to authorize a new destination. Error responses do not expose raw secret values or database/parser internals. Requests are limited to 16 MiB after authentication.
 
-Successful configuration writes return `revision`, `written`, `dry_run`, redacted `changes` and `restart_required`. Non-dry-run writes return the resulting resource ETag, or global revision ETag for apply/delete/import/restore; dry-run responses have no ETag because their candidate is not persisted. `X-Cook-Revision` identifies stored state when available and `X-Cook-Published-Revision` identifies the running projection. History is configuration history only: rolling it back never restores a revoked or deleted OAuth token.
+Successful configuration writes return `revision`, `written`, `dry_run`, redacted `changes` and `restart_required`. Non-dry-run writes return the resulting resource ETag, or global revision ETag for apply/delete/import/restore; dry-run responses have no ETag because their candidate is not persisted. `X-Ck-Revision` identifies stored state when available and `X-Ck-Published-Revision` identifies the running projection. History is configuration history only: rolling it back never restores a revoked or deleted OAuth token.
 
 SQLite's resource and global revisions are server-assigned values and cannot be set through a resource spec.
 
-API export is redacted unless explicitly requested with `?include_secrets=true`; a single resource read accepts the same parameter and reveals only that resource, for a client that needs one secret-bearing setting. JSON imports require the export envelope with `format: "cook-router-config"`, `version: 1`, an unsigned integer `revision` and `resources`. Use `application/json` for JSON (a charset parameter is accepted), or `application/yaml`, `application/x-yaml`, `text/yaml`, `text/x-yaml` or `text/plain` for legacy YAML; unsupported media types return **415**. A redacted export is for review, not a complete disaster-recovery backup. The old v0/v8 config reads, raw YAML upload and per-setting configuration endpoints are deleted; there is no compatibility alias. Credential, login and other non-config management operations remain separate.
+API export is redacted unless explicitly requested with `?include_secrets=true`; a single resource read accepts the same parameter and reveals only that resource, for a client that needs one secret-bearing setting. JSON imports require the export envelope with `format: "cooker-config"`, `version: 1`, an unsigned integer `revision` and `resources`. Use `application/json` for JSON (a charset parameter is accepted), or `application/yaml`, `application/x-yaml`, `text/yaml`, `text/x-yaml` or `text/plain` for legacy YAML; unsupported media types return **415**. A redacted export is for review, not a complete disaster-recovery backup. The old v0/v8 config reads, raw YAML upload and per-setting configuration endpoints are deleted; there is no compatibility alias. Credential, login and other non-config management operations remain separate.
 
 The masking contract covers `/admin/v1` resource/configuration reads, revisions and effective config, credential-list API-key `account` values, and per-key usage. `GET /admin/v1/credentials` is an explicitly authorized plaintext credential-source interface (bytes are base64 encoded, not encrypted); it is no-store and excluded from capture, like protected credential downloads. Management-key access still permits plaintext credential downloads (`/v8/management/credentials/download` and its v0 alias) and usage queue consumption (`/v8/management/observability/usage/queue`, v0 `usage-queue`, and RESP). HTTP management requests send the key as `Authorization: Bearer <key>`; the RESP usage queue authenticates with `AUTH <management key>`, the only non-Bearer form. Queue records contain provider keys in `source` and client keys in `api_key`. Protect access to these interfaces.
 
@@ -92,10 +92,10 @@ A document may include `if_match` containing the 64 hexadecimal SHA-256 digits o
 
 ### Online credential commands
 
-While a service owns the database, a terminal sign-in goes through it: a login flag with `--db` alone is an offline write and is refused with `already owned`. Run the login against the service and type the management key when asked, or export it as `COOK_ROUTER_MANAGEMENT_KEY` first:
+While a service owns the database, a terminal sign-in goes through it: a login flag with `--db` alone is an offline write and is refused with `already owned`. Run the login against the service and type the management key when asked, or export it as `CK_MANAGEMENT_KEY` first:
 
 ```sh
-export COOK_ROUTER_MANAGEMENT_KEY=...   # the management.secret-key value
+export CK_MANAGEMENT_KEY=...   # the management.secret-key value
 cooker --management-base-url http://127.0.0.1:8317 --claude-login --no-browser
 ```
 
@@ -104,7 +104,7 @@ With the service stopped, the same login flag with `--db` writes the database di
 Online built-in logins and Vertex import use the credential batch port:
 
 ```sh
-export COOK_ROUTER_MANAGEMENT_KEY=...
+export CK_MANAGEMENT_KEY=...
 cooker --management-base-url https://proxy.example --vertex-import ./service-account.json
 cooker --management-base-url https://proxy.example --codex-device-login --no-browser
 cooker --management-base-url https://proxy.example --siwc-bind codex-account.json --no-browser
@@ -182,7 +182,7 @@ observability:
 
 | Setting | What it does |
 |---|---|
-| `secret-key` | The dashboard and Management API password. A plaintext imported value is stored as its bcrypt hash, not rewritten into YAML. The `COOK_MANAGEMENT_PASSWORD` environment variable works too. When neither is set, every management request answers 403 ("management key not set"). Changing or removing it signs out every dashboard session for good: restoring the old value later brings none back. |
+| `secret-key` | The dashboard and Management API password. A plaintext imported value is stored as its bcrypt hash, not rewritten into YAML. The `CK_MANAGEMENT_PASSWORD` environment variable works too. When neither is set, every management request answers 403 ("management key not set"). Changing or removing it signs out every dashboard session for good: restoring the old value later brings none back. |
 | `allow-remote` | `false` (the default) accepts management requests from this computer only. |
 | `disable-control-panel` | `true` stops serving the dashboard at `/management.html`; the Management API keeps working. |
 
@@ -276,7 +276,7 @@ routing:
 - **Order.** Tiers are tried top down, `strategy` balances inside a tier, and unlisted credentials follow by `priority`. Order only places new conversations: with `session-affinity` a conversation keeps its usable account even when a higher tier recovers, so its cache stays warm.
 - **Failover** to the next credential follows the entry's `request-scoped-errors` actions, else the usual handling.
 
-`X-Cook-Routed-Provider` names the serving credential's selector. It is sent only when `routing.providers` sets `exclude` or `order`, or a model router served the request.
+`X-Ck-Routed-Provider` names the serving credential's selector. It is sent only when `routing.providers` sets `exclude` or `order`, or a model router served the request.
 
 ### Optional preset: fail over only on 429
 
@@ -395,7 +395,7 @@ How a request to `smart` is routed:
 - **Pick.** The grade maps linearly onto the index range of the candidates' cost/capability Pareto front, moved by -15% (`cost`), 0 or +20% (`quality`) of that range; the cheapest variant within 1 index point of it serves, since smaller gaps are benchmark noise. The client's suffix is kept when the route has none of its own. Without any rated candidate, the first available listed model serves, else the newest available model.
 - **Conversation.** A conversation (the session the server derives, see `session_source` in [DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)) keeps its model for an hour after its last request, so its prompt cache stays warm. Tool-result requests always keep it; a new user message is graded again and moves the conversation only to a stronger model. It also moves when its model becomes unavailable, leaves `models` or is too small. `count_tokens` neither asks the judge nor binds; image, video and speech routes do not route. A Responses client chaining `previous_response_id` should send `prompt_cache_key`, `conversation_id` or a session header, or each turn can land on another model.
 
-The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-Cook-Routed-Model` names the model that served a request and `X-Cook-Routed-Provider` its provider; `GET /v1/models` lists the routers. Not covered yet: the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cooker ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
+The benchmarks are fetched at start, daily, and an hour after a failure, which keeps the last data. `X-Ck-Routed-Model` names the model that served a request and `X-Ck-Routed-Provider` its provider; `GET /v1/models` lists the routers. Not covered yet: the Codex client and Grok Shell catalogs, and upstream WebSocket reuse for Responses WebSocket turns naming a router (they run over HTTP). This setting exists only in cooker ([DIFFERENCES-FROM-GO.md](DIFFERENCES-FROM-GO.md)); Artificial Analysis data requires attribution under its terms.
 
 ## Extending
 
@@ -403,8 +403,8 @@ cooker has no plugin interface: the plugin API carried over from the Go gateway 
 
 ## Environment
 
-- `COOK_MANAGEMENT_PASSWORD`: the management key, instead of `management.secret-key`.
+- `CK_MANAGEMENT_PASSWORD`: the management key, instead of `management.secret-key`.
 - `TOKIO_WORKER_THREADS`: the number of request threads, instead of `worker-threads`.
 - `RUST_LOG`: overrides the log level, for example `RUST_LOG=debug`.
 - A `.env` file in the working directory is loaded at start, as in CLIProxyAPI.
-- `COOK_DB`: the database path when `--db` is not supplied.
+- `CK_DB`: the database path when `--db` is not supplied.

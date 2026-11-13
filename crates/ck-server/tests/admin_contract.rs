@@ -128,7 +128,7 @@ impl Fixture {
             .unwrap();
         assert_eq!(response.status(), 200);
         let tag = response.headers()["etag"].to_str().unwrap().to_owned();
-        let revision = response.headers()["x-cook-revision"]
+        let revision = response.headers()["x-ck-revision"]
             .to_str()
             .unwrap()
             .parse::<u64>()
@@ -647,8 +647,8 @@ async fn admin_auth_failures_use_the_admin_error_contract_and_expose_revisions()
             request = request.bearer_auth(key);
         }
         let response = request.send().await.unwrap();
-        assert!(response.headers().contains_key("x-cook-published-revision"));
-        for name in ["x-cook-revision", "x-cook-published-revision"] {
+        assert!(response.headers().contains_key("x-ck-published-revision"));
+        for name in ["x-ck-revision", "x-ck-published-revision"] {
             assert!(
                 response
                     .headers()
@@ -962,7 +962,7 @@ async fn collection_replacements_require_atomic_global_preconditions() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    let head = response.headers()["x-cook-revision"]
+    let head = response.headers()["x-ck-revision"]
         .to_str()
         .unwrap()
         .parse::<u64>()
@@ -1400,7 +1400,7 @@ async fn committed_configuration_reaches_access_and_runtime_and_credential_commi
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    let published: u64 = response.headers()["x-cook-published-revision"]
+    let published: u64 = response.headers()["x-ck-published-revision"]
         .to_str()
         .unwrap()
         .parse()
@@ -1722,7 +1722,7 @@ async fn concurrent_write_responses_keep_the_committed_resource_and_revision_sna
         async move {
             let response = request.send().await.unwrap();
             assert_eq!(response.status(), 200);
-            let revision = response.headers()["x-cook-revision"]
+            let revision = response.headers()["x-ck-revision"]
                 .to_str()
                 .unwrap()
                 .parse::<u64>()

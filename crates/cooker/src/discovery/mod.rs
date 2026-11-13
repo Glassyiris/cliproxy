@@ -18,7 +18,7 @@ pub mod mdns;
 
 pub const DEFAULT_SERVICE_TYPE: &str = "_ai-gateway._tcp";
 pub const DEFAULT_DOMAIN: &str = "local.";
-pub const PRODUCT_CPA: &str = "cook-router";
+pub const PRODUCT: &str = "cooker";
 const DEFAULT_SUBTYPES: [&str; 5] = [
     "_chat-completions",
     "_responses",
@@ -61,7 +61,7 @@ impl Default for TxtOptions {
     fn default() -> Self {
         Self {
             version: "1".into(),
-            product: PRODUCT_CPA.into(),
+            product: PRODUCT.into(),
             protocols: strings(&[
                 "chat-completions",
                 "responses",
@@ -90,7 +90,7 @@ pub fn build_txt_records(opts: &TxtOptions) -> Vec<String> {
     let bool_text = |b: bool, t: &'static str, f: &'static str| if b { t } else { f };
     let candidates = [
         ("version", or(&opts.version, "1")),
-        ("product", or(&opts.product, PRODUCT_CPA)),
+        ("product", or(&opts.product, PRODUCT)),
         ("instance_id", opts.instance_id.clone()),
         ("tls", bool_text(opts.tls, "1", "0").into()),
         ("auth_required", bool_text(opts.auth_required, "true", "false").into()),
@@ -146,7 +146,7 @@ fn is_hex4(s: &str) -> bool {
     s.len() == 4 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Go `ResolveDiscoveryStateDir`: `$COOK_WRITABLE_PATH/discovery`, else the user config dir.
+/// Go `ResolveDiscoveryStateDir`: `$CK_WRITABLE_PATH/discovery`, else the user config dir.
 pub fn state_dir() -> Option<PathBuf> {
     let trimmed = |k: &str| {
         std::env::var(k)
@@ -154,7 +154,7 @@ pub fn state_dir() -> Option<PathBuf> {
             .map(|v| go_trim(&v).to_owned())
             .filter(|v| !v.is_empty())
     };
-    if let Some(w) = trimmed("COOK_WRITABLE_PATH") {
+    if let Some(w) = trimmed("CK_WRITABLE_PATH") {
         return Some(Path::new(&w).join("discovery"));
     }
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());

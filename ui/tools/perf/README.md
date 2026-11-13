@@ -21,7 +21,7 @@ node tools/perf/run.mjs --accounts 1000 --minutes 5 --dist "${TMPDIR:-/tmp}/cook
 ```
 
 The harness starts the mock on a free port, starts `vite preview` of `--dist` (its `/v8` proxy
-points at the mock through `CPA_BACKEND`), opens headless Chrome, signs in through the real login
+points at the mock through `CK_BACKEND`), opens headless Chrome, signs in through the real login
 form and measures. It stops both servers on exit. Nothing is built or written inside the repository.
 
 | Flag | Default | Meaning |
@@ -46,12 +46,12 @@ sign in, a page never renders, a server does not start, a polled request never a
 and CPU shares on a shared machine.
 
 The mock alone: `node tools/mock/server.mjs --port 8317 --accounts 1000 --seed 1 --key mock`, then
-`CPA_BACKEND=http://127.0.0.1:8317 npm run dev`.
+`CK_BACKEND=http://127.0.0.1:8317 npm run dev`.
 
 ## What the mock serves
 
 Every route the dashboard calls, with response shapes taken from `crates/ck-server/src/management/`
-and the fields the dashboard's `src/lib/` modules read. `X-Cook-Version: cook-router-mock` makes the UI
+and the fields the dashboard's `src/lib/` modules read. `X-Ck-Version: cooker-mock` makes the UI
 treat it as cooker. Accounts spread over claude, codex, gemini, kimi, antigravity, xai, devin
 and vertex, with twenty `recent_requests` buckets each, about 5% disabled, 5% cooling, 2% signed
 out, 3% with a model cooldown, and passive quota signals on most Claude, Codex and Devin accounts.

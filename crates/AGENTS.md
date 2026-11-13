@@ -19,7 +19,7 @@ A workspace reorganization updates this list in the same PR.
 ### APIs and modularity
 
 - Keep API abstractions and responsibility boundaries clear. URLs, paths, configuration, upstream fees, limits and rules are data rather than hardcoded policy. Keep endpoints working.
-- Inside the router, every transport protocol is represented as one SSE event stream in an internal format that extends OpenAI Chat Completions chunks with extra attributes, carried in reserved `x_cook_router` JSON fields and named `event:` events under one versioned grammar. Unknown fields and events are kept and passed to egress. Convert to it only at ingress and from it only at egress, including for same-protocol requests; no raw-byte passthrough path. Internal stages process the unbounded stream incrementally and never wait for a complete body.
+- Inside the router, every transport protocol is represented as one SSE event stream in an internal format that extends OpenAI Chat Completions chunks with extra attributes, carried in reserved `x_ck` JSON fields and named `event:` events under one versioned grammar. Unknown fields and events are kept and passed to egress. Convert to it only at ingress and from it only at egress, including for same-protocol requests; no raw-byte passthrough path. Internal stages process the unbounded stream incrementally and never wait for a complete body.
 - The internal stream is stored in memory-mapped files, never in heap buffers. Like operating-system paging, the files are divided into fixed-size blocks, so a position is a block number and an offset; stages hold only the key positions of a stream, not copies of its data or a pointer per block. Stream files hold request content, so they are private to the process user and removed when the request ends.
 - Non-SSE payloads (images, audio, video, realtime) travel in the same stream as custom data in fixed chunks of at most 50 KB, flushed within 100 ms.
 - A rewrite replaces the old code in the same change. Do not keep old and new paths side by side, adapters to the old form or unreachable legacy code.
@@ -134,7 +134,7 @@ Contract tests exercise every documented operation and validate actual response 
 
 ### Management API version
 
-Send `Cook-API-Version: 0.N` in requests and responses; reject a mismatch with 406 and `api.version_mismatch` before mutation. A change to the generated OpenAPI document increments N and adds a `changes/<branch-slug>.md` fragment. Unauthenticated `GET /admin` reports v0 as EXPERIMENTAL and the current version; it returns 404 when management is disabled.
+Send `Ck-API-Version: 0.N` in requests and responses; reject a mismatch with 406 and `api.version_mismatch` before mutation. A change to the generated OpenAPI document increments N and adds a `changes/<branch-slug>.md` fragment. Unauthenticated `GET /admin` reports v0 as EXPERIMENTAL and the current version; it returns 404 when management is disabled.
 
 ### Management error catalog
 

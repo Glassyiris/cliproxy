@@ -15,7 +15,7 @@ use super::dns::{
     TYPE_AAAA, TYPE_PTR, TYPE_SRV,
 };
 use super::iface::Iface;
-use super::{DiscoveredService, Entry, PRODUCT_CPA, ServiceSpec, entry_to_discovered, entry_within_limits};
+use super::{DiscoveredService, Entry, PRODUCT, ServiceSpec, entry_to_discovered, entry_within_limits};
 
 const GROUP_V4: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const GROUP_V6: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0xfb);
@@ -365,7 +365,7 @@ pub async fn browse(service_type: &str, ifaces: &[Iface], timeout: Duration) -> 
             break;
         }
     }
-    let (cpa, other): (Vec<_>, Vec<_>) = collector.discovered.into_iter().partition(|g| g.product == PRODUCT_CPA);
+    let (cpa, other): (Vec<_>, Vec<_>) = collector.discovered.into_iter().partition(|g| g.product == PRODUCT);
     Ok(cpa.into_iter().chain(other).collect())
 }
 

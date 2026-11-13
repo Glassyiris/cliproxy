@@ -13,7 +13,7 @@ The maintainer defaults B1-B9, C2, D1, D3 and F, and the pool-lifetime reading o
 
 | Subject | Status | Decision | Source |
 | --- | --- | --- | --- |
-| A1–A4 | Settled | Chat chunk base; `x_cook_router` JSON plus named events; one version; unknown fields/events reach egress intact. | Settled |
+| A1–A4 | Settled | Chat chunk base; `x_ck` JSON plus named events; one version; unknown fields/events reach egress intact. | Settled |
 | Conversion | Settled | Every ingress/egress converts, including same-protocol; replace pairwise paths without compatibility shims. | Settled |
 | Non-SSE | Settled | Custom-data chunks ≤50 KB; collection delay ≤100 ms. | Settled; `crates/AGENTS.md:25` |
 | Storage | Settled | mmap files, fixed blocks, positions only; no heap storage of stream data. | Settled; `crates/AGENTS.md:24` |
@@ -50,7 +50,7 @@ The maintainer defaults B1-B9, C2, D1, D3 and F, and the pool-lifetime reading o
 ### 3.1 Framing and base chunk
 
 Every record is UTF-8 SSE: optional `event: NAME\n`, optional `id: SEQUENCE\n`, exactly one `data: JSON\n`, then `\n`.
-The unnamed/default event is a Chat chunk; extension event names start `x_cook_router.`. Emit LF; boundary parsers accept LF, CRLF and CR.
+The unnamed/default event is a Chat chunk; extension event names start `x_ck.`. Emit LF; boundary parsers accept LF, CRLF and CR.
 Ingress SSE joins multiple `data:` lines with LF, observes empty-event boundaries, and validates text across fragmented network reads.
 Internal JSON has no literal newlines outside strings, duplicate object keys or non-finite numbers. Reject ambiguous duplicate-key input rather than silently selecting a value.
 An external event's `id`, `retry`, comments and unrecognized SSE fields are preserved in `X.source.sse`; internal SSE `id`, when present, equals `X.seq`.
@@ -62,9 +62,9 @@ ChatEvent = {
   choices: [{index: uint, delta: object, finish_reason: string|null,
              logprobs?: object|null, ...unknown_choice_fields}],
   usage?: ChatUsage, system_fingerprint?: string|null, service_tier?: string,
-  x_cook_router: X, ...unknown_chat_fields
+  x_ck: X, ...unknown_chat_fields
 }
-NamedEvent = {x_cook_router: X, ...payload_fields_from_the_registry}
+NamedEvent = {x_ck: X, ...payload_fields_from_the_registry}
 ```
 
 `id` is the response identifier, not the gateway request identifier; preserve a supplied value, synthesize only when absent.
@@ -74,7 +74,7 @@ One canonical Chat event carries at most one choice and one item/block/tool delt
 Usage-only/base-metadata chunks may have `choices: []`. Choice-level `logprobs` may accompany text/refusal or stand alone with `delta: {}` and `finish_reason: null`; preserve the choice index and supplied item/block correlation without fabricating text or opening a text block.
 A finish-only chunk has `delta: {}` and a non-null `finish_reason`; native reasons remain separately available.
 
-### 3.2 The `x_cook_router` object
+### 3.2 The `x_ck` object
 
 `X` denotes this object; `?` denotes absence allowed, not implicit null. Integers used for counters are unsigned 64-bit unless specified otherwise.
 Local identifiers are ASCII strings of at most 64 bytes; preserve unrestricted provider identifiers separately in `source.ids`.
@@ -109,7 +109,7 @@ Every row inherits `X`; fields without `?` are mandatory. “Required” in sche
 Native annotation/grounding/code/context payloads remain boundary-only data; supported content and operation semantics use §4 schemas, not protocol-specific body inspection by internal consumers.
 The registry is closed for core behavior, open for opaque carriage: an unrecognized name is preserved under §3.7, not executed.
 
-| Event suffix after `x_cook_router.` | Payload schema | Correlation and purpose |
+| Event suffix after `x_ck.` | Payload schema | Correlation and purpose |
 | --- | --- | --- |
 | `request.start` | `{operation: string}` | Begins the request document defined in §4. |
 | `request.field` | `{pointer: string, value: JSON}` | Sets one complete field of that logical document; no duplicate path assignment. |
@@ -180,7 +180,7 @@ For Claude, inclusive input = uncached input + cache read + cache creation; do n
 Derive `total_tokens` only from known inclusive `input_tokens` and `output_tokens`; derive Claude inclusive input only when uncached, cache-read and cache-creation counts are all known. Never infer an absent operand as zero. Retain disagreeing provider totals with a content-free diagnostic.
 A partial source usage update replaces the fields it supplies in the retained snapshot; it does not add them. Missing fields retain prior known values for that attempt/scope.
 Emit the resulting snapshot. A repeated or corrected snapshot replaces the previous one; accounting never sums successive snapshots or their Chat projections.
-If a Chat chunk contains native `usage`, publish its canonical snapshot once and treat the chunk field only as an egress projection; account only `x_cook_router.usage`.
+If a Chat chunk contains native `usage`, publish its canonical snapshot once and treat the chunk field only as an egress projection; account only `x_ck.usage`.
 Account each routing attempt independently, including failed attempts when usage is known; bill/record no duplicate client-egress observation. A count_tokens result is never billed as generated output.
 
 ### 3.6 Ordering, termination and commitment
@@ -206,7 +206,7 @@ Suppress transport keepalives and headers that would start a success response be
 Preserve unknown JSON members recursively, including array order, scalar type, null versus absence and unrecognized enums; retention is semantic, not original JSON whitespace.
 Known Chat fields remain native; other fields live in `X.original` with source pointer/correlation. Do not duplicate known content in a whole-body shadow copy.
 Unknown SSE events become `opaque` with source name, payload and SSE fields; valid non-JSON SSE data is a text value. Unsupported internal version is an error, not an unknown event.
-A wire field named `x_cook_router` is untrusted source data: retain it in `original`, never interpret it as gateway control. Only the trusted internal boundary accepts this grammar.
+A wire field named `x_ck` is untrusted source data: retain it in `original`, never interpret it as gateway control. Only the trusted internal boundary accepts this grammar.
 If replay metadata is explicitly accepted by a client codec, validate its version and correlation; it cannot set trusted request IDs, routing attempts, resource limits or authorization.
 Unknown fields and events always reach the egress encoder intact. That encoder writes them out where the destination grammar has a place for them (original location, native equivalent or defined extension carrier), and otherwise drops them with a content-free debug log naming field/event, destination and reason.
 Known normalized mutations, including deletion, win over stale preserved values; never inject source-specific options into an unrelated provider's request root.
@@ -215,9 +215,9 @@ B7/B9 response projections occur inside the egress encoder after receipt: select
 
 ## 4. Internal request
 
-The logical request is a Chat-based document plus `x_cook_router`, with typed content and structured historical tool input as specified below; it is a view over mmap positions, not a heap `Value` tree or buffered body.
+The logical request is a Chat-based document plus `x_ck`, with typed content and structured historical tool input as specified below; it is a view over mmap positions, not a heap `Value` tree or buffered body.
 `request.field` uses absolute JSON pointers into this document. Emit parent containers as empty objects/arrays before their child fields; arrays use consecutive numeric indexes.
-The reference spelling is `{type: "x_cook_router_media", media_id: string, value_kind: "bytes"|"utf8"}`. Egress resolves only references registered by trusted ingress at the exact document position in this stream's own media table, never by JSON shape or client-supplied `X.media`; literal look-alike objects pass through as data.
+The reference spelling is `{type: "x_ck_media", media_id: string, value_kind: "bytes"|"utf8"}`. Egress resolves only references registered by trusted ingress at the exact document position in this stream's own media table, never by JSON shape or client-supplied `X.media`; literal look-alike objects pass through as data.
 Large strings use registered references with `mime: text/plain;charset=utf-8` and custom-data events; the logical value is concatenated decoded UTF-8. Encoders escape incrementally from positions after validation, not from a second accumulated body.
 Routing may select model/operation/destination early, but no upstream request is sent before the whole internal request, including final fields and media, passes syntax/schema and destination capability validation at `request.end`. Authentication remains outside the document.
 Capability validation covers supplied model/operation, roles and ordered content kinds, tool declarations/choice/call-result linkage, signed/encrypted replay, cache directives, sampling/token limits, output schema/modalities, session controls and mapped provider parameters. Unsupported members fail with 400; unknown unmapped fields follow §3.7. No unresolved field is exempt from the fence.

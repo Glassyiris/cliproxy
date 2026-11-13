@@ -8,7 +8,7 @@ use super::{
     split, strip_read_annotations_at,
 };
 
-const EXPORT_FORMAT: &str = "cook-router-config";
+const EXPORT_FORMAT: &str = "cooker-config";
 const EXPORT_VERSION: u64 = 1;
 
 #[derive(Debug)]

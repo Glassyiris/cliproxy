@@ -15,7 +15,7 @@ reference=/absolute/path/to/CLIProxyAPI   # at 6fecc6e, Go 1.26
 here=$PWD                                 # this directory
 crate=$(cd ../../.. && pwd)               # crates/cooker
 echo "{\"Replace\": {\"$reference/internal/tui/zz_render_fixture_test.go\": \"$here/render_fixture_test.go\"}}" > /tmp/tui-overlay.json
-(cd "$reference" && CPA_FIXTURE_IN="$here/cases.json" CPA_FIXTURE_OUT="$crate/tests/fixtures/tui_go.json" \
+(cd "$reference" && CK_FIXTURE_IN="$here/cases.json" CK_FIXTURE_OUT="$crate/tests/fixtures/tui_go.json" \
   go test -count=1 -overlay /tmp/tui-overlay.json -run '^TestZZRenderFixture$' ./internal/tui)
 ```
 

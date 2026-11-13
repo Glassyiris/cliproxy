@@ -18,7 +18,7 @@ for (const base of process.argv.slice(2)) {
       ...init,
       headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
     });
-    return { status: r.status, server: r.headers.get("x-cook-version"), body: await r.json() };
+    return { status: r.status, server: r.headers.get("x-ck-version"), body: await r.json() };
   };
   const files = (await api("/credentials")).body.files;
   const cred = files.find((f) => f.name === "claude-research.json");

@@ -107,7 +107,7 @@ try {
           body = { cancelled: true };
         }
         else throw new Error(`Unexpected management request: ${path}`);
-        return route.fulfill({ json: body, headers: { "X-Cook-Commit": "fixture" } });
+        return route.fulfill({ json: body, headers: { "X-Ck-Commit": "fixture" } });
       }
       if (request.pathname.endsWith("/oauth-guide"))
         return route.fulfill({ contentType: "text/html", body: "<h1>Sign-in guide</h1>" });

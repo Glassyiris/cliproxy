@@ -3,7 +3,7 @@
 //! The recording is untouched; replay drops its `oauth.auth-dir` line (`without_auth_dir`) and
 //! stages the recorded credentials in `Config::auth_dir`, since the setting no longer exists.
 //! Where Go answers an empty 404 because no management key exists, replay expects
-//! cooker's 403 naming COOK_MANAGEMENT_PASSWORD: a deliberate divergence from Go
+//! cooker's 403 naming CK_MANAGEMENT_PASSWORD: a deliberate divergence from Go
 //! (owner ruling 2026-11-13).
 //! Go also sends and exposes `X-CPA-SUPPORT-PLUGIN`; cooker has no plugins, so replay
 //! drops that header from the recorded answers and from their CORS exposure list: a
@@ -490,7 +490,7 @@ mod access {
                 }
                 let res = req.send().await.unwrap();
                 let status = res.status().as_u16();
-                let version = res.headers().contains_key("x-cook-version");
+                let version = res.headers().contains_key("x-ck-version");
                 let body = res.text().await.unwrap();
                 assert_eq!(status, step["status"], "{name}[{i}] {body}");
                 if status != 200 {
@@ -571,7 +571,7 @@ mod routes {
                 }
                 if name == "availability_follows_secret_across_reloads" && step["status"] == 404 {
                     // Go hides management behind an empty 404 while no key exists. cooker
-                    // answers 403 naming COOK_MANAGEMENT_PASSWORD instead: a deliberate change
+                    // answers 403 naming CK_MANAGEMENT_PASSWORD instead: a deliberate change
                     // (owner ruling 2026-11-13), so the recording is untouched and these steps
                     // take the recorded 403 refusal's headers.
                     let refusal = &fixture()["routes"]
@@ -582,7 +582,7 @@ mod routes {
                         .unwrap()["steps"][0];
                     step["status"] = 403.into();
                     step["resp_body"] =
-                        r#"{"error":"management key not set: start the server with COOK_MANAGEMENT_PASSWORD"}"#.into();
+                        r#"{"error":"management key not set: start the server with CK_MANAGEMENT_PASSWORD"}"#.into();
                     step["resp_headers"] = refusal["resp_headers"].clone();
                 }
                 if let Some(update) = step["update"].as_str() {
@@ -608,16 +608,16 @@ mod routes {
                     "Access-Control-Allow-Methods",
                     "Access-Control-Allow-Headers",
                     "Access-Control-Expose-Headers",
-                    "X-Cook-Support-Plugin",
-                    "X-Cook-Commit",
-                    "X-Cook-Build-Date",
+                    "X-Ck-Support-Plugin",
+                    "X-Ck-Commit",
+                    "X-Ck-Build-Date",
                 ] {
                     if let Some(v) = res.headers().get(name) {
                         headers.insert(name.into(), v.to_str().unwrap().into());
                     }
                 }
-                if res.headers().contains_key("x-cook-version") {
-                    headers.insert("X-Cook-Version".into(), "present".into());
+                if res.headers().contains_key("x-ck-version") {
+                    headers.insert("X-Ck-Version".into(), "present".into());
                 }
                 assert!(!res.headers().contains_key("allow"), "{name}[{i}]: gin sends no Allow");
                 let body = res.text().await.unwrap();
@@ -636,10 +636,10 @@ mod routes {
                 // Go's recording names the version headers X-CPA-*.
                 let rename = |s: &str| {
                     [
-                        ("X-CPA-VERSION", "X-Cook-Version"),
-                        ("X-CPA-COMMIT", "X-Cook-Commit"),
-                        ("X-CPA-BUILD-DATE", "X-Cook-Build-Date"),
-                        ("X-CPA-TRACE-ID", "X-Cook-Trace-Id"),
+                        ("X-CPA-VERSION", "X-Ck-Version"),
+                        ("X-CPA-COMMIT", "X-Ck-Commit"),
+                        ("X-CPA-BUILD-DATE", "X-Ck-Build-Date"),
+                        ("X-CPA-TRACE-ID", "X-Ck-Trace-Id"),
                     ]
                     .iter()
                     .fold(s.to_owned(), |s, (old, new)| s.replace(old, new))
@@ -664,7 +664,7 @@ mod routes {
                     && GUARD_REFUSALS
                         .iter()
                         .any(|m| step["resp_body"].as_str().unwrap().contains(m));
-                if headers.contains_key("X-Cook-Version") && !guard_refused {
+                if headers.contains_key("X-Ck-Version") && !guard_refused {
                     want.insert("Cache-Control".into(), "no-store".into());
                 }
                 assert_eq!(Value::Object(headers), Value::Object(want), "{name}[{i}] headers");

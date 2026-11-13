@@ -22,7 +22,7 @@ fn working_dir_applies_before_dotenv_config_and_log_paths() {
         "config-version: 8\nserver:\n  port: 0\nobservability:\n  logs:\n    logging-to-file: true\n",
     )
     .unwrap();
-    std::fs::write(work.join(".env"), "COOK_WRITABLE_PATH=from-dotenv\n").unwrap();
+    std::fs::write(work.join(".env"), "CK_WRITABLE_PATH=from-dotenv\n").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_cooker"))
         .args([
             "--local-model",

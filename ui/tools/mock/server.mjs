@@ -29,7 +29,7 @@ const { values: opt } = parseArgs({
 const N = Math.max(0, Number(opt.accounts));
 const CHURN = Number(opt.churn);
 const KEY = opt.key;
-const VERSION = "cook-router-mock";
+const VERSION = "cooker-mock";
 // Three days before start, so the dashboard shows a past build in every time zone.
 const BUILD_DATE = new Date(Date.now() - 3 * 86_400_000).toISOString();
 const BUCKET_MS = 600_000;
@@ -539,7 +539,7 @@ on("GET", "/admin/v1/export", (ctx) => {
   const include = ctx.q.get("include_secrets");
   if (include !== null && !["true", "false"].includes(include)) return fail(400, "invalid_query");
   const items = resources(config).map((resource) => include === "true" ? resource : shownResource(resource));
-  return ok({ format: "cook-router-config", version: 1, revision: configVersion, resources: items });
+  return ok({ format: "cooker-config", version: 1, revision: configVersion, resources: items });
 });
 function validOperation(operation) {
   if (!operation) return false;
@@ -878,22 +878,22 @@ const server = http.createServer((req, res) => {
       if (url.pathname === "/healthz") return (status = 200), send(200, { "Content-Type": "application/json" }, '{"status":"ok"}');
       if (url.pathname === "/v1/models" && req.method === "GET") return (status = clientModels(req, send));
       if (![PREFIX, "/admin/v1"].some((prefix) => url.pathname.startsWith(prefix + "/") || url.pathname === prefix)) return send(404, {}, "");
-      const headers = { "X-Cook-Version": VERSION, "X-Cook-Commit": "0000000", "X-Cook-Build-Date": BUILD_DATE, "Cache-Control": "no-store", "X-Cook-Revision": String(configVersion), "X-Cook-Published-Revision": String(configVersion) };
+      const headers = { "X-Ck-Version": VERSION, "X-Ck-Commit": "0000000", "X-Ck-Build-Date": BUILD_DATE, "Cache-Control": "no-store", "X-Ck-Revision": String(configVersion), "X-Ck-Published-Revision": String(configVersion) };
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
       const auth = req.headers.authorization || "";
       const given = /^bearer /i.test(auth) ? auth.slice(7) : "";
       // The dashboard session, as the server does it (crates/ck-server/src/management/session.rs):
-      // the key is exchanged for a random id in `cook_router_session`; cookie requests need the
+      // the key is exchanged for a random id in `cooker_session`; cookie requests need the
       // dashboard header; sign-out revokes the id on the server.
-      const id = /(?:^|;\s*)cook_router_session=([^;]+)/.exec(req.headers.cookie || "")?.[1];
+      const id = /(?:^|;\s*)cooker_session=([^;]+)/.exec(req.headers.cookie || "")?.[1];
       const cookie = id !== undefined && dashboardSessions.has(id);
-      const dashboard = req.headers["x-cook-dashboard"] === "1";
+      const dashboard = req.headers["x-ck-dashboard"] === "1";
       if (url.pathname === `${PREFIX}/session`) {
         if (req.method !== "POST" && !dashboard) return (status = 403), send(403, headers, "");
         if (req.method === "GET") return (status = cookie ? 204 : 401), send(status, headers, "");
         if (req.method === "DELETE") {
           if (id !== undefined) dashboardSessions.delete(id);
-          return (status = 204), send(204, { ...headers, "Set-Cookie": "cook_router_session=; Path=/; Max-Age=0" }, "");
+          return (status = 204), send(204, { ...headers, "Set-Cookie": "cooker_session=; Path=/; Max-Age=0" }, "");
         }
         if (given !== KEY) return (status = 401), send(401, headers, "");
         let body;
@@ -906,7 +906,7 @@ const server = http.createServer((req, res) => {
         dashboardSessions.add(fresh);
         const age = body.remember ? 30 * 86400 : 7 * 86400;
         const path = typeof body.path === "string" && body.path.startsWith("/") ? body.path : "/";
-        return (status = 204), send(204, { ...headers, "Set-Cookie": `cook_router_session=${fresh}; Path=${path}; Max-Age=${age}; HttpOnly; SameSite=Strict` }, "");
+        return (status = 204), send(204, { ...headers, "Set-Cookie": `cooker_session=${fresh}; Path=${path}; Max-Age=${age}; HttpOnly; SameSite=Strict` }, "");
       }
       if (!given && cookie && !dashboard) return (status = 403), send(403, headers, "");
       if (!given && !cookie) return (status = 401), send(401, { ...headers, "Content-Type": "application/json; charset=utf-8" }, '{"error":"missing management key"}');
@@ -921,7 +921,7 @@ const server = http.createServer((req, res) => {
           const type = out.type === "json" ? "application/json; charset=utf-8" : out.type;
           return send(out.status, { ...headers, "Content-Type": type, ...out.headers }, out.raw);
         }
-        return send(out.status, { ...headers, ETag: `"${configVersion}"`, "X-Cook-Revision": String(configVersion), "X-Cook-Published-Revision": String(configVersion), "Content-Type": "application/json; charset=utf-8", ...out.headers }, JSON.stringify(out.body));
+        return send(out.status, { ...headers, ETag: `"${configVersion}"`, "X-Ck-Revision": String(configVersion), "X-Ck-Published-Revision": String(configVersion), "Content-Type": "application/json; charset=utf-8", ...out.headers }, JSON.stringify(out.body));
       }
       send(404, headers, "");
     } catch (e) {

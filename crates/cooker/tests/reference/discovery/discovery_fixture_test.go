@@ -224,7 +224,7 @@ func TestZZDiscoveryFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(os.Getenv("CPA_FIXTURE_OUT"), append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(os.Getenv("CK_FIXTURE_OUT"), append(data, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

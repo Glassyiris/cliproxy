@@ -14,7 +14,7 @@
 //! live ids never reach the database snapshot or its backups. Publishing a different
 //! `management.secret-key`, or removing it, drops every record, so restoring the old secret
 //! later revives none; a sign-in checked against a secret replaced meanwhile gets no session.
-//! `COOK_MANAGEMENT_PASSWORD` and the local password are read once at startup and cannot change
+//! `CK_MANAGEMENT_PASSWORD` and the local password are read once at startup and cannot change
 //! while sessions live.
 //!
 //! The cookie is `SameSite=Strict`, so browsers attach it to same-site requests only. Every
@@ -44,7 +44,7 @@ use sha2::{Digest, Sha256};
 use super::access::{provided_key, version_headers};
 use super::{Management, json_error};
 
-pub(crate) const COOKIE: &str = "cook_router_session";
+pub(crate) const COOKIE: &str = "cooker_session";
 const SHORT: Duration = Duration::from_secs(7 * 24 * 3600);
 const LONG: Duration = Duration::from_secs(30 * 24 * 3600);
 /// `{"remember": true, "path": "/..."}` with room to spare.
@@ -53,7 +53,7 @@ const PATH_LIMIT: usize = 256;
 pub(crate) const EXPIRED: &str = "invalid or expired session";
 pub(crate) const CROSS_SITE: &str = "cross-site request refused";
 /// The header the dashboard sends with every management request; see the module comment.
-pub(crate) const DASHBOARD: &str = "X-Cook-Dashboard";
+pub(crate) const DASHBOARD: &str = "X-Ck-Dashboard";
 pub(crate) const NOT_DASHBOARD: &str = "session cookie accepted only from the dashboard";
 const SECRET_CHANGED: &str = "management key changed during sign-in; sign in again";
 
@@ -410,12 +410,10 @@ mod tests {
     #[test]
     fn cookie_values_are_read_from_every_cookie_header() {
         let mut headers = HeaderMap::new();
-        headers.append(header::COOKIE, "theme=dark; cook_router_session=a".parse().unwrap());
+        headers.append(header::COOKIE, "theme=dark; cooker_session=a".parse().unwrap());
         headers.append(
             header::COOKIE,
-            "cook_router_sessionx=b;cook_router_session=c; cook_router_session="
-                .parse()
-                .unwrap(),
+            "cooker_sessionx=b;cooker_session=c; cooker_session=".parse().unwrap(),
         );
         assert_eq!(cookie_ids(&headers), ["a", "c"]);
     }
@@ -466,9 +464,9 @@ mod tests {
         };
         // An image's GET over plain HTTP: no fetch metadata, no Origin.
         assert_eq!(refused(&[("host", "127.0.0.1:8317")]), Some(NOT_DASHBOARD));
-        assert_eq!(refused(&[("x-cook-dashboard", "1")]), None);
+        assert_eq!(refused(&[("x-ck-dashboard", "1")]), None);
         assert_eq!(
-            refused(&[("x-cook-dashboard", "1"), ("sec-fetch-site", "same-site")]),
+            refused(&[("x-ck-dashboard", "1"), ("sec-fetch-site", "same-site")]),
             Some(CROSS_SITE)
         );
     }

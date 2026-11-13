@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "cooker")]
 pub struct Cli {
-    /// Config database; defaults to COOK_DB or cook.db beside --config.
+    /// Config database; defaults to CK_DB or cook.db beside --config.
     #[arg(long, global = true, default_value = "")]
     db: String,
     #[arg(long, global = true, default_value = "config.yaml")]
@@ -271,7 +271,7 @@ mod tests {
         let expected = original.load().unwrap().config;
         let text = export(&original, true).unwrap();
         let document: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(document["format"], "cook-router-config");
+        assert_eq!(document["format"], "cooker-config");
         let restored = ConfigStore::memory();
         restored
             .replace(import_config(&text).unwrap(), "cli", "restore", false)

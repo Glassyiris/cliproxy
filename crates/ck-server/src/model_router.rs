@@ -1381,7 +1381,7 @@ mod tests {
         Catalog::new(0, &models)
     }
 
-    /// Status, `X-Cook-Routed-Model`, body and `X-Cook-Routed-Provider` of one Chat
+    /// Status, `X-Ck-Routed-Model`, body and `X-Ck-Routed-Provider` of one Chat
     /// Completions request.
     async fn chat(url: &str, body: serde_json::Value) -> (u16, String, String, String) {
         let res = wreq::Client::new()
@@ -1399,7 +1399,7 @@ mod tests {
                 .unwrap_or_default()
                 .to_owned()
         };
-        let (routed, provider) = (header("x-cook-routed-model"), header("x-cook-routed-provider"));
+        let (routed, provider) = (header("x-ck-routed-model"), header("x-ck-routed-provider"));
         (res.status().as_u16(), routed, res.text().await.unwrap(), provider)
     }
 

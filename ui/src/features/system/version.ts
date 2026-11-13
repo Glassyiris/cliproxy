@@ -1,4 +1,4 @@
-// X-Cook-Version reads "cooker-1.2.3"; a release tag reads "v1.2.3".
+// X-Ck-Version reads "cooker-1.2.3"; a release tag reads "v1.2.3".
 const bare = (version: string) => version.replace(/^cooker[/-]/, "").replace(/^v/, "");
 
 const parts = (version: string) => {

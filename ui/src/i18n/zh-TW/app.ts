@@ -6,7 +6,7 @@ export default {
 
     "app.signIn.managementKey": "管理金鑰",
     "app.signIn.help":
-      "為 {setting} 設定的明文，或 COOK_MANAGEMENT_PASSWORD。管理金鑰以雜湊形式儲存在設定資料庫中。",
+      "為 {setting} 設定的明文，或 CK_MANAGEMENT_PASSWORD。管理金鑰以雜湊形式儲存在設定資料庫中。",
     "app.signIn.heading": "連線到此伺服器",
     "app.signIn.checking": "正在檢查 {host}…",
     "app.signIn.restoring": "正在連線到 {host}…",
@@ -21,7 +21,7 @@ export default {
     "app.signIn.connecting": "正在連線…",
     "app.signIn.remember": "在這台裝置記住我",
     "app.signIn.apiOff":
-      "管理 API 未開啟。請在設定資料庫中設定 management.secret-key，或用 COOK_MANAGEMENT_PASSWORD 啟動伺服器。",
+      "管理 API 未開啟。請在設定資料庫中設定 management.secret-key，或用 CK_MANAGEMENT_PASSWORD 啟動伺服器。",
     "app.signIn.remoteDisabled":
       "此伺服器只接受本機開啟的面板。請在伺服器所在的機器上開啟，或在設定資料庫中啟用 management.allow-remote 並使用強金鑰。",
     "app.signIn.banned": "{message}。此位址輸錯金鑰的次數過多。",

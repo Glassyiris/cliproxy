@@ -264,7 +264,7 @@ async fn quota_probe_fetch_matches_go() {
                     .get("content-type")
                     .map(|v| v.to_str().unwrap().to_owned())
                     .unwrap_or_default();
-                let version = res.headers().contains_key("x-cook-version");
+                let version = res.headers().contains_key("x-ck-version");
                 let text = res.text().await.unwrap();
                 serde_json::json!({
                     "status": status,

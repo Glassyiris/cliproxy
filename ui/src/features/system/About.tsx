@@ -62,7 +62,7 @@ function CommitValue({ commit }: { commit: string }) {
 }
 
 function RemoteManagement({ config }: { config: Config }) {
-  // The config cannot show the effective policy: COOK_MANAGEMENT_PASSWORD allows remote access too.
+  // The config cannot show the effective policy: CK_MANAGEMENT_PASSWORD allows remote access too.
   if (readPath(config, "management/allow-remote", false))
     return <StatusLamp status="ready" label={t("system.config.remoteAllowed")} />;
   return (
@@ -128,7 +128,7 @@ function ReleaseResult({ latest }: { latest: UseQueryResult<string> }) {
     return (
       <Banner
         status="info"
-        title={t("system.updates.disabled", { setting: "COOK_NO_UPDATE_CHECK=1" })}
+        title={t("system.updates.disabled", { setting: "CK_NO_UPDATE_CHECK=1" })}
       />
     );
   // The server answers 502 invalid_response when the repository has no release to redirect to.

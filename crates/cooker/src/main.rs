@@ -19,13 +19,13 @@ use ck_server::credential_store::CredentialDb;
 use ck_server::listener::bind;
 use clap::{ArgAction, Parser};
 
-/// Same strings as the management `X-Cook-*` headers.
+/// Same strings as the management `X-Ck-*` headers.
 const VERSION: &str = concat!("cooker-", env!("CARGO_PKG_VERSION"));
-const COMMIT: &str = match option_env!("COOK_COMMIT") {
+const COMMIT: &str = match option_env!("CK_COMMIT") {
     Some(v) => v,
     None => "none",
 };
-const BUILD_DATE: &str = match option_env!("COOK_BUILD_DATE") {
+const BUILD_DATE: &str = match option_env!("CK_BUILD_DATE") {
     Some(v) => v,
     None => "unknown",
 };
@@ -43,7 +43,7 @@ struct Args {
     /// later starts do not read it.
     #[arg(long, default_value = "")]
     config: String,
-    /// The config database (default: cook.db beside the config file, or COOK_DB).
+    /// The config database (default: cook.db beside the config file, or CK_DB).
     #[arg(long, default_value = "")]
     db: String,
     /// Write process logs to this file (10 MiB rotation), without a shell wrapper.
@@ -85,7 +85,7 @@ struct Args {
     /// Login to Meta using OAuth
     #[arg(long)]
     meta_login: bool,
-    /// Discover local AI gateways and CPA instances on the LAN
+    /// Discover local AI gateways and cooker instances on the LAN
     #[arg(long)]
     discover: bool,
     /// Timeout in seconds for LAN discovery (default 3s)
@@ -153,12 +153,11 @@ struct DiscoverArgs {
     exclude: Vec<String>,
 }
 
-/// The environment variable an online command reads its management key from; the
-/// install script's `keys.env` uses the same name.
-const MANAGEMENT_KEY_ENV: &str = "COOK_ROUTER_MANAGEMENT_KEY";
+/// The environment variable an online command reads its management key from.
+const MANAGEMENT_KEY_ENV: &str = "CK_MANAGEMENT_KEY";
 
 /// The management key for an online command: `--password` when given, else
-/// `COOK_ROUTER_MANAGEMENT_KEY`, else a prompt that does not echo on an interactive
+/// `CK_MANAGEMENT_KEY`, else a prompt that does not echo on an interactive
 /// terminal. Non-interactive callers without either send no key, as before.
 pub(crate) fn management_key(explicit: &str) -> anyhow::Result<String> {
     use std::io::IsTerminal as _;
@@ -309,12 +308,12 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-/// The config database: `--db`, else `COOK_DB`, else `cook.db` beside the config file.
+/// The config database: `--db`, else `CK_DB`, else `cook.db` beside the config file.
 fn db_path(flag: &str, config_file: &Path) -> PathBuf {
     if !flag.trim().is_empty() {
         return PathBuf::from(flag);
     }
-    if let Some(env) = std::env::var_os("COOK_DB").filter(|v| !v.is_empty()) {
+    if let Some(env) = std::env::var_os("CK_DB").filter(|v| !v.is_empty()) {
         return PathBuf::from(env);
     }
     config_file
@@ -332,7 +331,7 @@ enum FirstImport {
     /// The default `./config.yaml`: a fresh volume, or a blank file, starts with defaults and
     /// listens on `DEFAULT_PORT`. `Config::parse` itself still leaves an omitted port at 0.
     Defaults,
-    /// `COOK_DEPLOY=cloud`: an absent or blank file initializes an empty config, and the
+    /// `CK_DEPLOY=cloud`: an absent or blank file initializes an empty config, and the
     /// server waits for one.
     Cloud,
 }
@@ -451,7 +450,7 @@ fn main() -> anyhow::Result<()> {
     let loaded = if discover_mode || remote_client {
         None
     } else {
-        let first = if std::env::var("COOK_DEPLOY").is_ok_and(|v| v == "cloud") {
+        let first = if std::env::var("CK_DEPLOY").is_ok_and(|v| v == "cloud") {
             FirstImport::Cloud
         } else if args.config.is_empty() {
             FirstImport::Defaults
@@ -590,7 +589,7 @@ async fn run(args: Args, loaded: Option<(Arc<ConfigStore>, Config)>) -> anyhow::
         return Ok(());
     }
     let (config_store, mut config) = loaded.context("local config was not initialized")?;
-    let cloud = std::env::var("COOK_DEPLOY").is_ok_and(|v| v == "cloud");
+    let cloud = std::env::var("CK_DEPLOY").is_ok_and(|v| v == "cloud");
     let config_present = !cloud || cloud_config_present(&config_store, &config);
     let backend = initialize_credentials(config_store.clone(), &mut config)?;
     // Go ConfigureLogOutput and SetLogLevel, before any login command.
@@ -2593,7 +2592,7 @@ mod tests {
 
     /// Go `TestSIWCManagementRouteAccessControl`: the v8 SIWC bind route answers its
     /// own validation once authorized, 401 without the key, and 403 naming
-    /// COOK_MANAGEMENT_PASSWORD when no key exists (Go answers an empty 404; changed on
+    /// CK_MANAGEMENT_PASSWORD when no key exists (Go answers an empty 404; changed on
     /// purpose, owner ruling 2026-11-13).
     #[tokio::test]
     async fn siwc_bind_route_follows_management_availability() {
@@ -2616,7 +2615,7 @@ mod tests {
             };
             let rt = Arc::new(ck_server::testing::runtime(config.clone(), Vec::new(), executors));
             let options = ck_server::management::Options {
-                // COOK_MANAGEMENT_PASSWORD; with no config secret it alone decides availability.
+                // CK_MANAGEMENT_PASSWORD; with no config secret it alone decides availability.
                 management_password: Some(if enabled {
                     "fake-management-only".into()
                 } else {
@@ -2647,7 +2646,7 @@ mod tests {
                 400 => assert_eq!(&body[..], br#"{"error":"name is required"}"#, "{name}"),
                 403 => assert_eq!(
                     &body[..],
-                    br#"{"error":"management key not set: start the server with COOK_MANAGEMENT_PASSWORD"}"#,
+                    br#"{"error":"management key not set: start the server with CK_MANAGEMENT_PASSWORD"}"#,
                     "{name}"
                 ),
                 _ => {}

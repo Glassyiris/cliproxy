@@ -188,13 +188,13 @@ func render(c renderCase) []string {
 }
 
 func TestZZRenderFixture(t *testing.T) {
-	out := os.Getenv("CPA_FIXTURE_OUT")
+	out := os.Getenv("CK_FIXTURE_OUT")
 	if out == "" {
-		t.Skip("CPA_FIXTURE_OUT not set")
+		t.Skip("CK_FIXTURE_OUT not set")
 	}
 	lipgloss.SetColorProfile(termenv.Ascii)
 	var cases []renderCase
-	data, err := os.ReadFile(os.Getenv("CPA_FIXTURE_IN"))
+	data, err := os.ReadFile(os.Getenv("CK_FIXTURE_IN"))
 	if err != nil {
 		t.Fatal(err)
 	}

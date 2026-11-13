@@ -5,7 +5,7 @@
 //!
 //! Order matters and is Go's: availability (404, empty body) -> version headers ->
 //! active ban (403) -> remote policy (403) -> missing secret (403) -> missing key
-//! (401, counted) -> local password -> COOK_MANAGEMENT_PASSWORD -> bcrypt (401, counted).
+//! (401, counted) -> local password -> CK_MANAGEMENT_PASSWORD -> bcrypt (401, counted).
 //! The fifth counted failure bans the client IP for 30 minutes. "Local" means the
 //! client IP text is exactly `127.0.0.1` or `::1`, after trusted-proxy resolution.
 //!
@@ -35,15 +35,15 @@ pub(super) const PURGE_EVERY: Duration = Duration::from_secs(3600);
 const MAX_IDLE: Duration = Duration::from_secs(2 * 3600);
 
 pub const VERSION: &str = concat!("cooker-", env!("CARGO_PKG_VERSION"));
-const COMMIT: &str = match option_env!("COOK_COMMIT") {
+const COMMIT: &str = match option_env!("CK_COMMIT") {
     Some(v) => v,
     None => "none",
 };
-const BUILD_DATE: &str = match option_env!("COOK_BUILD_DATE") {
+const BUILD_DATE: &str = match option_env!("CK_BUILD_DATE") {
     Some(v) => v,
     None => "unknown",
 };
-const EXPOSED_HEADERS: &str = "X-Cook-Trace-Id, X-Cook-Version, X-Cook-Commit, X-Cook-Build-Date, \
+const EXPOSED_HEADERS: &str = "X-Ck-Trace-Id, X-Ck-Version, X-Ck-Commit, X-Ck-Build-Date, \
 X-SERVER-VERSION, X-SERVER-BUILD-DATE, Location, Retry-After, ETag, \
 X-Request-Id, OpenAI-Request-Id";
 
@@ -115,7 +115,7 @@ impl Access {
         // Go: os.LookupEnv + TrimSpace; empty means unset.
         let raw: Vec<u8> = match options.management_password {
             Some(value) => value.into_bytes(),
-            None => env_bytes("COOK_MANAGEMENT_PASSWORD"),
+            None => env_bytes("CK_MANAGEMENT_PASSWORD"),
         };
         let env_secret = go_trim_space(&raw).to_vec();
         let local_password = options.local_password;
@@ -133,7 +133,7 @@ impl Access {
         }
     }
 
-    /// Go's reload rule: COOK_MANAGEMENT_PASSWORD keeps routes on; otherwise availability
+    /// Go's reload rule: CK_MANAGEMENT_PASSWORD keeps routes on; otherwise availability
     /// follows the config secret alone. A `--password` that enabled routes at startup
     /// no longer counts after the first reload, exactly as in server_reload.go, except
     /// in the standalone TUI. A changed secret ends every dashboard session.
@@ -319,9 +319,9 @@ pub(super) fn provided_key(headers: &HeaderMap) -> &[u8] {
 
 pub(super) fn version_headers(headers: &mut HeaderMap) {
     for (name, value) in [
-        ("X-Cook-Version", VERSION),
-        ("X-Cook-Commit", COMMIT),
-        ("X-Cook-Build-Date", BUILD_DATE),
+        ("X-Ck-Version", VERSION),
+        ("X-Ck-Commit", COMMIT),
+        ("X-Ck-Build-Date", BUILD_DATE),
     ] {
         headers.insert(name, HeaderValue::from_static(value));
     }
@@ -345,10 +345,10 @@ pub(crate) async fn owned(State(state): State<Arc<Management>>, req: Request, ne
     next.run(req).await
 }
 
-/// The refusal while no management key exists at all (no `COOK_MANAGEMENT_PASSWORD`, no
+/// The refusal while no management key exists at all (no `CK_MANAGEMENT_PASSWORD`, no
 /// `management.secret-key`, no standalone TUI password). CLIProxyAPI hid the routes behind an
 /// empty 404, which reads as a wrong URL; this names the setting that turns the API on.
-const KEY_NOT_SET: &str = "management key not set: start the server with COOK_MANAGEMENT_PASSWORD";
+const KEY_NOT_SET: &str = "management key not set: start the server with CK_MANAGEMENT_PASSWORD";
 
 /// Availability alone (the OAuth callback routes).
 pub(crate) async fn available(State(state): State<Arc<Management>>, req: Request, next: Next) -> Response {
@@ -468,7 +468,7 @@ pub(crate) fn cors_headers(response: &mut Response) {
     if admin {
         headers.append(
             header::ACCESS_CONTROL_EXPOSE_HEADERS,
-            HeaderValue::from_static("X-Cook-Revision, X-Cook-Published-Revision"),
+            HeaderValue::from_static("X-Ck-Revision, X-Ck-Published-Revision"),
         );
     }
 }

@@ -3,7 +3,7 @@
 # cooker whose Claude login is an OAuth subscription; it is not part of CI and it
 # spends real tokens (about 75k input tokens on Opus, most of them cache reads).
 #
-#   CPA_URL=http://127.0.0.1:8317 CPA_KEY=<client key> bench/claude-cache-live.sh [results.jsonl]
+#   CK_URL=http://127.0.0.1:8317 CK_KEY=<client key> bench/claude-cache-live.sh [results.jsonl]
 #
 # It streams one conversation through /v1/messages the way a coding client does (a
 # caller system prompt, tools, a long first user message, a tool call as the first
@@ -36,24 +36,24 @@
 # nothing. The key reaches curl on stdin, never on its command line, and is not printed;
 # curl ignores ~/.curlrc.
 #
-# Environment: CPA_URL (default http://127.0.0.1:8317), CPA_KEY (required), MODEL
+# Environment: CK_URL (default http://127.0.0.1:8317), CK_KEY (required), MODEL
 # (default claude-opus-5-5; a current model, since older ones put the caller prompt
 # before the document), IDLE_SECONDS (default 330, between 301 and 3300), DOC_LINES
 # (default 600, at least 300; about 30 tokens a line).
 set +x
 set -euo pipefail
 
-CPA_URL=${CPA_URL:-http://127.0.0.1:8317}
+CK_URL=${CK_URL:-http://127.0.0.1:8317}
 MODEL=${MODEL:-claude-opus-5-5}
 IDLE_SECONDS=${IDLE_SECONDS:-330}
 DOC_LINES=${DOC_LINES:-600}
 OUT=${1:-}
-: "${CPA_KEY:?set CPA_KEY to a client key of the server}"
+: "${CK_KEY:?set CK_KEY to a client key of the server}"
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 fail() { echo "$*" >&2; exit 2; }
-[[ $CPA_KEY != *$'\n'* && $CPA_KEY != *$'\r'* ]] || fail "CPA_KEY must be one line"
+[[ $CK_KEY != *$'\n'* && $CK_KEY != *$'\r'* ]] || fail "CK_KEY must be one line"
 # A shell variable from here on: curl, jq, sed and sleep do not inherit it.
-export -n CPA_KEY
+export -n CK_KEY
 if ! [[ $IDLE_SECONDS =~ ^[0-9]+$ ]] || ((IDLE_SECONDS <= 300 || IDLE_SECONDS > 3300)); then
   fail "IDLE_SECONDS must be between 301 and 3300: past the 5-minute TTL, inside the 1-hour one"
 fi
@@ -92,8 +92,8 @@ body() { # system, number of user turns
 send() { # label, system, turns
   local label=$1 events usage
   body "$2" "$3" >"$WORK/body.json" || return 1
-  if ! events=$(printf 'Authorization: Bearer %s\n' "$CPA_KEY" |
-    curl -q -sS -N --fail-with-body -H @- "$CPA_URL/v1/messages" \
+  if ! events=$(printf 'Authorization: Bearer %s\n' "$CK_KEY" |
+    curl -q -sS -N --fail-with-body -H @- "$CK_URL/v1/messages" \
       -H 'Content-Type: application/json' -H 'Anthropic-Version: 2023-06-01' \
       --data-binary "@$WORK/body.json"); then
     echo "$label: request failed:" >&2

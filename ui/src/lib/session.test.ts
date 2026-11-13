@@ -44,7 +44,7 @@ test("each refused sign-in names what to change, and leaves the tab signed out",
   assert.equal(
     await refusal(() =>
       Response.json(
-        { error: "management key not set: start the server with COOK_MANAGEMENT_PASSWORD" },
+        { error: "management key not set: start the server with CK_MANAGEMENT_PASSWORD" },
         { status: 403 },
       ),
     ),
@@ -183,7 +183,7 @@ test("a sign-in answered after a sign-out elsewhere ends the session it set", as
     `DELETE ${SESSION}`,
   ]);
   const revocation = server.sent[2];
-  assert.equal(revocation.headers["X-Cook-Dashboard"], "1");
+  assert.equal(revocation.headers["X-Ck-Dashboard"], "1");
   assert.equal(revocation.headers.Authorization, undefined);
   assert.deepEqual(heard, [], "the other tabs already signed out");
 });

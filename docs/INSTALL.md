@@ -9,7 +9,7 @@ The image runs as uid and gid 10001, exposes 8317, works in `/data` and runs `co
 ```sh
 mkdir -m 700 -p data
 sudo chown -R 10001:10001 data            # the container runs as uid and gid 10001
-docker run -d --name cooker -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e COOK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cooker:<version>
+docker run -d --name cooker -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e CK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cooker:<version>
 ```
 
 To build the image yourself, run `docker build -t cooker .` in a checkout and use `cooker` as the image name. The build compiles BoringSSL and needs about 2 GB of memory; on a small machine add `--build-arg BUILD_JOBS=1`.
@@ -25,9 +25,9 @@ access:
     - "PASTE-CLIENT-KEY"       # your tools send this key to the proxy
 ```
 
-Sign in at `http://127.0.0.1:8317/management.html` with the value of `COOK_MANAGEMENT_PASSWORD`, or with `management.secret-key` from the imported config. With neither, the server starts but every management request, including the dashboard sign-in, is refused with 403 ("management key not set: start the server with COOK_MANAGEMENT_PASSWORD"). Keep a private copy of the keys: SQLite stores a `management.secret-key` as a bcrypt hash. [CONFIGURATION.md](CONFIGURATION.md) explains the settings.
+Sign in at `http://127.0.0.1:8317/management.html` with the value of `CK_MANAGEMENT_PASSWORD`, or with `management.secret-key` from the imported config. With neither, the server starts but every management request, including the dashboard sign-in, is refused with 403 ("management key not set: start the server with CK_MANAGEMENT_PASSWORD"). Keep a private copy of the keys: SQLite stores a `management.secret-key` as a bcrypt hash. [CONFIGURATION.md](CONFIGURATION.md) explains the settings.
 
-Docker bridge requests are non-local. Setting `COOK_MANAGEMENT_PASSWORD` admits them; with only `management.secret-key`, the import also needs `management.allow-remote: true`. Publishing on `127.0.0.1` as above still keeps other machines out. Login and refresh state belongs to SQLite.
+Docker bridge requests are non-local. Setting `CK_MANAGEMENT_PASSWORD` admits them; with only `management.secret-key`, the import also needs `management.allow-remote: true`. Publishing on `127.0.0.1` as above still keeps other machines out. Login and refresh state belongs to SQLite.
 
 On a machine without a browser, such as a server you reach over SSH, keep the port published on `127.0.0.1` and open an SSH tunnel from your own computer, for example `ssh -L 8317:127.0.0.1:8317 you@server`, then open the dashboard address there. [Tailscale](MULTI-ACCOUNT.md#reach-the-proxy-from-other-machines) works too. Never listen on `0.0.0.0` without client keys.
 
@@ -92,8 +92,8 @@ Set up the database by hand:
    cooker --db ~/.cook-router/cook.db
    ```
 
-   `--db` overrides `COOK_DB`; without either the default is `cook.db` beside the config file (`./config.yaml` unless `--config` names another). `--config FILE` selects the file a first start imports and must exist. Without `--config`, a missing `./config.yaml` starts with the defaults on port 8317. Once the database exists, the server does not read or watch the file. Check `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
-3. Connect accounts from `/management.html`, or from a terminal through the running server with `--management-base-url http://127.0.0.1:8317` (it reads the management key from `COOK_ROUTER_MANAGEMENT_KEY` or asks for it) and one of `--claude-login`, `--codex-login`, `--codex-device-login`, `--antigravity-login`, `--kimi-login`, `--kimi-ai-login`, `--meta-login`, `--xai-login` or `--devin-login`. Import a Vertex service account with `--vertex-import key.json`. Add `--no-browser` on a machine without a browser. With the server stopped, the same flags with `--db ~/.cook-router/cook.db` write the database directly. Sign-ins and refresh tokens are saved in SQLite, not a watched directory.
+   `--db` overrides `CK_DB`; without either the default is `cook.db` beside the config file (`./config.yaml` unless `--config` names another). `--config FILE` selects the file a first start imports and must exist. Without `--config`, a missing `./config.yaml` starts with the defaults on port 8317. Once the database exists, the server does not read or watch the file. Check `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
+3. Connect accounts from `/management.html`, or from a terminal through the running server with `--management-base-url http://127.0.0.1:8317` (it reads the management key from `CK_MANAGEMENT_KEY` or asks for it) and one of `--claude-login`, `--codex-login`, `--codex-device-login`, `--antigravity-login`, `--kimi-login`, `--kimi-ai-login`, `--meta-login`, `--xai-login` or `--devin-login`. Import a Vertex service account with `--vertex-import key.json`. Add `--no-browser` on a machine without a browser. With the server stopped, the same flags with `--db ~/.cook-router/cook.db` write the database directly. Sign-ins and refresh tokens are saved in SQLite, not a watched directory.
 
 Change configuration through the dashboard or `/admin/v1`; old v0/v8 config endpoints are removed. `RUST_LOG=debug` enables detailed logging; the default is `info`.
 

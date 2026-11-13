@@ -16,9 +16,9 @@ cat > "$tmp/overlay.json" <<EOF
 }}
 EOF
 cd "$reference"
-WRITABLE_PATH="$tmp/state" CPA_FIXTURE_OUT="$fixtures/discovery_go.json" \
+WRITABLE_PATH="$tmp/state" CK_FIXTURE_OUT="$fixtures/discovery_go.json" \
   go test -count=1 -overlay "$tmp/overlay.json" -run '^TestZZDiscoveryFixture$' ./internal/discovery
-CPA_FIXTURE_OUT="$fixtures/discovery_cmd_go.json" \
+CK_FIXTURE_OUT="$fixtures/discovery_cmd_go.json" \
   go test -count=1 -overlay "$tmp/overlay.json" -run '^TestZZCmdFixture$' ./internal/cmd
-CPA_FIXTURE_OUT="$fixtures/discovery_main_go.json" \
+CK_FIXTURE_OUT="$fixtures/discovery_main_go.json" \
   go test -count=1 -overlay "$tmp/overlay.json" -run '^TestZZMainFixture$' ./cmd/server

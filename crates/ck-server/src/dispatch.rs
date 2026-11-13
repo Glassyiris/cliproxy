@@ -457,7 +457,7 @@ fn canonical_model_raw(model: &str) -> &str {
     }
 }
 
-/// Runs `call` and renders the result, adding Go's `X-Cook-Trace-Id` (selection time,
+/// Runs `call` and renders the result, adding Go's `X-Ck-Trace-Id` (selection time,
 /// the selected credential's auth index and a request ID) once a credential was picked.
 ///
 /// Non-stream generate calls run under Go's `StartNonStreamingKeepAlive`: when
@@ -514,7 +514,7 @@ where
                 None => {}
             }
             if let Some(value) = trace.header() {
-                response.headers_mut().insert("x-cook-trace-id", value);
+                response.headers_mut().insert("x-ck-trace-id", value);
             }
             // The model a model router chose, and the provider that served (cooker only).
             // Both are sent only when a router or `routing.providers` is in play, so a config
@@ -522,14 +522,14 @@ where
             let routed_model = trace.routed_model();
             let routed = routed_model.is_some() || rt.policy().providers.is_set();
             if let Some(value) = routed_model.and_then(|m| axum::http::HeaderValue::from_str(&m).ok()) {
-                response.headers_mut().insert("x-cook-routed-model", value);
+                response.headers_mut().insert("x-ck-routed-model", value);
             }
             if let Some(value) = trace
                 .routed_provider(&rt)
                 .filter(|_| routed)
                 .and_then(|p| axum::http::HeaderValue::from_str(&p).ok())
             {
-                response.headers_mut().insert("x-cook-routed-provider", value);
+                response.headers_mut().insert("x-ck-routed-provider", value);
             }
             response
         }
@@ -589,7 +589,7 @@ where
     let headers = response.headers_mut();
     // Go cpa_trace.go applies the trace ID when the first keep-alive commits headers.
     if let Some(value) = trace.header() {
-        headers.insert("x-cook-trace-id", value);
+        headers.insert("x-ck-trace-id", value);
     }
     response
 }
@@ -794,7 +794,7 @@ impl Trace {
         self
     }
 
-    /// The `X-Cook-Trace-Id` value of the credential selected so far.
+    /// The `X-Ck-Trace-Id` value of the credential selected so far.
     fn header(&self) -> Option<axum::http::HeaderValue> {
         let id = self
             .0

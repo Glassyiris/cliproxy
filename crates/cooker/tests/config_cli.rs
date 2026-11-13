@@ -83,7 +83,7 @@ fn import_validate_export_and_backup_share_the_selected_database() {
     assert!(full.contains("8345"));
     assert!(full.contains("fake-client-secret"));
     let exported: serde_json::Value = serde_json::from_str(&full).unwrap();
-    assert_eq!(exported["format"], "cook-router-config");
+    assert_eq!(exported["format"], "cooker-config");
     std::fs::write(dir.join("export.json"), &full).unwrap();
     success(cli(&dir, &["--db", "chosen.db", "config", "validate", "export.json"]));
     success(cli(&dir, &["--db", "restored.db", "config", "import", "export.json"]));
@@ -380,8 +380,8 @@ async fn online_import_uses_the_owner_without_local_fallback() {
             ],
         );
         match key {
-            Some(key) => command.env("COOK_ROUTER_MANAGEMENT_KEY", key),
-            None => command.env_remove("COOK_ROUTER_MANAGEMENT_KEY"),
+            Some(key) => command.env("CK_MANAGEMENT_KEY", key),
+            None => command.env_remove("CK_MANAGEMENT_KEY"),
         };
         command.stdin(std::process::Stdio::null()).output().unwrap()
     };
@@ -396,17 +396,17 @@ async fn online_import_uses_the_owner_without_local_fallback() {
         "the environment key authorizes the import"
     );
     assert_eq!(std::fs::read(dir.join("local.db")).unwrap(), local_before);
-    // Ambient selectors (COOK_DB, a config.yaml and .env in the working directory)
+    // Ambient selectors (CK_DB, a config.yaml and .env in the working directory)
     // do not change what an online import computes or where it commits.
     std::fs::write(dir.join("config.yaml"), source(8499)).unwrap();
-    std::fs::write(dir.join(".env"), "COOK_DB=dotenv.db\n").unwrap();
+    std::fs::write(dir.join(".env"), "CK_DB=dotenv.db\n").unwrap();
     std::fs::write(dir.join("source.yaml"), source(8454)).unwrap();
     let ambient = cli_command(
         &dir,
         &["--management-base-url", &owner.base, "config", "import", "source.yaml"],
     )
-    .env("COOK_DB", dir.join("ambient.db"))
-    .env("COOK_ROUTER_MANAGEMENT_KEY", MANAGEMENT_KEY)
+    .env("CK_DB", dir.join("ambient.db"))
+    .env("CK_MANAGEMENT_KEY", MANAGEMENT_KEY)
     .stdin(std::process::Stdio::null())
     .output()
     .unwrap();
@@ -623,7 +623,7 @@ fn database_flag_overrides_environment_and_environment_overrides_default() {
                 .env("TMPDIR", dir.join("tmp"))
                 .env("TMP", dir.join("tmp"))
                 .env("TEMP", dir.join("tmp"))
-                .env("COOK_DB", "environment.db")
+                .env("CK_DB", "environment.db")
                 .args(args)
                 .output()
                 .unwrap(),

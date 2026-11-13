@@ -9,7 +9,7 @@ Needs cargo-about (CARGO_ABOUT overrides the lookup on PATH), cargo, and `npm ci
 Rust: cargo-about reads about.toml, runs offline against the locked dependency set, and covers the
 normal dependencies of the `cooker` binary for the Linux release targets. npm: ui/vite.config.ts
 loads ui/tools/notices-plugin.ts, which writes the license of every package bundled into the
-dashboard when COOK_ROUTER_NOTICES_OUT is set; the build goes to a temporary directory, so ui/dist
+dashboard when CK_NOTICES_OUT is set; the build goes to a temporary directory, so ui/dist
 is not touched.
 """
 
@@ -196,7 +196,7 @@ def npm_entries():
         sys.exit("ui/node_modules is missing: run `npm ci` in ui/")
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "notices.json"
-        env = dict(os.environ, COOK_ROUTER_NOTICES_OUT=str(out))
+        env = dict(os.environ, CK_NOTICES_OUT=str(out))
         run([vite, "build", "--outDir", Path(tmp) / "dist", "--emptyOutDir"], cwd=ui, env=env)
         packages = json.loads(out.read_text())
     entries = []

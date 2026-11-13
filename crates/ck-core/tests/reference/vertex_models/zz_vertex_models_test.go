@@ -33,7 +33,7 @@ func TestZZVertexConfigModels(t *testing.T) {
 		out = append(out, model{m.ID, m.MetadataModelID, m.DisplayName, m.OwnedBy, m.Type})
 	}
 	data, _ := json.MarshalIndent(map[string]any{"yaml": yaml, "models": out, "execution": recordVertexExecution(t)}, "", "  ")
-	if err := os.WriteFile(os.Getenv("CPA_FIXTURE_OUT"), append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(os.Getenv("CK_FIXTURE_OUT"), append(data, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

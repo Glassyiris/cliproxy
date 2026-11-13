@@ -19,7 +19,8 @@ fn fixture(name: &str) -> Value {
         "cmd" => include_str!("../../tests/fixtures/discovery_cmd_go.json"),
         _ => include_str!("../../tests/fixtures/discovery_main_go.json"),
     };
-    serde_json::from_str(text).expect("fixture JSON")
+    // The recordings name the product by its earlier id.
+    serde_json::from_str(&text.replace("cook-router", PRODUCT)).expect("fixture JSON")
 }
 
 /// A recorded scan config with its top-level `discovery:` section (always the last key)
@@ -337,9 +338,9 @@ fn gateways() -> Vec<DiscoveredService> {
             "instance_name": "CPA-8F3B", "service_type": "_ai-gateway._tcp", "domain": "local.", "host": "box.local.",
             "port": 8317, "ipv4": ["192.168.1.5", "10.0.0.2"], "ipv6": ["fe80::1", "2001:db8::5"],
             "protocols": ["chat-completions", "responses"], "features": ["chat", "evil\u{1b}[31m"],
-            "product": "cook-router", "auth_required": true, "auth_methods": ["api_key"],
+            "product": "cooker", "auth_required": true, "auth_methods": ["api_key"],
             "endpoints": {"openai": "/v1", "anthropic": "/v1", "gemini": "/v1beta"},
-            "node_role": "standalone", "version": "1", "raw_txt": {"tls": "1", "product": "cook-router", "z": "<&>"}
+            "node_role": "standalone", "version": "1", "raw_txt": {"tls": "1", "product": "cooker", "z": "<&>"}
         })),
         gw(
             serde_json::json!({"instance_name": "bare\u{202e}", "port": 1234, "ipv6": ["fe80::2"], "host": "gw.local."}),

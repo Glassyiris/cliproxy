@@ -79,7 +79,7 @@ pub fn reserved_response_header(name: &str) -> bool {
         "access-control-allow-origin",
         "access-control-expose-headers",
         "access-control-max-age",
-        "x-cook-trace-id",
+        "x-ck-trace-id",
     ]
     .iter()
     .any(|r| name.eq_ignore_ascii_case(r))
@@ -400,7 +400,7 @@ mod tests {
             let mut src = axum::http::HeaderMap::new();
             for (name, values) in as_map(&case["in"]) {
                 // Go's trace header is X-CPA-TRACE-ID.
-                let name = name.replace("x-cpa-", "x-cook-");
+                let name = name.replace("x-cpa-", "x-ck-");
                 for value in values {
                     src.append(
                         axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
@@ -439,18 +439,18 @@ mod tests {
         assert_eq!(dst["content-type"], "application/json");
         assert_eq!(dst.get_all("x-a").iter().collect::<Vec<_>>(), ["1", "2"]);
 
-        let mut dst = headers(&[("content-type", "application/json"), ("x-cook-trace-id", "t")]);
+        let mut dst = headers(&[("content-type", "application/json"), ("x-ck-trace-id", "t")]);
         write_error_headers(
             &mut dst,
             &headers(&[
                 ("content-type", "text/html"),
-                ("x-cook-trace-id", "upstream"),
+                ("x-ck-trace-id", "upstream"),
                 ("content-length", "999"),
                 ("x-b", "1"),
             ]),
         );
         assert_eq!(dst["content-type"], "application/json");
-        assert_eq!(dst["x-cook-trace-id"], "t");
+        assert_eq!(dst["x-ck-trace-id"], "t");
         assert!(dst.get("content-length").is_none());
         assert_eq!(dst["x-b"], "1");
     }

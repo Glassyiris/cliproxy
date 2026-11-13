@@ -70,9 +70,9 @@ fn send(state: &Management, status: StatusCode, body: &Json, revision: Option<u6
     let headers = response.headers_mut();
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if let Some(rev) = revision {
-        headers.insert("x-cook-revision", rev.into());
+        headers.insert("x-ck-revision", rev.into());
     }
-    headers.insert("x-cook-published-revision", state.published_rev().into());
+    headers.insert("x-ck-published-revision", state.published_rev().into());
     response
 }
 

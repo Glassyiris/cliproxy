@@ -929,8 +929,8 @@ fn a_duplicated_guard_descriptor_cannot_keep_a_released_owner_locked() {
 #[test]
 fn exclusive_owner_is_process_safe_and_released_after_shutdown() {
     const TEST: &str = "config_store::tests::database::exclusive_owner_is_process_safe_and_released_after_shutdown";
-    const PATH: &str = "COOK_ROUTER_TEST_OWNER_PATH";
-    const PHASE: &str = "COOK_ROUTER_TEST_OWNER_PHASE";
+    const PATH: &str = "CK_TEST_OWNER_PATH";
+    const PHASE: &str = "CK_TEST_OWNER_PHASE";
     if let Some(path) = std::env::var_os(PATH) {
         let path = PathBuf::from(path);
         let phase = std::env::var(PHASE).unwrap();
