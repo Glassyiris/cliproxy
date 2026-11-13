@@ -74,6 +74,21 @@ UI scale/layout values remain in `ui/DESIGN.md` and code limits in `ui/CONVENTIO
 
 Historical source evidence: `bench/budgets.txt` records dated compiler/runner measurements and tolerances; `ui/REQUIREMENTS.md` retains historical dashboard measurements. Dates, hosts and load are stated only where recorded.
 
+## Deploy-only stream settings
+
+S1 Phase A fixes this configuration contract; the stream settings are not implemented in this tree. All six values are read and validated at startup. Every change requires a restart. Configured overrides remain supported within the validation and owner ceilings in `docs/INTERNAL-STREAM.md`, §6.4. Schema declarations must mark these values deploy-only; runtime configuration publication must not hot-apply them.
+
+| Setting | Classification | Contract reference |
+| --- | --- | --- |
+| `stream.pool_directory` | Deploy-only; restart required | Private directory and file lifecycle, §6.3 |
+| `stream.pool_bytes` | Deploy-only; restart required | Startup tmpfs/cgroup caps and total ceiling, §6.4 |
+| `stream.max_frames` | Deploy-only; restart required | Derived capped-pool default and combined exchange quota, §6.4 |
+| `stream.max_event_bytes` | Deploy-only; restart required | Provisional event limit and startup validation, §6.4 |
+| `stream.max_metadata_bytes` | Deploy-only; restart required | Provisional metadata limit and checked capacity validation, §6.4 |
+| `stream.cache_ttl` | Deploy-only; restart required | Last-read expiry, §6.4 |
+
+These values need no live-editable admin page or page exception under `crates/AGENTS.md`, Admin panel. Later hot-change support must include its admin page in the same change. Codec/pipeline tolerances in `docs/INTERNAL-STREAM.md`, §9.2, remain PROPOSED and need owner approval; they do not change the existing budgets above or the §9.3 storage gate.
+
 ## Enforcement
 
 Names exactly match `###` headings and tags. Gate commands cover existing mechanical checks; Review criterion names the exact `REVIEW.md` section for judgment. Missing required gates remain blank and dated under "Not yet enforced".
