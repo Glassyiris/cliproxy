@@ -666,40 +666,6 @@ fn patch_and_set_cannot_bypass_secret_resends_by_omitting_the_key() {
     }
 }
 
-#[test]
-fn revision_checked_dashboard_plugin_toggle_keeps_opaque_nodes_and_payload_bytes() {
-    let store = ConfigStore::memory();
-    store.import_yaml("plugins:\n  configs:\n    acme:\n      enabled: true\n      priority: 7\n      ratio: 1.50\n      binary: !!binary YWJj\n      payload: \"  secret payload\\nunchanged  \"\n", "t", "").unwrap();
-    let before = store.get(Kind::Plugin, "acme").unwrap().unwrap();
-    let mut expected = store.load().unwrap().config.plugin_configs;
-    assert_eq!(resources::redacted(&before).spec, resources::SECRET);
-    // ui/src/features/plugins/queries.ts: patchResource(resource, { enabled }).
-    let toggle = Op::Patch {
-        kind: "plugin".into(),
-        id: "acme".into(),
-        patch: json!({"enabled":false}),
-        if_rev: Some(before.rev),
-    };
-    store.commit(&[toggle], "dashboard", "", false).unwrap();
-    let after = store.get(Kind::Plugin, "acme").unwrap().unwrap();
-    assert_eq!(after.spec["payload"], before.spec["payload"]);
-    assert_eq!(after.spec["ratio"], before.spec["ratio"]);
-    assert_eq!(after.spec["binary"], before.spec["binary"]);
-    expected["acme"]["enabled"] = serde_yaml_ng::Value::Bool(false);
-    assert_eq!(store.load().unwrap().config.plugin_configs, expected);
-    let opaque = Op::Patch {
-        kind: "plugin".into(),
-        id: "acme".into(),
-        patch: json!({"payload":"changed"}),
-        if_rev: Some(after.rev),
-    };
-    assert_eq!(
-        store.commit(&[opaque], "dashboard", "", false).unwrap_err().code,
-        "opaque_config_requires_replacement"
-    );
-    assert_eq!(store.head().unwrap(), after.rev);
-}
-
 /// The removed Home settings (the `home` section, the credential settings and the plugin
 /// auth revision) are unknown keys: YAML import and management writes refuse them in every
 /// spelling and publish no revision.
@@ -757,93 +723,6 @@ fn removed_home_settings_are_rejected_without_a_revision() {
         assert!(store.commit(&[op], "t", "", false).is_err(), "{path}: {value}");
         assert_eq!(store.head().unwrap(), head, "{path}: {value}");
     }
-}
-
-#[test]
-fn opaque_plugins_reject_nested_placeholders_on_every_replace_path() {
-    let store = ConfigStore::memory();
-    let original = json!({"base_url":"https://a.example.invalid", "token":"fake-plugin-token"});
-    store
-        .commit(&[put("plugin", "acme", original.clone())], "t", "", false)
-        .unwrap();
-    let nested = json!({"base_url":"https://x.invalid", "token":resources::SECRET});
-    for op in [
-        put("plugin", "acme", nested.clone()),
-        Op::Set {
-            path: "plugins/configs/acme".into(),
-            value: nested.clone(),
-            expect: None,
-        },
-        Op::Patch {
-            kind: "plugin".into(),
-            id: "acme".into(),
-            patch: nested.clone(),
-            if_rev: None,
-        },
-    ] {
-        let error = store.commit(&[op], "t", "", false).unwrap_err();
-        assert_eq!((error.status, error.code), (422, "opaque_config_requires_replacement"));
-        assert_eq!(error.fault.resource.as_deref(), Some("plugin/acme"));
-        assert_eq!(error.fault.pointer.as_deref(), Some("/token"));
-    }
-    let (rev, rows) = store.snapshot().unwrap();
-    let mut envelope = resources::export_json(rev, &rows, false);
-    envelope["resources"][0]["spec"] = nested.clone();
-    let imported = resources::import_json(&envelope.to_string()).unwrap();
-    let error = store.replace(imported, "import", "", false).unwrap_err();
-    assert_eq!(error.code, "opaque_config_requires_replacement");
-    assert_eq!(error.fault.pointer.as_deref(), Some("/token"));
-    let mut historical = store.state_at(rev).unwrap();
-    historical[0].spec = nested;
-    let error = store.replace(historical, "restore", "", false).unwrap_err();
-    assert_eq!(error.code, "opaque_config_requires_replacement");
-    assert_eq!(error.fault.pointer.as_deref(), Some("/token"));
-    store
-        .commit(
-            &[Op::Set {
-                path: "plugins/configs/acme".into(),
-                value: json!(resources::SECRET),
-                expect: None,
-            }],
-            "t",
-            "",
-            false,
-        )
-        .unwrap();
-    envelope["resources"][0]["spec"] = resources::SECRET.into();
-    store
-        .replace(
-            resources::import_json(&envelope.to_string()).unwrap(),
-            "import",
-            "",
-            false,
-        )
-        .unwrap();
-    store
-        .commit(&[put("plugin", "acme", json!(resources::SECRET))], "t", "", false)
-        .unwrap();
-    store
-        .replace(store.state_at(rev).unwrap(), "restore", "", false)
-        .unwrap();
-    assert_eq!(store.head().unwrap(), rev);
-    assert_eq!(store.get(Kind::Plugin, "acme").unwrap().unwrap().spec, original);
-    store
-        .commit(
-            &[Op::Patch {
-                kind: "plugin".into(),
-                id: "acme".into(),
-                patch: json!({"enabled":false,"priority":9}),
-                if_rev: None,
-            }],
-            "t",
-            "",
-            false,
-        )
-        .unwrap();
-    let plugin = store.get(Kind::Plugin, "acme").unwrap().unwrap();
-    assert_eq!(plugin.spec["token"], original["token"]);
-    assert_eq!(plugin.spec["enabled"], false);
-    assert_eq!(plugin.spec["priority"], 9);
 }
 
 #[test]

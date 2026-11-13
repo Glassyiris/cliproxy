@@ -2961,16 +2961,11 @@ mod tests {
         patch.set.insert("refresh_token".into(), "r2".into());
         let fence = crate::runtime::RefreshFence {
             registered,
-            plugin: true,
-            completed_plugin_grant: false,
-            plugin_source: None,
-            preserved_source: None,
         };
-        let committed = crate::runtime::commit_refresh(store, "a.json", &current, fence, &patch, |_| {}).unwrap();
+        let committed = crate::runtime::commit_refresh(store, "a.json", &current, fence, &patch).unwrap();
         assert_eq!(committed.metadata["refresh_token"], "r2", "the refresh commits");
         let on_disk: Value = serde_json::from_slice(&std::fs::read(dir.join("a.json")).unwrap()).unwrap();
         assert_eq!(on_disk["refresh_token"], "r2");
-        assert!(store.refresh_schedules().lock().unwrap()["a.json"].last.is_some());
         assert_eq!(
             codes,
             [
@@ -2988,66 +2983,6 @@ mod tests {
         .await;
         assert_eq!(r.status(), StatusCode::OK);
         let _ = std::fs::remove_dir_all(dir);
-    }
-
-    /// The two management paths that disable and enable a plugin-parsed credential
-    /// register it without parsing its file again (DIFFERENCES-FROM-GO.md): a status
-    /// write re-synthesizes it as a built-in credential, without a parsed
-    /// `NextRefreshAfter`, while a patch (a plugin-virtual source's status) keeps the one
-    /// its last parse gave. Go's watcher parses the written file and takes that parse's.
-    #[tokio::test]
-    async fn management_status_changes_register_plugin_deadlines_without_a_parse() {
-        use chrono::TimeZone;
-        let parsed = chrono::Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap();
-        let body = r#"{"type":"pp","access_token":"t","refresh_interval":"1h"}"#;
-        let (state, dir) = management_with("plugin-deadlines", &[("a.json", body), ("b.json", body)], |creds| {
-            for c in creds {
-                c.next_refresh_after = Some(parsed.into());
-            }
-        });
-        let store = state.rt.store();
-        store.end_bootstrap();
-        let next_after = |id: &str| {
-            store
-                .refresh_schedules()
-                .lock()
-                .unwrap()
-                .get(id)
-                .map(|s| (s.last.is_some(), s.next_after))
-        };
-        assert_eq!(next_after("a.json"), Some((false, Some(parsed))));
-        let now = chrono::Utc::now();
-        for id in ["a.json", "b.json"] {
-            let registration = store.get_registered(id).unwrap().1.registration;
-            store
-                .record_refresh(id, registration, None, |c, s| {
-                    crate::plugins::refresh::committed(c, s, now)
-                })
-                .unwrap();
-        }
-        for disabled in [true, false] {
-            let r = status(
-                State(state.clone()),
-                Ok(FirstJson(Bytes::from(format!(
-                    r#"{{"name":"a.json","disabled":{disabled}}}"#
-                )))),
-            )
-            .await;
-            assert_eq!(r.status(), StatusCode::OK);
-            assert_eq!(store.get("a.json").unwrap().disabled, disabled);
-            assert_eq!(next_after("a.json"), Some((false, None)), "status disabled={disabled}");
-            let mut patch = MetadataPatch::default();
-            patch.set.insert("disabled".into(), disabled.into());
-            store
-                .apply_patch("b.json", store.get("b.json").unwrap().revision, &patch)
-                .unwrap();
-            assert_eq!(
-                next_after("b.json"),
-                Some((false, Some(parsed))),
-                "patch disabled={disabled}"
-            );
-        }
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// What a token refresh commits: the store's compare-and-swap patch.
@@ -3507,76 +3442,4 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// An upload registers what it uploaded, as Go's upload does without asking plugin
-    /// auth providers, even while one is active and has not parsed the new bytes: it
-    /// replaces the credential with the same ID instead of keeping the old one.
-    #[tokio::test]
-    async fn an_upload_replaces_its_credential_while_plugins_parse_auth_files() {
-        use cpa_core::config::credentials::{ParseRequest, Parsed, PluginAuthParser};
-        struct Nothing;
-        impl PluginAuthParser for Nothing {
-            fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
-                Parsed::NotHandled
-            }
-        }
-        let (state, dir) = management(
-            "upload-plugins",
-            &[("a.json", r#"{"type":"claude","access_token":"fake-0"}"#)],
-        );
-        // This thread only: tests sharing the process never see the parser.
-        credentials::with_thread_plugin_auth_parser(Arc::new(Nothing), || {
-            let token = |state: &Management| state.rt.store().get("a.json").unwrap().metadata["access_token"].clone();
-            assert_eq!(token(&state), "fake-0");
-            store_file(
-                &state,
-                "a.json",
-                br#"{"type":"claude","access_token":"fake-1"}"#,
-                true,
-                &mut CodexLock::default(),
-            )
-            .unwrap()
-            .unwrap();
-            assert_eq!(token(&state), "fake-1");
-        });
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// A token refresh that commits between an upload's write and its publication
-    /// changed the file: the refreshed credential stays, on disk and in the store.
-    #[tokio::test]
-    async fn a_refresh_between_an_upload_and_its_publication_survives() {
-        use cpa_core::config::credentials::{ParseRequest, Parsed, PluginAuthParser};
-        struct Nothing;
-        impl PluginAuthParser for Nothing {
-            fn parse_auths(&self, _: &ParseRequest<'_>) -> Parsed {
-                Parsed::NotHandled
-            }
-        }
-        let (state, dir) = management(
-            "upload-refresh",
-            &[("a.json", r#"{"type":"claude","access_token":"fake-0"}"#)],
-        );
-        // This thread only: tests sharing the process never see the parser.
-        credentials::with_thread_plugin_auth_parser(Arc::new(Nothing), || {
-            let refreshing = state.clone();
-            crate::management::BEFORE_RECONCILE.lock().unwrap().push((
-                state.rt.config().auth_dir.clone(),
-                Box::new(move || refresh(&refreshing, "a.json", "fake-refreshed")),
-            ));
-            store_file(
-                &state,
-                "a.json",
-                br#"{"type":"claude","access_token":"fake-1"}"#,
-                true,
-                &mut CodexLock::default(),
-            )
-            .unwrap()
-            .unwrap();
-            let stored = state.rt.store().get("a.json").unwrap();
-            assert_eq!(stored.provider, "claude");
-            assert_eq!(stored.metadata["access_token"], "fake-refreshed");
-            assert_eq!(on_disk(&dir, "a.json")["access_token"], "fake-refreshed");
-        });
-        std::fs::remove_dir_all(dir).unwrap();
-    }
 }

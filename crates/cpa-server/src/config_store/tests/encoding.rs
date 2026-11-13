@@ -64,14 +64,14 @@ fn complete_state_exports_without_any_previous_database_or_credential_cache() {
     let source = root.join("source.db");
     let store = Arc::new(crate::testing::config_store(&source).unwrap());
     store.import_yaml(
-        "server: {port: 8911}\nupstream:\n  codex:\n    disable-codex-cloaking: true\nplugins: {configs: {acme: {ratio: 1.50, binary: !!binary YWJj, payload: '  keep opaque  '}, zeta: {unknown: [1, two]}}}\n",
+        "server: {port: 8911}\nupstream:\n  codex:\n    disable-codex-cloaking: true\n",
         "fixture", "first revision",
     ).unwrap();
     let first_rev = store.snapshot().unwrap().0;
     let mut resources = store.snapshot().unwrap().1;
-    for (index, resource) in resources.iter_mut().filter(|r| r.kind == Kind::Plugin).enumerate() {
+    for (index, resource) in resources.iter_mut().filter(|r| r.kind == Kind::Setting).enumerate() {
         resource.ord = index as i64 * 19 - 7;
-        resource.description = format!("opaque plugin {index}");
+        resource.description = format!("ordered setting {index}");
     }
     store
         .replace(resources, "fixture", "ordering and descriptions", false)
@@ -162,7 +162,6 @@ fn complete_state_exports_without_any_previous_database_or_credential_cache() {
     assert_eq!(again.digest, expected.digest);
     assert_eq!(again.text, expected.text);
     assert_eq!(again.config.oauth_only, expected.config.oauth_only);
-    assert_eq!(again.config.plugin_configs, expected.config.plugin_configs);
     assert_eq!(
         serde_json::to_value(recovered_store.revisions(500, None).unwrap()).unwrap(),
         revisions
@@ -231,7 +230,7 @@ fn ordinary_publication_encodes_only_the_admitted_candidate() {
     storage
         .execute_batch(
             "INSERT INTO resource(kind,id,ord,spec,description,rev,created_rev)
-         VALUES ('plugin','unadmitted',7,'{\"opaque\":true}','bypass',1,1);
+         VALUES ('setting','unadmitted',7,'{\"opaque\":true}','bypass',1,1);
          INSERT INTO credential_document(name,bytes,rev) VALUES ('local:unadmitted.json',X'7B7D',19);
          INSERT INTO credential_meta(name,value) VALUES ('unadmitted','bypass');
          INSERT INTO credential_cooldown(id,record) VALUES ('unadmitted','{}');",
@@ -329,9 +328,9 @@ fn cold_copies_stay_lossless_while_publications_compete() {
                 &[
                     put("setting", "server", json!({"port": port})),
                     put(
-                        "plugin",
+                        "provider",
                         "opaque",
-                        json!({"port": port, "padding": "x".repeat(131_072)}),
+                        json!({"type": "claude", "base-url": "https://a.example.invalid", "keys": [{"api-key": format!("{port}-{}", "x".repeat(131_072))}]}),
                     ),
                 ],
                 "owner",
@@ -373,10 +372,12 @@ fn cold_copies_stay_lossless_while_publications_compete() {
         assert_standalone_private(&copy);
         let recovered_store = Arc::new(crate::testing::config_store(&copy).unwrap());
         let config = recovered_store.load().unwrap();
-        let plugin = recovered_store.get(Kind::Plugin, "opaque").unwrap().unwrap();
-        assert_eq!(plugin.spec["port"], config.config.port);
-        assert_eq!(plugin.spec["padding"].as_str().unwrap(), "x".repeat(131_072));
-        assert_eq!(plugin.rev, config.rev);
+        let paired = recovered_store.get(Kind::Provider, "opaque").unwrap().unwrap();
+        assert_eq!(
+            paired.spec["keys"][0]["api-key"].as_str().unwrap(),
+            format!("{}-{}", config.config.port, "x".repeat(131_072))
+        );
+        assert_eq!(paired.rev, config.rev);
         assert_eq!(recovered_store.revisions(100, None).unwrap().len() as u64, config.rev);
         let recovered = CredentialDb::initialize(recovered_store.clone()).unwrap();
         assert_eq!(
