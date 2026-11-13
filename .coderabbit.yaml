@@ -38,7 +38,7 @@ reviews:
         - Check that credentials and client keys never reach logs or the wrong side. Ordinary /admin/v1 reads, revisions, effective config, credential-list API-key account values and per-key usage must stay masked; explicit secret exports, credential downloads, usage queue/RESP records and trusted plugin host callbacks retain their documented plaintext access.
         - Check that SQLite config commits and credential writes are atomic and safe against concurrent writers, runtime publication and token refresh. Credential state must remain separate from config revisions, and retained secrets must not move to a changed destination without plaintext re-entry. Plugin configs may retain $secret only as the whole opaque config; reject nested placeholders.
         - Check that refresh-token rotation is serialized across processes sharing a database, so a refresh token is never spent twice.
-    - path: "{crates/**/*refresh*.rs,crates/**/watching.rs,crates/**/runtime.rs,crates/**/*siwc*.rs,crates/cpa-server/src/cooldown_store.rs,crates/cpa-server/src/management.rs,crates/cpa-plugin/src/**,crates/cpa-home/src/**}"
+    - path: "{crates/**/*refresh*.rs,crates/**/watching.rs,crates/**/runtime.rs,crates/**/*siwc*.rs,crates/cpa-server/src/cooldown_store.rs,crates/cpa-server/src/management.rs,crates/cpa-plugin/src/**}"
       instructions: |
         - Check lock, refresh and reload code for races and deadlocks: lock order, locks held across an await or blocking I/O, waits that shutdown cannot cancel, and state read before a lock and used after it.
         - Check that a config reload or credential change during a request cannot mix two snapshots in one request.
