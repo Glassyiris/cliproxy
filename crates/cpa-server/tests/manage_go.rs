@@ -493,17 +493,6 @@ mod access {
             let dir = std::env::temp_dir().join(format!("cpa-access-{name}-{}", std::process::id()));
             let (base, server) = serve(state(&dir, scenario)).await;
             for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
-                // HTTP parsers (Go's textproto and hyper) trim header whitespace, so
-                // httptest-only values are covered by unit tests instead.
-                let headers = step["headers"].as_object();
-                if headers.into_iter().flatten().any(|(_, vs)| {
-                    vs.as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|v| v.as_str().unwrap().ends_with(' '))
-                }) {
-                    continue;
-                }
                 let mut req = client
                     .get(format!("{base}/admin/v1/effective/config"))
                     .header("X-Test-Peer", step["remote"].as_str().unwrap());
@@ -536,7 +525,7 @@ mod access {
             server.abort();
             let _ = std::fs::remove_dir_all(&dir);
         }
-        assert_eq!(steps, 70, "71 recorded steps, one not wire-representable");
+        assert_eq!(steps, 65, "every recorded step");
     }
 }
 

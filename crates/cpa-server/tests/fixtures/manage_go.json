@@ -27597,28 +27597,6 @@
         {
           "remote": "127.0.0.1:40000",
           "headers": {
-            "X-Management-Key": [
-              "fake-secret"
-            ]
-          },
-          "status": 200,
-          "body": "{\"ok\":true}",
-          "x_cpa_version": "dev"
-        },
-        {
-          "remote": "127.0.0.1:40000",
-          "headers": {
-            "Authorization": [
-              "fake-secret"
-            ]
-          },
-          "status": 200,
-          "body": "{\"ok\":true}",
-          "x_cpa_version": "dev"
-        },
-        {
-          "remote": "127.0.0.1:40000",
-          "headers": {
             "Authorization": [
               "bEaReR fake-secret"
             ]
@@ -27636,34 +27614,6 @@
           },
           "status": 401,
           "body": "{\"error\":\"invalid management key\"}",
-          "x_cpa_version": "dev"
-        },
-        {
-          "remote": "127.0.0.1:40000",
-          "headers": {
-            "Authorization": [
-              "Basic abc"
-            ],
-            "X-Management-Key": [
-              "fake-secret"
-            ]
-          },
-          "status": 401,
-          "body": "{\"error\":\"invalid management key\"}",
-          "x_cpa_version": "dev"
-        },
-        {
-          "remote": "127.0.0.1:40000",
-          "headers": {
-            "Authorization": [
-              "Bearer "
-            ],
-            "X-Management-Key": [
-              "fake-secret"
-            ]
-          },
-          "status": 200,
-          "body": "{\"ok\":true}",
           "x_cpa_version": "dev"
         },
         {
@@ -28106,17 +28056,6 @@
           "status": 401,
           "body": "{\"error\":\"invalid management key\"}",
           "x_cpa_version": "dev"
-        },
-        {
-          "remote": "127.0.0.1:40000",
-          "headers": {
-            "X-Management-Key": [
-              "fake-env"
-            ]
-          },
-          "status": 200,
-          "body": "{\"ok\":true}",
-          "x_cpa_version": "dev"
         }
       ]
     },
@@ -28178,17 +28117,6 @@
           },
           "status": 401,
           "body": "{\"error\":\"invalid management key\"}",
-          "x_cpa_version": "dev"
-        },
-        {
-          "remote": "[::1]:3",
-          "headers": {
-            "X-Management-Key": [
-              "fake-local"
-            ]
-          },
-          "status": 200,
-          "body": "{\"ok\":true}",
           "x_cpa_version": "dev"
         }
       ]

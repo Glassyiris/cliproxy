@@ -307,24 +307,16 @@ fn go_duration_seconds(d: Duration) -> String {
     }
 }
 
-/// `Authorization: Bearer <key>` (scheme case-insensitive, value untrimmed), any
-/// other Authorization value verbatim, then `X-Management-Key`. First values only.
+/// The key of `Authorization: Bearer <key>` (the scheme is case-insensitive, the value
+/// untrimmed); empty for any other form. First value only.
 pub(super) fn provided_key(headers: &HeaderMap) -> &[u8] {
     let auth = headers
         .get(header::AUTHORIZATION)
         .map(HeaderValue::as_bytes)
         .unwrap_or_default();
-    let key = match auth.iter().position(|&b| b == b' ') {
+    match auth.iter().position(|&b| b == b' ') {
         Some(i) if auth[..i].eq_ignore_ascii_case(b"bearer") => &auth[i + 1..],
-        _ => auth,
-    };
-    if key.is_empty() {
-        headers
-            .get("X-Management-Key")
-            .map(HeaderValue::as_bytes)
-            .unwrap_or_default()
-    } else {
-        key
+        _ => &[],
     }
 }
 
@@ -617,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn key_extraction_matches_go_header_rules() {
+    fn only_a_bearer_authorization_carries_the_key() {
         let get = |pairs: &[(&'static str, &str)]| {
             let mut h = HeaderMap::new();
             for (k, v) in pairs {
@@ -628,14 +620,12 @@ mod tests {
         assert_eq!(get(&[("authorization", "Bearer  k")]), " k");
         assert_eq!(get(&[("authorization", "bEaReR k")]), "k");
         assert_eq!(
-            get(&[("authorization", "Basic k"), ("x-management-key", "m")]),
-            "Basic k"
-        );
-        assert_eq!(get(&[("authorization", "Bearer "), ("x-management-key", "m")]), "m");
-        assert_eq!(
             get(&[("authorization", "Bearer a"), ("authorization", "Bearer b")]),
             "a"
         );
-        assert_eq!(get(&[("authorization", "raw")]), "raw");
+        assert_eq!(get(&[("authorization", "Basic k")]), "");
+        assert_eq!(get(&[("authorization", "raw")]), "");
+        assert_eq!(get(&[("x-management-key", "m")]), "");
+        assert_eq!(get(&[("authorization", "Bearer "), ("x-management-key", "m")]), "");
     }
 }

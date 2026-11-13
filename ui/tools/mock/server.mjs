@@ -953,7 +953,8 @@ const server = http.createServer((req, res) => {
       if (![PREFIX, "/admin/v1"].some((prefix) => url.pathname.startsWith(prefix + "/") || url.pathname === prefix)) return send(404, {}, "");
       const headers = { "X-Cook-Version": VERSION, "X-Cook-Commit": "0000000", "X-Cook-Build-Date": BUILD_DATE, "Cache-Control": "no-store", "X-Cook-Revision": String(configVersion), "X-Cook-Published-Revision": String(configVersion) };
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
-      const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || String(req.headers["x-management-key"] || "");
+      const auth = req.headers.authorization || "";
+      const given = /^bearer /i.test(auth) ? auth.slice(7) : "";
       // The dashboard session, as the server does it (crates/cpa-server/src/management/session.rs):
       // the key is exchanged for a random id in `cook_router_session`; cookie requests need the
       // dashboard header; sign-out revokes the id on the server.
