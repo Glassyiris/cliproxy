@@ -95,7 +95,7 @@ Each row shows how much is used and when it resets. Codex accounts show their 5-
 
 ## Per-account proxies and request shaping
 
-Edit these credential metadata fields through the account's dashboard panel/credential management operations. The JSON below is the legacy credential import shape, not a file to edit after import:
+Edit these credential metadata fields through the account's dashboard panel/credential management operations. The JSON below shows such a field:
 
 ```json
 {
@@ -109,7 +109,7 @@ Claude's default `auto` shaping mode can rewrite system prompts for non-native c
 
 ## Codex over WebSocket
 
-Codex accounts can talk to OpenAI over a WebSocket, the transport the Codex CLI itself uses, instead of one HTTPS request per turn. Enable it per account with the credential metadata field (shown in its legacy import shape):
+Codex accounts can talk to OpenAI over a WebSocket, the transport the Codex CLI itself uses, instead of one HTTPS request per turn. Enable it per account with the credential metadata field:
 
 ```json
 {

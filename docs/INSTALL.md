@@ -1,21 +1,20 @@
 # Installing cook-router
 
-cook-router is one executable, `cook-router`, with the dashboard built in. It ships as the Docker image `ghcr.io/prep-cook/cook-router` (tags `<version>` such as `0.3.0`, and `latest`; linux/amd64 and linux/arm64). Configuration and OAuth credentials are persisted in SQLite. It needs a private, writable, persistent database directory; YAML and credential files are legacy first-import sources, not runtime storage.
+cook-router is one executable, `cook-router`, with the dashboard built in. It ships as the Docker image `ghcr.io/prep-cook/cook-router` (tags `<version>` such as `0.3.0`, and `latest`; linux/amd64 and linux/arm64). Configuration and OAuth credentials are persisted in SQLite. It needs a private, writable, persistent database directory. A YAML file is only an optional import on the first start; credentials enter through sign-in or the management API.
 
 ## Docker
 
-The image runs as uid and gid 10001, exposes 8317 and starts `cook-router --config /data/config.yaml` by default. Pass `--db` to put the database in the mounted directory.
+The image runs as uid and gid 10001, exposes 8317, works in `/data` and runs `cook-router` with no default arguments. Without `--config`, a first start imports `./config.yaml` (`/data/config.yaml`) when it exists, and the database is `cook.db` beside it (`/data/cook.db`).
 
 ```sh
 mkdir -m 700 -p data
-$EDITOR data/config.yaml                  # initial import only; see below
 sudo chown -R 10001:10001 data            # the container runs as uid and gid 10001
-docker run -d --name cook-router -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" ghcr.io/prep-cook/cook-router:<version> --db /data/cook.db --config /data/config.yaml
+docker run -d --name cook-router -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e COOK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cook-router:<version>
 ```
 
 To build the image yourself, run `docker build -t cook-router .` in a checkout and use `cook-router` as the image name. The build compiles BoringSSL and needs about 2 GB of memory; on a small machine add `--build-arg BUILD_JOBS=1`.
 
-The first bootstrap imports `/data/config.yaml`; later starts use `/data/cook.db`, not changes to the YAML. A minimal file:
+On a fresh volume the first start creates `/data/cook.db` from `/data/config.yaml` when that file exists, and otherwise from the defaults with `server.port: 8317`. Later starts use `/data/cook.db`, not changes to the YAML. To set client keys before the first start, put a file like this in `data/`:
 
 ```yaml
 server:
@@ -24,14 +23,11 @@ server:
 access:
   api-keys:
     - "PASTE-CLIENT-KEY"       # your tools send this key to the proxy
-management:
-  allow-remote: true
-  secret-key: "PASTE-MANAGEMENT-KEY"  # the dashboard password
 ```
 
-Sign in at `http://127.0.0.1:8317/management.html` with `management.secret-key` from the imported config, or with the value of `COOK_MANAGEMENT_PASSWORD` if you set that environment variable. Keep a private copy of the keys: SQLite stores the management key as a bcrypt hash. [CONFIGURATION.md](CONFIGURATION.md) explains the settings.
+Sign in at `http://127.0.0.1:8317/management.html` with the value of `COOK_MANAGEMENT_PASSWORD`, or with `management.secret-key` from the imported config. With neither, the server starts but every management request, including the dashboard sign-in, is refused with 403 ("management key not set: start the server with COOK_MANAGEMENT_PASSWORD"). Keep a private copy of the keys: SQLite stores a `management.secret-key` as a bcrypt hash. [CONFIGURATION.md](CONFIGURATION.md) explains the settings.
 
-Docker bridge requests are non-local, so the initial import needs `management.allow-remote: true`; publishing on `127.0.0.1` as above still keeps other machines out. Login and refresh state belongs to SQLite.
+Docker bridge requests are non-local. Setting `COOK_MANAGEMENT_PASSWORD` admits them; with only `management.secret-key`, the import also needs `management.allow-remote: true`. Publishing on `127.0.0.1` as above still keeps other machines out. Login and refresh state belongs to SQLite.
 
 On a machine without a browser, such as a server you reach over SSH, keep the port published on `127.0.0.1` and open an SSH tunnel from your own computer, for example `ssh -L 8317:127.0.0.1:8317 you@server`, then open the dashboard address there. [Tailscale](MULTI-ACCOUNT.md#reach-the-proxy-from-other-machines) works too. Never listen on `0.0.0.0` without client keys.
 
@@ -87,7 +83,7 @@ Set up the database by hand:
      secret-key: "PASTE-MANAGEMENT-KEY"  # the dashboard password
    ```
 
-   Keep a private copy of the keys: SQLite stores the management key as a bcrypt hash. This YAML is an import/runtime projection shape, not the canonical persisted schema; [CONFIGURATION.md](CONFIGURATION.md) explains the settings. Keep the bootstrap file private while it exists.
+   Keep a private copy of the keys: SQLite stores the management key as a bcrypt hash. This YAML is an import shape, not the canonical persisted schema; [CONFIGURATION.md](CONFIGURATION.md) explains the settings. Keep the bootstrap file private while it exists.
 2. Import once, then run the database-backed server:
 
    ```sh
@@ -96,10 +92,10 @@ Set up the database by hand:
    cook-router --db ~/.cook-router/cook.db
    ```
 
-   `--db` overrides `COOK_DB`; without either the default is `cook.db` beside `--config` (`config.yaml` by default). `--config FILE` is a first-bootstrap compatibility import selector only. A fresh ordinary startup needs that source; once initialized, the server does not read or watch it. Check `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
+   `--db` overrides `COOK_DB`; without either the default is `cook.db` beside the config file (`./config.yaml` unless `--config` names another). `--config FILE` selects the file a first start imports and must exist. Without `--config`, a missing `./config.yaml` starts with the defaults on port 8317. Once the database exists, the server does not read or watch the file. Check `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
 3. Connect accounts from `/management.html`, or from a terminal through the running server with `--management-base-url http://127.0.0.1:8317` (it reads the management key from `COOK_ROUTER_MANAGEMENT_KEY` or asks for it) and one of `--claude-login`, `--codex-login`, `--codex-device-login`, `--antigravity-login`, `--kimi-login`, `--kimi-ai-login`, `--meta-login`, `--xai-login` or `--devin-login`. Import a Vertex service account with `--vertex-import key.json`. Add `--no-browser` on a machine without a browser. With the server stopped, the same flags with `--db ~/.cook-router/cook.db` write the database directly. Sign-ins and refresh tokens are saved in SQLite, not a watched directory.
 
-Change configuration through the dashboard or `/admin/v1`; old v0/v8 config endpoints are removed. Go-style single-dash flags still work. `RUST_LOG=debug` enables detailed logging; the default is `info`.
+Change configuration through the dashboard or `/admin/v1`; old v0/v8 config endpoints are removed. `RUST_LOG=debug` enables detailed logging; the default is `info`.
 
 ## Running as a system service
 
@@ -131,4 +127,4 @@ sudo systemctl enable --now cook-router
 journalctl -u cook-router -f
 ```
 
-Initialize the database under `/var/lib/cook-router` before starting the service, using the service user. The persistent directory must be writable for atomic snapshot publication, and OS tmp must be writable for the private working database; keep both private and set `UMask=0077` in the unit as defense in depth. While the service runs, CLI changes go through its management API (`--management-base-url`); offline CLI writes wait for it to stop. Keep the same user and OS temporary directory across restarts so a surviving working database can resume; with `PrivateTmp=yes` every service restart, and with a tmpfs `/tmp` every reboot, cold-starts from the published file instead, which already holds every acknowledged change. Mount this directory persistently in ephemeral deployments. No legacy PostgreSQL/S3/git config authority or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).
+Initialize the database under `/var/lib/cook-router` before starting the service, using the service user. The persistent directory must be writable for atomic snapshot publication, and OS tmp must be writable for the private working database; keep both private and set `UMask=0077` in the unit as defense in depth. While the service runs, CLI changes go through its management API (`--management-base-url`); offline CLI writes wait for it to stop. Keep the same user and OS temporary directory across restarts so a surviving working database can resume; with `PrivateTmp=yes` every service restart, and with a tmpfs `/tmp` every reboot, cold-starts from the published file instead, which already holds every acknowledged change. Mount this directory persistently in ephemeral deployments. No remote config store or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).

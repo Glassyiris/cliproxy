@@ -2089,10 +2089,9 @@ mod tests {
                 "{off}"
             );
         }
-        // The v7 top-level key migrates to requests.nonstream-keepalive-interval.
-        let legacy = cfg("requests:\n  nonstream-keepalive-interval: 2\n");
+        let configured = cfg("requests:\n  nonstream-keepalive-interval: 2\n");
         assert_eq!(
-            nonstream_keepalive(&call(Operation::Generate, false), &legacy),
+            nonstream_keepalive(&call(Operation::Generate, false), &configured),
             Some(Duration::from_secs(2))
         );
     }
