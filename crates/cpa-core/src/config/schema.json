@@ -31,7 +31,6 @@
             }
           }
         },
-        "auth-revision": "int",
         "configs": {
           "map": {
             "fields": {
@@ -161,38 +160,6 @@
       "fields": {
         "api-keys": {
           "list": "string"
-        }
-      }
-    },
-    "credentials": {
-      "fields": {
-        "concurrency": {
-          "fields": {
-            "lifecycle-config-revision": "int",
-            "observation-barrier-revision": "int",
-            "cpa-heartbeat-timeout": "duration",
-            "cpa-cancel-bound": "duration",
-            "reclaim-grace": "duration",
-            "cleanup-interval": "duration",
-            "release-flush-interval": "duration",
-            "release-max-backoff": "duration",
-            "busy-retry-min": "duration",
-            "busy-retry-max": "duration",
-            "max-limit": "int"
-          }
-        },
-        "in-flight": {
-          "fields": {
-            "snapshot-interval": "string",
-            "stale-after": "string",
-            "max-part-bytes": "int",
-            "max-part-count": "int",
-            "max-revision-bytes": "int",
-            "max-aggregate-groups": "int",
-            "max-details": "int",
-            "max-string-bytes": "int",
-            "staging-retention": "string"
-          }
         }
       }
     },

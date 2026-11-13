@@ -89,8 +89,7 @@ fn scalar_case_yaml(field: &str, spelling: &str) -> String {
         "plugins.configs.x.enabled" => {
             format!("config-version: 8\nplugins:\n  configs:\n    x:\n      enabled: {spelling}\n")
         }
-        "server.host" => format!("config-version: 8\nserver:\n  host: {spelling}\n"),
-        _ => format!("config-version: 8\ncredentials:\n  concurrency:\n    cpa-heartbeat-timeout: {spelling}\n"),
+        _ => format!("config-version: 8\nserver:\n  host: {spelling}\n"),
     }
 }
 
@@ -127,9 +126,7 @@ fn yaml_bool_spellings_and_durations_load_like_go() {
                     _ => false,
                 })
             }
-            "server.host" => json!(cfg.host),
-            // Durations: load acceptance only (nothing consumes them without Home).
-            _ => continue,
+            _ => json!(cfg.host),
         };
         assert_eq!(got, case["value"], "{at}");
     }

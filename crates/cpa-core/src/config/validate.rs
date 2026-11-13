@@ -1,6 +1,5 @@
-//! Go's custom checks in `ParseConfigBytes` beyond YAML shape: credential in-flight
-//! bounds (internal/config/credential_in_flight.go), the Codex Live media relay
-//! (internal/config/codex_live.go), and the model catalog sources Go checks while
+//! Go's custom checks in `ParseConfigBytes` beyond YAML shape: the Codex Live media
+//! relay (internal/config/codex_live.go) and the model catalog sources Go checks while
 //! decoding (internal/registry/catalog_config.go). Messages are Go's.
 
 use anyhow::{Result, bail};
@@ -8,10 +7,9 @@ use serde_yaml_ng::Value;
 
 use super::go_url;
 
-/// Runs both checks on the canonical v8 document.
+/// Runs the media relay check on the canonical v8 document.
 pub(super) fn go_custom(doc: &Value) -> Result<()> {
     let at = |path: &[&str]| path.iter().try_fold(doc, |node, part| node.get(*part));
-    in_flight(at(&["credentials", "in-flight"]))?;
     live_media_relay(at(&["oauth", "providers", "codex", "live-media-relay"]))
 }
 
@@ -110,51 +108,6 @@ fn text(section: Option<&Value>, key: &str, default: &str) -> String {
         Some(v) => super::go_string(v),
         None => default.to_owned(),
     }
-}
-
-/// `CredentialInFlightConfig.Validate`.
-fn in_flight(section: Option<&Value>) -> Result<()> {
-    const MAX_PART_COUNT: i64 = 64;
-    const MAX_REVISION_BYTES: i64 = 16 * 1024 * 1024;
-    const MAX_AGGREGATE_GROUPS: i64 = 100_000;
-    const MAX_DETAILS: i64 = 10_000;
-    const MAX_STRING_BYTES: i64 = 256;
-    let duration = |key: &str, default: &str| parse_duration(&text(section, key, default));
-    let snapshot = duration("snapshot-interval", "2s").filter(|d| *d > 0);
-    let Some(snapshot) = snapshot else {
-        bail!("credential-in-flight.snapshot-interval must be positive");
-    };
-    if !duration("stale-after", "10s").is_some_and(|stale| stale > 0 && snapshot <= stale / 3) {
-        bail!("credential-in-flight.stale-after must be at least three snapshot intervals");
-    }
-    if !duration("staging-retention", "1m").is_some_and(|d| d > 0) {
-        bail!("credential-in-flight.staging-retention must be positive");
-    }
-    let part_bytes = int(section, "max-part-bytes", 256 * 1024);
-    let part_count = int(section, "max-part-count", MAX_PART_COUNT);
-    if part_bytes < 1024 || part_count <= 0 || part_count > MAX_PART_COUNT {
-        bail!("credential-in-flight part bounds are invalid");
-    }
-    let revision = int(section, "max-revision-bytes", MAX_REVISION_BYTES);
-    if revision < part_bytes || revision > MAX_REVISION_BYTES {
-        bail!("credential-in-flight.max-revision-bytes is outside hard bounds");
-    }
-    if (revision + part_bytes - 1) / part_bytes > part_count {
-        bail!("credential-in-flight.max-revision-bytes exceeds part capacity");
-    }
-    let groups = int(section, "max-aggregate-groups", MAX_AGGREGATE_GROUPS);
-    if groups <= 0 || groups > MAX_AGGREGATE_GROUPS {
-        bail!("credential-in-flight.max-aggregate-groups is invalid");
-    }
-    let details = int(section, "max-details", MAX_DETAILS);
-    if !(0..=MAX_DETAILS).contains(&details) {
-        bail!("credential-in-flight.max-details is invalid");
-    }
-    let strings = int(section, "max-string-bytes", MAX_STRING_BYTES);
-    if strings <= 0 || strings > MAX_STRING_BYTES {
-        bail!("credential-in-flight.max-string-bytes is invalid");
-    }
-    Ok(())
 }
 
 /// Checks Go makes while decoding: the Codex Live media relay's UDP ports are Go
@@ -324,7 +277,7 @@ pub fn parse_duration(s: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Value, go_is_abs, in_flight, parse_duration};
+    use super::{go_is_abs, parse_duration};
 
     /// Go 1.26.4 `TestIsAbs` (path/filepath/path_test.go): `isabstests` on Unix; on
     /// Windows `winisabstests`, every Unix case false, and every Unix case behind `c:`.
@@ -366,26 +319,6 @@ mod tests {
         for (path, want) in windows {
             assert_eq!(go_is_abs(path, true), want, "windows {path:?}");
         }
-    }
-
-    /// Go `TestCredentialInFlightConfigDurationBounds` and
-    /// `TestCredentialInFlightConfigRejectsUnsafeBounds`.
-    #[test]
-    fn in_flight_bounds_follow_go() {
-        let valid = |yaml: &str| in_flight(Some(&serde_yaml_ng::from_str::<Value>(yaml).unwrap())).is_ok();
-        assert!(valid(""), "the defaults");
-        assert!(
-            valid("snapshot-interval: 1s\nstale-after: 3s\n"),
-            "exactly three intervals"
-        );
-        assert!(!valid("snapshot-interval: 1s\nstale-after: 2999999999ns\n"));
-        // time.Duration(math.MaxInt64 / 2).String() and time.Duration(math.MaxInt64).String().
-        assert!(!valid(
-            "snapshot-interval: 1281023h53m38.427387903s\nstale-after: 2562047h47m16.854775807s\n"
-        ));
-        assert!(!valid("stale-after: 5s\n"), "below three default intervals");
-        assert!(!valid(&format!("max-revision-bytes: {}\n", 16 * 1024 * 1024 + 1)));
-        assert!(!valid(&format!("max-part-bytes: {}\n", i64::MAX)));
     }
 
     /// Values that overflowed before: Go rejects out-of-range uint16 ports at decode

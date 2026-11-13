@@ -89,86 +89,6 @@
    "server.tls.key"
   ],
   [
-   "credential-concurrency.lifecycle-config-revision",
-   "credentials.concurrency.lifecycle-config-revision"
-  ],
-  [
-   "credential-concurrency.observation-barrier-revision",
-   "credentials.concurrency.observation-barrier-revision"
-  ],
-  [
-   "credential-concurrency.cpa-heartbeat-timeout",
-   "credentials.concurrency.cpa-heartbeat-timeout"
-  ],
-  [
-   "credential-concurrency.cpa-cancel-bound",
-   "credentials.concurrency.cpa-cancel-bound"
-  ],
-  [
-   "credential-concurrency.reclaim-grace",
-   "credentials.concurrency.reclaim-grace"
-  ],
-  [
-   "credential-concurrency.cleanup-interval",
-   "credentials.concurrency.cleanup-interval"
-  ],
-  [
-   "credential-concurrency.release-flush-interval",
-   "credentials.concurrency.release-flush-interval"
-  ],
-  [
-   "credential-concurrency.release-max-backoff",
-   "credentials.concurrency.release-max-backoff"
-  ],
-  [
-   "credential-concurrency.busy-retry-min",
-   "credentials.concurrency.busy-retry-min"
-  ],
-  [
-   "credential-concurrency.busy-retry-max",
-   "credentials.concurrency.busy-retry-max"
-  ],
-  [
-   "credential-concurrency.max-limit",
-   "credentials.concurrency.max-limit"
-  ],
-  [
-   "credential-in-flight.snapshot-interval",
-   "credentials.in-flight.snapshot-interval"
-  ],
-  [
-   "credential-in-flight.stale-after",
-   "credentials.in-flight.stale-after"
-  ],
-  [
-   "credential-in-flight.max-part-bytes",
-   "credentials.in-flight.max-part-bytes"
-  ],
-  [
-   "credential-in-flight.max-part-count",
-   "credentials.in-flight.max-part-count"
-  ],
-  [
-   "credential-in-flight.max-revision-bytes",
-   "credentials.in-flight.max-revision-bytes"
-  ],
-  [
-   "credential-in-flight.max-aggregate-groups",
-   "credentials.in-flight.max-aggregate-groups"
-  ],
-  [
-   "credential-in-flight.max-details",
-   "credentials.in-flight.max-details"
-  ],
-  [
-   "credential-in-flight.max-string-bytes",
-   "credentials.in-flight.max-string-bytes"
-  ],
-  [
-   "credential-in-flight.staging-retention",
-   "credentials.in-flight.staging-retention"
-  ],
-  [
    "remote-management.allow-remote",
    "management.allow-remote"
   ],
@@ -509,14 +429,6 @@
   [
    "tls",
    "server.tls"
-  ],
-  [
-   "credential-concurrency",
-   "credentials.concurrency"
-  ],
-  [
-   "credential-in-flight",
-   "credentials.in-flight"
   ],
   [
    "remote-management",

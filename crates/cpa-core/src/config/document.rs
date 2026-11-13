@@ -16,8 +16,6 @@ const PATHS: &[(&str, &str)] = &[
     ("commercial-mode", "server.commercial-mode"),
     ("discovery", "server.discovery"),
     ("remote-management", "management"),
-    ("credential-concurrency", "credentials.concurrency"),
-    ("credential-in-flight", "credentials.in-flight"),
     ("force-model-prefix", "routing.force-model-prefix"),
     ("request-retry", "routing.retry.request-retry"),
     ("max-retry-credentials", "routing.retry.max-retry-credentials"),
