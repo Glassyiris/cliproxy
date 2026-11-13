@@ -42,10 +42,10 @@ pub fn resolve_filters(cli: (Vec<String>, Vec<String>), cfg: (Vec<String>, Vec<S
     }
 }
 
-/// Go `LoadDiscoveryScanFilters`: `discovery.interfaces` from the legacy top-level key
-/// only (Go's scan does not read `server.discovery`), `!!binary` names decoded and
-/// merge keys expanded. A missing file, a YAML syntax error and a wrong-kind node on
-/// the path give no filters, as in Go. Anything else the config decoder refuses (invalid
+/// The scan's interface filters: `server.discovery.interfaces` of the config file (Go
+/// `LoadDiscoveryScanFilters` read the old top-level `discovery` key instead), `!!binary`
+/// names decoded and merge keys expanded. A missing file, a YAML syntax error and a
+/// wrong-kind node on the path give no filters, as in Go. Anything else the config decoder refuses (invalid
 /// `!!binary` data anywhere in the file, a scalar merge, the documented restrictions)
 /// is an error, where Go scans with no filters or with the file's filters
 /// (docs/DIFFERENCES-FROM-GO.md).
@@ -77,7 +77,10 @@ pub fn load_scan_filters(path: &str) -> Result<(Vec<String>, Vec<String>), Strin
     let Some(root) = mapping(Some(&doc)) else {
         return Ok(Default::default());
     };
-    let Some(discovery) = mapping(root.as_ref().and_then(|r| r.get("discovery"))) else {
+    let Some(server) = mapping(root.as_ref().and_then(|r| r.get("server"))) else {
+        return Ok(Default::default());
+    };
+    let Some(discovery) = mapping(server.as_ref().and_then(|s| s.get("discovery"))) else {
         return Ok(Default::default());
     };
     let Some(interfaces) = mapping(discovery.as_ref().and_then(|d| d.get("interfaces"))) else {

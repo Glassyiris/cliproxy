@@ -1,6 +1,8 @@
 //! Replays outputs recorded from Go's discovery code at 6fecc6e
 //! (tests/reference/discovery -> tests/fixtures/discovery_*.json), with Go's product id
-//! `cliproxyapi` replaced by `cook-router` in the recordings.
+//! `cliproxyapi` replaced by `cook-router` in the recordings. Go's scan read interface
+//! filters from the top-level `discovery` key; cook-router reads `server.discovery`, so the
+//! replay moves each recorded `discovery:` section under `server:` (`under_server`).
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -18,6 +20,21 @@ fn fixture(name: &str) -> Value {
         _ => include_str!("../../tests/fixtures/discovery_main_go.json"),
     };
     serde_json::from_str(text).expect("fixture JSON")
+}
+
+/// A recorded scan config with its top-level `discovery:` section (always the last key)
+/// moved under `server:`.
+fn under_server(yaml: &str) -> String {
+    match yaml
+        .find("discovery:")
+        .filter(|&at| at == 0 || yaml[..at].ends_with('\n'))
+    {
+        Some(at) => {
+            let moved: String = yaml[at..].lines().map(|line| format!("  {line}\n")).collect();
+            format!("{}server:\n{moved}", &yaml[..at])
+        }
+        None => yaml.to_owned(),
+    }
 }
 
 fn s(v: &Value) -> String {
@@ -254,10 +271,10 @@ fn service_spec_follows_config_bind_host_and_tls() {
         "discovery: refusing LAN advertising for non-IP bind host \"box.lan\""
     );
     assert_eq!(err("192.0.2.9"), "discovery: no interface owns bind host \"192.0.2.9\"");
-    // Legacy layout reads the same; defaults fill service type and subtypes.
-    let legacy =
+    // Defaults fill service type and subtypes.
+    let parsed =
         cpa_core::config::Config::parse("server:\n  discovery:\n    enabled: true\n    service-type: ''\n").unwrap();
-    let d = DiscoveryConfig::from_document(&legacy.document);
+    let d = DiscoveryConfig::from_document(&parsed.document);
     assert!(d.enabled && d.auth_required.is_none());
     assert_eq!((d.service_type.as_str(), d.subtypes.len()), (DEFAULT_SERVICE_TYPE, 5));
 }
@@ -384,8 +401,13 @@ fn terminal_sanitizing_and_filters_match_go() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("config.yaml");
     for case in f["config_filters"].as_array().unwrap() {
-        std::fs::write(&path, s(&case["yaml"])).unwrap();
+        std::fs::write(&path, under_server(&s(&case["yaml"]))).unwrap();
         let got = cli::load_scan_filters(path.to_str().unwrap());
+        // Go ignored `server.discovery`; it is the only place cook-router reads.
+        if s(&case["yaml"]).starts_with("server:") {
+            assert_eq!(got, Ok((vec!["eth0".to_owned()], vec![])), "{case}");
+            continue;
+        }
         // cook-router refuses invalid `!!binary` data anywhere in the file, where Go
         // scans with no filters (on the path) or the file's (elsewhere).
         if s(&case["yaml"]).contains("!!binary '!!!'") {
@@ -416,7 +438,7 @@ fn terminal_sanitizing_and_filters_match_go() {
     // become an unfiltered scan.
     std::fs::write(
         &path,
-        "a: &x 1\nb: &x 2\ndiscovery:\n  interfaces:\n    exclude: [eth0]\n",
+        "a: &x 1\nb: &x 2\nserver:\n  discovery:\n    interfaces:\n      exclude: [eth0]\n",
     )
     .unwrap();
     let refused = cli::load_scan_filters(path.to_str().unwrap()).unwrap_err();

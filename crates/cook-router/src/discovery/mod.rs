@@ -378,7 +378,7 @@ fn string_list(v: Option<&Yaml>) -> Option<Vec<String>> {
 }
 
 impl DiscoveryConfig {
-    /// Reads the v8 document (`server.discovery`; legacy `discovery` is migrated there).
+    /// Reads `server.discovery` of the config document.
     pub fn from_document(doc: &Yaml) -> Self {
         let d = doc.get("server").and_then(|s| s.get("discovery"));
         let get = |k: &str| d.and_then(|d| d.get(k));
