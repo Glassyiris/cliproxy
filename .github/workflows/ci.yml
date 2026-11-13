@@ -1,6 +1,6 @@
 # Formatting, lints, the full test suite and the harness build, clippy and the file writer
-# tests on Windows, the Linux size and idle gates, the dashboard's checks, actionlint and the
-# THIRD-PARTY-NOTICES check.
+# tests on Windows, the Linux size and idle gates, the dashboard's checks, actionlint, the
+# THIRD-PARTY-NOTICES check and the requirements check (REQUIREMENTS.md, in the changes job).
 # Every push to master, every manual run and the call from release.yml (so a tagged release
 # runs the same checks before it builds anything) run all of them. A pull request runs the
 # lanes its changed paths can affect (.github/scripts/ci-lanes.py, which lists the rules);
@@ -66,10 +66,17 @@ jobs:
         with:
           fetch-depth: 2
       - name: Selector tests
-        run: python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes.py'
+        run: python3 -m unittest discover -s .github/scripts -p 'test_ci_lanes*.py'
       # The size report's renderer (report.yml runs master's copy after each pull request run).
       - name: Size report renderer tests
         run: python3 -I -m unittest discover -s .github/ci/report -p 'test_render.py'
+      # REQUIREMENTS.md against the rule files: every rule group has a filled Enforcement
+      # row, and no deferral has expired. It reads files only and takes under a second, so
+      # it runs here on every run instead of in a lane; ci-ok fails when it does.
+      - name: Requirements check tests
+        run: python3 -I scripts/test_check_requirements.py
+      - name: Requirements check
+        run: python3 -I scripts/check-requirements.py
       - name: Select lanes
         id: select
         env:
