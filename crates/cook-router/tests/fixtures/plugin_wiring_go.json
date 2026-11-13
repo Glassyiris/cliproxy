@@ -2,7 +2,7 @@
   "scenarios": [
     {
       "name": "frontend auth without client keys",
-      "config": "config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\nremote-management:\n  disable-control-panel: true\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    fa:\n      enabled: true\n      record: RECDIR\n      label: fa\n      caps: frontend_auth_provider\n",
+      "config": "config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    fa:\n      enabled: true\n      record: RECDIR\n      label: fa\n      caps: frontend_auth_provider\nmanagement:\n  disable-control-panel: true\n",
       "plugins": {
         "fa.so": "recorder"
       },
@@ -351,7 +351,7 @@
     },
     {
       "name": "frontend auth after client keys",
-      "config": "config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\nremote-management:\n  disable-control-panel: true\napi-keys:\n  - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    fa:\n      enabled: true\n      record: RECDIR\n      label: fa\n      caps: frontend_auth_provider\n",
+      "config": "config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\naccess:\n  api-keys:\n    - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    fa:\n      enabled: true\n      record: RECDIR\n      label: fa\n      caps: frontend_auth_provider\nmanagement:\n  disable-control-panel: true\n",
       "plugins": {
         "fa.so": "recorder"
       },
@@ -557,7 +557,7 @@
     },
     {
       "name": "exclusive frontend auth",
-      "config": "config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\nremote-management:\n  disable-control-panel: true\napi-keys:\n  - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ex-b:\n      enabled: true\n      record: RECDIR\n      label: ex-b\n      caps: frontend_auth_provider,frontend_auth_provider_exclusive\n      priority: 5\n    ex-a:\n      enabled: true\n      record: RECDIR\n      label: ex-a\n      caps: frontend_auth_provider,frontend_auth_provider_exclusive\n      priority: 5\n    ex-low:\n      enabled: true\n      record: RECDIR\n      label: ex-low\n      caps: frontend_auth_provider,frontend_auth_provider_exclusive\n      priority: 1\n    plain:\n      enabled: true\n      record: RECDIR\n      label: plain\n      caps: frontend_auth_provider\n      priority: 9\n",
+      "config": "config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\naccess:\n  api-keys:\n    - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ex-b:\n      enabled: true\n      record: RECDIR\n      label: ex-b\n      caps: frontend_auth_provider,frontend_auth_provider_exclusive\n      priority: 5\n    ex-a:\n      enabled: true\n      record: RECDIR\n      label: ex-a\n      caps: frontend_auth_provider,frontend_auth_provider_exclusive\n      priority: 5\n    ex-low:\n      enabled: true\n      record: RECDIR\n      label: ex-low\n      caps: frontend_auth_provider,frontend_auth_provider_exclusive\n      priority: 1\n    plain:\n      enabled: true\n      record: RECDIR\n      label: plain\n      caps: frontend_auth_provider\n      priority: 9\nmanagement:\n  disable-control-panel: true\n",
       "plugins": {
         "ex-a.so": "recorder",
         "ex-b.so": "recorder",
@@ -672,7 +672,7 @@
     },
     {
       "name": "model router and plugin executors",
-      "config": "config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\nremote-management:\n  disable-control-panel: true\napi-keys:\n  - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rt:\n      enabled: true\n      record: RECDIR\n      label: rt\n      caps: model_router,executor\n      priority: 2\n    exb:\n      enabled: true\n      record: RECDIR\n      label: exb\n      caps: executor\n      inputs: claude\n      outputs: claude\nopenai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n    api-key-entries:\n      - api-key: fake-up-key\n    models:\n      - name: up-model\n        alias: up-alias\n",
+      "config": "config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\naccess:\n  api-keys:\n    - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rt:\n      enabled: true\n      record: RECDIR\n      label: rt\n      caps: model_router,executor\n      priority: 2\n    exb:\n      enabled: true\n      record: RECDIR\n      label: exb\n      caps: executor\n      inputs: claude\n      outputs: claude\napi-keys:\n  openai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n    models:\n      - name: up-model\n        alias: up-alias\n    keys:\n      - api-key: fake-up-key\nmanagement:\n  disable-control-panel: true\n",
       "plugins": {
         "exb.so": "recorder",
         "rt.so": "recorder"
@@ -2024,7 +2024,7 @@
     },
     {
       "name": "interceptors and request lifecycle",
-      "config": "config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\nremote-management:\n  disable-control-panel: true\napi-keys:\n  - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ic:\n      enabled: true\n      record: RECDIR\n      label: ic\n      caps: request_interceptor,response_interceptor,response_stream_interceptor,request_lifecycle_plugin\n      priority: 3\n    rt:\n      enabled: true\n      record: RECDIR\n      label: rt\n      caps: model_router,executor\n      priority: 2\nopenai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n    api-key-entries:\n      - api-key: fake-up\n    models:\n      - name: up-model\n        alias: up-alias\n  - name: down\n    base-url: UPSTREAM/down\n    api-key-entries:\n      - api-key: fake-down\n    models:\n      - name: down-model\n        alias: down-alias\n  - name: sse\n    base-url: UPSTREAM/sse\n    api-key-entries:\n      - api-key: fake-sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n",
+      "config": "config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\naccess:\n  api-keys:\n    - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ic:\n      enabled: true\n      record: RECDIR\n      label: ic\n      caps: request_interceptor,response_interceptor,response_stream_interceptor,request_lifecycle_plugin\n      priority: 3\n    rt:\n      enabled: true\n      record: RECDIR\n      label: rt\n      caps: model_router,executor\n      priority: 2\napi-keys:\n  openai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n    models:\n      - name: up-model\n        alias: up-alias\n    keys:\n      - api-key: fake-up\n  - name: down\n    base-url: UPSTREAM/down\n    models:\n      - name: down-model\n        alias: down-alias\n    keys:\n      - api-key: fake-down\n  - name: sse\n    base-url: UPSTREAM/sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n    keys:\n      - api-key: fake-sse\nmanagement:\n  disable-control-panel: true\n",
       "plugins": {
         "ic.so": "recorder",
         "rt.so": "recorder"
@@ -3046,7 +3046,7 @@
     },
     {
       "name": "interceptors with passthrough headers",
-      "config": "config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\nremote-management:\n  disable-control-panel: true\napi-keys:\n  - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ic:\n      enabled: true\n      record: RECDIR\n      label: ic\n      caps: response_interceptor,response_stream_interceptor\nrequests:\n  passthrough-headers: true\nopenai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n    api-key-entries:\n      - api-key: fake-up\n    models:\n      - name: up-model\n        alias: up-alias\n  - name: sse\n    base-url: UPSTREAM/sse\n    api-key-entries:\n      - api-key: fake-sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n",
+      "config": "config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\naccess:\n  api-keys:\n    - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ic:\n      enabled: true\n      record: RECDIR\n      label: ic\n      caps: response_interceptor,response_stream_interceptor\nrequests:\n  passthrough-headers: true\napi-keys:\n  openai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n    models:\n      - name: up-model\n        alias: up-alias\n    keys:\n      - api-key: fake-up\n  - name: sse\n    base-url: UPSTREAM/sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n    keys:\n      - api-key: fake-sse\nmanagement:\n  disable-control-panel: true\n",
       "plugins": {
         "ic.so": "recorder"
       },
@@ -3150,7 +3150,7 @@
     },
     {
       "name": "dropped chunks inside the bootstrap retries",
-      "config": "config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\nremote-management:\n  disable-control-panel: true\napi-keys:\n  - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ic:\n      enabled: true\n      record: RECDIR\n      label: ic\n      caps: response_stream_interceptor,request_lifecycle_plugin\nrequests:\n  streaming:\n    bootstrap-retries: 1\nopenai-compatibility:\n  - name: sse\n    base-url: UPSTREAM/sse\n    api-key-entries:\n      - api-key: fake-sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n",
+      "config": "config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\naccess:\n  api-keys:\n    - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ic:\n      enabled: true\n      record: RECDIR\n      label: ic\n      caps: response_stream_interceptor,request_lifecycle_plugin\nrequests:\n  streaming:\n    bootstrap-retries: 1\napi-keys:\n  openai-compatibility:\n  - name: sse\n    base-url: UPSTREAM/sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n    keys:\n      - api-key: fake-sse\nmanagement:\n  disable-control-panel: true\n",
       "plugins": {
         "ic.so": "recorder"
       },
@@ -3293,7 +3293,7 @@
     },
     {
       "name": "usage plugins",
-      "config": "config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\nremote-management:\n  disable-control-panel: true\napi-keys:\n  - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    us:\n      enabled: true\n      record: RECDIR\n      label: us\n      caps: usage_plugin\nopenai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n    api-key-entries:\n      - api-key: fake-up\n    models:\n      - name: up-model\n        alias: up-alias\n  - name: down\n    base-url: UPSTREAM/down\n    api-key-entries:\n      - api-key: fake-down\n    models:\n      - name: down-model\n        alias: down-alias\n  - name: sse\n    base-url: UPSTREAM/sse\n    api-key-entries:\n      - api-key: fake-sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n",
+      "config": "config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\naccess:\n  api-keys:\n    - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    us:\n      enabled: true\n      record: RECDIR\n      label: us\n      caps: usage_plugin\napi-keys:\n  openai-compatibility:\n  - name: up\n    base-url: UPSTREAM/v1\n    models:\n      - name: up-model\n        alias: up-alias\n    keys:\n      - api-key: fake-up\n  - name: down\n    base-url: UPSTREAM/down\n    models:\n      - name: down-model\n        alias: down-alias\n    keys:\n      - api-key: fake-down\n  - name: sse\n    base-url: UPSTREAM/sse\n    models:\n      - name: sse-model\n        alias: sse-alias\n    keys:\n      - api-key: fake-sse\nmanagement:\n  disable-control-panel: true\n",
       "plugins": {
         "us.so": "recorder"
       },
@@ -3467,7 +3467,7 @@
     },
     {
       "name": "model list interceptors",
-      "config": "config-version: 8\nhost: 127.0.0.1\nport: PORT\nauth-dir: AUTHDIR\nremote-management:\n  disable-control-panel: true\napi-keys:\n  - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ic:\n      enabled: true\n      record: RECDIR\n      label: ic\n      caps: response_interceptor,request_lifecycle_plugin\n",
+      "config": "config-version: 8\nserver:\n  host: 127.0.0.1\n  port: PORT\noauth:\n  auth-dir: AUTHDIR\naccess:\n  api-keys:\n    - \"k1\"\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    ic:\n      enabled: true\n      record: RECDIR\n      label: ic\n      caps: response_interceptor,request_lifecycle_plugin\nmanagement:\n  disable-control-panel: true\n",
       "plugins": {
         "ic.so": "recorder"
       },

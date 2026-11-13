@@ -6851,7 +6851,7 @@
   },
   {
    "name": "config-oauth-header-defaults",
-   "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\n  providers:\n    claude:\n      header-defaults:\n        user-agent: claude-cli/2.1.300 (external, cli)\n        package-version: 0.120.0\n        runtime-version: v27.1.0\n        os: Linux\n        arch: x64\n        timeout: \"900\"\n        timezone: UTC\n        stabilize-device-profile: false\n",
+   "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\nupstream:\n  claude:\n    header-defaults:\n      user-agent: claude-cli/2.1.300 (external, cli)\n      package-version: 0.120.0\n      runtime-version: v27.1.0\n      os: Linux\n      arch: x64\n      timeout: \"900\"\n      timezone: UTC\n      stabilize-device-profile: false\n",
    "auth_file": "{\"type\": \"claude\", \"access_token\": \"sk-ant-oat01-FAKE-LOCAL-ONLY\", \"refresh_token\": \"sk-ant-ort01-FAKE-LOCAL-ONLY\", \"id_token\": \"\", \"email\": \"fixture@example.invalid\", \"account_uuid\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"organization_uuid\": \"12345678-1234-4234-8234-123456789abc\", \"organization_name\": \"Fixture\", \"claude_device_ids\": [\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"], \"expired\": \"2099-01-01T00:00:00Z\", \"last_refresh\": \"2026-10-01T00:00:00Z\"}",
    "client_key": "client-key-1",
    "model": "claude-sonnet-4-6",
@@ -6979,7 +6979,7 @@
   },
   {
    "name": "config-oauth-header-defaults-stabilized",
-   "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\n  providers:\n    claude:\n      header-defaults:\n        user-agent: claude-cli/2.1.300 (external, cli)\n        package-version: 0.120.0\n        runtime-version: v27.1.0\n        os: Linux\n        arch: x64\n        stabilize-device-profile: true\n",
+   "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\nupstream:\n  claude:\n    header-defaults:\n      user-agent: claude-cli/2.1.300 (external, cli)\n      package-version: 0.120.0\n      runtime-version: v27.1.0\n      os: Linux\n      arch: x64\n      stabilize-device-profile: true\n",
    "auth_file": "{\"type\": \"claude\", \"access_token\": \"sk-ant-oat01-FAKE-LOCAL-ONLY\", \"refresh_token\": \"sk-ant-ort01-FAKE-LOCAL-ONLY\", \"id_token\": \"\", \"email\": \"fixture@example.invalid\", \"account_uuid\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"organization_uuid\": \"12345678-1234-4234-8234-123456789abc\", \"organization_name\": \"Fixture\", \"claude_device_ids\": [\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"], \"expired\": \"2099-01-01T00:00:00Z\", \"last_refresh\": \"2026-10-01T00:00:00Z\"}",
    "client_key": "client-key-1",
    "model": "claude-sonnet-4-6",
@@ -7131,7 +7131,7 @@
   },
   {
    "name": "config-oauth-disable-cloak",
-   "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\n  providers:\n    claude:\n      disable-claude-cloak-mode: true\n",
+   "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\nupstream:\n  claude:\n    disable-claude-cloak-mode: true\n",
    "auth_file": "{\"type\": \"claude\", \"access_token\": \"sk-ant-oat01-FAKE-LOCAL-ONLY\", \"refresh_token\": \"sk-ant-ort01-FAKE-LOCAL-ONLY\", \"id_token\": \"\", \"email\": \"fixture@example.invalid\", \"account_uuid\": \"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\", \"organization_uuid\": \"12345678-1234-4234-8234-123456789abc\", \"organization_name\": \"Fixture\", \"claude_device_ids\": [\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"], \"expired\": \"2099-01-01T00:00:00Z\", \"last_refresh\": \"2026-10-01T00:00:00Z\"}",
    "client_key": "client-key-1",
    "model": "claude-sonnet-4-6",

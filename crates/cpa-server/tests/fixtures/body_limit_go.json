@@ -666,7 +666,7 @@
   },
   {
     "name": "legacy_root_key",
-    "yaml": "max-request-body-bytes: 16\napi-keys:\n  - test-key\n",
+    "yaml": "server:\n  max-request-body-bytes: 16\naccess:\n  api-keys:\n    - test-key\n",
     "method": "POST",
     "path": "/v1/responses",
     "headers": {
@@ -682,7 +682,7 @@
   },
   {
     "name": "v8_key_wins_over_legacy",
-    "yaml": "max-request-body-bytes: 16\nserver:\n  max-request-body-bytes: 0\napi-keys:\n  - test-key\n",
+    "yaml": "server:\n  max-request-body-bytes: 0\naccess:\n  api-keys:\n    - test-key\n",
     "method": "POST",
     "path": "/v1/responses",
     "headers": {

@@ -358,26 +358,6 @@ fn load_config(db: &Path, config_file: &Path, optional: bool) -> anyhow::Result<
     Ok((store, loaded.config))
 }
 
-/// The settings that selected a remote config store before SQLite, upper and lower case.
-const REMOTE_STORE_KEYS: [&str; 6] = [
-    "PGSTORE_DSN",
-    "pgstore_dsn",
-    "OBJECTSTORE_ENDPOINT",
-    "objectstore_endpoint",
-    "GITSTORE_GIT_URL",
-    "gitstore_git_url",
-];
-
-fn reject_remote_store(env: &dyn Fn(&str) -> Option<String>) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        !REMOTE_STORE_KEYS
-            .iter()
-            .any(|key| env(key).is_some_and(|v| !v.trim().is_empty())),
-        "PGSTORE/OBJECTSTORE/GITSTORE live storage is no longer supported. Export the old config with the previous release and import it with cook-router --db PATH config import FILE, migrate auths, then remove the remote-store environment variables. SQLite is the durable authority; mount a persistent volume for --db or COOK_DB in ephemeral containers. Remote data has not been changed."
-    );
-    Ok(())
-}
-
 /// Go's cloud-deploy check, of the config database.
 fn cloud_config_present(store: &ConfigStore, config: &Config) -> bool {
     let (present, message) = if store.is_empty().unwrap_or(true) {
@@ -516,8 +496,7 @@ fn main() -> anyhow::Result<()> {
         None
     } else {
         let optional = std::env::var("COOK_DEPLOY").is_ok_and(|v| v == "cloud");
-        let loaded =
-            reject_remote_store(&|key| std::env::var(key).ok()).and_then(|()| load_config(&db, &config_file, optional));
+        let loaded = load_config(&db, &config_file, optional);
         // Like a failure inside `run`: the process log keeps why startup stopped.
         if let Err(error) = &loaded
             && log_file.is_some()
@@ -2659,7 +2638,7 @@ mod tests {
         store
             .import_yaml(
                 &format!(
-                    "host: 127.0.0.1\nport: 0\nauth-dir: '{}'\n",
+                    "server:\n  host: 127.0.0.1\n  port: 0\noauth:\n  auth-dir: '{}'\n",
                     root.join("legacy").display()
                 ),
                 "test",
@@ -2795,7 +2774,10 @@ mod tests {
         let store = Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap());
         store
             .import_yaml(
-                &format!("host: 127.0.0.1\nport: 0\nauth-dir: '{}'\n", auth.display()),
+                &format!(
+                    "server:\n  host: 127.0.0.1\n  port: 0\noauth:\n  auth-dir: '{}'\n",
+                    auth.display()
+                ),
                 "test",
                 "standalone server",
             )
@@ -2834,7 +2816,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cpa-siwc-route-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("auth")).unwrap();
         let store = Arc::new(ConfigStore::memory_with(&format!(
-            "auth-dir: '{}'\n",
+            "oauth:\n  auth-dir: '{}'\n",
             dir.join("auth").display()
         )));
         let config = store.load().unwrap().config;
@@ -2905,10 +2887,13 @@ mod tests {
         assert_eq!(cfg.port, 0);
         assert!(!store.is_empty().unwrap(), "even an empty initial import is durable");
         assert!(!cloud_config_present(&store, &cfg));
-        std::fs::write(&missing, "port: 9000\n").unwrap();
+        std::fs::write(&missing, "server:\n  port: 9000\n").unwrap();
         drop(store);
         assert_eq!(load_config(&db, &missing, false).unwrap().1.port, 0);
-        for (i, text) in ["port: [\n", "port: wrong\n", "- a\n- b\n"].iter().enumerate() {
+        for (i, text) in ["server:\n  port: [\n", "server:\n  port: wrong\n", "- a\n- b\n"]
+            .iter()
+            .enumerate()
+        {
             let broken = dir.join("broken.yaml");
             std::fs::write(&broken, text).unwrap();
             assert!(
@@ -2927,20 +2912,6 @@ mod tests {
     }
 
     #[test]
-    fn live_remote_store_selection_is_rejected_without_touching_it() {
-        for key in ["PGSTORE_DSN", "OBJECTSTORE_ENDPOINT", "GITSTORE_GIT_URL", "pgstore_dsn"] {
-            let error = reject_remote_store(&|name| (name == key).then(|| "fake-secret".to_owned()))
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("config import"));
-            assert!(error.contains("persistent volume"));
-            assert!(!error.contains("fake-secret"));
-        }
-        reject_remote_store(&|_| None).unwrap();
-        reject_remote_store(&|_| Some("  ".to_owned())).unwrap();
-    }
-
-    #[test]
     fn an_existing_database_does_not_reread_the_import_file() {
         let dir = std::env::temp_dir().join(format!(
             "cpa-import-once-{}",
@@ -2952,9 +2923,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let db = dir.join("cook.db");
         let file = dir.join("config.yaml");
-        std::fs::write(&file, "port: 9\n").unwrap();
+        std::fs::write(&file, "server:\n  port: 9\n").unwrap();
         assert_eq!(load_config(&db, &file, false).unwrap().1.port, 9);
-        std::fs::write(&file, "port: 10\n").unwrap();
+        std::fs::write(&file, "server:\n  port: 10\n").unwrap();
         assert_eq!(load_config(&db, &file, false).unwrap().1.port, 9);
         std::fs::remove_dir_all(dir).unwrap();
     }

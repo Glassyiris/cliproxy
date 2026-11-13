@@ -2,7 +2,7 @@
   "scenarios": [
     {
       "name": "payload_override_stop_dropped",
-      "config": "payload:\n  override:\n    - models:\n        - name: grok-4.3\n      params:\n        stop: [\"X\"]\n        temperature: 0.3\n",
+      "config": "requests:\n  payload:\n    override:\n      - models:\n          - name: grok-4.3\n        params:\n          stop: [\"X\"]\n          temperature: 0.3\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"

@@ -60,7 +60,7 @@ async fn proxy(credits: bool, id: &str) -> (String, Arc<Seen>) {
     let seen = Arc::new(Seen::default());
     let up = serve(axum::Router::new().fallback(upstream).with_state(seen.clone())).await;
     let config = Config::parse(&format!(
-        "auth-dir: {}\naccess:\n  api-keys: [client-key]\nquota-exceeded:\n  antigravity-credits: {credits}\n",
+        "oauth:\n  auth-dir: {}\n  providers:\n    antigravity:\n      antigravity-credits: {credits}\naccess:\n  api-keys: [client-key]\n",
         auth_dir(id).display()
     ))
     .unwrap();

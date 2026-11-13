@@ -1185,7 +1185,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\n      cloak:\n        mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\n        cloak:\n          mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-20",
      "exchanges": {
       "chunks": null,
@@ -1323,7 +1323,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\n      cloak:\n        mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\n        cloak:\n          mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-20",
      "exchanges": {
       "chunks": null,
@@ -1886,7 +1886,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-3-5-sonnet-20241022\n          params:\n            prompt_cache_options.mode: explicit\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-3-5-sonnet-20241022\n            params:\n              prompt_cache_options.mode: explicit\n",
      "date": "2026-10-20",
      "exchanges": {
       "chunks": null,
@@ -2248,7 +2248,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\n      cloak:\n        mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\n        cloak:\n          mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-20",
      "exchanges": {
       "chunks": null,
@@ -2389,7 +2389,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\n      cloak:\n        mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\n        cloak:\n          mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-20",
      "exchanges": {
       "chunks": null,
@@ -2530,7 +2530,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\n      cloak:\n        mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\n        cloak:\n          mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-20",
      "exchanges": {
       "chunks": null,
@@ -2671,7 +2671,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\n      cloak:\n        mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\n        cloak:\n          mode: always\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-20",
      "exchanges": {
       "chunks": null,

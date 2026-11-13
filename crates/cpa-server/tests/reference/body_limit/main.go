@@ -186,9 +186,9 @@ func scenarios() []scenario {
 	negYAML := "config-version: 8\nserver:\n  max-request-body-bytes: -1\naccess:\n  api-keys:\n    - test-key\n"
 	add(scenario{Name: "negative_limit_disables", YAML: negYAML, Method: "POST", Path: "/v1/responses", Headers: auth,
 		Body: `{"model":"gpt-5","input":"` + strings.Repeat("a", 256) + `"}`, Chunked: true})
-	add(scenario{Name: "legacy_root_key", YAML: "max-request-body-bytes: 16\napi-keys:\n  - test-key\n", Method: "POST", Path: "/v1/responses", Headers: auth,
+	add(scenario{Name: "legacy_root_key", YAML: "server:\n  max-request-body-bytes: 16\naccess:\n  api-keys:\n    - test-key\n", Method: "POST", Path: "/v1/responses", Headers: auth,
 		Body: `{"model":"gpt-5","input":"ok"}`})
-	add(scenario{Name: "v8_key_wins_over_legacy", YAML: "max-request-body-bytes: 16\nserver:\n  max-request-body-bytes: 0\napi-keys:\n  - test-key\n", Method: "POST", Path: "/v1/responses", Headers: auth,
+	add(scenario{Name: "v8_key_wins_over_legacy", YAML: "server:\n  max-request-body-bytes: 0\naccess:\n  api-keys:\n    - test-key\n", Method: "POST", Path: "/v1/responses", Headers: auth,
 		Body: `{"model":"gpt-5","input":"ok"}`})
 	add(scenario{Name: "get_with_body_over_limit", YAML: api64(""), Method: "GET", Path: "/v1/models", Headers: auth, Body: big, Chunked: true})
 	add(scenario{Name: "healthz_content_length_over_limit", YAML: api64(""), Method: "GET", Path: "/healthz", Body: big})

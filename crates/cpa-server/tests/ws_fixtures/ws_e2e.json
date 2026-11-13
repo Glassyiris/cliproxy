@@ -1,7 +1,7 @@
 [
   {
     "name": "ws_two_turns",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "client_headers": {
       "session_id": "sess-ws",
       "x-codex-turn-state": "ts-1"
@@ -103,7 +103,7 @@
   },
   {
     "name": "http_incremental",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "client_headers": {
       "session_id": "sess-http"
     },
@@ -242,7 +242,7 @@
   },
   {
     "name": "previous_not_found_then_create",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-http.json",
@@ -327,7 +327,7 @@
   },
   {
     "name": "prewarm_then_followup",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-http.json",
@@ -397,7 +397,7 @@
   },
   {
     "name": "ws_request_fault_exposed",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -457,7 +457,7 @@
   },
   {
     "name": "ws_request_fault_headers",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -517,7 +517,7 @@
   },
   {
     "name": "ws_quota_silent_close",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -574,7 +574,7 @@
   },
   {
     "name": "ws_continuation_needs_replay",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -657,7 +657,7 @@
   },
   {
     "name": "ws_upstream_closes_between_turns",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -731,7 +731,7 @@
   },
   {
     "name": "ws_upstream_message_too_big",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -792,7 +792,7 @@
   },
   {
     "name": "ws_upstream_message_too_big_spaced_reason",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -853,7 +853,7 @@
   },
   {
     "name": "http_stream_ends_early",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-http.json",
@@ -911,7 +911,7 @@
   },
   {
     "name": "ws_multi_agent_v2",
-    "config": "host: \"\"\nclient:\n  codex:\n    optimize-multi-agent-v2: true\ncodex:\n  orphan-delegation-compatibility: true\n",
+    "config": "server:\n  host: \"\"\nclient:\n  codex:\n    optimize-multi-agent-v2: true\nupstream:\n  codex:\n    orphan-delegation-compatibility: true\n",
     "client_headers": {
       "User-Agent": "codex_cli_rs/0.150.0 (Linux; x86_64)",
       "X-Openai-Subagent": "collab_spawn",
@@ -980,7 +980,7 @@
   },
   {
     "name": "http_multi_agent_v2",
-    "config": "host: \"\"\nclient:\n  codex:\n    optimize-multi-agent-v2: true\ncodex:\n  orphan-delegation-compatibility: true\n",
+    "config": "server:\n  host: \"\"\nclient:\n  codex:\n    optimize-multi-agent-v2: true\nupstream:\n  codex:\n    orphan-delegation-compatibility: true\n",
     "client_headers": {
       "User-Agent": "codex_cli_rs/0.150.0 (Linux; x86_64)",
       "X-Openai-Subagent": "collab_spawn",
@@ -1043,7 +1043,7 @@
   },
   {
     "name": "steer_successor",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -1151,7 +1151,7 @@
   },
   {
     "name": "steer_tool_pending",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -1279,7 +1279,7 @@
   },
   {
     "name": "steer_disconnect_accepted",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -1376,7 +1376,7 @@
   },
   {
     "name": "steer_local_validation",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -1505,7 +1505,7 @@
   },
   {
     "name": "steer_later_error_recovers",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -1613,7 +1613,7 @@
   },
   {
     "name": "steer_initial_error_terminal",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -1673,7 +1673,7 @@
   },
   {
     "name": "steer_later_error_then_upstream_close",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -1757,116 +1757,8 @@
     ]
   },
   {
-    "name": "steer_historical_oauth_path_steers_api_key",
-    "config": "host: \"\"\noauth:\n  providers:\n    codex:\n      response-steering: true\n",
-    "credentials": [
-      {
-        "id": "codex-ws.json",
-        "attributes": {
-          "api_key": "sk-fake-ws",
-          "websockets": "true"
-        },
-        "models": [
-          "gpt-fixture"
-        ]
-      }
-    ],
-    "steps": [
-      {
-        "send": "{\"type\":\"response.create\",\"model\":\"gpt-fixture\",\"instructions\":\"INITIAL\",\"input\":[]}",
-        "read": "until:response.completed",
-        "upstream": [
-          {
-            "events": [
-              "{\"type\":\"response.created\",\"response\":{\"id\":\"first\",\"status\":\"in_progress\",\"output\":[]}}",
-              "{\"type\":\"response.completed\",\"response\":{\"id\":\"first\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}"
-            ]
-          }
-        ],
-        "frames": [
-          {
-            "text": "{\"type\":\"response.created\",\"response\":{\"id\":\"first\",\"status\":\"in_progress\",\"output\":[]}}"
-          },
-          {
-            "text": "{\"type\":\"response.completed\",\"response\":{\"id\":\"first\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5,\"output_tokens_details\":{\"reasoning_tokens\":0},\"input_tokens_details\":{\"cached_tokens\":0}}}}"
-          }
-        ]
-      },
-      {
-        "send": "{\"type\":\"response.create\",\"model\":\"gpt-fixture\",\"instructions\":\"REJECTED\",\"input\":[]}",
-        "read": "until:error",
-        "upstream": [
-          {
-            "events": [
-              "{\"type\":\"error\",\"status\":400,\"event_id\":\"rejected-create\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Correct the request\"}}"
-            ]
-          }
-        ],
-        "frames": [
-          {
-            "text": "{\"type\":\"error\",\"status\":400,\"event_id\":\"rejected-create\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Correct the request\"}}"
-          }
-        ]
-      },
-      {
-        "send": "{\"type\":\"response.create\",\"model\":\"gpt-fixture\",\"instructions\":\"CORRECTED\",\"input\":[]}",
-        "read": "until:response.completed",
-        "upstream": [
-          {
-            "events": [
-              "{\"type\":\"response.created\",\"response\":{\"id\":\"corrected\",\"status\":\"in_progress\",\"output\":[]}}",
-              "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"id\":\"msg_RECOVERED\",\"content\":[{\"type\":\"output_text\",\"text\":\"RECOVERED\"}]}}",
-              "{\"type\":\"response.completed\",\"response\":{\"id\":\"corrected\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}"
-            ]
-          }
-        ],
-        "frames": [
-          {
-            "text": "{\"type\":\"response.created\",\"response\":{\"id\":\"corrected\",\"status\":\"in_progress\",\"output\":[]}}"
-          },
-          {
-            "text": "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"id\":\"msg_RECOVERED\",\"content\":[{\"type\":\"output_text\",\"text\":\"RECOVERED\"}]}}"
-          },
-          {
-            "text": "{\"type\":\"response.completed\",\"response\":{\"id\":\"corrected\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"id\":\"msg_RECOVERED\",\"content\":[{\"type\":\"output_text\",\"text\":\"RECOVERED\"}]}],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5,\"output_tokens_details\":{\"reasoning_tokens\":0},\"input_tokens_details\":{\"cached_tokens\":0}}}}"
-          }
-        ]
-      }
-    ],
-    "upstream": [
-      {
-        "kind": "ws_dial",
-        "headers": {
-          "authorization": "Bearer sk-fake-ws",
-          "connection": "Upgrade",
-          "conversation_id": "6e975880-0f47-50fb-ad83-1ccdd6104781",
-          "openai-beta": "responses_websockets=2026-02-06",
-          "originator": "codex-tui",
-          "sec-websocket-extensions": "permessage-deflate; server_no_context_takeover; client_no_context_takeover",
-          "sec-websocket-key": "PpHjDRbUilwyoCiJKjybXA==",
-          "sec-websocket-version": "13",
-          "session_id": "6e975880-0f47-50fb-ad83-1ccdd6104781",
-          "upgrade": "websocket",
-          "user-agent": "codex-tui/0.154.0 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.154.0)"
-        }
-      },
-      {
-        "kind": "ws_frame",
-        "body": "{\"model\":\"gpt-fixture\",\"instructions\":\"INITIAL\",\"input\":[],\"stream\":true,\"store\":false,\"parallel_tool_calls\":true,\"include\":[\"reasoning.encrypted_content\"],\"tools\":[{\"type\":\"image_generation\",\"output_format\":\"png\"}],\"prompt_cache_key\":\"6e975880-0f47-50fb-ad83-1ccdd6104781\",\"type\":\"response.create\"}"
-      },
-      {
-        "kind": "ws_frame",
-        "body": "{\"type\":\"response.create\",\"model\":\"gpt-fixture\",\"instructions\":\"REJECTED\",\"input\":[],\"stream\":true,\"store\":false,\"parallel_tool_calls\":true,\"include\":[\"reasoning.encrypted_content\"],\"tools\":[{\"type\":\"image_generation\",\"output_format\":\"png\"}],\"prompt_cache_key\":\"6e975880-0f47-50fb-ad83-1ccdd6104781\"}"
-      },
-      {
-        "kind": "ws_frame",
-        "body": "{\"type\":\"response.create\",\"model\":\"gpt-fixture\",\"instructions\":\"CORRECTED\",\"input\":[],\"stream\":true,\"store\":false,\"parallel_tool_calls\":true,\"include\":[\"reasoning.encrypted_content\"],\"tools\":[{\"type\":\"image_generation\",\"output_format\":\"png\"}],\"prompt_cache_key\":\"6e975880-0f47-50fb-ad83-1ccdd6104781\"}"
-      }
-    ]
-  },
-  {
     "name": "steer_idle_upstream_close",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -1936,7 +1828,7 @@
   },
   {
     "name": "steer_idle_upstream_close_legacy_disabled",
-    "config": "host: \"\"\ncodex:\n  response-steering: false\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: false\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -2005,151 +1897,8 @@
     ]
   },
   {
-    "name": "steer_idle_upstream_close_v8_api_key",
-    "config": "host: \"\"\noauth:\n  providers:\n    codex:\n      response-steering: true\n",
-    "credentials": [
-      {
-        "id": "codex-ws.json",
-        "attributes": {
-          "api_key": "sk-fake-ws",
-          "websockets": "true"
-        },
-        "models": [
-          "gpt-fixture"
-        ]
-      }
-    ],
-    "steps": [
-      {
-        "send": "{\"type\":\"response.create\",\"model\":\"gpt-fixture\",\"input\":[]}",
-        "read": "until:response.completed",
-        "upstream": [
-          {
-            "events": [
-              "{\"type\":\"response.created\",\"response\":{\"id\":\"first\",\"status\":\"in_progress\",\"output\":[]}}",
-              "{\"type\":\"response.completed\",\"response\":{\"id\":\"first\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}"
-            ],
-            "then": "close"
-          }
-        ],
-        "frames": [
-          {
-            "text": "{\"type\":\"response.created\",\"response\":{\"id\":\"first\",\"status\":\"in_progress\",\"output\":[]}}"
-          },
-          {
-            "text": "{\"type\":\"response.completed\",\"response\":{\"id\":\"first\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5,\"output_tokens_details\":{\"reasoning_tokens\":0},\"input_tokens_details\":{\"cached_tokens\":0}}}}"
-          }
-        ]
-      },
-      {
-        "read": "close",
-        "frames": [
-          {
-            "close": 1006,
-            "reason": "unexpected EOF"
-          }
-        ]
-      }
-    ],
-    "upstream": [
-      {
-        "kind": "ws_dial",
-        "headers": {
-          "authorization": "Bearer sk-fake-ws",
-          "connection": "Upgrade",
-          "conversation_id": "863b84d0-923a-5d8b-82b2-1d10bef61679",
-          "openai-beta": "responses_websockets=2026-02-06",
-          "originator": "codex-tui",
-          "sec-websocket-extensions": "permessage-deflate; server_no_context_takeover; client_no_context_takeover",
-          "sec-websocket-key": "cUtoZdfwaWHx8tD95ETUNg==",
-          "sec-websocket-version": "13",
-          "session_id": "863b84d0-923a-5d8b-82b2-1d10bef61679",
-          "upgrade": "websocket",
-          "user-agent": "codex-tui/0.154.0 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.154.0)"
-        }
-      },
-      {
-        "kind": "ws_frame",
-        "body": "{\"model\":\"gpt-fixture\",\"input\":[],\"stream\":true,\"store\":false,\"parallel_tool_calls\":true,\"include\":[\"reasoning.encrypted_content\"],\"instructions\":\"\",\"tools\":[{\"type\":\"image_generation\",\"output_format\":\"png\"}],\"prompt_cache_key\":\"863b84d0-923a-5d8b-82b2-1d10bef61679\",\"type\":\"response.create\"}"
-      }
-    ]
-  },
-  {
-    "name": "steer_idle_upstream_close_v8_oauth",
-    "config": "host: \"\"\noauth:\n  providers:\n    codex:\n      response-steering: true\n",
-    "credentials": [
-      {
-        "id": "codex-oauth.json",
-        "attributes": {
-          "websockets": "true"
-        },
-        "models": [
-          "gpt-6-astra"
-        ],
-        "metadata": {
-          "access_token": "fake-oauth-token"
-        }
-      }
-    ],
-    "steps": [
-      {
-        "send": "{\"type\":\"response.create\",\"model\":\"gpt-6-astra\",\"input\":[]}",
-        "read": "until:response.completed",
-        "upstream": [
-          {
-            "events": [
-              "{\"type\":\"response.created\",\"response\":{\"id\":\"first\",\"status\":\"in_progress\",\"output\":[]}}",
-              "{\"type\":\"response.completed\",\"response\":{\"id\":\"first\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}"
-            ],
-            "then": "close"
-          }
-        ],
-        "frames": [
-          {
-            "text": "{\"type\":\"response.created\",\"response\":{\"id\":\"first\",\"status\":\"in_progress\",\"output\":[]}}"
-          },
-          {
-            "text": "{\"type\":\"response.completed\",\"response\":{\"id\":\"first\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5,\"output_tokens_details\":{\"reasoning_tokens\":0},\"input_tokens_details\":{\"cached_tokens\":0}}}}"
-          }
-        ]
-      },
-      {
-        "read": "close",
-        "frames": [
-          {
-            "close": 1006,
-            "reason": "unexpected EOF"
-          }
-        ]
-      }
-    ],
-    "upstream": [
-      {
-        "kind": "ws_dial",
-        "headers": {
-          "authorization": "Bearer fake-oauth-token",
-          "connection": "Upgrade",
-          "conversation_id": "95ae0ff5-ad0d-5e38-8b3c-0b4352568cd8",
-          "openai-beta": "responses_websockets=2026-02-06",
-          "originator": "codex-tui",
-          "sec-websocket-extensions": "permessage-deflate; server_no_context_takeover; client_no_context_takeover",
-          "sec-websocket-key": "s6Zyq3OxlqbMGAqOTFJdHQ==",
-          "sec-websocket-version": "13",
-          "session_id": "95ae0ff5-ad0d-5e38-8b3c-0b4352568cd8",
-          "upgrade": "websocket",
-          "user-agent": "codex-tui/0.154.0 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.154.0)",
-          "x-codex-routing-hint": "model=gpt-6-astra"
-        }
-      },
-      {
-        "kind": "ws_frame",
-        "body": "{\"model\":\"gpt-6-astra\",\"input\":[],\"stream\":true,\"store\":false,\"parallel_tool_calls\":true,\"include\":[\"reasoning.encrypted_content\"],\"instructions\":\"\",\"tools\":[{\"type\":\"image_generation\",\"output_format\":\"png\"}],\"prompt_cache_key\":\"95ae0ff5-ad0d-5e38-8b3c-0b4352568cd8\",\"type\":\"response.create\"}"
-      }
-    ]
-  },
-  {
     "name": "steer_idle_upstream_close_upstream_api_key",
-    "config": "host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -2219,7 +1968,7 @@
   },
   {
     "name": "steer_idle_upstream_close_upstream_oauth",
-    "config": "host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-oauth.json",
@@ -2292,7 +2041,7 @@
   },
   {
     "name": "steer_disabled_error_terminal",
-    "config": "host: \"\"\ncodex:\n  response-steering: false\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: false\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -2376,7 +2125,7 @@
   },
   {
     "name": "steer_in_flight",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -2456,7 +2205,7 @@
   },
   {
     "name": "steer_disconnect_pending",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -2561,7 +2310,7 @@
   },
   {
     "name": "steer_append_inherits",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -2645,7 +2394,7 @@
   },
   {
     "name": "steer_queued_create_then_steer",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -2782,7 +2531,7 @@
   },
   {
     "name": "steer_active_failure_keeps_queued_create",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -2866,7 +2615,7 @@
   },
   {
     "name": "steer_ambiguous_failure_ends_the_socket",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -2946,7 +2695,7 @@
   },
   {
     "name": "steer_later_credential_failure",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -3030,7 +2779,7 @@
   },
   {
     "name": "steer_later_quota_failure",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -3110,7 +2859,7 @@
   },
   {
     "name": "steer_wrong_parent_rejected",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -3227,7 +2976,7 @@
   },
   {
     "name": "steer_model_switch_needs_replay",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -3297,7 +3046,7 @@
   },
   {
     "name": "steer_credential_disabled",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -3368,7 +3117,7 @@
   },
   {
     "name": "steer_rejected_when_disabled",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -3446,7 +3195,7 @@
   },
   {
     "name": "http_upstream_400_exposed",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-http.json",
@@ -3499,7 +3248,7 @@
   },
   {
     "name": "interrupt_in_flight",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -3637,7 +3386,7 @@
   },
   {
     "name": "interrupt_in_flight_steering",
-    "config": "host: \"\"\ncodex:\n  response-steering: true\n",
+    "config": "server:\n  host: \"\"\nupstream:\n  codex:\n    response-steering: true\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -3775,7 +3524,7 @@
   },
   {
     "name": "interrupt_http_local",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-http.json",
@@ -3884,7 +3633,7 @@
   },
   {
     "name": "interrupt_binary_frame",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",
@@ -3954,14 +3703,14 @@
       },
       {
         "kind": "ws_frame",
-        "body": "{\"type\":\"response.interrupt\",\"response_id\":\"r1\",\"extension\":\"\ufffd\"}",
+        "body": "{\"type\":\"response.interrupt\",\"response_id\":\"r1\",\"extension\":\"�\"}",
         "body_hex": "7b2274797065223a22726573706f6e73652e696e74657272757074222c22726573706f6e73655f6964223a227231222c22657874656e73696f6e223a22ff227d"
       }
     ]
   },
   {
     "name": "interrupt_late_ws",
-    "config": "host: \"\"\n",
+    "config": "server:\n  host: \"\"\n",
     "credentials": [
       {
         "id": "codex-ws.json",

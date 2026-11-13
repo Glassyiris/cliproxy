@@ -90,7 +90,7 @@ async fn upstream_loss_while_the_client_stalls_releases_the_session() {
         .serve(axum::Router::new().fallback(|ws: WebSocketUpgrade| async move { ws.on_upgrade(flood_then_close) }))
         .await;
     let cfg = Config::parse(&format!(
-        "codex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    websockets: true\n    models:\n      - name: gpt-fixture\n"
+        "api-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n"
     ))
     .unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
@@ -188,7 +188,7 @@ async fn upstream_loss_cancels_a_blocked_local_error_reply() {
         );
     let address = servers.serve(app).await;
     let cfg = Config::parse(&format!(
-        "codex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{address}/upstream\n    websockets: true\n    models:\n      - name: gpt-fixture\n"
+        "api-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{address}/upstream\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n"
     )).unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
     let executors = Executors {
@@ -288,7 +288,7 @@ async fn steering_reader_cancels_the_turn_when_the_client_leaves() {
         }))
         .await;
     let cfg = Config::parse(&format!(
-        "codex:\n  response-steering: true\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n"
+        "upstream:\n  codex:\n    response-steering: true\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n"
     ))
     .unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
@@ -363,7 +363,7 @@ async fn request_log_records_the_websocket_timeline_and_each_turn() {
     let dir = std::env::temp_dir().join(format!("cpa-ws-timeline-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
-        "auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n",
+        "oauth:\n  auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n",
         dir.join("auths").display()
     ))
     .unwrap();
@@ -505,7 +505,7 @@ async fn a_client_close_cancels_a_stalled_steering_turn() {
         }))
         .await;
     let cfg = Config::parse(&format!(
-        "codex:\n  response-steering: true\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n"
+        "upstream:\n  codex:\n    response-steering: true\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n"
     ))
     .unwrap();
     let credentials = cpa_core::config::credentials::from_config(&cfg);
@@ -570,7 +570,7 @@ async fn logging_proxy(servers: &mut Servers, dir: &std::path::Path, status: u16
         }))
         .await;
     let cfg = Config::parse(&format!(
-        "auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n",
+        "oauth:\n  auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n",
         dir.join("auths").display()
     ))
     .unwrap();
@@ -786,7 +786,7 @@ async fn interrupt_diagnostics_are_sanitized() {
     let dir = std::env::temp_dir().join(format!("cpa-ws-interrupt-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
-        "auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n",
+        "oauth:\n  auth-dir: {}\nobservability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n",
         dir.join("auths").display()
     ))
     .unwrap();
@@ -944,7 +944,7 @@ async fn uninterrupted_claude_turns_send_masters_bytes() {
     };
     let dir = std::env::temp_dir().join(format!("cpa-ws-claude-{}", uuid::Uuid::new_v4()));
     let cfg = Config::parse(&format!(
-        "auth-dir: {}\nclaude-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    models:\n      - name: claude-opus-5-5\n",
+        "oauth:\n  auth-dir: {}\napi-keys:\n  claude:\n  - name: claude-1\n    base-url: http://{upstream}\n    models:\n      - name: claude-opus-5-5\n    keys:\n      - api-key: sk-FAKE\n",
         dir.join("auths").display()
     ))
     .unwrap();
@@ -1050,7 +1050,7 @@ async fn pinned_continuation_failure(shown: &'static [&'static str], failure: &'
     let dir = std::env::temp_dir().join(format!("cpa-ws-pinned-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
-        "auth-dir: {}\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    websockets: true\n    models:\n      - name: gpt-fixture\n",
+        "oauth:\n  auth-dir: {}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n",
         dir.display()
     ))
     .unwrap();
@@ -1182,7 +1182,7 @@ async fn an_upstream_error_that_loses_the_socket_still_cools_the_credential() {
         let dir = std::env::temp_dir().join(format!("cpa-ws-6503-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = Config::parse(&format!(
-            "auth-dir: {}\ncodex-api-key:\n  - api-key: sk-FAKE\n    base-url: http://{upstream}\n    websockets: true\n    models:\n      - name: gpt-fixture\n",
+            "oauth:\n  auth-dir: {}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n",
             dir.display()
         ))
         .unwrap();
@@ -1309,11 +1309,11 @@ async fn early_upstream_failures_switch_before_downstream_output() {
         .await;
         let entry = |key: &str, priority: u8, websocket: bool| {
             format!(
-                "  - api-key: {key}\n    base-url: http://{upstream}\n    priority: {priority}\n    websockets: {websocket}\n    models:\n      - name: gpt-fixture\n"
+                "    - base-url: http://{upstream}\n      priority: {priority}\n      models:\n        - name: gpt-fixture\n      keys:\n        - api-key: {key}\n          websockets: {websocket}\n"
             )
         };
         let cfg = Config::parse(&format!(
-            "codex:\n  stream-bootstrap-buffering: {buffering}\ncodex-api-key:\n{}{}",
+            "upstream:\n  codex:\n    stream-bootstrap-buffering: {buffering}\napi-keys:\n  codex:\n{}{}",
             entry("bad", 2, websocket),
             entry("good", 1, fallback_websocket),
         ))
@@ -1373,7 +1373,7 @@ async fn early_upstream_failures_switch_before_downstream_output() {
 /// socket for the next turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn removing_a_credential_closes_only_its_upstream_sockets() {
-    for section in ["codex-api-key", "xai-api-key"] {
+    for section in ["codex", "xai"] {
         removal_closes_only_its_sockets(section).await;
     }
 }
@@ -1417,11 +1417,11 @@ async fn removal_closes_only_its_sockets(section: &str) {
     let dir = std::env::temp_dir().join(format!("cpa-ws-remove-{}", uuid::Uuid::new_v4()));
     let entry = |key: &str| {
         format!(
-            "  - api-key: {key}\n    base-url: http://{upstream}\n    websockets: true\n    models:\n      - name: gpt-{key}\n"
+            "    - base-url: http://{upstream}\n      models:\n        - name: gpt-{key}\n      keys:\n        - api-key: {key}\n          websockets: true\n"
         )
     };
     let cfg = Config::parse(&format!(
-        "auth-dir: {}\n{section}:\n{}{}",
+        "oauth:\n  auth-dir: {}\napi-keys:\n  {section}:\n{}{}",
         dir.join("auths").display(),
         entry("keep"),
         entry("drop")

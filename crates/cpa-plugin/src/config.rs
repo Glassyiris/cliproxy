@@ -625,7 +625,11 @@ mod tests {
         assert!(!rc.enabled);
         assert!(rc.items.is_empty());
         assert_eq!(rc.dir, PathBuf::from("plugins"));
-        assert!(!runtime_config(&doc("port: 1\n"), &Value::Null).unwrap().enabled);
+        assert!(
+            !runtime_config(&doc("server:\n  port: 1\n"), &Value::Null)
+                .unwrap()
+                .enabled
+        );
     }
 
     #[test]

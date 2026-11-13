@@ -24,7 +24,7 @@ fn home_flags_are_unknown_and_home_variables_start_nothing() {
     std::fs::create_dir_all(dir.join("auth")).unwrap();
     std::fs::write(
         dir.join("config.yaml"),
-        "config-version: 8\nport: 0\nauth-dir: ./auth\n",
+        "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: ./auth\n",
     )
     .unwrap();
     let import = ["--local-model", "--vertex-import", "missing-key.json"];

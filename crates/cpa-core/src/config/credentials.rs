@@ -1893,7 +1893,7 @@ mod tests {
     #[test]
     fn scalar_model_names_keep_their_yaml_text() {
         let go: Json = serde_json::from_str(include_str!("../../tests/fixtures/scalar_model_names_go.json")).unwrap();
-        for section in ["yaml", "legacy", "lists", "legacy-lists"] {
+        for section in ["yaml", "lists"] {
             let cfg = Config::parse(go[section]["yaml"].as_str().unwrap()).unwrap();
             let aliases = crate::registry::dynamic::global_aliases(&cfg);
             // Exclusions and OAuth model aliases, where Go has them.

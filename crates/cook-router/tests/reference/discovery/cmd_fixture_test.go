@@ -114,24 +114,24 @@ func TestZZCmdFixture(t *testing.T) {
 	dir := t.TempDir()
 	var filters []map[string]any
 	for _, text := range []string{
-		"discovery:\n  interfaces:\n    include: [\"eth0,en0\", \" wl* \"]\n    exclude: [docker0]\n",
+		"server:\n  discovery:\n    interfaces:\n      include: [\"eth0,en0\", \" wl* \"]\n      exclude: [docker0]\n",
 		"server:\n  discovery:\n    interfaces:\n      include: [eth0]\n",
-		"discovery: [broken\n",
-		"discovery:\n  interfaces:\n    include: eth0\n",
+		"server:\n  discovery: [broken\n",
+		"server:\n  discovery:\n    interfaces:\n      include: eth0\n",
 		"",
 		// !!binary names, through aliases too.
-		"discovery:\n  interfaces:\n    include: [&i !!binary ZXRoMA==, wl*]\n    exclude: [!!binary ZG9ja2VyMA==, *i]\n",
+		"server:\n  discovery:\n    interfaces:\n      include: [&i !!binary ZXRoMA==, wl*]\n      exclude: [!!binary ZG9ja2VyMA==, *i]\n",
 		// Merge keys: plain, binary, explicit keys over merged ones, earlier maps first.
-		"discovery:\n  interfaces:\n    <<: {exclude: [eth0]}\n",
-		"discovery:\n  interfaces:\n    <<: {exclude: [!!binary ZXRoMA==]}\n    include: [wl*]\n",
-		"discovery:\n  interfaces:\n    <<: [{exclude: [a], include: [x]}, {exclude: [b]}]\n    include: [c]\n",
+		"server:\n  discovery:\n    interfaces:\n      <<: {exclude: [eth0]}\n",
+		"server:\n  discovery:\n    interfaces:\n      <<: {exclude: [!!binary ZXRoMA==]}\n      include: [wl*]\n",
+		"server:\n  discovery:\n    interfaces:\n      <<: [{exclude: [a], include: [x]}, {exclude: [b]}]\n      include: [c]\n",
 		// Invalid base64 on the path, then elsewhere: cook-router refuses both.
-		"discovery:\n  interfaces:\n    include: [!!binary '!!!']\n",
-		"proxy-url: !!binary '!!!'\ndiscovery:\n  interfaces:\n    exclude: [eth0]\n",
+		"server:\n  discovery:\n    interfaces:\n      include: [!!binary '!!!']\n",
+		"requests:\n  proxy-url: !!binary '!!!'\nserver:\n  discovery:\n    interfaces:\n      exclude: [eth0]\n",
 		// A quoted merge key (a plain key to yaml.v3) and an aliased sequence as a merge
 		// operand (a decode error): cook-router refuses both.
-		"discovery:\n  interfaces:\n    '<<': {exclude: [eth0]}\n    include: [wl*]\n",
-		"seq: &s [{exclude: [eth0]}]\ndiscovery:\n  interfaces:\n    <<: *s\n    include: [wl*]\n",
+		"server:\n  discovery:\n    interfaces:\n      '<<': {exclude: [eth0]}\n      include: [wl*]\n",
+		"seq: &s [{exclude: [eth0]}]\nserver:\n  discovery:\n    interfaces:\n      <<: *s\n      include: [wl*]\n",
 	} {
 		path := filepath.Join(dir, "config.yaml")
 		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {

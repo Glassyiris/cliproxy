@@ -3856,7 +3856,7 @@ mod tests {
     #[test]
     fn compat_groups_match_with_go_equal_fold() {
         let cfg = cpa_core::config::Config::parse(
-            "openai-compatibility:\n  - name: openai-compatible-ος\n    base-url: http://127.0.0.1:9\n    disable-cooling: true\n    api-key-entries: [{api-key: k, proxy-url: 'http://127.0.0.1:8080'}]\n  - name: ΟΣ\n    base-url: http://127.0.0.1:9\n    api-key-entries: [{api-key: k}]\n",
+            "api-keys:\n  openai-compatibility:\n  - name: openai-compatible-ος\n    base-url: http://127.0.0.1:9\n    disable-cooling: true\n    keys: [{api-key: k, proxy-url: 'http://127.0.0.1:8080'}]\n  - name: ΟΣ\n    base-url: http://127.0.0.1:9\n    keys: [{api-key: k}]\n",
         )
         .unwrap();
         let creds = cpa_core::config::credentials::from_config(&cfg);
@@ -3973,7 +3973,7 @@ mod tests {
         // Go `providerCoolingOverrideForAuth`: the first enabled compat entry named by
         // compat_name, provider_key or provider; credential metadata still wins.
         let cfg = cpa_core::config::Config::parse(
-            "openai-compatibility:\n  - {name: skipped, base-url: '', disable-cooling: false}\n  - {name: Router, base-url: http://r.invalid, disable-cooling: true}\n  - {name: plain, base-url: http://p.invalid}\n",
+            "api-keys:\n  openai-compatibility:\n  - name: skipped\n    base-url: ''\n    disable-cooling: false\n    keys: []\n  - name: Router\n    base-url: http://r.invalid\n    disable-cooling: true\n    keys: []\n  - name: plain\n    base-url: http://p.invalid\n    keys: []\n",
         )
         .unwrap();
         let mut p = Policy {

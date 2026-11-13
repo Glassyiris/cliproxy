@@ -2009,7 +2009,7 @@
  },
  {
   "name": "config-oauth-header-defaults",
-  "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\n  providers:\n    claude:\n      header-defaults:\n        user-agent: claude-cli/2.1.300 (external, cli)\n        package-version: 0.120.0\n        runtime-version: v27.1.0\n        os: Linux\n        arch: x64\n        timeout: \"900\"\n        timezone: UTC\n        stabilize-device-profile: false\n",
+  "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\nupstream:\n  claude:\n    header-defaults:\n      user-agent: claude-cli/2.1.300 (external, cli)\n      package-version: 0.120.0\n      runtime-version: v27.1.0\n      os: Linux\n      arch: x64\n      timeout: \"900\"\n      timezone: UTC\n      stabilize-device-profile: false\n",
   "client_key": "client-key-1",
   "model": "claude-sonnet-4-6",
   "headers": [
@@ -2044,7 +2044,7 @@
  },
  {
   "name": "config-oauth-header-defaults-stabilized",
-  "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\n  providers:\n    claude:\n      header-defaults:\n        user-agent: claude-cli/2.1.300 (external, cli)\n        package-version: 0.120.0\n        runtime-version: v27.1.0\n        os: Linux\n        arch: x64\n        stabilize-device-profile: true\n",
+  "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\nupstream:\n  claude:\n    header-defaults:\n      user-agent: claude-cli/2.1.300 (external, cli)\n      package-version: 0.120.0\n      runtime-version: v27.1.0\n      os: Linux\n      arch: x64\n      stabilize-device-profile: true\n",
   "client_key": "client-key-1",
   "model": "claude-sonnet-4-6",
   "headers": [
@@ -2103,7 +2103,7 @@
  },
  {
   "name": "config-oauth-disable-cloak",
-  "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\n  providers:\n    claude:\n      disable-claude-cloak-mode: true\n",
+  "config": "config-version: 8\naccess:\n  api-keys: [client-key-1]\noauth:\n  auth-dir: AUTH_DIR\nupstream:\n  claude:\n    disable-claude-cloak-mode: true\n",
   "client_key": "client-key-1",
   "model": "claude-sonnet-4-6",
   "headers": [

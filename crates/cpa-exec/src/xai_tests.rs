@@ -531,8 +531,10 @@ async fn compact_keeps_a_configured_top_k() {
     let mock = Mock::start(&s["upstream"]).await;
     let addr = mock.addr.clone();
     let executor = XaiExecutor::default().with_url_rewrite(move |url| redirect(url, &addr));
-    let cfg =
-        Config::parse("payload:\n  override:\n    - models: [{name: \"*\"}]\n      params: {top_k: 10}\n").unwrap();
+    let cfg = Config::parse(
+        "requests:\n  payload:\n    override:\n      - models: [{name: \"*\"}]\n        params: {top_k: 10}\n",
+    )
+    .unwrap();
     let cred = credential(s, &cfg);
     executor
         .execute(&cred, request(s, Default::default()), &cfg, false)

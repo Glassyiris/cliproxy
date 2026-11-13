@@ -561,7 +561,7 @@ mod tests {
 
     #[tokio::test]
     async fn real_dispatch_header_access_and_usage_share_identity() {
-        let config = cpa_core::config::Config::parse("claude-api-key:\n  - api-key: fake-observe-key\n    base-url: http://127.0.0.1:9\n    models: [{name: claude-sonnet-4-6}]\nobservability: {usage: {usage-statistics-enabled: true}}\n").unwrap();
+        let config = cpa_core::config::Config::parse("api-keys:\n  claude:\n  - name: claude-1\n    base-url: http://127.0.0.1:9\n    models: [{name: claude-sonnet-4-6}]\n    keys:\n      - api-key: fake-observe-key\nobservability: {usage: {usage-statistics-enabled: true}}\n").unwrap();
         let credentials = cpa_core::config::credentials::from_config(&config);
         let executors = cpa_exec::Executors {
             claude: cpa_exec::claude::ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),

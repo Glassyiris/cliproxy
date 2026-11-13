@@ -119,7 +119,7 @@ async fn proxy(behaviour: Upstream) -> Proxy {
     let auth_dir = std::env::temp_dir().join(format!("cpa-xai-cancel-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
     let config = Config::parse(&format!(
-        "auth-dir: {}\naccess:\n  api-keys: [client-key]\napi-keys:\n  xai:\n    - name: xai-1\n      base-url: http://{upstream}/v1\n      keys:\n        - api-key: sk-fake-xai\n",
+        "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key]\napi-keys:\n  xai:\n    - name: xai-1\n      base-url: http://{upstream}/v1\n      keys:\n        - api-key: sk-fake-xai\n",
         auth_dir.display()
     ))
     .unwrap();

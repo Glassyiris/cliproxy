@@ -274,20 +274,23 @@ fn config(scenario: &Value, upstream: &str) -> Config {
     let mut yaml = scenario["config"].as_str().unwrap_or_default().to_owned();
     let keys = api_keys(scenario);
     if !keys.is_empty() {
-        yaml.push_str("codex-api-key:\n");
+        yaml.push_str("api-keys:\n  codex:\n");
     }
-    for cred in keys {
+    for (i, cred) in keys.into_iter().enumerate() {
         let attrs = &cred["attributes"];
         yaml.push_str(&format!(
-            "  - api-key: {}\n    base-url: http://{upstream}\n",
+            "  - name: codex-{}\n    base-url: http://{upstream}\n    models:\n",
+            i + 1
+        ));
+        for model in cred["models"].as_array().unwrap() {
+            yaml.push_str(&format!("      - name: {}\n", model.as_str().unwrap()));
+        }
+        yaml.push_str(&format!(
+            "    keys:\n      - api-key: {}\n",
             attrs["api_key"].as_str().unwrap()
         ));
         if attrs["websockets"].as_str() == Some("true") {
-            yaml.push_str("    websockets: true\n");
-        }
-        yaml.push_str("    models:\n");
-        for model in cred["models"].as_array().unwrap() {
-            yaml.push_str(&format!("      - name: {}\n", model.as_str().unwrap()));
+            yaml.push_str("        websockets: true\n");
         }
     }
     Config::parse(&yaml).unwrap()
@@ -650,13 +653,6 @@ async fn steering_later_error_then_upstream_close_closes_the_client() {
     run("steer_later_error_then_upstream_close").await;
 }
 
-/// The historical `oauth.providers.codex` spelling is the shared `upstream.codex`
-/// setting since Go 52d5507d, so it steers API keys too.
-#[tokio::test]
-async fn steering_historical_oauth_path_steers_api_keys() {
-    run("steer_historical_oauth_path_steers_api_key").await;
-}
-
 #[tokio::test]
 async fn steering_idle_upstream_close_closes_the_client() {
     run("steer_idle_upstream_close").await;
@@ -725,18 +721,6 @@ async fn steer_is_rejected_when_steering_is_off() {
 #[tokio::test]
 async fn steering_off_idle_upstream_close_closes_the_client() {
     run("steer_idle_upstream_close_legacy_disabled").await;
-}
-
-/// `.../v8_enabled_api_key`: the historical spelling, an API key.
-#[tokio::test]
-async fn steering_historical_idle_upstream_close_closes_an_api_key_client() {
-    run("steer_idle_upstream_close_v8_api_key").await;
-}
-
-/// `.../v8_enabled_oauth`: the historical spelling, an OAuth account.
-#[tokio::test]
-async fn steering_historical_idle_upstream_close_closes_an_oauth_client() {
-    run("steer_idle_upstream_close_v8_oauth").await;
 }
 
 /// `.../upstream_enabled_api_key`.
@@ -831,11 +815,8 @@ fn every_go_scenario_has_a_test() {
             "steer_later_error_recovers",
             "steer_initial_error_terminal",
             "steer_later_error_then_upstream_close",
-            "steer_historical_oauth_path_steers_api_key",
             "steer_idle_upstream_close",
             "steer_idle_upstream_close_legacy_disabled",
-            "steer_idle_upstream_close_v8_api_key",
-            "steer_idle_upstream_close_v8_oauth",
             "steer_idle_upstream_close_upstream_api_key",
             "steer_idle_upstream_close_upstream_oauth",
             "steer_disabled_error_terminal",

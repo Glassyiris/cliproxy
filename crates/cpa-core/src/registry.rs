@@ -35,20 +35,18 @@ const LOOKUP_ORDER: [&str; 10] = [
     "meta",
 ];
 
-/// Thinking budget and level support (`ThinkingSupport` in model_registry.go).
+/// Thinking budget and level support (`ThinkingSupport` in model_registry.go), as the
+/// model catalogs spell it (`zero_allowed`). Config YAML spells its fields in kebab case
+/// and decodes through [`dynamic::ConfigModel`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct ThinkingSupport {
     pub min: i64,
     pub max: i64,
-    /// `zero_allowed` in models.json, `zero-allowed` in config YAML (Go's yaml tag).
-    #[serde(alias = "zero-allowed")]
     pub zero_allowed: bool,
-    #[serde(alias = "dynamic-allowed")]
     pub dynamic_allowed: bool,
-    /// The Claude `thinking.type` that turns thinking off (`disable-type` in config
-    /// YAML). Empty means `disabled`; claude-sonnet-5-5 needs `between_tools`.
-    #[serde(alias = "disable-type")]
+    /// The Claude `thinking.type` that turns thinking off. Empty means `disabled`;
+    /// claude-sonnet-5-5 needs `between_tools`.
     pub disable_type: String,
     /// Discrete effort levels; empty means budget-based thinking.
     pub levels: Vec<String>,

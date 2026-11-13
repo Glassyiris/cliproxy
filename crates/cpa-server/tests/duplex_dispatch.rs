@@ -151,12 +151,13 @@ impl Conductor {
     fn new(upstream: &str, keys: &[&str], model: &str, session: &str) -> Self {
         let auth_dir = AuthDir::new();
         let mut yaml = format!(
-            "auth-dir: {}\ncodex:\n  response-steering: true\ncodex-api-key:\n",
+            "oauth:\n  auth-dir: {}\nupstream:\n  codex:\n    response-steering: true\napi-keys:\n  codex:\n",
             auth_dir.0.display()
         );
         for (i, key) in keys.iter().enumerate() {
             yaml.push_str(&format!(
-                "  - api-key: {key}\n    base-url: {upstream}\n    websockets: true\n    priority: {}\n    models:\n      - name: {model}\n",
+                "  - name: codex-{}\n    base-url: {upstream}\n    priority: {}\n    models:\n      - name: {model}\n    keys:\n      - api-key: {key}\n        websockets: true\n",
+                i + 1,
                 4 - i
             ));
         }

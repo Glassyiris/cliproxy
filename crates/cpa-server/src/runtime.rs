@@ -4794,9 +4794,8 @@ impl Stream for Completing {
 
 /// Go `configuredSignatureCacheEnabled` / `configuredSignatureBypassStrict`
 /// (internal/api/server_reload.go): `oauth.providers.antigravity.signature-cache-enabled`
-/// (default true) and `.signature-bypass-strict` (default false), legacy
-/// `antigravity-signature-*` spellings included. Applied on every publish, as Go
-/// applies them at startup and on each reload.
+/// (default true) and `.signature-bypass-strict` (default false). Applied on every
+/// publish, as Go applies them at startup and on each reload.
 fn signature_cache_config(cfg: &Config) -> (bool, bool) {
     let flag = |key: &str| {
         cfg.document
@@ -4988,13 +4987,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn signature_cache_config_reads_v8_and_legacy_keys() {
+    fn signature_cache_config_reads_antigravity_settings() {
         let at = |yaml: &str| signature_cache_config(&Config::parse(yaml).unwrap());
         assert_eq!(at("{}\n"), (true, false));
-        assert_eq!(
-            at("antigravity-signature-cache-enabled: false\nantigravity-signature-bypass-strict: true\n"),
-            (false, true)
-        );
         assert_eq!(
             at("oauth: {providers: {antigravity: {signature-cache-enabled: false, signature-bypass-strict: true}}}\n"),
             (false, true)
@@ -6118,7 +6113,8 @@ pub(crate) mod tests {
         };
         // Legacy top-level keys and the canonical routing block both reach the scheduler.
         let rt = test_runtime(
-            Config::parse("request-retry: 2\nrouting:\n  strategy: ff\n  session-affinity-ttl: 250ms\n").unwrap(),
+            Config::parse("routing:\n  strategy: ff\n  session-affinity-ttl: 250ms\n  retry:\n    request-retry: 2\n")
+                .unwrap(),
             Vec::new(),
             executors(),
         );
@@ -6145,14 +6141,14 @@ pub(crate) mod tests {
             openai: Default::default(),
             google: Default::default(),
         };
-        let rt = test_runtime(Config::parse("port: 8501\n").unwrap(), Vec::new(), executors);
+        let rt = test_runtime(Config::parse("server:\n  port: 8501\n").unwrap(), Vec::new(), executors);
         let mut kept = rt.subscribe_config();
         let dropped = rt.subscribe_config();
         assert_eq!(kept.current().config.port, 8501);
         let start = kept.current().sequence;
         drop(dropped);
-        assert!(rt.publish_config(Config::parse("port: 8502\n").unwrap()));
-        assert!(rt.publish_config(Config::parse("port: 8503\n").unwrap()));
+        assert!(rt.publish_config(Config::parse("server:\n  port: 8502\n").unwrap()));
+        assert!(rt.publish_config(Config::parse("server:\n  port: 8503\n").unwrap()));
         let first = kept.try_next().expect("the first publication");
         let second = kept.try_next().expect("the second publication");
         assert_eq!((first.sequence, first.config.port), (start + 1, 8502));
@@ -6316,7 +6312,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let config = || {
             Config::parse(&format!(
-                "auth-dir: {}\nrouting:\n  cooldown:\n    save-cooldown-status: true\n",
+                "oauth:\n  auth-dir: {}\nrouting:\n  cooldown:\n    save-cooldown-status: true\n",
                 dir.display()
             ))
             .unwrap()
@@ -6436,7 +6432,7 @@ pub(crate) mod tests {
         assert!(rewritten.iter().all(|r| r.auth_id != "gone.json" && r.model != "m3"));
 
         // Turning the option off persists the final state and stops writing.
-        rt.publish_config(Config::parse(&format!("auth-dir: {}\n", dir.display())).unwrap());
+        rt.publish_config(Config::parse(&format!("oauth:\n  auth-dir: {}\n", dir.display())).unwrap());
         rt.store.reset_cooldown("b.json");
         rt.store.flush_cooldowns();
         assert!(
@@ -10023,7 +10019,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let yaml = format!(
-            "auth-dir: {}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    acme:\n      enabled: true\n      label: acme\n      record: {}\n      caps: auth_provider\n",
+            "oauth:\n  auth-dir: {}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    acme:\n      enabled: true\n      label: acme\n      record: {}\n      caps: auth_provider\n",
             auths.display(),
             plugins.display(),
             records.display()

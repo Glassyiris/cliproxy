@@ -18,7 +18,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -107,7 +107,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -196,7 +196,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": [
@@ -321,7 +321,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": [
@@ -446,7 +446,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -535,7 +535,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -623,7 +623,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -711,7 +711,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -799,7 +799,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -890,7 +890,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -983,7 +983,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -1074,7 +1074,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -1207,7 +1207,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -1339,7 +1339,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -1427,7 +1427,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": [
@@ -1551,7 +1551,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,
@@ -1644,7 +1644,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: '*'\n          params:\n            tools.3.defer_loading: false\n",
+     "config": "upstream:\n  claude:\n    tool-search: true\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: '*'\n            params:\n              tools.3.defer_loading: false\n",
      "date": "2026-10-25",
      "exchanges": {
       "chunks": null,

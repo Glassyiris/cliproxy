@@ -364,7 +364,7 @@ mod tests {
         )
         .unwrap();
         let config = Config::parse(&format!(
-            "auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
+            "oauth:\n  auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
             db.auth_dir().display(),
             dir.display()
         ))
@@ -402,7 +402,7 @@ mod tests {
         )
         .unwrap();
         let config = Config::parse(&format!(
-            "auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
+            "oauth:\n  auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
             db.auth_dir().display(),
             dir.display()
         ))
@@ -457,7 +457,7 @@ mod tests {
             .unwrap();
         assert_eq!(db.read(&nested).unwrap().unwrap(), raw);
         let config = Config::parse(&format!(
-            "auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
+            "oauth:\n  auth-dir: '{}'\nplugins:\n  enabled: true\n  dir: '{}'\n  configs:\n    cli:\n      enabled: true\n",
             db.auth_dir().display(),
             dir.display()
         ))

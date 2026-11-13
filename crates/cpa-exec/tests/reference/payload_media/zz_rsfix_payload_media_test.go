@@ -40,7 +40,7 @@ func TestRSFixPayloadMedia(t *testing.T) {
 		return h + "\r\n" + data
 	}
 	rule := func(kind, params string) string {
-		return "payload:\n  " + kind + ":\n    - models: [{name: gpt-image-2, protocol: openai}]\n      params: " + params + "\n"
+		return "requests:\n  payload:\n  " + kind + ":\n    - models: [{name: gpt-image-2, protocol: openai}]\n      params: " + params + "\n"
 	}
 	png := "\x00\xff\r\n\x89PNG"
 	basic := form(field("model", "gpt-image-2"), field("prompt", "a <cat> & \xff"), file("image", "input.png", "image/png", png))
@@ -49,10 +49,10 @@ func TestRSFixPayloadMedia(t *testing.T) {
 	}{
 		{"json_override", rule("override", `{"size": "1024x1024"}`), `{"model":"gpt-image-2","prompt":"x"}`, "application/json", ""},
 		{"json_default_kept", rule("default", `{"prompt": "default"}`), `{"model":"gpt-image-2","prompt":"x"}`, "application/json", ""},
-		{"form_unmatched", "payload:\n  override:\n    - models: [{name: other, protocol: openai}]\n      params: {\"size\": \"1\"}\n", basic, ct, ""},
+		{"form_unmatched", "requests:\n  payload:\n    override:\n      - models: [{name: other, protocol: openai}]\n        params: {\"size\": \"1\"}\n", basic, ct, ""},
 		{"form_no_change", rule("default", `{"prompt": "default"}`), basic, ct, ""},
 		{"form_override", rule("override", `{"model": "configured", "size": "auto"}`), basic, ct, ""},
-		{"form_filter", "payload:\n  filter:\n    - models: [{name: gpt-image-2, protocol: openai}]\n      params: [\"prompt\"]\n", basic, ct, ""},
+		{"form_filter", "requests:\n  payload:\n    filter:\n      - models: [{name: gpt-image-2, protocol: openai}]\n        params: [\"prompt\"]\n", basic, ct, ""},
 		{"form_repeated", rule("override", `{"n": 2}`),
 			form(field("model", "gpt-image-2"), file("image[]", "a.png", "image/png", "A"), file("image[]", "b.jpg", "", "B"), field("tag", "1"), field("tag", "2")), ct, ""},
 		{"form_names", rule("override", `{"quality": "high"}`),

@@ -3252,7 +3252,7 @@
       "source": "gemini",
       "model": "gemini-3-flash",
       "payload": "{\"systemInstruction\":{\"parts\":[{\"text\":\"You are Claude Code with a SECRET plan.\"}]},\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"sensitive ag Claude Code\"}]}]}",
-      "config": "antigravity:\n  sensitive-words: [\"Claude Code\", \"secret\"]\n",
+      "config": "oauth:\n  providers:\n    antigravity:\n      sensitive-words: [\"Claude Code\", \"secret\"]\n",
       "auth_id": "sensitive_words",
       "metadata": {
         "access_token": "ya29.fake-ag",
@@ -4124,7 +4124,7 @@
       "source": "claude",
       "model": "claude-sonnet-4-6",
       "payload": "{\"model\":\"claude-sonnet-4-6\",\"max_tokens\":256,\"messages\":[{\"role\":\"user\",\"content\":\"credits ag\"}]}",
-      "config": "quota-exceeded:\n  antigravity-credits: true\n",
+      "config": "oauth:\n  providers:\n    antigravity:\n      antigravity-credits: true\n",
       "auth_id": "credits_claude_execute",
       "metadata": {
         "access_token": "ya29.fake-ag",
@@ -4173,7 +4173,7 @@
       "source": "gemini",
       "model": "gemini-3-flash",
       "payload": "{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"credits cooldown bypass\"}]}]}",
-      "config": "quota-exceeded:\n  antigravity-credits: true\n",
+      "config": "oauth:\n  providers:\n    antigravity:\n      antigravity-credits: true\n",
       "auth_id": "ag-cool",
       "metadata": {
         "access_token": "ya29.fake-ag",
@@ -4269,7 +4269,7 @@
       "source": "claude",
       "model": "claude-sonnet-4-6",
       "payload": "{\"model\":\"claude-sonnet-4-6\",\"max_tokens\":256,\"messages\":[{\"role\":\"user\",\"content\":\"credits empty\"}]}",
-      "config": "quota-exceeded:\n  antigravity-credits: true\n",
+      "config": "oauth:\n  providers:\n    antigravity:\n      antigravity-credits: true\n",
       "auth_id": "credits_balance_exhausted",
       "metadata": {
         "access_token": "ya29.fake-ag",

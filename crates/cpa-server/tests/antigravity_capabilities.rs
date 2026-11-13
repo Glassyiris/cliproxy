@@ -57,7 +57,7 @@ async fn registration_probes_web_search_models() {
     // A private `auth-dir`, so nothing reads or writes the user's `~/.cli-proxy-api`.
     let auth_dir = std::env::temp_dir().join(format!("cpa-ag-capabilities-{}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
-    let config = Config::parse(&format!("auth-dir: {}\n", auth_dir.display())).unwrap();
+    let config = Config::parse(&format!("oauth:\n  auth-dir: {}\n", auth_dir.display())).unwrap();
     let rt = cpa_server::testing::runtime(config, vec![credential], executors);
     let flagged = |rt: &cpa_server::Runtime| {
         rt.registry()

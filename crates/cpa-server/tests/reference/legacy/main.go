@@ -122,70 +122,97 @@ func cat(groups ...[]step) (out []step) {
 
 const minimalV8 = "config-version: 8\nmanagement:\n  secret-key: '$HASH'\n"
 
-const legacyFull = `port: 8317
-remote-management:
-  secret-key: '$HASH'
-debug: true
-proxy-url: "socks5://127.0.0.1:1080"
-request-retry: 5
-max-retry-credentials: 2
-max-retry-interval: 30
-force-model-prefix: true
-logging-to-file: false
-logs-max-total-size-mb: 100
-error-logs-max-files: 3
-usage-statistics-enabled: true
-request-log: true
-ws-auth: true
+const legacyFull = `server:
+  port: 8317
+  discovery:
+    enabled: true
+    service-name: office
+observability:
+  logs:
+    debug: true
+    logging-to-file: false
+    logs-max-total-size-mb: 100
+    error-logs-max-files: 3
+    request-log: true
+  usage:
+    usage-statistics-enabled: true
+requests:
+  proxy-url: "socks5://127.0.0.1:1080"
+oauth:
+  providers:
+    aistudio:
+      ws-auth: true
+  excluded-models:
+    claude: [m1, " M2 "]
+    " Codex ": [x]
+  model-alias:
+    codex: [{name: a, alias: b}]
+  request-scoped-errors:
+    codex: [{status: 429, match: [quota], action: switch}]
 quota-exceeded:
   switch-project: true
   switch-preview-model: false
 routing:
   strategy: ff
+  retry:
+    request-retry: 5
+    max-retry-credentials: 2
+    max-retry-interval: 30
+  force-model-prefix: true
+access:
+  api-keys:
+    - fake-key-1
+    - " fake-key-2 "
+    - fake-key-1
 api-keys:
-  - fake-key-1
-  - " fake-key-2 "
-  - fake-key-1
-gemini-api-key:
-  - api-key: fake-gem-1
+  gemini:
+  - name: gemini-1
     base-url: https://gem.example.invalid
     headers: {X-A: b, " ": c}
     excluded-models: [" m1 ", M1, ""]
-  - api-key: " fake-gem-2 "
-    prefix: /team/
+    keys:
+      - api-key: fake-gem-1
+  - name: gemini-2
     priority: 2
-    weight: 3
-claude-api-key:
-  - api-key: fake-cl-1
+    prefix: /team/
+    keys:
+      - api-key: " fake-gem-2 "
+        weight: 3
+  claude:
+  - name: claude-1
     models: [{name: claude-x, alias: cx}]
-    cloak: {mode: always}
-codex-api-key:
-  - api-key: fake-cx-1
+    keys:
+      - api-key: fake-cl-1
+        cloak: {mode: always}
+  codex:
+  - name: codex-1
     base-url: https://codex.example.invalid
-openai-compatibility:
+    keys:
+      - api-key: fake-cx-1
+  openai-compatibility:
   - name: local
     base-url: http://127.0.0.1:9/v1
-    api-key-entries: [{api-key: fake-oa}]
     models: [{name: m, alias: a}]
-vertex-api-key:
-  - api-key: fake-vx-1
+    keys: [{api-key: fake-oa}]
+  vertex:
+  - name: vertex-1
     base-url: https://vertex.example.invalid
-xai-api-key:
-  - api-key: fake-xai-1
-meta-api-key:
-  - api-key: fake-meta-1
-interactions-api-key:
-  - api-key: fake-int-1
-oauth-excluded-models:
-  claude: [m1, " M2 "]
-  " Codex ": [x]
-oauth-model-alias:
-  codex: [{name: a, alias: b}]
-oauth-request-scoped-errors:
-  codex: [{status: 429, match: [quota], action: switch}]
-discovery:
-  enabled: true
-  service-name: office
+    keys:
+      - api-key: fake-vx-1
+  xai:
+  - name: xai-1
+    keys:
+      - api-key: fake-xai-1
+  meta:
+  - name: meta-1
+    keys:
+      - api-key: fake-meta-1
+  interactions:
+  - name: interactions-1
+    keys:
+      - api-key: fake-int-1
+management:
+  secret-key: '$HASH'
 `
 
 const v8Full = `config-version: 8
@@ -502,11 +529,11 @@ func decoderEdges() []step {
 func configYAMLWrites() []step {
 	r := "/config.yaml"
 	v8Head := "config-version: 8\nmanagement:\n  secret-key: fake-secret\n"
-	legacyHead := "remote-management:\n  secret-key: fake-secret\n"
+	legacyHead := "management:\n  secret-key: fake-secret\n"
 	return steps(
 		put(r, "config-version: 8\nmanagement:\n  secret-key: fake-secret\n    # indented comment\nobservability:\n  logs:\n    debug: true\nrouting:\n  strategy: fill-first\n"),
 		get("/debug"),
-		put(r, "remote-management:\n  secret-key: fake-secret\ndebug: false\nrequest-retry: 4\napi-keys: [fake-k1]\n"),
+		put(r, "observability:\n  logs:\n    debug: false\nrouting:\n  retry:\n    request-retry: 4\naccess:\n  api-keys: [fake-k1]\nmanagement:\n  secret-key: fake-secret\n"),
 		get("/request-retry"), get("/api-keys"),
 		put(r, "a: [\n"), put(r, "- 1\n"), put(r, "plain scalar\n"),
 		put(r, "config-version: 8\nmanagement:\n  secret-key: fake-secret\napi-keys:\n  claude:\n    - name: c\n      keys: [{api-key: fake-k, weight: 2000000}]\n"),
@@ -515,16 +542,16 @@ func configYAMLWrites() []step {
 		put(r, "config-version: 8\nmanagement:\n  secret-key: fake-secret\napi-keys:\n  codex:\n    - name: x\n      keys: [{api-key: fake-k, weight: 1.5}]\n"),
 		put(r, "config-version: 8\nmanagement:\n  secret-key: fake-secret\napi-keys:\n  xai: [{name: x}]\n"),
 		put(r, "config-version: 7\nmanagement:\n  secret-key: fake-secret\n"),
-		put(r, "remote-management:\n  secret-key: fake-secret\ngemini-api-key:\n  - api-key: fake-k\n    weight: 2000000\n"),
-		put(r, "openai-compatibility:\n  - name: o\n    base-url: http://127.0.0.1:9\n    api-key-entries: [{api-key: a}, {api-key: b, weight: x}]\nremote-management:\n  secret-key: fake-secret\n"),
+		put(r, "api-keys:\n  gemini:\n  - name: gemini-1\n    keys:\n      - api-key: fake-k\n        weight: 2000000\nmanagement:\n  secret-key: fake-secret\n"),
+		put(r, "api-keys:\n  openai-compatibility:\n  - name: o\n    base-url: http://127.0.0.1:9\n    keys: [{api-key: a}, {api-key: b, weight: x}]\nmanagement:\n  secret-key: fake-secret\n"),
 		put(r, v8Head+"api-keys:\n  gemini:\n    - name: g\n      keys:\n        - api-key: fake-k\n          <<: {weight: null}\n"),
-		put(r, legacyHead+"gemini-api-key: [{api-key: fake-k, weight: 1.5}]\n"),
+		put(r, legacyHead+"api-keys:\n  gemini:\n  - name: gemini-1\n    keys:\n      - api-key: fake-k\n        weight: 1.5\n"),
 		put(r, v8Head+"api-keys:\n  gemini:\n    - unexpected: true\n      keys: []\n"),
 		put(r, v8Head+"api-keys:\n  codex:\n    - name: c\n      keys: [plain]\n"),
 		put(r, v8Head+"api-keys:\n  xai:\n    - name: x\n      keys: [{api-key: fake-k, base-url: http://x.invalid}]\n"),
 		put(r, v8Head+"api-keys:\n  openai-compatibility:\n    - name: o\n      base-url: http://127.0.0.1:9\n      extra: 1\n      keys: [{api-key: fake-k}]\n"),
 		put(r, "config-version: 8\nmanagement:\n  secret-key: "+strings.Repeat("a", 73)+"\n"),
-		put(r, legacyHead+"gemini-api-key: [{api-key: fake-k, weight: 2000000}]\napi-keys: {gemini: []}\n"),
+		put(r, legacyHead+"api-keys:\n  gemini: []\n"),
 		get("/gemini-api-key"),
 		get("/request-retry"),
 		// Last: a 72-byte key is accepted and replaces the harness key (later reads 401).

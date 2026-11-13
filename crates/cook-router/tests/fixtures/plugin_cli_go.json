@@ -2,7 +2,7 @@
   "cases": [
     {
       "name": "invalid int",
-      "config": "config-version: 8\nport: 0\nauth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
+      "config": "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
       "register": "{\"ok\":true,\"result\":{\"Flags\":[{\"Name\":\"mine\",\"Type\":\"bool\",\"Usage\":\"run mine\"},{\"DefaultValue\":\"2\",\"Name\":\"count\",\"Type\":\"int\",\"Usage\":\"how many\"},{\"DefaultValue\":\"0.25\",\"Name\":\"ratio\",\"Type\":\"float64\",\"Usage\":\"a ratio\"},{\"Name\":\"wait\",\"Type\":\"duration\",\"Usage\":\"how long\"},{\"DefaultValue\":\"x\",\"Name\":\"name\",\"Type\":\"string\",\"Usage\":\"a name\"},{\"Name\":\"config\",\"Type\":\"string\",\"Usage\":\"clashes with a built-in flag\"},{\"Name\":\"bad name\",\"Type\":\"bool\",\"Usage\":\"invalid\"},{\"Name\":\"odd\",\"Type\":\"uint\",\"Usage\":\"unsupported type\"},{\"DefaultValue\":\"nope\",\"Name\":\"late\",\"Type\":\"int\",\"Usage\":\"invalid default\"}]}}",
       "execute": "{\"ok\":true,\"result\":{\"ExitCode\":4,\"Stderr\":\"ZXJyLWEK\",\"Stdout\":\"b3V0LWEK\"}}",
       "args": [
@@ -23,7 +23,7 @@
     },
     {
       "name": "invalid duration",
-      "config": "config-version: 8\nport: 0\nauth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
+      "config": "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
       "register": "{\"ok\":true,\"result\":{\"Flags\":[{\"Name\":\"mine\",\"Type\":\"bool\",\"Usage\":\"run mine\"},{\"DefaultValue\":\"2\",\"Name\":\"count\",\"Type\":\"int\",\"Usage\":\"how many\"},{\"DefaultValue\":\"0.25\",\"Name\":\"ratio\",\"Type\":\"float64\",\"Usage\":\"a ratio\"},{\"Name\":\"wait\",\"Type\":\"duration\",\"Usage\":\"how long\"},{\"DefaultValue\":\"x\",\"Name\":\"name\",\"Type\":\"string\",\"Usage\":\"a name\"},{\"Name\":\"config\",\"Type\":\"string\",\"Usage\":\"clashes with a built-in flag\"},{\"Name\":\"bad name\",\"Type\":\"bool\",\"Usage\":\"invalid\"},{\"Name\":\"odd\",\"Type\":\"uint\",\"Usage\":\"unsupported type\"},{\"DefaultValue\":\"nope\",\"Name\":\"late\",\"Type\":\"int\",\"Usage\":\"invalid default\"}]}}",
       "execute": "{\"ok\":true,\"result\":{\"ExitCode\":4,\"Stderr\":\"ZXJyLWEK\",\"Stdout\":\"b3V0LWEK\"}}",
       "args": [
@@ -44,7 +44,7 @@
     },
     {
       "name": "plugin disabled",
-      "config": "config-version: 8\nport: 0\nauth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: false\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
+      "config": "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: false\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
       "register": "{\"ok\":true,\"result\":{\"Flags\":[{\"Name\":\"mine\",\"Type\":\"bool\",\"Usage\":\"run mine\"},{\"DefaultValue\":\"2\",\"Name\":\"count\",\"Type\":\"int\",\"Usage\":\"how many\"},{\"DefaultValue\":\"0.25\",\"Name\":\"ratio\",\"Type\":\"float64\",\"Usage\":\"a ratio\"},{\"Name\":\"wait\",\"Type\":\"duration\",\"Usage\":\"how long\"},{\"DefaultValue\":\"x\",\"Name\":\"name\",\"Type\":\"string\",\"Usage\":\"a name\"},{\"Name\":\"config\",\"Type\":\"string\",\"Usage\":\"clashes with a built-in flag\"},{\"Name\":\"bad name\",\"Type\":\"bool\",\"Usage\":\"invalid\"},{\"Name\":\"odd\",\"Type\":\"uint\",\"Usage\":\"unsupported type\"},{\"DefaultValue\":\"nope\",\"Name\":\"late\",\"Type\":\"int\",\"Usage\":\"invalid default\"}]}}",
       "execute": "{\"ok\":true,\"result\":{\"ExitCode\":4,\"Stderr\":\"ZXJyLWEK\",\"Stdout\":\"b3V0LWEK\"}}",
       "args": [
@@ -64,7 +64,7 @@
     },
     {
       "name": "execute fails",
-      "config": "config-version: 8\nport: 0\nauth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
+      "config": "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
       "register": "{\"ok\":true,\"result\":{\"Flags\":[{\"Name\":\"mine\",\"Type\":\"bool\",\"Usage\":\"run mine\"},{\"DefaultValue\":\"2\",\"Name\":\"count\",\"Type\":\"int\",\"Usage\":\"how many\"},{\"DefaultValue\":\"0.25\",\"Name\":\"ratio\",\"Type\":\"float64\",\"Usage\":\"a ratio\"},{\"Name\":\"wait\",\"Type\":\"duration\",\"Usage\":\"how long\"},{\"DefaultValue\":\"x\",\"Name\":\"name\",\"Type\":\"string\",\"Usage\":\"a name\"},{\"Name\":\"config\",\"Type\":\"string\",\"Usage\":\"clashes with a built-in flag\"},{\"Name\":\"bad name\",\"Type\":\"bool\",\"Usage\":\"invalid\"},{\"Name\":\"odd\",\"Type\":\"uint\",\"Usage\":\"unsupported type\"},{\"DefaultValue\":\"nope\",\"Name\":\"late\",\"Type\":\"int\",\"Usage\":\"invalid default\"}]}}",
       "execute": "{\"ok\":false,\"error\":{\"code\":\"x\",\"message\":\"boom\"}}",
       "args": [
@@ -301,7 +301,7 @@
     },
     {
       "name": "auths saved",
-      "config": "config-version: 8\nport: 0\nauth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
+      "config": "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
       "register": "{\"ok\":true,\"result\":{\"Flags\":[{\"Name\":\"mine\",\"Type\":\"bool\",\"Usage\":\"run mine\"},{\"DefaultValue\":\"2\",\"Name\":\"count\",\"Type\":\"int\",\"Usage\":\"how many\"},{\"DefaultValue\":\"0.25\",\"Name\":\"ratio\",\"Type\":\"float64\",\"Usage\":\"a ratio\"},{\"Name\":\"wait\",\"Type\":\"duration\",\"Usage\":\"how long\"},{\"DefaultValue\":\"x\",\"Name\":\"name\",\"Type\":\"string\",\"Usage\":\"a name\"},{\"Name\":\"config\",\"Type\":\"string\",\"Usage\":\"clashes with a built-in flag\"},{\"Name\":\"bad name\",\"Type\":\"bool\",\"Usage\":\"invalid\"},{\"Name\":\"odd\",\"Type\":\"uint\",\"Usage\":\"unsupported type\"},{\"DefaultValue\":\"nope\",\"Name\":\"late\",\"Type\":\"int\",\"Usage\":\"invalid default\"}]}}",
       "execute": "{\"ok\":true,\"result\":{\"Auths\":[{\"FileName\":\"rec-1.json\",\"Label\":\"L\",\"Metadata\":{\"base-url\":\"https://b.example\",\"email\":\"a@example.invalid\"},\"Provider\":\"Rec\",\"StorageJSON\":\"eyJ0b2tlbiI6InQiLCJleHBpcmVkIjoiMjAzMC0wMS0wMVQwMDowMDowMFoiLCJwcmlvcml0eSI6IjMifQ==\"},{\"Disabled\":true,\"FileName\":\"gone.json\",\"Provider\":\"rec\",\"StorageJSON\":\"eyJrIjoxfQ==\"},{\"FileName\":\"kept.json\",\"Provider\":\"rec\",\"StorageJSON\":\"eyJrIjoyfQ==\"}],\"ExitCode\":0,\"Stderr\":\"\",\"Stdout\":\"bG9nZ2VkIGlu\"}}",
       "auths": {
@@ -548,7 +548,7 @@
     },
     {
       "name": "auths ignored on failure",
-      "config": "config-version: 8\nport: 0\nauth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
+      "config": "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
       "register": "{\"ok\":true,\"result\":{\"Flags\":[{\"Name\":\"mine\",\"Type\":\"bool\",\"Usage\":\"run mine\"},{\"DefaultValue\":\"2\",\"Name\":\"count\",\"Type\":\"int\",\"Usage\":\"how many\"},{\"DefaultValue\":\"0.25\",\"Name\":\"ratio\",\"Type\":\"float64\",\"Usage\":\"a ratio\"},{\"Name\":\"wait\",\"Type\":\"duration\",\"Usage\":\"how long\"},{\"DefaultValue\":\"x\",\"Name\":\"name\",\"Type\":\"string\",\"Usage\":\"a name\"},{\"Name\":\"config\",\"Type\":\"string\",\"Usage\":\"clashes with a built-in flag\"},{\"Name\":\"bad name\",\"Type\":\"bool\",\"Usage\":\"invalid\"},{\"Name\":\"odd\",\"Type\":\"uint\",\"Usage\":\"unsupported type\"},{\"DefaultValue\":\"nope\",\"Name\":\"late\",\"Type\":\"int\",\"Usage\":\"invalid default\"}]}}",
       "execute": "{\"ok\":true,\"result\":{\"Auths\":[{\"FileName\":\"rec-1.json\",\"Label\":\"L\",\"Metadata\":{\"base-url\":\"https://b.example\",\"email\":\"a@example.invalid\"},\"Provider\":\"Rec\",\"StorageJSON\":\"eyJ0b2tlbiI6InQiLCJleHBpcmVkIjoiMjAzMC0wMS0wMVQwMDowMDowMFoiLCJwcmlvcml0eSI6IjMifQ==\"}],\"ExitCode\":5,\"Stderr\":\"bm9wZQo=\",\"Stdout\":\"\"}}",
       "args": [
@@ -787,7 +787,7 @@
     },
     {
       "name": "invalid auth",
-      "config": "config-version: 8\nport: 0\nauth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
+      "config": "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: AUTHDIR\nplugins:\n  enabled: true\n  dir: PLUGINDIR\n  configs:\n    rec:\n      enabled: true\n      record: RECDIR\n      label: a\n      caps: command_line_plugin\n",
       "register": "{\"ok\":true,\"result\":{\"Flags\":[{\"Name\":\"mine\",\"Type\":\"bool\",\"Usage\":\"run mine\"},{\"DefaultValue\":\"2\",\"Name\":\"count\",\"Type\":\"int\",\"Usage\":\"how many\"},{\"DefaultValue\":\"0.25\",\"Name\":\"ratio\",\"Type\":\"float64\",\"Usage\":\"a ratio\"},{\"Name\":\"wait\",\"Type\":\"duration\",\"Usage\":\"how long\"},{\"DefaultValue\":\"x\",\"Name\":\"name\",\"Type\":\"string\",\"Usage\":\"a name\"},{\"Name\":\"config\",\"Type\":\"string\",\"Usage\":\"clashes with a built-in flag\"},{\"Name\":\"bad name\",\"Type\":\"bool\",\"Usage\":\"invalid\"},{\"Name\":\"odd\",\"Type\":\"uint\",\"Usage\":\"unsupported type\"},{\"DefaultValue\":\"nope\",\"Name\":\"late\",\"Type\":\"int\",\"Usage\":\"invalid default\"}]}}",
       "execute": "{\"ok\":true,\"result\":{\"Auths\":[{\"Provider\":\" \"}],\"ExitCode\":0,\"Stderr\":\"\",\"Stdout\":\"cGFydGlhbA==\"}}",
       "args": [

@@ -14,7 +14,8 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
-const authConfig = `auth-dir: AUTHDIR
+const authConfig = `oauth:
+  auth-dir: AUTHDIR
 plugins:
   enabled: true
   dir: PLUGINDIR

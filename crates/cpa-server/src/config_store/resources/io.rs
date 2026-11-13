@@ -4,8 +4,8 @@ use cpa_core::config::Config;
 use serde_json::Value as Json;
 
 use super::{
-    Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, PROVENANCE, Resource, check, config, hash_management_key, plugin,
-    redacted, resolve_secrets, split, strip_read_annotations_at,
+    Fault, Kind, MAX_RESOURCES, MAX_STATE_BYTES, Resource, check, hash_management_key, plugin, redacted,
+    resolve_secrets, split, strip_read_annotations_at,
 };
 
 const EXPORT_FORMAT: &str = "cook-router-config";
@@ -44,7 +44,7 @@ impl std::fmt::Display for ImportError {
 
 impl std::error::Error for ImportError {}
 
-/// Imports both layouts without losing unsupported fields or legacy OAuth scope.
+/// Imports the current layout; a field the schema does not know is an error.
 pub fn import_yaml(text: &str) -> anyhow::Result<Vec<Resource>> {
     anyhow::ensure!(text.len() <= MAX_STATE_BYTES, "config exceeds size limit");
     let cfg = Config::parse(text)?;
@@ -52,16 +52,6 @@ pub fn import_yaml(text: &str) -> anyhow::Result<Vec<Resource>> {
     let json = strip_read_annotations_at(serde_json::to_value(cpa_core::config::AsJson(&cfg.document))?, &[]);
     cpa_core::config::validate_config_fields(&serde_yaml_ng::to_value(&json)?, true)?;
     let mut resources = split(&json, &[]).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let (canonical, _) = config(&resources).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let global: Vec<_> = canonical.oauth_only.difference(&cfg.oauth_only).cloned().collect();
-    if !global.is_empty() {
-        resources.push(Resource::new(
-            Kind::Setting,
-            PROVENANCE,
-            0,
-            serde_json::json!({"global-oauth-paths": global}),
-        ));
-    }
     for r in &mut resources {
         plugin::preserve_raw(r, &cfg)?;
         resolve_secrets(r, None).map_err(|e| anyhow::anyhow!("{e}"))?;

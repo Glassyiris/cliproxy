@@ -109,7 +109,7 @@ async fn env_with(
         std::fs::create_dir_all(d).unwrap();
     }
     let mut yaml = format!(
-        "auth-dir: {}\n{extra_yaml}plugins:\n  enabled: true\n  dir: {}\n  configs:\n",
+        "oauth:\n  auth-dir: {}\n{extra_yaml}plugins:\n  enabled: true\n  dir: {}\n  configs:\n",
         auth_dir.display(),
         plugin_dir.display()
     );
@@ -395,7 +395,7 @@ async fn plugin_catalog_models_bind_to_credentials_served_by_a_plugin_executor()
 /// under their provider key, with no exclusions, whether or not models are configured.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn openai_compatible_credentials_list_their_provider_catalog() {
-    let compat = "openai-compatibility:\n  - name: empty\n    base-url: http://127.0.0.1:1/v1\n    api-key-entries: [{api-key: k1}]\n  - name: full\n    base-url: http://127.0.0.1:1/v1\n    api-key-entries: [{api-key: k2}]\n    models: [{name: up-model}]\n";
+    let compat = "api-keys:\n  openai-compatibility:\n  - name: empty\n    base-url: http://127.0.0.1:1/v1\n    keys: [{api-key: k1}]\n  - name: full\n    base-url: http://127.0.0.1:1/v1\n    models: [{name: up-model}]\n    keys: [{api-key: k2}]\n";
     let Some(env) = env(
         "plugin-owned-compat",
         &[("cat-empty", "model_provider"), ("cat-full", "model_provider")],
@@ -484,7 +484,7 @@ async fn a_catalog_for_an_unbound_builtin_provider_reserves_nothing() {
 /// credential and cools the failed one. A real transport fault cools nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_failing_plugin_credential_fails_over_to_the_next() {
-    let dead = "openai-compatibility:\n  - name: dead\n    base-url: http://127.0.0.1:1/v1\n    api-key-entries: [{api-key: k1}]\n    models: [{name: dead-model}]\n";
+    let dead = "api-keys:\n  openai-compatibility:\n  - name: dead\n    base-url: http://127.0.0.1:1/v1\n    models: [{name: dead-model}]\n    keys: [{api-key: k1}]\n";
     let Some(env) = env(
         "plugin-owned-failover",
         &[("catalog", "model_provider"), ("acme", "executor")],
@@ -748,7 +748,7 @@ async fn a_plugin_scheduler_picks_rejects_or_delegates() {
     let fail = Arc::new(std::sync::Mutex::new(String::new()));
     let upstream = keyed_upstream(seen.clone(), fail.clone()).await;
     let yaml = format!(
-        "openai-compatibility:\n  - name: up\n    base-url: {upstream}/v1\n    priority: 5\n    api-key-entries: [{{api-key: k-a}}, {{api-key: k-b}}]\n    models: [{{name: up-model}}]\n  - name: low\n    base-url: {upstream}/v1\n    api-key-entries: [{{api-key: k-low}}]\n    models: [{{name: up-model}}]\n"
+        "api-keys:\n  openai-compatibility:\n  - name: up\n    base-url: {upstream}/v1\n    priority: 5\n    models: [{{name: up-model}}]\n    keys: [{{api-key: k-a}}, {{api-key: k-b}}]\n  - name: low\n    base-url: {upstream}/v1\n    models: [{{name: up-model}}]\n    keys: [{{api-key: k-low}}]\n"
     );
     // Codex live calls answer 201 with the `Thread-Id` as the call ID.
     let live_upstream = {
@@ -1186,7 +1186,7 @@ async fn a_plugin_scheduler_sees_zero_weights_and_a_stale_pick_falls_back() {
     let fail = Arc::new(std::sync::Mutex::new(String::new()));
     let upstream = keyed_upstream(seen.clone(), fail).await;
     let yaml = format!(
-        "routing:\n  strategy: weighted-round-robin\nopenai-compatibility:\n  - name: up\n    base-url: {upstream}/v1\n    api-key-entries: [{{api-key: k-a, weight: 0}}, {{api-key: k-b, weight: 1}}]\n    models: [{{name: up-model}}]\n"
+        "routing:\n  strategy: weighted-round-robin\napi-keys:\n  openai-compatibility:\n  - name: up\n    base-url: {upstream}/v1\n    models: [{{name: up-model}}]\n    keys: [{{api-key: k-a, weight: 0}}, {{api-key: k-b, weight: 1}}]\n"
     );
     let Some(env) = env(
         "plugin-scheduler-weights",
@@ -1270,7 +1270,7 @@ async fn statusless_plugin_errors_earn_retry_rounds_only_for_transport_text() {
         let Some(env) = env(
             &format!("plugin-owned-retry-{retry}"),
             &[("catalog", "model_provider"), ("acme", "executor")],
-            &format!("request-retry: {retry}\n"),
+            &format!("routing:\n  retry:\n    request-retry: {retry}\n"),
             &[
                 ("acme-a.json", r#"{"type":"acme"}"#),
                 ("acme-b.json", r#"{"type":"acme"}"#),
@@ -1567,8 +1567,10 @@ async fn a_plugin_executor_takes_an_unconfigured_compatible_provider() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(calls(&unconfigured.records, "acme", "executor.execute").len(), 1);
     unconfigured.finish().await;
-    for keys in ["    api-key-entries: [{api-key: k1}]\n", ""] {
-        let config = format!("openai-compatibility:\n  - name: acme\n    base-url: http://127.0.0.1:1/v1\n{keys}");
+    for keys in ["      keys: [{api-key: k1}]\n", "      keys: []\n"] {
+        let config = format!(
+            "api-keys:\n  openai-compatibility:\n    - name: acme\n      base-url: http://127.0.0.1:1/v1\n{keys}"
+        );
         let Some(configured) = env("plugin-owned-compat-native", &plugins, &config, &[], catalog).await else {
             return;
         };
@@ -2067,7 +2069,7 @@ async fn plugin_response_hooks_run_once_per_openai_compatible_stream_frame() {
         url
     };
     let compat = format!(
-        "openai-compatibility:\n  - name: up\n    base-url: {upstream}/v1\n    api-key-entries: [{{api-key: k1}}]\n    models: [{{name: up-model}}]\n"
+        "api-keys:\n  openai-compatibility:\n  - name: up\n    base-url: {upstream}/v1\n    models: [{{name: up-model}}]\n    keys: [{{api-key: k1}}]\n"
     );
     let Some(env) = env(
         "plugin-owned-stream-hooks",
@@ -3524,7 +3526,7 @@ async fn a_host_config_change_reparses_the_auth_files() {
     let proxy = "http://127.0.0.1:9";
     let accepted = management
         .config_store()
-        .import_yaml(&format!("proxy-url: {proxy}\n{}", env.yaml), "test", "")
+        .import_yaml(&format!("requests:\n  proxy-url: {proxy}\n{}", env.yaml), "test", "")
         .unwrap();
     assert!(accepted.rev > initial);
     assert_eq!(
@@ -5926,7 +5928,7 @@ async fn a_stream_whose_chunks_are_all_dropped_ends_with_done() {
         url
     };
     let compat = format!(
-        "openai-compatibility:\n  - name: up\n    base-url: {upstream}/v1\n    api-key-entries: [{{api-key: k1}}]\n    models: [{{name: up-model}}]\n"
+        "api-keys:\n  openai-compatibility:\n  - name: up\n    base-url: {upstream}/v1\n    models: [{{name: up-model}}]\n    keys: [{{api-key: k1}}]\n"
     );
     let Some(env) = env(
         "plugin-owned-stream-drop-all",

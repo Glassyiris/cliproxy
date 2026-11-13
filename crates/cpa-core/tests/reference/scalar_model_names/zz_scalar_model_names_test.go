@@ -14,8 +14,8 @@ import (
 
 // Records the models Go v8.0.35 registers for config entries whose model names and
 // aliases are plain YAML scalars that are not strings (numbers, booleans): yaml.v3
-// reads each into the string field as its text. Aliases, merges and the legacy
-// layout included. The upstream model comes through ../vertex_models's export overlay.
+// reads each into the string field as its text. Aliases and merges
+// included. The upstream model comes through ../vertex_models's export overlay.
 func TestZZScalarModelNames(t *testing.T) {
 	yaml := `api-keys:
   claude:
@@ -31,7 +31,6 @@ func TestZZScalarModelNames(t *testing.T) {
       keys: [{api-key: ok}]
       models: [{name: .5, alias: +12}, {name: 0o17}, {name: yes, alias: o1}, {name: 2001-12-14, alias: o2}]
 `
-	legacy := "codex-api-key:\n  - api-key: lk\n    base-url: http://127.0.0.1:2\n    models: [{name: 2.50, alias: False}]\n"
 	// Exclusions, OAuth model aliases and tagged scalars, which yaml.v3 also reads as
 	// their text; an anchor in a header value aliased as a model name, anchors outside
 	// any such field aliased as exclusions, and OAuth channels named like payload keys.
@@ -57,17 +56,8 @@ oauth:
     claude: [2.50, !!int 0x1F, false]
     match: [2.50]
 `
-	legacyLists := `claude-api-key:
-  - api-key: lk2
-    models: [{name: a, alias: 2.50}, {name: b, alias: bb}]
-    excluded-models: [2.50]
-oauth-model-alias:
-  codex: [{name: 1.50, alias: 1e3}]
-m: &m {codex: [0x1F]}
-oauth-excluded-models: *m
-`
 	out := map[string]any{}
-	for name, text := range map[string]string{"yaml": yaml, "legacy": legacy, "lists": lists, "legacy-lists": legacyLists} {
+	for name, text := range map[string]string{"yaml": yaml, "lists": lists} {
 		cfg, err := config.ParseConfigBytes([]byte(text))
 		if err != nil {
 			t.Fatal(err)

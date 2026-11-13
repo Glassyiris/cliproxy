@@ -491,7 +491,7 @@ fn registered_models_carry_the_hints_through_aliases_and_prefixes() {
     // TestAntigravityAsyncProbe_AppliesCapabilitiesToAliasedAndPrefixedModels, on models
     // the static catalog does not flag.
     let cfg = Config::parse(
-        "oauth-model-alias:\n  antigravity:\n    - name: claude-sonnet-4-6\n      alias: aliased-sonnet\n    - name: gpt-oss-120b-medium\n      alias: google/oss\n      fork: true\n",
+        "oauth:\n  model-alias:\n    antigravity:\n      - name: claude-sonnet-4-6\n        alias: aliased-sonnet\n      - name: gpt-oss-120b-medium\n        alias: google/oss\n        fork: true\n",
     )
     .unwrap();
     let mut c = credential("ag-alias-registry", "ya29", &[]);

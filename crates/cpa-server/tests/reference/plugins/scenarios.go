@@ -67,7 +67,8 @@ var upstreamRoutes = map[string]struct {
 const initialConfig = `config-version: 8
 server:
   port: 18317
-auth-dir: AUTHDIR
+oauth:
+  auth-dir: AUTHDIR
 management:
   secret-key: $HASH
 plugins:

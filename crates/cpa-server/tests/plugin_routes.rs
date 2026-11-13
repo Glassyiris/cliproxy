@@ -347,10 +347,7 @@ async fn start(
 ) {
     let hash = bcrypt::hash("fake-secret", 4).unwrap();
     let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(
-        &dirs
-            .placeholders(yaml)
-            .replace("$HASH", &hash)
-            .replace("\nauth-dir: ", "\noauth:\n  auth-dir: "),
+        &dirs.placeholders(yaml).replace("$HASH", &hash),
     ));
     let config = store.load().unwrap().config;
     let credentials = cpa_core::config::credentials::load(&config);

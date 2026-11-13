@@ -67,7 +67,7 @@ fn complete_state_exports_without_any_previous_database_or_credential_cache() {
     let source = root.join("source.db");
     let store = Arc::new(crate::testing::config_store(&source).unwrap());
     store.import_yaml(
-        "server: {port: 8911}\ncodex: {disable-codex-cloaking: true}\nplugins: {configs: {acme: {ratio: 1.50, binary: !!binary YWJj, payload: '  keep opaque  '}, zeta: {unknown: [1, two]}}}\n",
+        "server: {port: 8911}\nupstream:\n  codex:\n    disable-codex-cloaking: true\nplugins: {configs: {acme: {ratio: 1.50, binary: !!binary YWJj, payload: '  keep opaque  '}, zeta: {unknown: [1, two]}}}\n",
         "fixture", "first revision",
     ).unwrap();
     let first_rev = store.snapshot().unwrap().0;

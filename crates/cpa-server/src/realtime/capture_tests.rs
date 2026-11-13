@@ -69,7 +69,7 @@ async fn start(dir: &Path, upstream_url: &str) -> String {
     let rt = Arc::new(crate::testing::runtime(
         // A private auth-dir: the test never reads the user's.
         cpa_core::config::Config::parse(&format!(
-            "auth-dir: '{}'\nobservability: {{logs: {{request-log: true}}}}\n",
+            "oauth:\n  auth-dir: '{}'\nobservability: {{logs: {{request-log: true}}}}\n",
             dir.join("auths").display()
         ))
         .unwrap(),

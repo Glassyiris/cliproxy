@@ -314,7 +314,7 @@
     },
     {
       "name": "config_key_base_url_and_headers",
-      "config": "xai-api-key:\n  - api-key: sk-fake-cfg\n    base-url: https://xai.example.test/v1\n    headers:\n      X-Org: acme\n",
+      "config": "api-keys:\n  xai:\n  - name: xai-1\n    base-url: https://xai.example.test/v1\n    headers:\n      X-Org: acme\n    keys:\n      - api-key: sk-fake-cfg\n",
       "config_auth": 0,
       "model": "grok-4.3",
       "payload": "{\"model\":\"grok-4.3\",\"input\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
@@ -388,7 +388,7 @@
     },
     {
       "name": "shapes_responses_request",
-      "config": "xai:\n  inject-x-search: true\n",
+      "config": "upstream:\n  xai:\n    inject-x-search: true\n",
       "config_auth": -1,
       "metadata": {
         "access_token": "xai-fake-token",
@@ -813,7 +813,7 @@
     },
     {
       "name": "payload_override_stop_dropped",
-      "config": "payload:\n  override:\n    - models:\n        - name: grok-4.3\n      params:\n        stop: [\"X\"]\n        temperature: 0.3\n",
+      "config": "requests:\n  payload:\n    override:\n      - models:\n          - name: grok-4.3\n        params:\n          stop: [\"X\"]\n          temperature: 0.3\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"
@@ -1061,7 +1061,7 @@
     },
     {
       "name": "tools_clamped_to_200",
-      "config": "xai:\n  inject-x-search: true\n",
+      "config": "upstream:\n  xai:\n    inject-x-search: true\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"
@@ -1176,7 +1176,7 @@
     },
     {
       "name": "x_search_internal_calls_filtered",
-      "config": "xai:\n  inject-x-search: true\n",
+      "config": "upstream:\n  xai:\n    inject-x-search: true\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"
@@ -1215,7 +1215,7 @@
     },
     {
       "name": "x_search_stream_keeps_client_same_name_tool",
-      "config": "xai:\n  inject-x-search: true\n",
+      "config": "upstream:\n  xai:\n    inject-x-search: true\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"
@@ -1329,7 +1329,7 @@
     },
     {
       "name": "claude_web_search_tool_choice_grok43",
-      "config": "xai:\n  inject-x-search: true\n",
+      "config": "upstream:\n  xai:\n    inject-x-search: true\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"
@@ -1368,7 +1368,7 @@
     },
     {
       "name": "claude_web_search_tool_choice_grok46",
-      "config": "xai:\n  inject-x-search: true\n",
+      "config": "upstream:\n  xai:\n    inject-x-search: true\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"
@@ -1445,7 +1445,7 @@
     },
     {
       "name": "image_generation_forced_kept_grok46",
-      "config": "xai:\n  inject-x-search: true\n",
+      "config": "upstream:\n  xai:\n    inject-x-search: true\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"
@@ -1522,7 +1522,7 @@
     },
     {
       "name": "allowed_tools_web_search_mixed",
-      "config": "xai:\n  inject-x-search: true\n",
+      "config": "upstream:\n  xai:\n    inject-x-search: true\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"
@@ -1561,7 +1561,7 @@
     },
     {
       "name": "orphaned_tool_choice_dropped",
-      "config": "xai:\n  inject-x-search: true\n",
+      "config": "upstream:\n  xai:\n    inject-x-search: true\n",
       "config_auth": -1,
       "attributes": {
         "api_key": "sk-fake-xai"

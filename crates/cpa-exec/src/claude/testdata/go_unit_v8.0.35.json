@@ -23,7 +23,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            max_tokens: 100\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              max_tokens: 100\n",
      "date": "2026-08-01",
      "exchanges": {
       "chunks": null,
@@ -169,7 +169,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            max_tokens: 100\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              max_tokens: 100\n",
      "date": "2026-08-02",
      "exchanges": {
       "chunks": null,
@@ -315,7 +315,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            max_tokens: 100\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              max_tokens: 100\n",
      "date": "2026-08-02",
      "exchanges": {
       "chunks": [
@@ -463,7 +463,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -593,7 +593,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -731,7 +731,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -861,7 +861,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management:\n                edits:\n                    - type: payload_rule\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management:\n                  edits:\n                      - type: payload_rule\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -991,7 +991,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management:\n                edits:\n                    - keep: all\n                      type: clear_thinking_20251015\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management:\n                  edits:\n                      - keep: all\n                        type: clear_thinking_20251015\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -1121,7 +1121,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management:\n                edits:\n                    - keep: all\n                      type: clear_thinking_20251015\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management:\n                  edits:\n                      - keep: all\n                        type: clear_thinking_20251015\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -1259,7 +1259,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default-raw:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management: '{\"edits\":[{\"type\":\"clear_thinking_20251015\",\"keep\":\"all\"}]}'\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default-raw:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management: '{\"edits\":[{\"type\":\"clear_thinking_20251015\",\"keep\":\"all\"}]}'\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -1389,7 +1389,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default-raw:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management: '{\"edits\":[{\"type\":\"clear_thinking_20251015\",\"keep\":\"all\"}]}'\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default-raw:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management: '{\"edits\":[{\"type\":\"clear_thinking_20251015\",\"keep\":\"all\"}]}'\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -1527,7 +1527,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management:\n                edits:\n                    - keep: all\n                      type: clear_thinking_20251015\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management:\n                  edits:\n                      - keep: all\n                        type: clear_thinking_20251015\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -1657,7 +1657,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management:\n                edits:\n                    - keep: all\n                      type: clear_thinking_20251015\n            thinking.type: disabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management:\n                  edits:\n                      - keep: all\n                        type: clear_thinking_20251015\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -1795,7 +1795,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: disabled\n    override-raw:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management: '{\"edits\":[{\"type\":\"clear_thinking_20251015\",\"keep\":\"all\"}]}'\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: disabled\n      override-raw:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management: '{\"edits\":[{\"type\":\"clear_thinking_20251015\",\"keep\":\"all\"}]}'\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -1925,7 +1925,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: disabled\n    override-raw:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management: '{\"edits\":[{\"type\":\"clear_thinking_20251015\",\"keep\":\"all\"}]}'\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: disabled\n      override-raw:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management: '{\"edits\":[{\"type\":\"clear_thinking_20251015\",\"keep\":\"all\"}]}'\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -2063,7 +2063,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            - context_management\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              - context_management\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -2463,7 +2463,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: enabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: enabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -2593,7 +2593,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: adaptive\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: adaptive\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -2723,7 +2723,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: enabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: enabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -2861,7 +2861,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: adaptive\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: adaptive\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -2999,7 +2999,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: enabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: enabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -3129,7 +3129,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management:\n                edits:\n                    - type: payload_rule\n            thinking.type: adaptive\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management:\n                  edits:\n                      - type: payload_rule\n              thinking.type: adaptive\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -3259,7 +3259,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            - context_management\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: enabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              - context_management\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: enabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -3389,7 +3389,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: enabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: enabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -3527,7 +3527,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            context_management:\n                edits:\n                    - type: payload_rule\n            thinking.type: adaptive\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              context_management:\n                  edits:\n                      - type: payload_rule\n              thinking.type: adaptive\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -3665,7 +3665,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            - context_management\n    override:\n        - models:\n            - name: claude-opus-5\n              protocol: claude\n          params:\n            thinking.type: enabled\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              - context_management\n      override:\n          - models:\n              - name: claude-opus-5\n                protocol: claude\n            params:\n              thinking.type: enabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -3905,7 +3905,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: claude-opus-5-5\n              protocol: claude\n          params:\n            max_tokens: 16384\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: claude-opus-5-5\n                protocol: claude\n            params:\n              max_tokens: 16384\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -4005,7 +4005,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: claude-opus-5-5\n              protocol: claude\n          params:\n            max_tokens: 16384\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: claude-opus-5-5\n                protocol: claude\n            params:\n              max_tokens: 16384\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -4117,7 +4117,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: claude-opus-5-5\n              protocol: claude\n          params:\n            max_tokens: 16384\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: claude-opus-5-5\n                protocol: claude\n            params:\n              max_tokens: 16384\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -4217,7 +4217,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: claude-opus-5-5\n              protocol: claude\n          params:\n            max_tokens: 16384\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: claude-opus-5-5\n                protocol: claude\n            params:\n              max_tokens: 16384\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -4317,7 +4317,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: claude-opus-5-5\n              protocol: claude\n          params:\n            max_tokens: 16384\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: claude-opus-5-5\n                protocol: claude\n            params:\n              max_tokens: 16384\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -4417,7 +4417,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: claude-opus-5-5\n              protocol: claude\n          params:\n            max_tokens: 16384\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: claude-opus-5-5\n                protocol: claude\n            params:\n              max_tokens: 16384\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -4517,7 +4517,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: claude-opus-5-5\n              protocol: claude\n          params:\n            max_tokens: 16384\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: claude-opus-5-5\n                protocol: claude\n            params:\n              max_tokens: 16384\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -4624,7 +4624,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-disabled-thinking-beta-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-disabled-thinking-beta-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -4771,7 +4771,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-3-5-sonnet-20241022\n              protocol: claude\n          params:\n            stream: false\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-3-5-sonnet-20241022\n                protocol: claude\n            params:\n              stream: false\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -4878,7 +4878,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-3-5-sonnet-20241022\n              protocol: claude\n          params:\n            stream: true\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-3-5-sonnet-20241022\n                protocol: claude\n            params:\n              stream: true\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -4987,7 +4987,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-3-5-sonnet-20241022\n              protocol: claude\n          params:\n            stream: false\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-3-5-sonnet-20241022\n                protocol: claude\n            params:\n              stream: false\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -5094,7 +5094,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-3-5-sonnet-20241022\n              protocol: claude\n          params:\n            stream: true\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-3-5-sonnet-20241022\n                protocol: claude\n            params:\n              stream: true\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -5208,7 +5208,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-fable-custom-reporting-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            model: claude-sonnet-5\n            system:\n                - text: Custom user prompt containing Reporting outcomes heading in discussion.\n                  type: text\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-fable-custom-reporting-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              model: claude-sonnet-5\n              system:\n                  - text: Custom user prompt containing Reporting outcomes heading in discussion.\n                    type: text\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -5354,7 +5354,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-fable-probe-strip-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            max_tokens: 1\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-fable-probe-strip-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              max_tokens: 1\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -5500,7 +5500,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-fable-disabled-thinking-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            thinking.type: disabled\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-fable-disabled-thinking-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              thinking.type: disabled\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -5646,7 +5646,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-fable-to-sonnet-sensitive-test\n      cloak:\n        sensitive-words:\n            - Reporting\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            model: claude-sonnet-5\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-fable-to-sonnet-sensitive-test\n        cloak:\n          sensitive-words:\n              - Reporting\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              model: claude-sonnet-5\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -5792,7 +5792,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-fable-filter-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            - fallbacks\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-fable-filter-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              - fallbacks\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -5938,7 +5938,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-probe-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-sonnet-5\n          params:\n            max_tokens: 1\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-probe-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-sonnet-5\n            params:\n              max_tokens: 1\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -6084,7 +6084,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-fable-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            model: claude-sonnet-5\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-fable-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              model: claude-sonnet-5\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -6230,7 +6230,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-fable-test-2\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-sonnet-5\n          params:\n            model: claude-fable-5-1\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-fable-test-2\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-sonnet-5\n            params:\n              model: claude-fable-5-1\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -6376,7 +6376,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-parent-thinking-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            thinking:\n                type: adaptive\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-parent-thinking-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              thinking:\n                  type: adaptive\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -6522,7 +6522,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-fable-test-3\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            fallbacks:\n                - model: claude-opus-5\n            model: claude-sonnet-5\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-fable-test-3\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              fallbacks:\n                  - model: claude-opus-5\n              model: claude-sonnet-5\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -6668,7 +6668,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-probe-explicit-diag-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-haiku-4-5-20251001\n          params:\n            diagnostics:\n                operator_custom: custom_value_123\n            max_tokens: 1\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-probe-explicit-diag-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-haiku-4-5-20251001\n            params:\n              diagnostics:\n                  operator_custom: custom_value_123\n              max_tokens: 1\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -6814,7 +6814,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-fable-test-5\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override-raw:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            fallbacks: '[{\"model\":\"claude-opus-5\"}]'\n            model: '\"claude-sonnet-5\"'\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-fable-test-5\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override-raw:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              fallbacks: '[{\"model\":\"claude-opus-5\"}]'\n              model: '\"claude-sonnet-5\"'\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -6960,7 +6960,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-declassify-probe-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            max_tokens: 1000\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-declassify-probe-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              max_tokens: 1000\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -7106,7 +7106,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-fable-replace-sys-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            system: Custom replaced system prompt\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-fable-replace-sys-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              system: Custom replaced system prompt\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -7252,7 +7252,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-sonnet-to-fable-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-sonnet-5\n          params:\n            model: claude-fable-5-1\n            system.1.cache_control.ttl: 1h\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-sonnet-to-fable-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-sonnet-5\n            params:\n              model: claude-fable-5-1\n              system.1.cache_control.ttl: 1h\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -7398,7 +7398,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-sonnet-to-fable-sensitive-test\n      cloak:\n        sensitive-words:\n            - Reporting\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-sonnet-5\n          params:\n            model: claude-fable-5-1\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-sonnet-to-fable-sensitive-test\n        cloak:\n          sensitive-words:\n              - Reporting\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-sonnet-5\n            params:\n              model: claude-fable-5-1\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -7544,7 +7544,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-string-system-fable-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-sonnet-5\n          params:\n            model: claude-fable-5-1\n            system: You are a helpful coding assistant.\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-string-system-fable-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-sonnet-5\n            params:\n              model: claude-fable-5-1\n              system: You are a helpful coding assistant.\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -7690,7 +7690,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-string-system-mention-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-sonnet-5\n          params:\n            model: claude-fable-5-1\n            system: Please follow best practices when reporting outcomes to the user.\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-string-system-mention-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-sonnet-5\n            params:\n              model: claude-fable-5-1\n              system: Please follow best practices when reporting outcomes to the user.\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -7836,7 +7836,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-string-system-exact-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-sonnet-5\n          params:\n            model: claude-fable-5-1\n            system: |-\n                # Reporting outcomes\n\n                Report what actually happened, not what you intended. When you say something is done, sent, saved, fixed, or verified, that claim must rest on a result you observed in this session — tool output, the file as it now reads, the page as it now loads — not on what the step should have produced. If you did not check, say you did not check. If any step failed, was skipped, or came back different from what you expected, say so in the first sentence of your report, before anything else, even when the rest of the work succeeded. Never quietly work around a failure in a way that makes it look resolved; a problem the user can see is recoverable, one your summary hides is not. When you stop before the task is complete, your first line says so plainly and names what is left. Do not describe partial work as done, and do not let a summary read as more certain than the evidence behind it.\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-string-system-exact-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-sonnet-5\n            params:\n              model: claude-fable-5-1\n              system: |-\n                  # Reporting outcomes\n\n                  Report what actually happened, not what you intended. When you say something is done, sent, saved, fixed, or verified, that claim must rest on a result you observed in this session — tool output, the file as it now reads, the page as it now loads — not on what the step should have produced. If you did not check, say you did not check. If any step failed, was skipped, or came back different from what you expected, say so in the first sentence of your report, before anything else, even when the rest of the work succeeded. Never quietly work around a failure in a way that makes it look resolved; a problem the user can see is recoverable, one your summary hides is not. When you stop before the task is complete, your first line says so plainly and names what is left. Do not describe partial work as done, and do not let a summary read as more certain than the evidence behind it.\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -7982,7 +7982,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-system-ttl-fable-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-fable-5-1\n          params:\n            model: claude-sonnet-5\n            system.0.cache_control.ttl: 1h\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-system-ttl-fable-test\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-fable-5-1\n            params:\n              model: claude-sonnet-5\n              system.0.cache_control.ttl: 1h\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -8128,7 +8128,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: sk-ant-oat-payload-fable-test-4\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: gpt-4\n          params:\n            fallbacks:\n                - model: claude-opus-5\n        - models:\n            - name: claude-fable-5-1\n          params:\n            model: claude-sonnet-5\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: sk-ant-oat-payload-fable-test-4\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: gpt-4\n            params:\n              fallbacks:\n                  - model: claude-opus-5\n          - models:\n              - name: claude-fable-5-1\n            params:\n              model: claude-sonnet-5\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -8271,7 +8271,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - name: claude-haiku-4-5-20251001\n              protocol: claude\n          params:\n            - messages.#(role==\"system\")#\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - name: claude-haiku-4-5-20251001\n                protocol: claude\n            params:\n              - messages.#(role==\"system\")#\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -8401,7 +8401,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-haiku-4-5-20251001\n              protocol: claude\n          params:\n            model: claude-sonnet-5\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-haiku-4-5-20251001\n                protocol: claude\n            params:\n              model: claude-sonnet-5\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -8531,7 +8531,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - name: claude-haiku-4-5-20251001\n              protocol: claude\n          params:\n            - messages.#(role==\"system\")#\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - name: claude-haiku-4-5-20251001\n                protocol: claude\n            params:\n              - messages.#(role==\"system\")#\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -8665,7 +8665,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: claude-haiku-4-5-20251001\n              protocol: claude\n          params:\n            model: claude-sonnet-5\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: claude-haiku-4-5-20251001\n                protocol: claude\n            params:\n              model: claude-sonnet-5\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -8801,7 +8801,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: '*'\n          params:\n            model: claude-haiku-4-5-20251001\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: '*'\n            params:\n              model: claude-haiku-4-5-20251001\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -8858,7 +8858,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: '*'\n          params:\n            model: claude-haiku-4-5-20251001\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: '*'\n            params:\n              model: claude-haiku-4-5-20251001\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -8915,7 +8915,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: '*'\n          params:\n            model: claude-haiku-4-5-20251001\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: '*'\n            params:\n              model: claude-haiku-4-5-20251001\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -8970,7 +8970,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "claude-api-key:\n    - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    override:\n        - models:\n            - name: '*'\n          params:\n            model: claude-haiku-4-5-20251001\n",
+     "config": "api-keys:\n  claude:\n  - name: claude-1\n    keys:\n      - api-key: key-123\ncredential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      override:\n          - models:\n              - name: '*'\n            params:\n              model: claude-haiku-4-5-20251001\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -9027,7 +9027,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - name: '*'\n          params:\n            - system\n            - metadata\n            - diagnostics\n            - context_management\n            - messages.0\n    override:\n        - models:\n            - name: '*'\n          params:\n            max_tokens: 1\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - name: '*'\n            params:\n              - system\n              - metadata\n              - diagnostics\n              - context_management\n              - messages.0\n      override:\n          - models:\n              - name: '*'\n            params:\n              max_tokens: 1\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -9157,7 +9157,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - name: '*'\n          params:\n            - system\n            - metadata\n            - diagnostics\n            - context_management\n            - messages.0\n    override:\n        - models:\n            - name: '*'\n          params:\n            max_tokens: 1\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - name: '*'\n            params:\n              - system\n              - metadata\n              - diagnostics\n              - context_management\n              - messages.0\n      override:\n          - models:\n              - name: '*'\n            params:\n              max_tokens: 1\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -9299,7 +9299,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - match:\n                - max_tokens: 200\n              name: '*'\n          params:\n            - messages.0\n    override:\n        - models:\n            - match:\n                - max_tokens: 100\n              name: '*'\n          params:\n            diagnostics:\n                user: true\n            max_tokens: 200\n            temperature: 0.2\n        - models:\n            - match:\n                - max_tokens: 200\n              name: '*'\n          params:\n            top_p: 0.4\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - match:\n                  - max_tokens: 200\n                name: '*'\n            params:\n              - messages.0\n      override:\n          - models:\n              - match:\n                  - max_tokens: 100\n                name: '*'\n            params:\n              diagnostics:\n                  user: true\n              max_tokens: 200\n              temperature: 0.2\n          - models:\n              - match:\n                  - max_tokens: 200\n                name: '*'\n            params:\n              top_p: 0.4\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -9429,7 +9429,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    filter:\n        - models:\n            - match:\n                - max_tokens: 200\n              name: '*'\n          params:\n            - messages.0\n    override:\n        - models:\n            - match:\n                - max_tokens: 100\n              name: '*'\n          params:\n            diagnostics:\n                user: true\n            max_tokens: 200\n            temperature: 0.2\n        - models:\n            - match:\n                - max_tokens: 200\n              name: '*'\n          params:\n            top_p: 0.4\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      filter:\n          - models:\n              - match:\n                  - max_tokens: 200\n                name: '*'\n            params:\n              - messages.0\n      override:\n          - models:\n              - match:\n                  - max_tokens: 100\n                name: '*'\n            params:\n              diagnostics:\n                  user: true\n              max_tokens: 200\n              temperature: 0.2\n          - models:\n              - match:\n                  - max_tokens: 200\n                name: '*'\n            params:\n              top_p: 0.4\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [
@@ -9569,7 +9569,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            default_matched: true\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            default_unmatched: true\n    default-raw:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            default_raw_matched: \"true\"\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            default_raw_unmatched: \"true\"\n    filter:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            - metadata\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            - system\n    override:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            override_matched: true\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            override_unmatched: true\n    override-raw:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            override_raw_matched: \"true\"\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            override_raw_unmatched: \"true\"\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              default_matched: true\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              default_unmatched: true\n      default-raw:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              default_raw_matched: \"true\"\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              default_raw_unmatched: \"true\"\n      filter:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              - metadata\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              - system\n      override:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              override_matched: true\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              override_unmatched: true\n      override-raw:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              override_raw_matched: \"true\"\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              override_raw_unmatched: \"true\"\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": null,
@@ -9699,7 +9699,7 @@
       "proxy_url": ""
      },
      "caller": "",
-     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\npayload:\n    default:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            default_matched: true\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            default_unmatched: true\n    default-raw:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            default_raw_matched: \"true\"\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            default_raw_unmatched: \"true\"\n    filter:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            - metadata\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            - system\n    override:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            override_matched: true\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            override_unmatched: true\n    override-raw:\n        - models:\n            - name: '*'\n              not-exist:\n                - thinking\n          params:\n            override_raw_matched: \"true\"\n        - models:\n            - exist:\n                - thinking\n              name: '*'\n          params:\n            override_raw_unmatched: \"true\"\n",
+     "config": "credential-concurrency:\n    busy-retry-max: 0s\n    busy-retry-min: 0s\n    cleanup-interval: 0s\n    cpa-cancel-bound: 0s\n    cpa-heartbeat-timeout: 0s\n    reclaim-grace: 0s\n    release-flush-interval: 0s\n    release-max-backoff: 0s\nrequests:\n  payload:\n      default:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              default_matched: true\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              default_unmatched: true\n      default-raw:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              default_raw_matched: \"true\"\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              default_raw_unmatched: \"true\"\n      filter:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              - metadata\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              - system\n      override:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              override_matched: true\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              override_unmatched: true\n      override-raw:\n          - models:\n              - name: '*'\n                not-exist:\n                  - thinking\n            params:\n              override_raw_matched: \"true\"\n          - models:\n              - exist:\n                  - thinking\n                name: '*'\n            params:\n              override_raw_unmatched: \"true\"\n",
      "date": "2026-10-22",
      "exchanges": {
       "chunks": [

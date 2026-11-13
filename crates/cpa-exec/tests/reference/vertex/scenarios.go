@@ -635,15 +635,16 @@ var chatSSE = reply{Status: 200, Headers: [][2]string{{"Content-Type", "text/eve
 // oaPayloadRules: the openapi route applies rules for the openai protocol of the vertex
 // executor, after the built-in edits.
 const oaPayloadRules = `
-payload:
-  default:
-    - models: [{name: "meta/*", protocol: openai}]
-      params: {max_tokens: 77}
-  override:
-    - models: [{name: "meta/*", protocol: openai}]
-      params: {temperature: 0.1}
-    - models: [{name: "meta/*", protocol: gemini}]
-      params: {generationConfig.temperature: 0.9}
+requests:
+  payload:
+    default:
+      - models: [{name: "meta/*", protocol: openai}]
+        params: {max_tokens: 77}
+    override:
+      - models: [{name: "meta/*", protocol: openai}]
+        params: {temperature: 0.1}
+      - models: [{name: "meta/*", protocol: gemini}]
+        params: {generationConfig.temperature: 0.9}
 `
 
 var _ = strings.TrimSpace

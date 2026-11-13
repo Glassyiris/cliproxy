@@ -16,7 +16,7 @@
   },
   "request": {
     "body": "{\"model\":\"muse-spark-1.3(high)\",\"input\":\"hi\",\"temperature\":0.2}",
-    "config": "payload:\n  default:\n    - models: [{name: \"muse-*\", protocol: meta}]\n      params: {temperature: 0.7, store: true, metadata_hint: \"d\"}\n    - models: [{name: \"muse-*\", protocol: codex}]\n      params: {wrong_protocol: true}\n  override:\n    - models: [{name: \"muse-spark-1.3(high)\", protocol: meta}]\n      params: {requested_hit: true}\n  filter:\n    - models: [{name: \"muse-*\", from-protocol: openai-response}]\n      params: [parallel_tool_calls]\n",
+    "config": "requests:\n  payload:\n    default:\n      - models: [{name: \"muse-*\", protocol: meta}]\n        params: {temperature: 0.7, store: true, metadata_hint: \"d\"}\n      - models: [{name: \"muse-*\", protocol: codex}]\n        params: {wrong_protocol: true}\n    override:\n      - models: [{name: \"muse-spark-1.3(high)\", protocol: meta}]\n        params: {requested_hit: true}\n    filter:\n      - models: [{name: \"muse-*\", from-protocol: openai-response}]\n        params: [parallel_tool_calls]\n",
     "model": "muse-spark-1.3(high)",
     "source": "openai-response",
     "stream": false

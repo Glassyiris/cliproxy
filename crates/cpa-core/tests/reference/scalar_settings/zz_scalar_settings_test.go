@@ -85,28 +85,6 @@ api-keys:
 			{Go: "openai-compatibility.0.name", Rust: "api-keys.openai-compatibility.0.name"},
 			{Go: "openai-compatibility.0.api-key-entries.0.api-key", Rust: "api-keys.openai-compatibility.0.keys.0.api-key"},
 		}},
-		{Name: "legacy", YAML: `host: 1.50
-auth-dir: 007
-api-keys: [0x1F]
-github-token: 1.50
-claude-api-key: [{api-key: 0x1F, prefix: 1.50, base-url: http://127.0.0.1:1, headers: {X-V: 1.10}}]
-openai-compatibility: [{name: 2024, base-url: http://127.0.0.1:2, api-key-entries: [{api-key: 1e3}]}]
-oauth-settings: {claude: [{name: 1.50, alias: 2.50}]}
-proxy-url: 1.50
-`, Checks: []check{
-			{Go: "proxy-url", Rust: "requests.proxy-url"},
-			{Go: "host", Rust: "server.host"},
-			{Go: "auth-dir", Rust: "oauth.auth-dir"},
-			{Go: "api-keys.0", Rust: "access.api-keys.0"},
-			{Go: "github-token", Rust: "server.github-token"},
-			{Go: "claude-api-key.0.api-key", Rust: "api-keys.claude.0.keys.0.api-key"},
-			{Go: "claude-api-key.0.prefix", Rust: "api-keys.claude.0.prefix"},
-			{Go: "claude-api-key.0.headers.X-V", Rust: "api-keys.claude.0.headers.X-V"},
-			{Go: "openai-compatibility.0.name", Rust: "api-keys.openai-compatibility.0.name"},
-			{Go: "openai-compatibility.0.api-key-entries.0.api-key", Rust: "api-keys.openai-compatibility.0.keys.0.api-key"},
-			{Go: "oauth-settings.claude.0.name", Rust: "oauth.settings.claude.0.name"},
-			{Go: "oauth-settings.claude.0.alias", Rust: "oauth.settings.claude.0.alias"},
-		}},
 		{Name: "anchored-key", YAML: `x: {&k 1.50: v}
 oauth:
   model-alias: {codex: [{name: *k, alias: z}]}

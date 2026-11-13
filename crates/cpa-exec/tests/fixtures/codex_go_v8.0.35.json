@@ -2,7 +2,7 @@
   "executor": [
     {
       "name": "apikey_payload_rules_and_session_headers",
-      "config": "payload:\n  override:\n    - models:\n        - name: gpt-5.4\n      params:\n        reasoning.effort: low\n  default:\n    - models:\n        - name: \"gpt-*\"\n      params:\n        text.verbosity: low\n        reasoning.effort: minimal\n  filter:\n    - models:\n        - name: gpt-5.4\n      params:\n        - tool_choice\n",
+      "config": "requests:\n  payload:\n    override:\n      - models:\n          - name: gpt-5.4\n        params:\n          reasoning.effort: low\n    default:\n      - models:\n          - name: \"gpt-*\"\n        params:\n          text.verbosity: low\n          reasoning.effort: minimal\n    filter:\n      - models:\n          - name: gpt-5.4\n        params:\n          - tool_choice\n",
       "attributes": {
         "api_key": "sk-FAKE",
         "header:X-Combo": "s=$cpa-session-id;x",

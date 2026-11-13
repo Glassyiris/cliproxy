@@ -1,11 +1,8 @@
-//! `config.yaml`, read the way CLIProxyAPI v8 reads it (internal/config/config_v8.go,
-//! config_load.go).
-//!
-//! Both the v8 layout (`server.port`, `access.api-keys`, `oauth.auth-dir`) and the
-//! legacy top-level spellings are accepted. Presence decides: a v8 key that is present
-//! wins even when it is `null`, `0`, `false` or empty. A v8 parent that is present but
-//! not a mapping is an error, so `access: null` is rejected instead of silently opening
-//! the proxy.
+//! `config.yaml` in the current (v8) layout (`server.port`, `access.api-keys`,
+//! `oauth.auth-dir`), decoded the way CLIProxyAPI v8 decodes it
+//! (internal/config/config_v8.go, config_load.go). A root section the schema does not
+//! know is an error, and so is a present section that is not a mapping, so
+//! `access: null` is rejected instead of silently opening the proxy.
 
 use std::path::PathBuf;
 
@@ -22,7 +19,7 @@ mod timestamp;
 mod trusted;
 mod validate;
 pub use binary::{PLAIN as PLAIN_SCALAR, double_quoted as yaml_double_quoted};
-pub use document::{ConfigDocument, credential_error, v8_group_error, v8_layout_error};
+pub use document::ConfigDocument;
 pub use schema::ValidationPath;
 pub use schema::validate as validate_config_fields;
 pub use schema::{coerce_typed_scalars, go_bool, go_int};
@@ -440,10 +437,9 @@ pub struct Config {
     pub management: ManagementConfig,
     /// Presence-preserving v8 view, including fields not yet wired into executors.
     pub document: Value,
-    /// v8 `oauth.providers.*` leaf paths present in the source text (Go
-    /// `Config.OAuthOnlyFields`, keyed by v8 path rather than legacy name). They
-    /// apply to OAuth credentials only; see [`Config::for_api_key`]. Settings written
-    /// in the legacy layout stay global, as in Go.
+    /// `oauth.providers.*` leaf paths present in the source text (Go
+    /// `Config.OAuthOnlyFields`, keyed by path). They apply to OAuth credentials only;
+    /// see [`Config::for_api_key`].
     pub oauth_only: std::collections::BTreeSet<String>,
     /// `plugins.configs` as Go hands each plugin its raw node (pluginhost
     /// `runtimeConfigYAML`): a plain scalar that is not plain text to serde_yaml_ng is its
@@ -602,7 +598,7 @@ enum Decode {
 /// come first, unwrapped, as in Go.
 fn decode(text: &str, mode: Decode) -> anyhow::Result<(Mapping, ConfigDocument)> {
     let mut parsed = config_value(text)?;
-    // Before any migration, as Go expands aliases first.
+    // Before the shape checks, as Go expands aliases first.
     expand_merges(&mut parsed)?;
     let root = match parsed {
         Value::Null if text.trim().is_empty() => Mapping::new(),
@@ -610,7 +606,7 @@ fn decode(text: &str, mode: Decode) -> anyhow::Result<(Mapping, ConfigDocument)>
         _ => bail!("config must be a mapping"),
     };
     validate_shape(&root)?;
-    if let Some(e) = credential_error(&root) {
+    if let Some(e) = document::group_error(&root) {
         bail!(e);
     }
     let mut document = ConfigDocument::from_mapping(root.clone())?;
@@ -645,18 +641,15 @@ impl Config {
         let mut routing = routing;
         routing.retry.max_retry_credentials = routing.retry.max_retry_credentials.max(0);
         let management = decode_section::<ManagementConfig>(canonical, "management")?;
-        let pick = |v8: &str, legacy: &str| lookup(&root, v8).or_else(|| lookup(&root, legacy));
-        let host = string_or_empty(pick("server.host", "host"), "server.host")?;
-        let port = match pick("server.port", "port") {
+        let host = string_or_empty(lookup(&root, "server.host"), "server.host")?;
+        let port = match lookup(&root, "server.port") {
             None | Some(Value::Null) => 0,
             // yaml.v3 truncates a float into Go's int port.
             Some(v) => go_int(v)
                 .and_then(|p| u16::try_from(p).ok())
                 .context("server.port must be an integer port number")?,
         };
-        // A top-level `api-keys` mapping is the v8 upstream key map, not client keys.
-        let legacy_keys = lookup(&root, "api-keys").filter(|v| !v.is_mapping());
-        let api_keys = match lookup(&root, "access.api-keys").or(legacy_keys) {
+        let api_keys = match lookup(&root, "access.api-keys") {
             None | Some(Value::Null) => Vec::new(),
             Some(Value::Sequence(seq)) => seq
                 .iter()
@@ -668,7 +661,7 @@ impl Config {
                 .collect::<anyhow::Result<_>>()?,
             Some(_) => bail!("access.api-keys must be a list of strings"),
         };
-        let auth_dir = string_or_empty(pick("oauth.auth-dir", "auth-dir"), "oauth.auth-dir")?;
+        let auth_dir = string_or_empty(lookup(&root, "oauth.auth-dir"), "oauth.auth-dir")?;
         let trusted_proxies: Vec<String> = match lookup(canonical, "server.trusted-proxies") {
             Some(Value::Sequence(seq)) => seq.iter().map(go_string).collect(),
             _ => Vec::new(),
@@ -692,7 +685,7 @@ impl Config {
         })
     }
 
-    /// `server.max-request-body-bytes` (legacy root `max-request-body-bytes`), Go
+    /// `server.max-request-body-bytes`, Go
     /// `SDKConfig.MaxRequestBodyBytes`: the request body limit in bytes. `None` when
     /// omitted or not positive, which disables it (Go's default 0).
     pub fn max_request_body_bytes(&self) -> Option<u64> {
@@ -822,21 +815,57 @@ mod tests {
     }
 
     #[test]
-    fn v8_wins_by_presence_even_when_null_or_empty() {
+    fn present_values_win_even_when_null_or_empty() {
         let cfg = Config::parse(
-            "port: 9000\napi-keys: [legacy]\nauth-dir: /legacy\nhost: legacyhost\n\
-             server: {port: 9100, host: null}\naccess: {api-keys: []}\noauth: {auth-dir: /v8}\n\
-             remote-management: {allow-remote: true}\nmanagement: {allow-remote: false, disable-auto-update-panel: true}\n",
+            "server: {port: 9100, host: null}\naccess: {api-keys: []}\noauth: {auth-dir: /v8}\n\
+             management: {allow-remote: false, disable-auto-update-panel: true}\n",
         )
         .unwrap();
-        assert_eq!(cfg.port, 9100);
-        assert_eq!(cfg.host, "", "present null beats legacy");
-        assert!(cfg.api_keys.is_empty(), "present empty list beats legacy");
+        assert_eq!((cfg.port, cfg.host.as_str()), (9100, ""));
+        assert!(cfg.api_keys.is_empty());
         assert_eq!(cfg.auth_dir, PathBuf::from("/v8"));
-        assert!(!cfg.management.allow_remote, "present false beats legacy");
-        assert!(cfg.management.disable_auto_update_panel);
-        let cfg = Config::parse("api-keys: [legacy]\naccess: {api-keys: null}\n").unwrap();
-        assert!(cfg.api_keys.is_empty(), "present null list beats legacy");
+        assert!(!cfg.management.allow_remote && cfg.management.disable_auto_update_panel);
+    }
+
+    /// Pre-v8 keys and historical v8 spellings are unknown settings to the strict check
+    /// every import and write runs, and a client key list at the root is not the
+    /// `api-keys` provider map.
+    #[test]
+    fn pre_v8_keys_are_rejected() {
+        for (yaml, want) in [
+            ("port: 9000\n", "unknown setting config.port"),
+            ("host: 127.0.0.1\n", "unknown setting config.host"),
+            ("auth-dir: /x\n", "unknown setting config.auth-dir"),
+            (
+                "remote-management: {allow-remote: true}\n",
+                "unknown setting config.remote-management",
+            ),
+            ("request-retry: 4\n", "unknown setting config.request-retry"),
+            (
+                "claude-api-key: [{api-key: k}]\n",
+                "unknown setting config.claude-api-key",
+            ),
+            (
+                "codex: {disable-codex-cloaking: true}\n",
+                "unknown setting config.codex",
+            ),
+            (
+                "oauth: {providers: {codex: {disable-codex-cloaking: true}}}\n",
+                "unknown setting config.oauth.providers.codex.disable-codex-cloaking",
+            ),
+            (
+                "oauth: {providers: {xai: {inject-x-search: true}}}\n",
+                "unknown setting config.oauth.providers.xai",
+            ),
+        ] {
+            let doc = ConfigDocument::parse(yaml).unwrap();
+            let err = schema::validate(doc.value(), true).unwrap_err();
+            assert_eq!(err.to_string(), want, "{yaml:?}");
+        }
+        assert_eq!(
+            Config::parse("api-keys: [legacy]\n").unwrap_err().to_string(),
+            "api-keys must be a mapping"
+        );
     }
 
     /// `worker-threads` is cook-router only: a whole-file upload through the Management
@@ -850,11 +879,11 @@ mod tests {
     }
 
     #[test]
-    fn legacy_spellings_still_work() {
-        let cfg = Config::parse("host: 127.0.0.1\nport: 9000\napi-keys: [' a ', a, '', b]\nauth-dir: /x\n").unwrap();
+    fn client_keys_are_trimmed_and_deduplicated() {
+        let cfg =
+            Config::parse("server: {host: 127.0.0.1, port: 9000}\naccess: {api-keys: [' a ', a, '', b]}\n").unwrap();
         assert_eq!((cfg.host.as_str(), cfg.port), ("127.0.0.1", 9000));
         assert_eq!(cfg.api_keys, ["a", "b"]);
-        assert_eq!(cfg.auth_dir, PathBuf::from("/x"));
     }
 
     #[test]
@@ -913,14 +942,12 @@ mod tests {
     }
 
     #[test]
-    fn scheduler_legacy_keys_and_v8_presence_share_one_typed_view() {
+    fn routing_settings_decode_into_one_typed_view() {
         let cfg = Config::parse(
-            "request-retry: 7\nmax-retry-credentials: -2\nmax-retry-interval: 41\n\
-             disable-cooling: true\nsave-cooldown-status: true\n\
-             transient-error-cooldown-seconds: -3\nforce-model-prefix: true\n\
-             routing:\n  strategy: fill-first\n  session-affinity: true\n\
+            "routing:\n  strategy: fill-first\n  force-model-prefix: true\n  session-affinity: true\n\
              \x20 session-affinity-ttl: 37m\n  session-affinity-subagents: false\n\
-             \x20 retry: {request-retry: 0}\n  cooldown: {disable-cooling: false}\n",
+             \x20 retry: {request-retry: 0, max-retry-credentials: -2, max-retry-interval: 41}\n\
+             \x20 cooldown: {disable-cooling: false, save-cooldown-status: true, transient-error-cooldown-seconds: -3}\n",
         )
         .unwrap();
         assert_eq!(cfg.routing.strategy, "fill-first");
@@ -944,139 +971,41 @@ mod tests {
         let empty = Config::default();
         assert_eq!(empty.routing, RoutingConfig::default());
         assert_eq!(empty.routing.session_affinity_subagents, None);
-        let null = Config::parse("request-retry: 7\nrouting: {retry: {request-retry: null}}\n").unwrap();
+        let null = Config::parse("routing: {retry: {request-retry: null}}\n").unwrap();
         assert_eq!(null.routing.retry.request_retry, 0);
     }
 
-    /// v8.0.35 `buildV8Paths` moves the legacy `claude.session-date-pin-days` to
-    /// `upstream.claude`.
+    /// Go `shared_upstream_test.go` (52d5507d): the shared `upstream` settings load the
+    /// same for OAuth and API-key views, and the Codex header defaults stay OAuth-only.
     #[test]
-    fn legacy_session_date_pin_days_migrates() {
-        let doc = ConfigDocument::parse("claude: {tool-search: true, session-date-pin-days: 3}\n").unwrap();
-        assert!(doc.value().get("claude").is_none(), "{:?}", doc.value());
-        assert_eq!(doc.value()["upstream"]["claude"]["session-date-pin-days"], 3);
-    }
-
-    /// Go `shared_upstream_test.go` (52d5507d): the legacy, canonical `upstream` and
-    /// historical `oauth.providers` layouts load the same shared settings for OAuth and
-    /// API-key views alike, migrate without their aliases, and keep the Codex header
-    /// defaults OAuth-only.
-    #[test]
-    fn shared_upstream_layouts_agree_and_migrate() {
+    fn shared_upstream_settings_reach_both_views() {
         let keys = "api-keys: {codex: [{base-url: https://example.invalid, keys: [{api-key: test-key, disable-codex-cloaking: false}]}]}\n";
         let codex = "{disable-codex-cloaking: true, stream-bootstrap-buffering: true, stream-bootstrap-timeout: 10s, orphan-delegation-compatibility: true, model-level-cooling: true, response-steering: true";
         let headers = "{user-agent: client-agent, package-version: 1.2.3, runtime-version: v22.1.0, os: Linux, arch: arm64, timeout: '123', timezone: Asia/Shanghai, stabilize-device-profile: true}";
         let oauth = "oauth: {auth-dir: client-auth, auth-auto-refresh-workers: 3, providers: {codex: {header-defaults: {user-agent: oauth-agent, beta-features: oauth-beta}}}}\n";
-        let legacy = format!(
-            "auth-dir: client-auth\nauth-auto-refresh-workers: 3\ncodex: {codex}}}\nclaude: {{model-level-cooling: true}}\nclaude-code: {{disable-cloaking-model-list: true}}\ndisable-claude-cloak-mode: true\nclaude-header-defaults: {headers}\nxai: {{inject-x-search: true}}\n{oauth}{keys}"
-        );
-        let canonical = format!(
+        let raw = format!(
             "upstream:\n  codex: {codex}}}\n  claude:\n    model-level-cooling: true\n    disable-cloaking-model-list: true\n    disable-claude-cloak-mode: true\n    header-defaults: {headers}\n  xai: {{inject-x-search: true}}\n{oauth}{keys}"
         );
-        let historical = format!(
-            "oauth:\n  auth-dir: client-auth\n  auth-auto-refresh-workers: 3\n  providers:\n    codex: {codex}, header-defaults: {{user-agent: oauth-agent, beta-features: oauth-beta}}}}\n    claude:\n      model-level-cooling: true\n      claude-code: {{disable-cloaking-model-list: true}}\n      disable-claude-cloak-mode: true\n      header-defaults: {headers}\n    xai: {{inject-x-search: true}}\n{keys}"
-        );
-        let expected = Config::parse(&canonical).unwrap().document;
+        let doc = ConfigDocument::parse(&raw).unwrap();
+        schema::validate(doc.value(), true).unwrap();
+        let expected = Config::parse(&raw).unwrap().document;
         assert_eq!(
             expected["upstream"]["claude"]["header-defaults"]["timezone"],
             "Asia/Shanghai"
         );
-        for raw in [&legacy, &canonical, &historical] {
-            let doc = ConfigDocument::parse(raw).unwrap();
-            schema::validate(doc.value(), true).unwrap();
-            for alias in ["codex", "claude", "claude-code", "xai", "claude-header-defaults"] {
-                assert!(doc.value().get(alias).is_none(), "{alias} survived: {raw}");
+        for text in [raw.clone(), yaml_string(doc.value()).unwrap()] {
+            let cfg = Config::parse(&text).unwrap();
+            for view in [&cfg, &*cfg.for_api_key()] {
+                assert_eq!(view.document["upstream"], expected["upstream"], "{text}");
+                assert_eq!(view.document["oauth"]["auth-auto-refresh-workers"], 3);
+                let key = &view.document["api-keys"]["codex"][0]["keys"][0];
+                assert_eq!(key["disable-codex-cloaking"], Value::Bool(false));
             }
-            let providers = &doc.value()["oauth"]["providers"];
-            assert!(
-                providers.get("claude").is_none() && providers.get("xai").is_none(),
-                "{raw}"
-            );
-            let codex = providers["codex"].as_mapping().unwrap();
-            assert_eq!(
-                codex.keys().collect::<Vec<_>>(),
-                [&Value::from("header-defaults")],
-                "{raw}"
-            );
-            for text in [raw.to_string(), yaml_string(doc.value()).unwrap()] {
-                let cfg = Config::parse(&text).unwrap();
-                for view in [&cfg, &*cfg.for_api_key()] {
-                    assert_eq!(view.document["upstream"], expected["upstream"], "{text}");
-                    assert_eq!(view.document["oauth"]["auth-auto-refresh-workers"], 3);
-                    let key = &view.document["api-keys"]["codex"][0]["keys"][0];
-                    assert_eq!(key["disable-codex-cloaking"], Value::Bool(false));
-                }
-                let user_agent =
-                    |c: &Config| c.document["oauth"]["providers"]["codex"]["header-defaults"]["user-agent"].clone();
-                assert_eq!(user_agent(&cfg), "oauth-agent");
-                assert_eq!(user_agent(&cfg.for_api_key()), "");
-            }
+            let user_agent =
+                |c: &Config| c.document["oauth"]["providers"]["codex"]["header-defaults"]["user-agent"].clone();
+            assert_eq!(user_agent(&cfg), "oauth-agent");
+            assert_eq!(user_agent(&cfg.for_api_key()), "");
         }
-    }
-
-    /// Go `TestSharedUpstreamPresenceWinsOverHistoricalAliases` and
-    /// `TestSharedUpstreamEmptyHistoricalContainers`.
-    #[test]
-    fn shared_upstream_presence_wins_and_empty_containers_move() {
-        for value in ["false", "null"] {
-            let raw = format!(
-                "codex: {{response-steering: true}}\noauth: {{providers: {{codex: {{response-steering: true}}, claude: {{header-defaults: {{user-agent: historical-agent, stabilize-device-profile: true}}}}}}}}\nupstream: {{codex: {{response-steering: {value}}}, claude: {{header-defaults: {{user-agent: '', stabilize-device-profile: {value}}}}}}}\n"
-            );
-            let cfg = Config::parse(&raw).unwrap();
-            let upstream = &cfg.document["upstream"];
-            assert_ne!(upstream["codex"]["response-steering"], Value::Bool(true), "{raw}");
-            assert_eq!(upstream["claude"]["header-defaults"]["user-agent"], "", "{raw}");
-            assert_ne!(
-                upstream["claude"]["header-defaults"]["stabilize-device-profile"],
-                Value::Bool(true)
-            );
-            schema::validate(ConfigDocument::parse(&raw).unwrap().value(), true).unwrap();
-        }
-        for (historical, current) in [
-            (
-                "oauth.providers.claude.header-defaults",
-                "upstream.claude.header-defaults",
-            ),
-            ("oauth.providers.claude.claude-code", "upstream.claude"),
-            ("oauth.providers.claude", "upstream.claude"),
-            ("oauth.providers.xai", "upstream.xai"),
-        ] {
-            for value in ["{}", "null"] {
-                let parts: Vec<&str> = historical.split('.').collect();
-                let raw = parts
-                    .iter()
-                    .rev()
-                    .fold(value.to_owned(), |inner, key| format!("{{{key}: {inner}}}"));
-                let doc = ConfigDocument::parse(&raw).unwrap();
-                schema::validate(doc.value(), true).unwrap();
-                assert!(lookup(doc.value().as_mapping().unwrap(), historical).is_none(), "{raw}");
-                assert!(lookup(doc.value().as_mapping().unwrap(), current).is_some(), "{raw}");
-            }
-        }
-        // The legacy Claude structs move by their declared fields only: Go has no
-        // `claude.disable-cloaking-model-list` or `claude-code.model-level-cooling`.
-        let cfg = Config::parse(
-            "claude: {disable-cloaking-model-list: true, model-level-cooling: true}\nclaude-code: {disable-cloaking-model-list: false, model-level-cooling: true}\n",
-        )
-        .unwrap();
-        let claude = &cfg.document["upstream"]["claude"];
-        assert_eq!(claude["disable-cloaking-model-list"], Value::Bool(false));
-        assert_eq!(claude["model-level-cooling"], Value::Bool(true));
-        assert_eq!(cfg.document["claude"]["disable-cloaking-model-list"], Value::Bool(true));
-        assert_eq!(cfg.document["claude-code"]["model-level-cooling"], Value::Bool(true));
-        let cfg = Config::parse("claude-code: {model-level-cooling: true}\n").unwrap();
-        assert!(cfg.document.get("upstream").is_none(), "{:?}", cfg.document);
-        for legacy in ["claude: null\n", "claude-code: {}\n"] {
-            let doc = ConfigDocument::parse(legacy).unwrap();
-            assert_eq!(
-                doc.value()["upstream"]["claude"],
-                Value::Mapping(Mapping::new()),
-                "{legacy}"
-            );
-            assert!(doc.value().get("claude").is_none() && doc.value().get("claude-code").is_none());
-        }
-        let err = Config::parse("oauth: {providers: {xai: true}}\n").unwrap_err();
-        assert_eq!(err.to_string(), "oauth.providers.xai must be a mapping");
     }
 
     #[test]
@@ -1085,7 +1014,7 @@ mod tests {
         assert_eq!((cfg.port, cfg.host.as_str()), (0, ""));
         assert_eq!(cfg.auth_dir, home().join(".cli-proxy-api"));
         assert_eq!(
-            Config::parse("auth-dir: ''\n").unwrap().auth_dir,
+            Config::parse("oauth: {auth-dir: ''}\n").unwrap().auth_dir,
             home().join(".cli-proxy-api")
         );
         assert_eq!(resolve_auth_dir("~"), home());
@@ -1132,13 +1061,13 @@ mod tests {
     fn unused_number_aliases_do_not_expand_too_far() {
         let numbers: Vec<String> = (0..1024).map(|i| i.to_string()).collect();
         let text = format!(
-            "a: &l [{}]\nb: [{}]\noauth-excluded-models: {{c: *l}}\n",
+            "a: &l [{}]\nb: [{}]\noauth: {{excluded-models: {{c: *l}}}}\n",
             numbers.join(", "),
             vec!["*l"; 1024].join(", ")
         );
         let doc = config_value(&text).unwrap();
         assert_eq!(doc["b"][1023][1023], Value::from(1023));
-        assert_eq!(doc["oauth-excluded-models"]["c"][7], Value::from("7"));
+        assert_eq!(doc["oauth"]["excluded-models"]["c"][7], Value::from("7"));
     }
 
     /// Aliases whose copies no string setting keeps are bounded too: 2,048 aliases of a
@@ -1160,12 +1089,12 @@ mod tests {
         let numbers = vec!["0"; (1 << 20) + 1].join(", ");
         let doc = config_value(&format!(
             "x: &l [{numbers}]
-oauth-excluded-models: {{c: [{numbers}]}}
+oauth: {{excluded-models: {{c: [{numbers}]}}}}
 "
         ))
         .unwrap();
         assert_eq!(doc["x"][1 << 20], Value::from(0));
-        assert_eq!(doc["oauth-excluded-models"]["c"][1 << 20], Value::from("0"));
+        assert_eq!(doc["oauth"]["excluded-models"]["c"][1 << 20], Value::from("0"));
     }
 
     /// yaml.v3 (v8.0.35) reads a plain integer beyond int64 and uint64 as a float when it
@@ -1340,7 +1269,7 @@ oauth-excluded-models: {{c: [{numbers}]}}
         // stays text, as yaml.v3 reads it into a string-keyed map.
         let cfg = Config::parse(
             "server: {github-token: 1_000}\nrouting: {retry: {request-retry: 1_0}}\n\
-             oauth-excluded-models: {1_0: [a], 007: [b]}\n",
+             oauth: {excluded-models: {1_0: [a], 007: [b]}}\n",
         )
         .unwrap();
         assert_eq!(cfg.document["server"]["github-token"].as_str(), Some("1_000"));
@@ -1393,7 +1322,7 @@ oauth-excluded-models: {{c: [{numbers}]}}
         assert!(text.contains("\n- 2001-12-14T00:00:00Z\n"), "{text}");
         assert_eq!(yaml_value(&text).unwrap(), any, "{text}");
         let cfg =
-            Config::parse("server: {github-token: 2001-12-14}\noauth-excluded-models: {2001-12-14: [a]}\n").unwrap();
+            Config::parse("server: {github-token: 2001-12-14}\noauth: {excluded-models: {2001-12-14: [a]}}\n").unwrap();
         assert_eq!(cfg.document["server"]["github-token"].as_str(), Some("2001-12-14"));
         assert!(cfg.document["oauth"]["excluded-models"].get("2001-12-14").is_some());
         // Folded over lines, under a `%TAG !` directive, and inside a local tag, which

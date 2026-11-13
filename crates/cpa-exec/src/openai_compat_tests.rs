@@ -686,7 +686,7 @@ fn count_tokens_sees_the_payload_rules() {
     };
     let plain = count("");
     let configured = count(
-        "payload:\n  override:\n    - models: [{name: gpt-4o}]\n      params: {messages.0.content: one two three four five six seven eight nine ten}\n",
+        "requests:\n  payload:\n    override:\n      - models: [{name: gpt-4o}]\n        params: {messages.0.content: one two three four five six seven eight nine ten}\n",
     );
     assert!(plain > 0);
     assert!(configured > plain + 5, "{plain} -> {configured}");
@@ -704,7 +704,8 @@ async fn chat_payload_rules_run_after_the_stream_options() {
         .find(|s| s["name"] == "stream_basic")
         .unwrap()
         .clone();
-    let rule = "\npayload:\n  filter:\n    - models: [{name: acme-chat}]\n      params: [stream_options]\n";
+    let rule =
+        "\nrequests:\n  payload:\n    filter:\n      - models: [{name: acme-chat}]\n        params: [stream_options]\n";
     s["config"] = Value::String(format!("{}{rule}", s["config"].as_str().unwrap()));
     let mock = Mock::start(&s["upstream"]).await;
     let cfg = Config::parse(&s["config"].as_str().unwrap().replace("UPSTREAM", &mock.addr)).unwrap();
@@ -736,7 +737,7 @@ async fn images_multipart_payload_rules_run_last() {
         .find(|s| s["name"] == "images_edits_multipart_rewritten")
         .unwrap()
         .clone();
-    let rule = "\npayload:\n  override:\n    - models: [{name: \"*\", protocol: openai}]\n      params: {size: auto}\n";
+    let rule = "\nrequests:\n  payload:\n    override:\n      - models: [{name: \"*\", protocol: openai}]\n        params: {size: auto}\n";
     s["config"] = Value::String(format!("{}{rule}", s["config"].as_str().unwrap()));
     let mock = Mock::start(&s["upstream"]).await;
     let cfg = Config::parse(&s["config"].as_str().unwrap().replace("UPSTREAM", &mock.addr)).unwrap();

@@ -142,9 +142,9 @@ fn prepared_tools_skip_the_model_list() {
 }
 
 #[test]
-fn settings_read_go_config_paths() {
+fn settings_read_config_paths() {
     let cfg = Config::parse(
-        "client:\n  codex:\n    optimize-multi-agent-v2: true\noauth:\n  providers:\n    codex:\n      orphan-delegation-compatibility: true\n",
+        "client:\n  codex:\n    optimize-multi-agent-v2: true\nupstream:\n  codex:\n    orphan-delegation-compatibility: true\n",
     )
     .unwrap();
     assert_eq!(

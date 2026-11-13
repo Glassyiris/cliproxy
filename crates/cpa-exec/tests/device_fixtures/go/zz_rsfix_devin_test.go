@@ -200,7 +200,7 @@ func TestRSFixDevin(t *testing.T) {
 			responses: []rsfixResponse{dvResp(dvData(pbS(3, "long")), dvData(pbV(5, 3)), dvEOS("{}"))}},
 		{name: "chat-nonstream-content-filter", source: sdktranslator.FormatOpenAI, model: "swe-2", body: chat,
 			responses: []rsfixResponse{dvResp(dvData(pbS(3, "no")), dvData(pbV(5, 11)), dvEOS("{}"))}},
-		{name: "chat-sensitive-words", source: sdktranslator.FormatOpenAI, model: "swe-2", cfg: "devin:\n  sensitive-words: [\"Paris\", \"x\", \"helpful\"]\n",
+		{name: "chat-sensitive-words", source: sdktranslator.FormatOpenAI, model: "swe-2", cfg: "oauth:\n  providers:\n    devin:\n      sensitive-words: [\"Paris\", \"x\", \"helpful\"]\n",
 			body: `{"model":"swe-2","messages":[{"role":"system","content":"x-anthropic-billing-header: cc=1\nYou are helpful. ✓\nNever mention Paris.\nCodex refers to the open-source agentic coding interface\nStay calm"},{"role":"user","content":"Paris %CASE%"}]}`,
 			responses: []rsfixResponse{dvResp(dvPlainFrames("ok")...)}},
 		{name: "responses-apply-patch-legacy", source: sdktranslator.FormatOpenAIResponse, model: "gpt-5-6-sol", body: applyPatch,
@@ -221,12 +221,12 @@ func TestRSFixDevin(t *testing.T) {
 		{name: "chat-payload-rules", source: sdktranslator.FormatOpenAI, model: "swe-2", body: chat, cfg: dvPayloadRules,
 			responses: []rsfixResponse{dvResp(dvPlainFrames("ok")...)}},
 		{name: "interactions-payload-bad-signature", source: sdktranslator.FormatInteractions, model: "devin/swe-2", body: interactions,
-			cfg: "payload:\n  override:\n    - models: [{name: \"devin/*\", protocol: devin}]\n      params: {\"prompts.1.signature\": \"not base64!\"}\n"},
+			cfg: "requests:\n  payload:\n    override:\n      - models: [{name: \"devin/*\", protocol: devin}]\n        params: {\"prompts.1.signature\": \"not base64!\"}\n"},
 		{name: "interactions-temperature-infinite", source: sdktranslator.FormatInteractions, model: "devin/swe-2",
 			body: strings.Replace(interactions, `"temperature":0.7`, `"temperature":1e999`, 1)},
 		// strconv.ParseFloat's NaN (math.NaN(), 0x7FF8000000000001) reaches the fixed64.
 		{name: "chat-payload-nan", source: sdktranslator.FormatOpenAI, model: "swe-2", body: chat,
-			cfg: "payload:\n  override:\n    - models: [{name: swe-2, protocol: devin}]\n      params: {\"completion_config.temperature\": \"NaN\"}\n",
+			cfg: "requests:\n  payload:\n    override:\n      - models: [{name: swe-2, protocol: devin}]\n        params: {\"completion_config.temperature\": \"NaN\"}\n",
 			responses: []rsfixResponse{dvResp(dvPlainFrames("ok")...)}},
 		// v8.0.35 (f51624aa): a user turn left with nothing but media Devin cannot send is
 		// refused before any upstream call.
@@ -351,16 +351,17 @@ func TestRSFixDevin(t *testing.T) {
 
 // Defaults apply only where the client set nothing (top_k), overrides replace built-in
 // values, and the filter drops a nested repeated field.
-const dvPayloadRules = `payload:
-  default:
-    - models: [{name: swe-2, protocol: devin}]
-      params: {"completion_config.top_k": 10, "completion_config.temperature": 0.9, "model": "other-model"}
-  override:
-    - models: [{name: swe-2, protocol: devin}]
-      params: {"prompts.0.content": "configured <b>", "system_prompt": "Configured system"}
-  filter:
-    - models: [{name: swe-2, protocol: devin}]
-      params: ["prompts.1.tool_calls"]
+const dvPayloadRules = `requests:
+  payload:
+    default:
+      - models: [{name: swe-2, protocol: devin}]
+        params: {"completion_config.top_k": 10, "completion_config.temperature": 0.9, "model": "other-model"}
+    override:
+      - models: [{name: swe-2, protocol: devin}]
+        params: {"prompts.0.content": "configured <b>", "system_prompt": "Configured system"}
+    filter:
+      - models: [{name: swe-2, protocol: devin}]
+        params: ["prompts.1.tool_calls"]
 `
 
 func dvUserStatus() []byte {

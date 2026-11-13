@@ -693,7 +693,7 @@ async fn credits_lookup_loads_the_hint() {
     let mut s = scenario("gemini_execute_basic").clone();
     s["auth_id"] = Value::String("ag-credits-lookup".into());
     s["attributes"] = serde_json::json!({ "base_url": base, "user_agent": "antigravity/1.23.2 windows/amd64" });
-    let cfg = Config::parse("quota-exceeded:\n  antigravity-credits: true\n").unwrap();
+    let cfg = Config::parse("oauth:\n  providers:\n    antigravity:\n      antigravity-credits: true\n").unwrap();
     let cred = credential(&s, "");
     assert!(credits::hint(&cred.id).is_none());
     let executor = AntigravityExecutor::default();
@@ -767,7 +767,7 @@ async fn a_refused_request_makes_no_credits_lookup() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let cfg = Config::parse("quota-exceeded:\n  antigravity-credits: true\n").unwrap();
+    let cfg = Config::parse("oauth:\n  providers:\n    antigravity:\n      antigravity-credits: true\n").unwrap();
     let executor = AntigravityExecutor::default();
     for op in ["execute", "stream", "count"] {
         let mut s = scenario("gemini_execute_basic").clone();
@@ -839,46 +839,52 @@ fn pool_settings_follow_go() {
     };
     let cases = [
         ("", PoolSettings::Short),
-        ("antigravity: {connection-pool: {enabled: false}}", PoolSettings::Short),
-        ("antigravity: {connection-pool: {enabled: true}}", pooled(30, 2)),
         (
-            "antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 15s}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: false}}",
+            PoolSettings::Short,
+        ),
+        (
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true}}",
+            pooled(30, 2),
+        ),
+        (
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 15s}}",
             pooled(15, 2),
         ),
         (
-            "antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 45s}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 45s}}",
             pooled(45, 2),
         ),
         (
-            "antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 10m}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 10m}}",
             pooled(210, 2),
         ),
         (
-            "antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 500s}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 500s}}",
             pooled(210, 2),
         ),
         (
-            "antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 0s}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, idle-conn-timeout: 0s}}",
             PoolSettings::Short,
         ),
         (
-            "antigravity: {connection-pool: {enabled: true, idle-conn-timeout: invalid-timeout}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, idle-conn-timeout: invalid-timeout}}",
             pooled(30, 2),
         ),
         (
-            "antigravity: {connection-pool: {enabled: true, max-idle-conns-per-host: -5}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, max-idle-conns-per-host: -5}}",
             PoolSettings::Short,
         ),
         (
-            "antigravity: {connection-pool: {enabled: true, max-idle-conns-per-host: 1000000}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, max-idle-conns-per-host: 1000000}}",
             pooled(30, 100),
         ),
         (
-            "antigravity: {connection-pool: {enabled: true, max-idle-conns-per-host: 0}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, max-idle-conns-per-host: 0}}",
             pooled(30, 2),
         ),
         (
-            "antigravity: {connection-pool: {enabled: true, max-idle-conns-per-host: 7}}",
+            "oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true, max-idle-conns-per-host: 7}}",
             pooled(30, 7),
         ),
         (
@@ -986,7 +992,7 @@ async fn pooled_mode_scopes_connections_by_credential() {
         r#"{"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}}"#;
     let (base, connections, _) = keep_alive_upstream(vec![(200, ok), (200, ok), (200, ok), (429, RATE_LIMITED)]).await;
     let executor = AntigravityExecutor::default();
-    let cfg = Config::parse("antigravity: {connection-pool: {enabled: true}}").unwrap();
+    let cfg = Config::parse("oauth:\n  providers:\n    antigravity: {connection-pool: {enabled: true}}").unwrap();
     let count = || connections.load(std::sync::atomic::Ordering::SeqCst);
     let a = pooled_scenario(&base, "ag-pool-a");
     let b = pooled_scenario(&base, "ag-pool-b");
@@ -1055,13 +1061,14 @@ async fn payload_rules_run_after_the_envelope() {
     });
     let cfg = Config::parse(
         r#"
-payload:
-  override:
-    - models: [{name: "gemini-*"}]
-      params: {"generationConfig.maxOutputTokens": 123}
-  filter:
-    - models: [{name: "gemini-*"}]
-      params: ["sessionId", "contents.0"]
+requests:
+  payload:
+    override:
+      - models: [{name: "gemini-*"}]
+        params: {"generationConfig.maxOutputTokens": 123}
+    filter:
+      - models: [{name: "gemini-*"}]
+        params: ["sessionId", "contents.0"]
 "#,
     )
     .unwrap();

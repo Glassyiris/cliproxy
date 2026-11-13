@@ -83,7 +83,7 @@ async fn routed_images_never_select_a_free_codex_credential() {
     ];
     let auth_dir = AuthDir::new();
     let cfg = Config::parse(&format!(
-        "auth-dir: {}\naccess:\n  api-keys: [client-key]\n",
+        "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key]\n",
         auth_dir.0.display()
     ))
     .unwrap();

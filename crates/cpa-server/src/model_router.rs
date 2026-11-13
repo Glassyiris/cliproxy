@@ -1348,7 +1348,7 @@ mod tests {
         let auth_dir = std::env::temp_dir().join(format!("cpa-router-auths-{}", std::process::id()));
         std::fs::create_dir_all(&auth_dir).unwrap();
         Config::parse(&format!(
-            "auth-dir: {}\naccess:\n  api-keys: [client-key]\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      models:\n        - {{name: up-cheap, alias: cheap, display-name: Cheap One}}\n        - {{name: up-top, alias: top, display-name: Top One}}\n        - {{name: up-judge, alias: judge}}\n      keys:\n        - api-key: sk-fake-upstream\n{extra}",
+            "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key]\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      models:\n        - {{name: up-cheap, alias: cheap, display-name: Cheap One}}\n        - {{name: up-top, alias: top, display-name: Top One}}\n        - {{name: up-judge, alias: judge}}\n      keys:\n        - api-key: sk-fake-upstream\n{extra}",
             auth_dir.display()
         ))
         .unwrap()
@@ -1508,7 +1508,7 @@ mod tests {
     async fn unrated_fallback_stays_within_filtered_candidates() {
         let auth = std::env::temp_dir().join(format!("router-regression-{}", std::process::id()));
         let cfg = Config::parse(&format!(
-            "auth-dir: {}\napi-keys:\n  openai-compatibility:\n    - name: local\n      base-url: http://127.0.0.1:1/v1\n      models:\n        - {{name: small, max-context-length: 8000}}\n        - {{name: large, max-context-length: 128000}}\n      keys:\n        - api-key: test\nmodel-routers:\n  - name: smart\n    judge: smart\n", auth.display()
+            "oauth:\n  auth-dir: {}\napi-keys:\n  openai-compatibility:\n    - name: local\n      base-url: http://127.0.0.1:1/v1\n      models:\n        - {{name: small, max-context-length: 8000}}\n        - {{name: large, max-context-length: 128000}}\n      keys:\n        - api-key: test\nmodel-routers:\n  - name: smart\n    judge: smart\n", auth.display()
         )).unwrap();
         let credentials = cpa_core::config::credentials::load(&cfg);
         let rt = Arc::new(crate::testing::runtime(

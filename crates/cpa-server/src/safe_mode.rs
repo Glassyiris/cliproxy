@@ -120,8 +120,11 @@ mod tests {
         for startup in [false, true] {
             let config = |enabled| {
                 let key = if enabled { "your-api-key-2" } else { "not-a-template" };
-                cpa_core::config::Config::parse(&format!("api-keys: [{key}]\noauth: {{auth-dir: {}}}\n", dir.display()))
-                    .unwrap()
+                cpa_core::config::Config::parse(&format!(
+                    "access:\n  api-keys: [{key}]\noauth: {{auth-dir: {}}}\n",
+                    dir.display()
+                ))
+                .unwrap()
             };
             let rt = Arc::new(crate::testing::runtime(
                 config(startup),

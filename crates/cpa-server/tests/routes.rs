@@ -526,18 +526,13 @@ async fn mid_stream_failure_ends_with_route_error_frame() {
     assert!(!text.contains("[DONE]"), "terminal errors replace [DONE]");
 }
 
-/// `upstream.claude.disable-cloaking-model-list` (Go 52d5507d) in each spelling stops
+/// `upstream.claude.disable-cloaking-model-list` (Go 52d5507d) stops
 /// the Anthropic catalog from cloaking non-Claude IDs.
 #[tokio::test]
 async fn anthropic_model_list_cloaking_reads_the_shared_setting() {
     for (config, cloaked) in [
         ("", true),
         ("upstream: {claude: {disable-cloaking-model-list: true}}\n", false),
-        (
-            "oauth: {providers: {claude: {claude-code: {disable-cloaking-model-list: true}}}}\n",
-            false,
-        ),
-        ("claude-code: {disable-cloaking-model-list: true}\n", false),
     ] {
         let key = Credential {
             id: "claude:apikey:1".into(),
@@ -1262,16 +1257,16 @@ async fn responses_route_prepares_codex_orphan_delegation() {
     let rewritten = "Tool output from codex_app__create_thread:\\nsecond <one>";
     // Legacy `codex.orphan-delegation-compatibility` applies at the Responses boundary.
     let p = proxy(
-        "codex:\n  orphan-delegation-compatibility: true\n",
+        "upstream:\n  codex:\n    orphan-delegation-compatibility: true\n",
         vec![oauth("a.json", "fake-ok", serde_json::json!({}))],
     )
     .await;
     assert_eq!(send(p.url.clone(), body.clone()).await, 200);
     let upstream = p.seen.requests.lock().unwrap()[0].1.to_string();
     assert!(upstream.contains(rewritten), "{upstream}");
-    // The setting is shared (`upstream.codex`, Go 52d5507d): its historical v8 spelling
-    // rewrites for an API-key credential too, which runs with cfg.ForAPIKey().
-    let v8 = "oauth:\n  providers:\n    codex:\n      orphan-delegation-compatibility: true\n";
+    // The setting is shared (`upstream.codex`, Go 52d5507d): it rewrites for an API-key
+    // credential too, which runs with cfg.ForAPIKey().
+    let shared = "upstream:\n  codex:\n    orphan-delegation-compatibility: true\n";
     let mut key = Credential::from_file(
         Path::new("/fake"),
         &Path::new("/fake").join("key.json"),
@@ -1279,7 +1274,7 @@ async fn responses_route_prepares_codex_orphan_delegation() {
     )
     .unwrap();
     key.attributes.insert("api_key".into(), "fake-ok".into());
-    let p = proxy(v8, vec![key]).await;
+    let p = proxy(shared, vec![key]).await;
     assert_eq!(send(p.url.clone(), body).await, 200);
     let upstream = p.seen.requests.lock().unwrap()[0].1.to_string();
     assert!(upstream.contains(rewritten), "{upstream}");

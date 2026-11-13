@@ -190,12 +190,12 @@ fn named<K: AsRef<str>>(keys: &[Option<K>]) -> Vec<Option<&str>> {
     named
 }
 
-/// Whether the scalar at `keys` is a Go string field (in the v8 layout or the legacy one
-/// it migrates from), which yaml.v3 reads any plain scalar into as its text. Untyped
+/// Whether the scalar at `keys` is a Go string field, which yaml.v3 reads any plain
+/// scalar into as its text. Untyped
 /// data keeps its YAML types: plugin configs, and a payload rule's `params` and
 /// `match`/`not-match` values, which reach requests with them.
 fn literal_field<K: AsRef<str>>(keys: &[Option<K>]) -> bool {
-    super::schema::is_string(&super::document::v8_path(&named(keys)))
+    super::schema::is_string(&named(keys))
 }
 
 /// Whether `keys` lead into a `plugins.configs` entry.

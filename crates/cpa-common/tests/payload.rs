@@ -125,7 +125,7 @@ fn custom_headers_match_go() {
 #[test]
 fn model_candidates_dedup_on_go_lowercase() {
     let cfg = Config::parse(
-        "payload:\n  override:\n    - models: [{name: \"ς\"}, {name: \"i\"}]\n      params: {hit: true}\n",
+        "requests:\n  payload:\n    override:\n      - models: [{name: \"ς\"}, {name: \"i\"}]\n        params: {hit: true}\n",
     )
     .unwrap();
     let rules = payload::Rules::of(&cfg);
@@ -157,24 +157,25 @@ fn wildcard_rules_scale_linearly() {
     // a whole-element default, a condition whose only match is the last element, and a
     // filter of fields inside elements.
     let cfg = Config::parse(
-        r#"payload:
-  default:
-    - models: [{name: "m"}]
-      params: {"items.#(k==3)#.x": 9}
-    - models: [{name: "m"}]
-      params: {"w.#(k==1)#": 5}
-  default-raw:
-    - models: [{name: "m"}]
-      params: {"items.#(k==3)#.y": '{"a":1}'}
-  override:
-    - models: [{name: "m", exist: ["items.#(k==1)#"]}]
-      params: {"items.#(k==1)#": "replaced"}
-  override-raw:
-    - models: [{name: "m", match: [{"items.#(k==2)#.n": 7}]}]
-      params: {"items.#(k==2)#": '{"k":2,"n":4}'}
-  filter:
-    - models: [{name: "m"}]
-      params: ["items.#(k==3)#.pad"]
+        r#"requests:
+  payload:
+    default:
+      - models: [{name: "m"}]
+        params: {"items.#(k==3)#.x": 9}
+      - models: [{name: "m"}]
+        params: {"w.#(k==1)#": 5}
+    default-raw:
+      - models: [{name: "m"}]
+        params: {"items.#(k==3)#.y": '{"a":1}'}
+    override:
+      - models: [{name: "m", exist: ["items.#(k==1)#"]}]
+        params: {"items.#(k==1)#": "replaced"}
+    override-raw:
+      - models: [{name: "m", match: [{"items.#(k==2)#.n": 7}]}]
+        params: {"items.#(k==2)#": '{"k":2,"n":4}'}
+    filter:
+      - models: [{name: "m"}]
+        params: ["items.#(k==3)#.pad"]
 "#,
     )
     .unwrap();

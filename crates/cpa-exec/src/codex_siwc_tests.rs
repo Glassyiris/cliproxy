@@ -42,8 +42,11 @@ fn identifier_reads_scalars_as_go_strings() {
     assert_eq!(id(&v8("true")), "true");
     assert_eq!(id(&v8("'  '")), "CLIProxyAPI");
     assert_eq!(id(&v8("null")), "CLIProxyAPI");
-    assert_eq!(id("port: 1\n"), "CLIProxyAPI");
-    assert_eq!(id("codex:\n  signin-with-chatgpt-identifier: Legacy\n"), "Legacy");
+    assert_eq!(id("server:\n  port: 1\n"), "CLIProxyAPI");
+    assert_eq!(
+        id("oauth:\n  providers:\n    codex:\n      signin-with-chatgpt-identifier: Legacy\n"),
+        "Legacy"
+    );
 }
 
 #[test]

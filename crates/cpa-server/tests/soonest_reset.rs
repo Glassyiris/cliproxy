@@ -114,7 +114,7 @@ struct Proxy {
 /// `~/.cli-proxy-api`.
 fn yaml(base: &str, strategy: &str, auth_dir: &std::path::Path) -> String {
     format!(
-        "auth-dir: {}\napi-keys:\n  - client-key\nrouting:\n  strategy: {strategy}\nclaude-api-key:\n  - api-key: sk-fake-1\n    base-url: {base}\n  - api-key: sk-fake-2\n    base-url: {base}\n",
+        "oauth:\n  auth-dir: {}\naccess:\n  api-keys:\n    - client-key\nrouting:\n  strategy: {strategy}\napi-keys:\n  claude:\n  - name: claude-1\n    base-url: {base}\n    keys:\n      - api-key: sk-fake-1\n  - name: claude-2\n    base-url: {base}\n    keys:\n      - api-key: sk-fake-2\n",
         auth_dir.display()
     )
 }

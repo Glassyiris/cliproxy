@@ -356,7 +356,7 @@ async fn refresh_uses_the_credential_proxy_before_the_global_one() {
     let oauth = CodexOAuth::with_endpoints(wreq::Client::new(), "http://token.invalid/oauth/token", "", "");
     let executor = CodexExecutor::with_transport(crate::codex_tls::Transport::new(Default::default()), oauth);
     // The global proxy is a closed port: using it would fail the refresh.
-    let cfg = Config::parse("proxy-url: http://127.0.0.1:9\n").unwrap();
+    let cfg = Config::parse("requests:\n  proxy-url: http://127.0.0.1:9\n").unwrap();
     let gone = (Utc::now() - chrono::TimeDelta::hours(2)).to_rfc3339();
     let credential = Credential::from_file(
         Path::new("/fake"),
@@ -752,7 +752,7 @@ async fn usage_records_the_payload_override_reasoning_effort() {
         );
         let credential = credential(case, &mock.url);
         let cfg = Config::parse(&format!(
-            "payload:\n  override:\n    - models:\n        - name: gpt-5.4\n          protocol: {protocol}\n      params:\n        reasoning.effort: high\n"
+            "requests:\n  payload:\n    override:\n      - models:\n          - name: gpt-5.4\n            protocol: {protocol}\n        params:\n          reasoning.effort: high\n"
         ))
         .unwrap();
         let recorded = Arc::new(Recorded::default());
@@ -785,9 +785,10 @@ async fn direct_images_send_the_configured_upstream_model() {
     let form = "--XB\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nREQ\r\n--XB\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\ndiagnostic\r\n--XB--\r\n";
     let models = "[{name: openai/gpt-image-2-cpr, protocol: openai, match: [{model: openai/gpt-image-2-cpr}]}]";
     let override_rules = format!(
-        "payload:\n  override:\n    - models: {models}\n      params: {{model: policy/image-model}}\n    - models: [{{name: \"*\"}}]\n      params: {{\"audit.-1\": once}}\n"
+        "requests:\n  payload:\n    override:\n      - models: {models}\n        params: {{model: policy/image-model}}\n      - models: [{{name: \"*\"}}]\n        params: {{\"audit.-1\": once}}\n"
     );
-    let filter_rules = format!("payload:\n  filter:\n    - models: {models}\n      params: [model]\n");
+    let filter_rules =
+        format!("requests:\n  payload:\n    filter:\n      - models: {models}\n        params: [model]\n");
     for (requested, resolved, configured, want, rules) in [
         (
             "gpt-image-2",
@@ -841,7 +842,7 @@ async fn direct_images_send_the_configured_upstream_model() {
                 )],
             );
             let cfg = Config::parse(&format!(
-                "codex-api-key:\n  - api-key: codex-token\n    base-url: {}\n    prefix: tenant\n    models:\n      - name: {configured}\n        alias: gpt-image-2\n{rules}",
+                "api-keys:\n  codex:\n  - name: codex-1\n    base-url: {}\n    prefix: tenant\n    models:\n      - name: {configured}\n        alias: gpt-image-2\n    keys:\n      - api-key: codex-token\n{rules}",
                 mock.url
             ))
             .unwrap();
@@ -1386,7 +1387,10 @@ async fn through_sse(sse: &str, stream: bool, buffering: bool) -> Result<(Vec<St
         "stream": stream,
         "attributes": {"api_key": "test"},
     });
-    let cfg = Config::parse(&format!("codex:\n  stream-bootstrap-buffering: {buffering}\n")).unwrap();
+    let cfg = Config::parse(&format!(
+        "upstream:\n  codex:\n    stream-bootstrap-buffering: {buffering}\n"
+    ))
+    .unwrap();
     let response = executor()
         .execute(&credential(&synthetic, &mock.url), request(&synthetic), &cfg)
         .await?;
@@ -1601,7 +1605,7 @@ async fn replayed_web_search_history_matches_go() {
             "attributes": attributes,
         });
         let cfg = Config::parse(if case["no_image"] == true {
-            "disable-image-generation: true\n"
+            "multimedia:\n  disable-image-generation: true\n"
         } else {
             "{}"
         })
@@ -1945,7 +1949,7 @@ async fn siwc_partition_refreshes_like_go() {
 async fn payload_filters_remove_late_codex_additions() {
     let executor = executor();
     let cfg = Config::parse(
-        "payload:\n  filter:\n    - models: [{name: gpt-5.6-sol}]\n      params: ['tools.#(type==\"image_generation\")#', instructions, prompt_cache_key]\n",
+        "requests:\n  payload:\n    filter:\n      - models: [{name: gpt-5.6-sol}]\n        params: ['tools.#(type==\"image_generation\")#', instructions, prompt_cache_key]\n",
     )
     .unwrap();
     for stream in [false, true] {
@@ -2002,7 +2006,7 @@ fn count_tokens_sees_the_payload_rules() {
     };
     let plain = count("");
     let configured = count(
-        "payload:\n  override:\n    - models: [{name: gpt-5.4}]\n      params: {input.0.content.0.text: one two three four five six seven eight nine ten}\n",
+        "requests:\n  payload:\n    override:\n      - models: [{name: gpt-5.4}]\n        params: {input.0.content.0.text: one two three four five six seven eight nine ten}\n",
     );
     assert!(plain > 0);
     assert!(configured > plain + 5, "{plain} -> {configured}");

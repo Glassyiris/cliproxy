@@ -75,7 +75,7 @@ async fn proxy_keys(keys: &[&str]) -> (String, Arc<Seen>) {
     let auth_dir = std::env::temp_dir().join(format!("cpa-compat-auths-{}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
     let config = Config::parse(&format!(
-        "auth-dir: {}\naccess:\n  api-keys: [client-key]\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      models:\n        - name: up-model\n          alias: fast\n      keys:\n{keys}",
+        "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key]\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      models:\n        - name: up-model\n          alias: fast\n      keys:\n{keys}",
         auth_dir.display()
     ))
     .unwrap();
@@ -350,7 +350,7 @@ async fn lcp_session_reaches_custom_headers_and_usage_records() {
     let auth_dir = std::env::temp_dir().join(format!("cpa-compat-lcp-auths-{}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
     let config = Config::parse(&format!(
-        "auth-dir: {}\naccess:\n  api-keys: [client-key]\nrouting:\n  session-affinity: true\nobservability:\n  usage:\n    usage-statistics-enabled: true\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      headers:\n        X-Session: $CPA-SESSION-ID\n      models:\n        - name: up-model\n          alias: fast\n      keys:\n        - api-key: sk-fake-a\n",
+        "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key]\nrouting:\n  session-affinity: true\nobservability:\n  usage:\n    usage-statistics-enabled: true\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      headers:\n        X-Session: $CPA-SESSION-ID\n      models:\n        - name: up-model\n          alias: fast\n      keys:\n        - api-key: sk-fake-a\n",
         auth_dir.display()
     ))
     .unwrap();

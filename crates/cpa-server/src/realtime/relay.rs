@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn config_reads_section_and_legacy_private_ip_setting() {
         let c = RelayConfig::from_config(&cfg(
-            "codex:\n  live-media-relay:\n    enabled: true\n    max-sessions: 2\n    public-ip: 203.0.113.9\n    udp-port-min: 40000\n    udp-port-max: 40010\n    allow-private-remote-ips: false\n    ice-servers:\n      - urls: [\"turn:turn.example:3478\"]\n        username: u\n        credential: c\n",
+            "oauth:\n  providers:\n    codex:\n      live-media-relay:\n        enabled: true\n        max-sessions: 2\n        public-ip: 203.0.113.9\n        udp-port-min: 40000\n        udp-port-max: 40010\n        allow-private-remote-ips: false\n        ice-servers:\n          - urls: [\"turn:turn.example:3478\"]\n            username: u\n            credential: c\n",
         ))
         .unwrap();
         assert!(c.enabled && c.disable_private_remote_ips);
@@ -314,7 +314,7 @@ mod tests {
         assert_eq!(RelayConfig::default().max_sessions(), 32);
         assert!(
             RelayConfig::from_config(&cfg(
-                "codex:\n  live-media-relay:\n    allow-private-remote-ips: true\n    disable-private-remote-ips: true\n"
+                "oauth:\n  providers:\n    codex:\n      live-media-relay:\n        allow-private-remote-ips: true\n        disable-private-remote-ips: true\n"
             ))
             .is_err()
         );
@@ -326,14 +326,16 @@ mod tests {
     #[test]
     fn relay_is_rebuilt_only_when_its_section_changes() {
         let relays = Relays::default();
-        let enabled = "codex:\n  live-media-relay:\n    enabled: true\n    max-sessions: 1\n";
+        let enabled = "oauth:\n  providers:\n    codex:\n      live-media-relay:\n        enabled: true\n        max-sessions: 1\n";
         let first = relays.current(&cfg(enabled)).unwrap().expect("enabled");
-        let unrelated = format!("{enabled}debug: true\nproxy-url: http://new-proxy.example\n");
+        let unrelated = format!(
+            "{enabled}observability:\n  logs:\n    debug: true\nrequests:\n  proxy-url: http://new-proxy.example\n"
+        );
         let same = relays.current(&cfg(&unrelated)).unwrap().unwrap();
         assert!(Arc::ptr_eq(&first, &same), "unrelated change kept the relay");
         let changed = relays
             .current(&cfg(
-                "codex:\n  live-media-relay:\n    enabled: true\n    max-sessions: 2\n",
+                "oauth:\n  providers:\n    codex:\n      live-media-relay:\n        enabled: true\n        max-sessions: 2\n",
             ))
             .unwrap()
             .unwrap();
@@ -346,7 +348,7 @@ mod tests {
     #[test]
     fn builds_without_the_relay_negotiate_without_it() {
         let relays = Relays::default();
-        let enabled = cfg("codex:\n  live-media-relay:\n    enabled: true\n");
+        let enabled = cfg("oauth:\n  providers:\n    codex:\n      live-media-relay:\n        enabled: true\n");
         assert!(relays.current(&enabled).unwrap().is_none());
     }
 

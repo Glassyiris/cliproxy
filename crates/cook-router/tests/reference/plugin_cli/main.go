@@ -45,8 +45,10 @@ func check(err error) {
 }
 
 const baseConfig = `config-version: 8
-port: 0
-auth-dir: AUTHDIR
+server:
+  port: 0
+oauth:
+  auth-dir: AUTHDIR
 plugins:
   enabled: true
   dir: PLUGINDIR

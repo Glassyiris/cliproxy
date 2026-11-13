@@ -966,7 +966,7 @@ mod tests {
             cred("b.json", "kimi.ai"),
             cred("c.json", "claude"),
         ];
-        let cfg = cpa_core::config::Config::parse(&format!("auth-dir: {}\n", dir.display())).unwrap();
+        let cfg = cpa_core::config::Config::parse(&format!("oauth:\n  auth-dir: {}\n", dir.display())).unwrap();
         let rt = std::sync::Arc::new(crate::testing::runtime(
             cfg,
             creds,

@@ -34,7 +34,7 @@ async fn get(path: &str, cfg: &str) -> (u16, String, Value) {
     (status, content_type, body)
 }
 
-const CONFIG: &str = "codex-api-key:\n  - api-key: sk-FAKE-codex\n    base-url: http://127.0.0.1:1\n    models:\n      - name: gpt-5.5\nclaude-api-key:\n  - api-key: sk-FAKE-claude\n    models:\n      - name: claude-sonnet-4-6\n        alias: sonnet-long\n        max-context-length: 150000\nclient:\n  codex:\n    optimize-multi-agent-v2: true\n";
+const CONFIG: &str = "api-keys:\n  codex:\n  - name: codex-1\n    base-url: http://127.0.0.1:1\n    models:\n      - name: gpt-5.5\n    keys:\n      - api-key: sk-FAKE-codex\n  claude:\n  - name: claude-1\n    models:\n      - name: claude-sonnet-4-6\n        alias: sonnet-long\n        max-context-length: 150000\n    keys:\n      - api-key: sk-FAKE-claude\nclient:\n  codex:\n    optimize-multi-agent-v2: true\n";
 
 #[tokio::test]
 async fn client_version_selects_the_codex_catalog() {
@@ -200,7 +200,7 @@ async fn model_detail_reads_the_intercepted_catalog() {
     }
     std::fs::copy(built.join("recorder.so"), plugins.join("catalog.so")).unwrap();
     let yaml = format!(
-        "auth-dir: {}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    catalog:\n      enabled: true\n      label: catalog\n      record: {}\n      caps: response_interceptor,request_lifecycle_plugin\n",
+        "oauth:\n  auth-dir: {}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    catalog:\n      enabled: true\n      label: catalog\n      record: {}\n      caps: response_interceptor,request_lifecycle_plugin\n",
         auths.display(),
         plugins.display(),
         records.display()
