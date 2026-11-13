@@ -23,6 +23,7 @@ import { Switch } from "@astryxdesign/core/Switch";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { icons } from "../../components/icons.ts";
 import { useConfig, usePlugins } from "../../app/serverQueries.ts";
+import { PanelHeading } from "../../app/settings/PanelHeading.tsx";
 import { useAction } from "../../app/useAction.ts";
 import { useHashParams, useHashRoute } from "../../app/useHashRoute.ts";
 import { PluginConfigEditor } from "../../components/PluginConfigEditor.tsx";
@@ -206,10 +207,6 @@ function StoreBody() {
   );
 }
 
-function PanelHeading({ panel }: { panel: PanelId }) {
-  return <Heading level={2}>{panelOf(panel).label()}</Heading>;
-}
-
 function CloseButton({ onClose }: { onClose: () => void }) {
   return (
     <IconButton
@@ -268,7 +265,7 @@ function WideShell({ titleId, active, onSelect, onClose, body }: ShellProps) {
           <VStack gap={4}>
             <HStack gap={2} vAlign="start">
               <StackItem size="fill">
-                <PanelHeading panel={active} />
+                <PanelHeading>{panelOf(active).label()}</PanelHeading>
               </StackItem>
               <CloseButton onClose={onClose} />
             </HStack>
@@ -314,7 +311,7 @@ function NarrowShell({ titleId, active, onSelect, onClose, body }: ShellProps) {
       <Divider />
       <StackItem size="fill">
         <VStack gap={4} padding={4} isScrollable height="100%">
-          <PanelHeading panel={active} />
+          <PanelHeading>{panelOf(active).label()}</PanelHeading>
           {body}
         </VStack>
       </StackItem>
