@@ -94,7 +94,7 @@ pub fn normalize_flag_value(kind: &str, value: &str) -> Option<String> {
 /// no sign, and underscores may separate digits.
 /// ponytail: Go's hexadecimal form (`0x1p-2`) is rejected; plugin flags are decimal in
 /// practice. Upgrade by porting `atofHex` if a plugin needs it.
-pub fn parse_float(s: &str) -> Option<f64> {
+fn parse_float(s: &str) -> Option<f64> {
     let unsigned = s.strip_prefix(['+', '-']).unwrap_or(s);
     if unsigned.len() != s.len() && unsigned.eq_ignore_ascii_case("nan") {
         return None;

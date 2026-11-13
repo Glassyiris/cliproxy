@@ -46,36 +46,19 @@ pub struct PluginAuth {
     pub next_refresh_after: GoTime,
 }
 
-/// Go `CanonicalCredentialMetadataKey`.
-pub fn canonical_metadata_key(key: &str) -> &str {
-    match key {
-        "api-key" => "api_key",
-        "base-url" => "base_url",
-        "disable-cooling" => "disable_cooling",
-        "excluded-models" => "excluded_models",
-        "fingerprint-profile" => "fingerprint_profile",
-        "model-aliases" => "model_aliases",
-        "openapi-location" => "openapi_location",
-        "openapi-models" => "openapi_models",
-        "proxy-url" => "proxy_url",
-        "request-retry" => "request_retry",
-        "request-scoped-errors" => "request_scoped_errors",
-        "tool-prefix-disabled" => "tool_prefix_disabled",
-        other => other,
-    }
-}
-
 /// Go `NormalizeCredentialMetadata`: legacy keys move to their canonical name unless
 /// the canonical one is already present.
 pub fn normalize_credential_metadata(metadata: &mut serde_json::Map<String, Value>) {
     let legacy: Vec<String> = metadata
         .keys()
-        .filter(|k| canonical_metadata_key(k) != k.as_str())
+        .filter(|k| cpa_core::credential::canonical_metadata_key(k) != k.as_str())
         .cloned()
         .collect();
     for key in legacy {
         let value = metadata.remove(&key).expect("listed above");
-        metadata.entry(canonical_metadata_key(&key).to_owned()).or_insert(value);
+        metadata
+            .entry(cpa_core::credential::canonical_metadata_key(&key).to_owned())
+            .or_insert(value);
     }
 }
 
@@ -205,7 +188,7 @@ impl PluginAuth {
             }
             if meta
                 && matches!(
-                    canonical_metadata_key(key),
+                    cpa_core::credential::canonical_metadata_key(key),
                     "api_key" | "dca_token" | "dca_expired" | "dca_expires_at"
                 )
             {
@@ -341,7 +324,7 @@ fn json_payload_equal(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// Go `atomicWriteFile`: a 0600 temp file beside `path`, renamed over it.
-pub fn atomic_write(path: &std::path::Path, data: &[u8]) -> Result<(), String> {
+fn atomic_write(path: &std::path::Path, data: &[u8]) -> Result<(), String> {
     use std::io::Write as _;
     let dir = match path.parent() {
         Some(d) if !d.as_os_str().is_empty() => d,

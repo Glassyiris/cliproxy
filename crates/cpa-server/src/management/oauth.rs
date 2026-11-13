@@ -2539,7 +2539,7 @@ mod tests {
                 |dir, name, save| {
                     let path = dir.join(&name);
                     save_login(Some(&save), std::slice::from_ref(&path), || {
-                        cpa_plugin::auth::atomic_write(&path,&serde_json::to_vec(&serde_json::json!({
+                        crate::credential_store::atomic_write(&path,&serde_json::to_vec(&serde_json::json!({
                         "type":"codex","access_token":format!("grant-{name}"),"refresh_token":format!("refresh-{name}")
                     })).unwrap())?;
                         Ok(path.clone())
