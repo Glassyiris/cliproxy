@@ -4925,3 +4925,377 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+/// The value of `Set-Cookie` and the session id it sets.
+fn session_cookie(response: &wreq::Response) -> (String, String) {
+    let cookie = response.headers()["set-cookie"].to_str().unwrap().to_owned();
+    let id = cookie
+        .strip_prefix("cook_router_session=")
+        .and_then(|rest| rest.split(';').next())
+        .unwrap()
+        .to_owned();
+    (cookie, id)
+}
+
+async fn sign_in(base: &str, body: Value) -> wreq::Response {
+    wreq::Client::new()
+        .post(format!("{base}/v8/management/session"))
+        .bearer_auth("fake-management-only")
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+}
+
+/// A request as the dashboard sends it: the session cookie and the dashboard's header.
+async fn with_cookie(method: wreq::Method, url: String, id: &str, extra: &[(&str, &str)]) -> wreq::Response {
+    let mut request = wreq::Client::new()
+        .request(method, url)
+        .header("cookie", format!("cook_router_session={id}"))
+        .header("x-cook-dashboard", "1");
+    for (name, value) in extra {
+        request = request.header(*name, *value);
+    }
+    request.send().await.unwrap()
+}
+
+#[tokio::test]
+async fn dashboard_session_cookie_signs_in_reads_and_signs_out() {
+    let f = Fixture::new("session");
+    let (base, server) = f.server().await;
+    let config = format!("{base}/admin/v1/effective/config");
+    let session = format!("{base}/v8/management/session");
+
+    let response = sign_in(&base, json!({"path": "/router/"})).await;
+    assert_eq!(response.status(), 204);
+    let (cookie, id) = session_cookie(&response);
+    assert_eq!(
+        cookie.strip_prefix(&format!("cook_router_session={id}")).unwrap(),
+        "; Path=/router/; Max-Age=604800; HttpOnly; SameSite=Strict",
+        "no Secure over plain HTTP"
+    );
+    assert_eq!(id.len(), 43, "256 random bits, base64url");
+    let (remembered, _) = session_cookie(&sign_in(&base, json!({"remember": true})).await);
+    assert!(remembered.contains("; Path=/; Max-Age=2592000;"), "{remembered}");
+    assert_eq!(
+        sign_in(&base, json!({"path": "/a; Domain=evil.example"}))
+            .await
+            .status(),
+        400
+    );
+
+    assert_eq!(
+        with_cookie(wreq::Method::GET, config.clone(), &id, &[]).await.status(),
+        200
+    );
+    assert_eq!(
+        with_cookie(wreq::Method::GET, session.clone(), &id, &[]).await.status(),
+        204
+    );
+
+    let out = with_cookie(wreq::Method::DELETE, session.clone(), &id, &[]).await;
+    assert_eq!(out.status(), 204);
+    let (cleared, _) = session_cookie(&out);
+    assert_eq!(
+        cleared,
+        "cook_router_session=; Path=/router/; Max-Age=0; HttpOnly; SameSite=Strict"
+    );
+    let refused = with_cookie(wreq::Method::GET, config, &id, &[]).await;
+    assert_eq!(refused.status(), 401);
+    assert_eq!(
+        refused.json::<Value>().await.unwrap()["message"],
+        "invalid or expired session"
+    );
+    assert_eq!(with_cookie(wreq::Method::GET, session, &id, &[]).await.status(), 401);
+    server.abort();
+}
+
+#[tokio::test]
+async fn authenticated_management_answers_are_never_stored() {
+    let f = Fixture::new("session-no-store");
+    let (base, server) = f.server().await;
+    let (_, id) = session_cookie(&sign_in(&base, json!({})).await);
+    let credentials = format!("{base}/v8/management/credentials");
+    let client = wreq::Client::new();
+    let upload = client
+        .post(format!("{credentials}?name=a.json"))
+        .bearer_auth("fake-management-only")
+        .json(&json!({"type": "claude", "access_token": "fake-a"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), 200);
+    assert_eq!(upload.headers()["cache-control"], "no-store");
+    eventually(|| f.rt.store().get("a.json").is_some()).await;
+    let download = format!("{credentials}/download?name=a.json");
+    let by_key = client
+        .get(download.clone())
+        .bearer_auth("fake-management-only")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(by_key.status(), 200);
+    assert_eq!(
+        by_key.headers()["cache-control"],
+        "no-store",
+        "key-authenticated download"
+    );
+    let by_cookie = with_cookie(wreq::Method::GET, download, &id, &[]).await;
+    assert_eq!(by_cookie.status(), 200);
+    assert_eq!(
+        by_cookie.headers()["cache-control"],
+        "no-store",
+        "cookie-authenticated download"
+    );
+    // A handler's own error answer is authenticated as well.
+    let missing = with_cookie(
+        wreq::Method::GET,
+        format!("{credentials}/download?name=b.json"),
+        &id,
+        &[],
+    )
+    .await;
+    assert_eq!(missing.status(), 404);
+    assert_eq!(missing.headers()["cache-control"], "no-store");
+    server.abort();
+}
+
+#[tokio::test]
+async fn changing_the_management_secret_ends_every_session() {
+    let f = Fixture::new("session-rotate");
+    let (base, server) = f.server().await;
+    let original = f.rt.config().management.secret_key.clone();
+    let (_, id) = session_cookie(&sign_in(&base, json!({})).await);
+    let (_, other) = session_cookie(&sign_in(&base, json!({"remember": true})).await);
+    let setting = format!("{base}/admin/v1/r/setting/management");
+    let response = wreq::Client::new()
+        .patch(&setting)
+        .header("cookie", format!("cook_router_session={id}"))
+        .header("x-cook-dashboard", "1")
+        .json(&json!({"secret-key": "fake-rotated"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    // Restore the original hash before either session is used again: neither comes back.
+    let response = wreq::Client::new()
+        .patch(&setting)
+        .bearer_auth("fake-rotated")
+        .json(&json!({"secret-key": original}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(f.rt.config().management.secret_key, original);
+    assert_eq!(
+        sign_in(&base, json!({})).await.status(),
+        204,
+        "the original key works again"
+    );
+    for id in [id, other] {
+        assert_eq!(
+            with_cookie(wreq::Method::GET, format!("{base}/admin/v1/effective/config"), &id, &[])
+                .await
+                .status(),
+            401
+        );
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn cookie_requests_must_come_from_the_same_origin() {
+    let f = Fixture::new("session-csrf");
+    let (base, server) = f.server().await;
+    let (_, id) = session_cookie(&sign_in(&base, json!({})).await);
+    let api_call = format!("{base}/v8/management/requests/api-call");
+    let host = base.strip_prefix("http://").unwrap().to_owned();
+    for extra in [
+        [("sec-fetch-site", "cross-site"), ("origin", "http://evil.example")],
+        [("sec-fetch-site", "same-site"), ("origin", "http://127.0.0.1:1")],
+        [("x-unrelated", "1"), ("origin", "http://evil.example")],
+    ] {
+        let response = with_cookie(wreq::Method::POST, api_call.clone(), &id, &extra).await;
+        assert_eq!(response.status(), 403, "{extra:?}");
+        assert_eq!(
+            response.json::<Value>().await.unwrap(),
+            json!({"error": "cross-site request refused"})
+        );
+    }
+    // Admin routes keep their own error shape.
+    let response = with_cookie(
+        wreq::Method::POST,
+        format!("{base}/admin/v1/apply"),
+        &id,
+        &[("sec-fetch-site", "cross-site")],
+    )
+    .await;
+    assert_eq!(response.status(), 403);
+    assert_eq!(response.json::<Value>().await.unwrap()["error"], "forbidden");
+    // The sign-in endpoint itself refuses another origin before the key.
+    let response = wreq::Client::new()
+        .post(format!("{base}/v8/management/session"))
+        .bearer_auth("fake-management-only")
+        .header("sec-fetch-site", "cross-site")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+    assert!(response.headers().get("set-cookie").is_none());
+    // Reads too: a sibling origin on the same site must not start a sign-in with a GET.
+    let sibling = [("sec-fetch-site", "same-site"), ("origin", "http://127.0.0.1:1")];
+    for url in [
+        "v8/management/oauth/auth-url",
+        "admin/v1/effective/config",
+        "v8/management/session",
+    ] {
+        let response = with_cookie(wreq::Method::GET, format!("{base}/{url}"), &id, &sibling).await;
+        assert_eq!(response.status(), 403, "{url}");
+    }
+    // Without the dashboard's header, a cookie request is refused whatever its method, as an
+    // image's GET to a plain-HTTP origin arrives: no fetch metadata and no Origin.
+    let bare = wreq::Client::new();
+    for (method, url) in [
+        (wreq::Method::GET, "v8/management/oauth/auth-url"),
+        (wreq::Method::GET, "v8/management/observability/usage/queue?count=1"),
+        (wreq::Method::GET, "v8/management/session"),
+        (wreq::Method::DELETE, "v8/management/session"),
+        (wreq::Method::POST, "admin/v1/apply"),
+    ] {
+        let response = bare
+            .request(method, format!("{base}/{url}"))
+            .header("cookie", format!("cook_router_session={id}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 403, "{url}");
+        assert!(response.headers().get("set-cookie").is_none(), "{url}");
+    }
+    let session = format!("{base}/v8/management/session");
+    assert_eq!(
+        with_cookie(wreq::Method::GET, session, &id, &[]).await.status(),
+        204,
+        "the refused DELETE left the session live"
+    );
+    // A same-origin request, or one without fetch metadata, passes to the handler.
+    let origin = format!("http://{host}");
+    let same = [("sec-fetch-site", "same-origin"), ("origin", origin.as_str())];
+    let response = with_cookie(wreq::Method::POST, api_call, &id, &same).await;
+    assert_eq!(response.status(), 400, "past authentication to input validation");
+    let auth_url = format!("{base}/v8/management/oauth/auth-url");
+    let response = with_cookie(wreq::Method::GET, auth_url.clone(), &id, &same).await;
+    assert_eq!(response.status(), 400, "past authentication to the missing provider");
+    let response = with_cookie(wreq::Method::GET, auth_url, &id, &[]).await;
+    assert_eq!(response.status(), 400, "past authentication to the missing provider");
+    server.abort();
+}
+
+#[tokio::test]
+async fn bearer_requests_ignore_cookies_and_fetch_metadata() {
+    let f = Fixture::new("session-bearer");
+    let (base, server) = f.server().await;
+    let (_, id) = session_cookie(&sign_in(&base, json!({})).await);
+    let client = wreq::Client::new();
+    let response = client
+        .post(format!("{base}/v8/management/requests/api-call"))
+        .bearer_auth("fake-management-only")
+        .header("sec-fetch-site", "cross-site")
+        .header("origin", "http://evil.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400, "a key is checked as before sessions existed");
+    let response = client
+        .get(format!("{base}/admin/v1/effective/config"))
+        .bearer_auth("wrong")
+        .header("cookie", format!("cook_router_session={id}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 401, "a wrong key is not rescued by a live cookie");
+    assert_eq!(
+        response.json::<Value>().await.unwrap()["message"],
+        "invalid management key"
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn session_sign_in_counts_failures_and_stale_cookies_do_not() {
+    let f = Fixture::new("session-ban");
+    let (base, server) = f.server().await;
+    let client = wreq::Client::new();
+    for _ in 0..6 {
+        for url in ["admin/v1/effective/config", "v8/management/session"] {
+            let stale = with_cookie(wreq::Method::GET, format!("{base}/{url}"), "stale", &[]).await;
+            assert_eq!(stale.status(), 401, "{url}");
+            let bare = client
+                .get(format!("{base}/{url}"))
+                .header("cookie", "cook_router_session=stale")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(bare.status(), 403, "{url}");
+        }
+    }
+    let (_, id) = session_cookie(&sign_in(&base, json!({})).await);
+    for _ in 0..5 {
+        let wrong = client
+            .post(format!("{base}/v8/management/session"))
+            .bearer_auth("wrong")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(wrong.status(), 401);
+        assert!(wrong.headers().get("set-cookie").is_none());
+    }
+    let banned = sign_in(&base, json!({})).await;
+    assert_eq!(banned.status(), 403);
+    let message = banned.json::<Value>().await.unwrap()["error"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(message.starts_with("IP banned"), "{message}");
+    // The ban covers the cookie too.
+    let response = with_cookie(wreq::Method::GET, format!("{base}/admin/v1/effective/config"), &id, &[]).await;
+    assert_eq!(response.status(), 403);
+    server.abort();
+}
+
+#[tokio::test]
+async fn cookie_answers_stay_unreadable_to_other_origins() {
+    let f = Fixture::new("session-cors");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let app = management::router(f.state.clone()).layer(axum::middleware::from_fn(management::cors));
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    let (_, id) = session_cookie(&sign_in(&base, json!({})).await);
+    let response = with_cookie(wreq::Method::GET, format!("{base}/admin/v1/effective/config"), &id, &[]).await;
+    assert_eq!(response.status(), 200);
+    // `*` without Allow-Credentials: browsers withhold a credentialed answer from every
+    // other origin.
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    assert!(response.headers().get("access-control-allow-credentials").is_none());
+    // The preflight another origin needs before adding the dashboard's header: `*` covers
+    // only requests without credentials, so a credentialed one carrying the cookie fails.
+    let preflight = wreq::Client::new()
+        .request(wreq::Method::OPTIONS, format!("{base}/admin/v1/effective/config"))
+        .header("origin", "http://127.0.0.1:1")
+        .header("access-control-request-method", "GET")
+        .header("access-control-request-headers", "x-cook-dashboard")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(preflight.status(), 204);
+    assert_eq!(preflight.headers()["access-control-allow-origin"], "*");
+    assert_eq!(preflight.headers()["access-control-allow-headers"], "*");
+    assert!(preflight.headers().get("access-control-allow-credentials").is_none());
+    server.abort();
+}

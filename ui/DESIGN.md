@@ -155,10 +155,10 @@ Each tab and dialog hosts a feature page from `src/features/` through a thin hos
   620: the hosted pages were laid out for a reading width (`roles.content.formWidth`). Closing it
   drops its own query keys, so the next opening starts clean.
 - Filters, tabs, paging and the open item live in the hash query, so Back restores them.
-- The sign-in page loads none of the signed-in app: the shell and its pages are their own chunks
-  (`src/app/chunks.ts`). A stored key starts the shell and the current page's chunk while it is
-  checked, a typed key as it is entered. recharts loads once a chart has its data and the page has
-  painted, so it is never on a page's critical path.
+- The sign-in page renders none of the signed-in app: the shell and its pages are their own chunks
+  (`src/app/chunks.ts`). Every load starts the shell and the current page's chunk while the
+  session cookie is checked. recharts loads once a chart has its data and the page has painted,
+  so it is never on a page's critical path.
 - After sign-in, every route's chunk is fetched when the browser is idle, so the first visit to a
   page does not wait for its chunks. Queries are fresh for 30 s (`src/app/queryClient.ts`); a
   page entered again shows its cached data while it refetches, and polling queries keep their own

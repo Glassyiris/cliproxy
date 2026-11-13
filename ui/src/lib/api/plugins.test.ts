@@ -7,7 +7,7 @@ const server = fakeServer();
 const { connect } = await import("./client.ts");
 const { ConfigChangedError, revealResource } = await import("./config.ts");
 const { replacePluginConfig, revealPluginConfig } = await import("./plugins.ts");
-connect("management-key", { unauthorized() {}, server() {} });
+connect({ unauthorized() {}, server() {} });
 
 const resource = { kind: "plugin", id: "imported", ord: 0, rev: 7, spec: "$secret" };
 const written = { revision: 8, written: true, changes: [], restart_required: false };

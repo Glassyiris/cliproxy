@@ -13,26 +13,34 @@ import { useQueryClient } from "@tanstack/react-query";
 import { t } from "../lib/i18n.ts";
 import { notify } from "../lib/notify.ts";
 import type { ServerBuild, SessionHooks } from "../lib/api/client.ts";
-import { discard, forget, onForgotten, recall, remember } from "../lib/keyStore.ts";
-import { cancelSignIns, closeSession, openSession, SignInError } from "../lib/session.ts";
+import { dropLegacyKey, onForgotten } from "../lib/keyStore.ts";
+import {
+  cancelSignIns,
+  closeSession,
+  openSession,
+  resumeSession,
+  revokeSession,
+} from "../lib/session.ts";
 
 type SessionState = {
   signedIn: boolean;
-  /** True while a key stored before this load is being checked (at most RESTORE_LIMIT ms). */
+  /** True while this browser's session cookie is checked on load (at most RESTORE_LIMIT ms). */
   restoring: boolean;
   /** False once a request could not reach the server; true again on the next answer. */
   online: boolean;
 } & ServerBuild;
 
 type Session = SessionState & {
-  /** Sign in with a typed key; `persist` also keeps it on this device. */
-  signIn: (secret: string, persist: boolean) => Promise<void>;
-  signOut: () => void;
+  /** Sign in with a typed key; `remember` keeps the session for 30 days instead of 7. */
+  signIn: (secret: string, remember: boolean) => Promise<void>;
+  /** Revoke the session, then sign out every tab; on failure say so and stay signed in. */
+  signOut: () => Promise<void>;
   /**
-   * Run `work` when the operator signs out, while the key is still set, so a page can end what it
-   * started on the server. A rejected key signs out without it. Returns the unregister function.
+   * Run `work` when the operator signs out, while the session is still live, so a page can end what
+   * it started on the server; the session is revoked after the promise `work` returns settles. An
+   * ended session signs out without it. Returns the unregister function.
    */
-  beforeSignOut: (work: () => void) => () => void;
+  beforeSignOut: (work: () => unknown) => () => void;
 };
 
 const signedOut: SessionState = {
@@ -44,10 +52,8 @@ const signedOut: SessionState = {
   built: "",
 };
 const SessionContext = createContext<Session | null>(null);
-/** How long a stored key is checked before the sign-in form shows; a hung server counts as down. */
+/** How long the session cookie is checked before the sign-in form shows; a hung server counts as down. */
 const RESTORE_LIMIT = 10_000;
-
-type Open = (secret: string, signal?: AbortSignal) => Promise<void>;
 
 /** The state after an answer: `build` is its headers, or null when the server was not reached. */
 function withBuild(s: SessionState, build: ServerBuild | null): SessionState {
@@ -60,28 +66,22 @@ function withBuild(s: SessionState, build: ServerBuild | null): SessionState {
 }
 
 /**
- * Try the stored key once per load (the ref keeps StrictMode's second effect run out). A success
- * leaves it in whichever store it came from; a refused key is discarded from the stores holding
- * it; a server that cannot be reached within RESTORE_LIMIT or refuses for another reason keeps it
- * for the next load. `failed` runs on any failure.
+ * Resume the cookie's session once per load (the ref keeps StrictMode's second effect run out).
+ * `failed` runs when there is none, or the server cannot be reached within RESTORE_LIMIT.
  */
-function useRestore(open: Open, failed: () => void) {
+function useRestore(resume: (signal: AbortSignal) => Promise<void>, failed: () => void) {
   const restored = useRef(false);
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
-    const secret = recall();
-    if (secret === null) return;
-    open(secret, AbortSignal.timeout(RESTORE_LIMIT)).catch((error: unknown) => {
-      if (error instanceof SignInError && error.reason === "rejected") discard(secret);
-      failed();
-    });
-  }, [open, failed]);
+    resume(AbortSignal.timeout(RESTORE_LIMIT)).catch(failed);
+  }, [resume, failed]);
 }
 
 /**
- * A sign-out in another tab cleared the stores; this tab follows, and a sign-in it is still checking
- * is cancelled. The signing-out tab hears its own message too, after it has already signed out.
+ * A sign-out in another tab revoked the shared session; this tab follows without a request of its
+ * own, and a sign-in it is still checking is cancelled. The signing-out tab hears its own message
+ * too, after it has signed out.
  */
 function useFollowSignOut(signedIn: RefObject<boolean>, endSession: () => void) {
   useEffect(
@@ -95,16 +95,34 @@ function useFollowSignOut(signedIn: RefObject<boolean>, endSession: () => void) 
 }
 
 /**
- * The one session of this tab. Requests read the key from lib/api/client.ts memory; the stored
- * copy is lib/keyStore.ts's, written on a typed sign-in and read back once when the page loads.
+ * Only an explicit sign-out revokes the session, after the `leaving` work settles. The other tabs
+ * hear of it once the server has confirmed; until then this tab stays signed in, so a failure
+ * leaves it usable for a retry.
+ */
+function useSignOut(leaving: ReadonlySet<() => unknown>, endSession: () => void) {
+  return useCallback(async () => {
+    const last = Promise.allSettled([...leaving].map((work) => Promise.resolve(work())));
+    try {
+      await revokeSession(last);
+    } catch {
+      notify("error", t("app.signOut.failed"));
+      return;
+    }
+    endSession();
+  }, [leaving, endSession]);
+}
+
+/**
+ * The one session of this tab. The browser's HttpOnly session cookie, shared by every tab,
+ * authenticates its requests; the key itself is sent once, at sign-in, and never kept.
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const [state, setState] = useState(() => ({ ...signedOut, restoring: recall() !== null }));
+  const [state, setState] = useState(() => ({ ...signedOut, restoring: true }));
   const signedIn = useRef(false);
   const [leaving] = useState(() => new Set<() => void>());
 
-  /** End the session in this tab only; the caller decides what happens to the stored key. */
+  /** End the session in this tab only; the caller decides whether the server session ends too. */
   const endSession = useCallback(() => {
     closeSession();
     signedIn.current = false;
@@ -114,54 +132,54 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   useFollowSignOut(signedIn, endSession);
+  useEffect(dropLegacyKey, []);
 
-  // Only an explicit sign-out clears both stores and signs out the other tabs.
-  const signOut = useCallback(() => {
-    cancelSignIns();
-    for (const work of leaving) work();
-    forget();
-    endSession();
-  }, [leaving, endSession]);
+  const signOut = useSignOut(leaving, endSession);
 
   const beforeSignOut = useCallback(
-    (work: () => void) => {
+    (work: () => unknown) => {
       leaving.add(work);
       return () => void leaving.delete(work);
     },
     [leaving],
   );
 
-  const open = useCallback(
-    async (secret: string, signal?: AbortSignal) => {
-      const hooks: SessionHooks = {
-        unauthorized() {
-          if (!signedIn.current) return;
-          // A rotated key: drop this one only, so a newer key another tab stored keeps working.
-          discard(secret);
-          endSession();
-          notify("error", t("app.signIn.rejected"));
-        },
-        server(build) {
-          setState((s) => withBuild(s, build));
-        },
-      };
-      await openSession(secret, hooks, signal);
-      signedIn.current = true;
-      setState((s) => ({ ...s, signedIn: true, restoring: false }));
-    },
+  const hooks = useMemo<SessionHooks>(
+    () => ({
+      unauthorized() {
+        if (!signedIn.current) return;
+        // The session expired, was revoked, or the management key changed.
+        endSession();
+        notify("error", t("app.signIn.rejected"));
+      },
+      server(build) {
+        setState((s) => withBuild(s, build));
+      },
+    }),
     [endSession],
   );
 
+  const entered = useCallback(() => {
+    signedIn.current = true;
+    setState((s) => ({ ...s, signedIn: true, restoring: false }));
+  }, []);
+
   const signIn = useCallback(
-    async (secret: string, persist: boolean) => {
-      await open(secret);
-      remember(secret, persist);
+    async (secret: string, remember: boolean) => {
+      await openSession(secret, remember, hooks);
+      entered();
     },
-    [open],
+    [hooks, entered],
   );
 
   useRestore(
-    open,
+    useCallback(
+      async (signal: AbortSignal) => {
+        await resumeSession(hooks, signal);
+        entered();
+      },
+      [hooks, entered],
+    ),
     useCallback(() => setState((s) => ({ ...s, restoring: false })), []),
   );
 

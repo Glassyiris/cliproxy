@@ -9,7 +9,7 @@ const { ApiError, connect } = await import("./client.ts");
 const { absent, storedValue } = await import("../configPath.ts");
 const { ConfigChangedError, readConfig, readConfigValue, replaceConfigValue, replaceConfigValues } =
   await import("./config.ts");
-connect("secret", { unauthorized() {}, server() {} });
+connect({ unauthorized() {}, server() {} });
 
 const ok: ConfigApplyResult = {
   revision: 12,

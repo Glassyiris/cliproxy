@@ -1,5 +1,11 @@
 // A fetch stand-in for API tests: records each request and answers from `answer`.
-export type Sent = { method: string; url: URL; headers: Record<string, string>; body: unknown };
+export type Sent = {
+  method: string;
+  url: URL;
+  headers: Record<string, string>;
+  credentials: RequestCredentials | undefined;
+  body: unknown;
+};
 
 export function fakeServer(href = "http://cpa.test/management.html") {
   const sent: Sent[] = [];
@@ -14,6 +20,7 @@ export function fakeServer(href = "http://cpa.test/management.html") {
       method: init.method ?? "GET",
       url: new URL(String(input)),
       headers: init.headers as Record<string, string>,
+      credentials: init.credentials,
       body,
     };
     sent.push(s);

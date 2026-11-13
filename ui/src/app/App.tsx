@@ -22,20 +22,19 @@ import {
   storePalette,
   type ThemeMode,
 } from "./preferences.ts";
-import { recall } from "../lib/keyStore.ts";
 import { loadedSignedIn, loadSignedIn, PageLoadError, preloadSignedIn } from "./chunks.ts";
 import { QueryBoundary } from "./QueryBoundary.tsx";
 import { queryClient } from "./queryClient.ts";
 import { SessionProvider, useSession } from "./Session.tsx";
 import { SignIn } from "./SignIn.tsx";
 
-// A stored key is checked before anything shows; its shell and page load in the meantime.
-if (recall() !== null) preloadSignedIn();
+// The session cookie is checked before anything shows; the shell and page load in the meantime.
+preloadSignedIn();
 
-/** How long a stored-key check shows only the page background, so a quick one does not flash. */
+/** How long a session check shows only the page background, so a quick one does not flash. */
 const QUIET_WAIT = 400;
 
-/** While a stored key is checked: the page background, then a spinner naming the server. */
+/** While the session cookie is checked: the page background, then a spinner naming the server. */
 function RestoreWait() {
   const [shown, setShown] = useState(false);
   useEffect(() => {
@@ -74,7 +73,7 @@ function SignedIn() {
   return shell ? <shell.default /> : <RestoreWait />;
 }
 
-/** Shell or sign-in; neither shows while a stored key is checked, so the wrong one never flashes. */
+/** Shell or sign-in; neither shows while the session cookie is checked, so the wrong one never flashes. */
 function Gate() {
   const { signedIn, restoring } = useSession();
   if (restoring) return <RestoreWait />;

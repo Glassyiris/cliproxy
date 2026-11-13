@@ -7,7 +7,7 @@ import { fakeServer } from "./api/fakeServer.testSupport.ts";
 const server = fakeServer();
 const { connect } = await import("./api/client.ts");
 const { createQuotaChecker, quotaApplies } = await import("./quota.ts");
-connect("secret", { unauthorized() {}, server() {} });
+connect({ unauthorized() {}, server() {} });
 
 const account = (auth_index: string, extra: Partial<Credential> = {}) =>
   ({
@@ -110,7 +110,7 @@ test("an answer that is not usage data is malformed; an ended session records no
 
   // A new session starts while the request is out: its answer belongs to the old one.
   server.answer = () => {
-    connect("secret", { unauthorized() {}, server() {} });
+    connect({ unauthorized() {}, server() {} });
     return Response.json({ status_code: 401, header: {}, body: "" });
   };
   await checker.checkAll([list[1]]);

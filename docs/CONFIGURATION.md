@@ -184,7 +184,7 @@ observability:
 
 | Setting | What it does |
 |---|---|
-| `secret-key` | The dashboard and Management API password. A plaintext imported value is stored as its bcrypt hash, not rewritten into YAML. The `MANAGEMENT_PASSWORD` environment variable works too. When neither is set, the management API is off. |
+| `secret-key` | The dashboard and Management API password. A plaintext imported value is stored as its bcrypt hash, not rewritten into YAML. The `MANAGEMENT_PASSWORD` environment variable works too. When neither is set, the management API is off. Changing or removing it signs out every dashboard session for good: restoring the old value later brings none back. |
 | `allow-remote` | `false` (the default) accepts management requests from this computer only. |
 | `disable-control-panel` | `true` stops serving the dashboard at `/management.html`; the Management API keeps working. |
 

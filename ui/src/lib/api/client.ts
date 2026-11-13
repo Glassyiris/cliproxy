@@ -1,9 +1,8 @@
 import type { Route } from "./routes.ts";
 
-// Requests read the management key from this module's memory; lib/keyStore.ts keeps the stored
-// copy that a reload reads back once.
-// Requests go only to the server that served this page: the API sits next to it
-// (/management.html -> /admin/v1 and /v8/management, also under a reverse-proxy path prefix).
+// The browser holds the sign-in as an HttpOnly session cookie the server set; no script here sees
+// a key after sign-in. Requests go only to the server that served this page: the API sits next to
+// it (/management.html -> /admin/v1 and /v8/management, also under a reverse-proxy path prefix).
 export const base = new URL(".", location.href).href.replace(/\/$/, "");
 const endpoint = `${base}/v8/management`;
 
@@ -17,20 +16,20 @@ export type SessionHooks = {
 /** X-CPA-VERSION, X-CPA-COMMIT and X-CPA-BUILD-DATE; empty when the header is absent. */
 export type ServerBuild = { version: string; commit: string; built: string };
 
-let key = "";
+let connected = false;
 // Bumped on every sign-in and sign-out, so an answer that belongs to the old session is dropped.
 let revision = 0;
 let hooks: SessionHooks = { unauthorized() {}, server() {} };
 
-export function connect(secret: string, sessionHooks: SessionHooks) {
-  key = secret;
+export function connect(sessionHooks: SessionHooks) {
+  connected = true;
   hooks = sessionHooks;
   revision++;
   resetCapabilities();
 }
 
 export function disconnect() {
-  key = "";
+  connected = false;
   revision++;
   resetCapabilities();
 }
@@ -125,6 +124,8 @@ export type Call = {
   /** Aborting it drops the request, so the latest read of a value wins. */
   signal?: AbortSignal;
   as?: "json" | "text" | "blob";
+  /** Sent while signed out: the session routes. `key` goes only with the sign-in itself. */
+  outside?: { key?: string };
 };
 
 function url(route: Route, call: Call) {
@@ -141,13 +142,24 @@ function url(route: Route, call: Call) {
   return { path, href: `${root}${path}${search}` };
 }
 
+/**
+ * The key goes only with the sign-in request; everything else rides the session cookie. The server
+ * accepts the cookie only with X-Cook-Dashboard, which an image, form or other origin cannot send.
+ */
+function headersFor(call: Call) {
+  const headers: Record<string, string> = { "X-Cook-Dashboard": "1" };
+  if (call.outside?.key !== undefined) headers.Authorization = `Bearer ${call.outside.key}`;
+  if (call.body !== undefined && !(call.body instanceof FormData))
+    headers["Content-Type"] = "application/json";
+  return headers;
+}
+
 async function send(route: Route, call: Call) {
-  if (!key) throw new ConnectionError("signed-out");
+  if (!connected && !call.outside) throw new ConnectionError("signed-out");
   const at = revision;
   const { path, href } = url(route, call);
   const form = call.body instanceof FormData;
-  const headers: Record<string, string> = { Authorization: `Bearer ${key}` };
-  if (call.body !== undefined && !form) headers["Content-Type"] = "application/json";
+  const headers = headersFor(call);
   const timeout = AbortSignal.timeout(path.includes("/refresh") ? 300_000 : 30_000);
   let response: Response;
   try {
@@ -160,6 +172,7 @@ async function send(route: Route, call: Call) {
           : JSON.stringify(call.body),
       signal: call.signal ? AbortSignal.any([call.signal, timeout]) : timeout,
       cache: "no-store",
+      credentials: "same-origin",
       redirect: "error",
     });
   } catch (e) {
@@ -206,7 +219,7 @@ export async function request<T>(route: Route, call: Call = {}): Promise<T> {
   // A body that finishes after sign-out or a reconnect belongs to the old session.
   if (at !== revision) throw new ConnectionError("session-changed");
   if (response.ok) return value as T;
-  if (response.status === 401) hooks.unauthorized();
+  if (response.status === 401 && !call.outside) hooks.unauthorized();
   const error = new ApiError(
     String(value?.message || value?.error || `HTTP ${response.status}`),
     response.status,

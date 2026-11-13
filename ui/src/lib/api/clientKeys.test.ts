@@ -10,7 +10,7 @@ const { ConfigChangedError, patchResource, readResource, replaceResource, reveal
 const { createClientKey, deleteClientKey, listClientKeys, revealClientKey } =
   await import("./clientKeys.ts");
 const { listClientModels } = await import("./proxy.ts");
-connect("management-key", { unauthorized() {}, server() {} });
+connect({ unauthorized() {}, server() {} });
 
 const written = { revision: 4, written: true, changes: [], restart_required: false };
 const resource = {

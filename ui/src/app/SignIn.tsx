@@ -109,7 +109,7 @@ function useSubmit(input: RefObject<HTMLInputElement | null>) {
   // One request per press: the ref blocks a second submit before the busy state renders.
   const pending = useRef(false);
 
-  const submit = async (secret: string, persist: boolean) => {
+  const submit = async (secret: string, remember: boolean) => {
     if (pending.current) return;
     if (!secret) {
       setFailure(t("app.signIn.keyRequired"));
@@ -122,7 +122,7 @@ function useSubmit(input: RefObject<HTMLInputElement | null>) {
     setBusy(true);
     setFailure("");
     try {
-      await signIn(secret, persist);
+      await signIn(secret, remember);
     } catch (error) {
       setFailure(error instanceof Error ? error.message : String(error));
       setBusy(false);
@@ -135,8 +135,8 @@ function useSubmit(input: RefObject<HTMLInputElement | null>) {
 
 export function SignIn() {
   const [secret, setSecret] = useState("");
-  // Off on every load: keeping the key on the device is chosen each time.
-  const [persist, setPersist] = useState(false);
+  // Off on every load: the 30-day session is chosen each time.
+  const [remember, setRemember] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const { failure, setFailure, busy, submit } = useSubmit(input);
   useDocumentTitle(t("app.document.signInTitle"));
@@ -145,7 +145,7 @@ export function SignIn() {
   // success, which Chrome and Firefox take as a finished sign-in.
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
-    void submit(secret, persist);
+    void submit(secret, remember);
   };
 
   return (
@@ -179,8 +179,8 @@ export function SignIn() {
               />
               <CheckboxInput
                 label={t("app.signIn.remember")}
-                value={persist}
-                onChange={setPersist}
+                value={remember}
+                onChange={setRemember}
               />
               <Button
                 label={busy ? t("app.signIn.connecting") : t("app.signIn.connect")}

@@ -176,8 +176,12 @@ async function cancelFlow(ctx: Ctx, flow: Flow) {
   if (answer.cancelled !== false) end(ctx, flow.id, "cancelled");
 }
 
-/** End a session this page will not follow; nobody waits for the answer. */
-const abandon = (state: string) => void cancelOAuth(state).catch(() => undefined);
+/** End a session this page will not follow; only a sign-out waits for the answer. */
+const abandon = (state: string) =>
+  cancelOAuth(state).then(
+    () => undefined,
+    () => undefined,
+  );
 
 async function begin(ctx: Ctx, provider: string, notOnServer: () => void) {
   const current = ctx.latest.get();
@@ -193,7 +197,7 @@ async function begin(ctx: Ctx, provider: string, notOnServer: () => void) {
   if (!ctx.mounted.current) return abandon(r.state);
   const url = signInUrl(r.url, location.href);
   if (!url) {
-    abandon(r.state);
+    void abandon(r.state);
     throw new Error(t("connect.start.unsafe"));
   }
   const now = Date.now();
@@ -243,20 +247,20 @@ export function useSignIn(action: Action) {
   const status = useSignInStatus(flow, flow?.phase === "wait", (id, answer) =>
     onAnswer(ctx, id, answer),
   );
-  // Leaving the page or signing out cancels a waiting sign-in. Signing out runs this before the
-  // session drops its key, which the cancel request needs.
+  // Leaving the page or signing out cancels a waiting sign-in. Signing out runs this while the
+  // session is live and revokes it only after the cancel request has its answer.
   useEffect(() => {
     mounted.current = true;
     const leave = () => {
       mounted.current = false;
       const left = latest.get();
       latest.set(null);
-      if (left?.phase === "wait") abandon(left.state);
+      if (left?.phase === "wait") return abandon(left.state);
     };
     const stop = beforeSignOut(leave);
     return () => {
       stop();
-      leave();
+      void leave();
     };
   }, [latest, beforeSignOut]);
   const run = (control: string, work: () => Promise<unknown>) =>

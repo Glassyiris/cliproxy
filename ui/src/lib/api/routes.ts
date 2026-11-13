@@ -5,6 +5,10 @@ type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type Route = { readonly method: Method; readonly path: string };
 
 export const routes = {
+  signIn: { method: "POST", path: "/session" },
+  checkSession: { method: "GET", path: "/session" },
+  signOut: { method: "DELETE", path: "/session" },
+
   readConfig: { method: "GET", path: "/admin/v1/effective/config" },
   applyConfig: { method: "POST", path: "/admin/v1/apply" },
   listClientKeys: { method: "GET", path: "/admin/v1/r/client-key" },

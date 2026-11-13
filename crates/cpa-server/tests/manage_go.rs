@@ -35,6 +35,15 @@ fn first_header<'a>(headers: &'a Value, name: &str) -> Option<&'a [u8]> {
 }
 
 // Access policy still follows these recordings; admin failures have a typed envelope.
+/// The `error` texts of Go's `Handler.Middleware` refusals.
+const GUARD_REFUSALS: [&str; 5] = [
+    "missing management key",
+    "invalid management key",
+    "remote management disabled",
+    "remote management key not set",
+    "IP banned",
+];
+
 fn admin_auth_body(legacy: &str, status: u16) -> Value {
     let legacy: Value = serde_json::from_str(legacy).unwrap();
     json!({"error": if status == 401 { "unauthorized" } else { "forbidden" },
@@ -641,6 +650,14 @@ mod routes {
                 let mut want = step["resp_headers"].as_object().unwrap().clone();
                 if step["path"].as_str().unwrap().starts_with("/admin/v1/") && matches!(status, 401 | 403) {
                     want.insert("Content-Type".into(), "application/json".into());
+                    want.insert("Cache-Control".into(), "no-store".into());
+                }
+                // Unlike Go, the guard keeps every answer past authentication out of shared caches.
+                let guard_refused = matches!(status, 401 | 403)
+                    && GUARD_REFUSALS
+                        .iter()
+                        .any(|m| step["resp_body"].as_str().unwrap().contains(m));
+                if headers.contains_key("X-CPA-VERSION") && !guard_refused {
                     want.insert("Cache-Control".into(), "no-store".into());
                 }
                 // The goldens come from Go's cgo build, which loads native plugins; this

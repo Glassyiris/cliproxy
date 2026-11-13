@@ -231,7 +231,7 @@ function PageNav({ current }: { current: PageRoute }) {
           <SideNavItem
             label={t("app.nav.signOut")}
             icon={LogOut}
-            onClick={() => leaveOrAsk(signOut)}
+            onClick={() => leaveOrAsk(() => void signOut())}
           />
         </SideNavSection>
       }
