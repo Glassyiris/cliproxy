@@ -148,7 +148,7 @@ async fn callback() -> (tokio::net::TcpListener, u16) {
 }
 
 fn temp_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("cpa-claude-login-{}", random_hex(8).unwrap()));
+    let dir = std::env::temp_dir().join(format!("cooker-claude-login-{}", random_hex(8).unwrap()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

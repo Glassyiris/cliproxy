@@ -55,7 +55,7 @@ async fn registration_probes_web_search_models() {
         google: Default::default(),
     };
     // A private credential directory: `testing::runtime` stores its `.json` files in the test database.
-    let auth_dir = std::env::temp_dir().join(format!("cpa-ag-capabilities-{}", std::process::id()));
+    let auth_dir = std::env::temp_dir().join(format!("cooker-ag-capabilities-{}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
     let config = Config::parse("").unwrap();
     let rt = ck_server::testing::runtime(config, vec![credential], executors);

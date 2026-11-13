@@ -121,9 +121,9 @@ mod tests {
     use std::time::Duration;
 
     fn state() -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>, PathBuf) {
-        let root = std::env::temp_dir().join(format!("cpa-watch-outcome-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("cooker-watch-outcome-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap());
         store.import_yaml("oauth: {}\n", "test", "").unwrap();
         let db = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         let mut config = store.load().unwrap().config;
@@ -266,7 +266,7 @@ mod tests {
             .save(&external_db.auth_dir().join("unadmitted.json"), canonical)
             .unwrap();
         std::fs::copy(external.path().unwrap(), root.join("replacement.db")).unwrap();
-        std::fs::rename(root.join("replacement.db"), root.join("cook.db")).unwrap();
+        std::fs::rename(root.join("replacement.db"), root.join("cooker.db")).unwrap();
         reload(&state).unwrap();
         assert_eq!(
             state.rt.store().get(&nested).unwrap().str("email"),
@@ -325,7 +325,7 @@ mod tests {
         // The subsequent legitimate command must not smuggle bypass rows into
         // the portable artifact. Cold-load only its ordinary single-file copy.
         let copy = root.join("cold.db");
-        std::fs::copy(root.join("cook.db"), &copy).unwrap();
+        std::fs::copy(root.join("cooker.db"), &copy).unwrap();
         let recovered_store = Arc::new(crate::testing::config_store(&copy).unwrap());
         let recovered = crate::credential_store::CredentialDb::initialize(recovered_store.clone()).unwrap();
         assert_eq!(
@@ -420,7 +420,7 @@ mod tests {
             .import_yaml("server: {port: 9002}\noauth: {}\n", "test", "")
             .unwrap();
         std::fs::copy(external.path().unwrap(), root.join("replacement.db")).unwrap();
-        std::fs::rename(root.join("replacement.db"), root.join("cook.db")).unwrap();
+        std::fs::rename(root.join("replacement.db"), root.join("cooker.db")).unwrap();
         reload(&state).unwrap();
         assert_eq!(state.rt.config().port, original);
         assert_eq!(state.config_store().load().unwrap().config.port, original);

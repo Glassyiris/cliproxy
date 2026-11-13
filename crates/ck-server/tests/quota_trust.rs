@@ -124,7 +124,7 @@ async fn proxy_with(
          \x20   save-cooldown-status: {save}\n\
          \x20   max-trusted-cooldown: \"{bound}\"\n",
     );
-    let store = Arc::new(ck_server::testing::config_store(&dir.join("cook.db")).unwrap());
+    let store = Arc::new(ck_server::testing::config_store(&dir.join("cooker.db")).unwrap());
     let db = ck_server::credential_store::CredentialDb::initialize(store).unwrap();
     let meta = json!({"type": "claude", "api_key": "sk-fake-claude", "base_url": upstream_url});
     let path = db.auth_dir().join(FILE);

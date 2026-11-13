@@ -32,7 +32,7 @@ const setConfig = async (path, value, expected = 200) => apply([{ op: "set", pat
 const config = await readConfig();
 // The credential store sits beside the database, which the disposable backend keeps here.
 assert.ok(
-  String((await call("/admin/v1/credentials")).auth_dir).startsWith("/tmp/cook-router-backend/"),
+  String((await call("/admin/v1/credentials")).auth_dir).startsWith("/tmp/cooker-backend/"),
   "Not the disposable backend. Refusing mutations.",
 );
 const backup = await call("/admin/v1/export?include_secrets=true");

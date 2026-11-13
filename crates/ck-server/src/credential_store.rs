@@ -702,7 +702,7 @@ mod tests {
     fn directory() -> PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "cpa-credential-db-{}-{}",
+            "cooker-credential-db-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -713,7 +713,7 @@ mod tests {
     #[test]
     fn rendered_grant_batch_is_durable_before_cache_materialization() {
         let root = directory();
-        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap());
         let db = CredentialDb::initialize(store.clone()).unwrap();
         let documents = vec![
             (
@@ -751,7 +751,7 @@ mod tests {
     fn consumed_grant_survives_a_checkpoint_error_and_merges_the_next_result() {
         use crate::testing::installation_effects::{self, Stage};
         let root = directory();
-        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap());
         store.import_yaml("server: {port: 8317}\n", "test", "initial").unwrap();
         let db = CredentialDb::initialize(store.clone()).unwrap();
         let a = db.auth_dir().join("a.json");
@@ -798,7 +798,7 @@ mod tests {
     #[test]
     fn unresolved_grant_checkpoint_survives_drop_and_another_database_initialization() {
         let root = directory();
-        let path = root.join("cook.db");
+        let path = root.join("cooker.db");
         let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store.import_yaml("server: {port: 8317}\n", "test", "history").unwrap();
         let db = CredentialDb::initialize(store.clone()).unwrap();
@@ -841,7 +841,7 @@ mod tests {
     #[test]
     fn failed_publication_keeps_the_newer_grant_until_an_owner_retry() {
         let root = directory();
-        let path = root.join("cook.db");
+        let path = root.join("cooker.db");
         let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store.import_yaml("server: {port: 8317}\n", "test", "").unwrap();
         let db = CredentialDb::initialize(store.clone()).unwrap();
@@ -905,7 +905,7 @@ mod tests {
     #[test]
     fn initialize_save_reopen_documents_round_trip() {
         let root = directory();
-        let path = root.join("cook.db");
+        let path = root.join("cooker.db");
         let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap())).unwrap();
         let local = db.auth_dir().join("auth.json");
         let nested = db.auth_dir().join("nested/auth.json");
@@ -932,7 +932,7 @@ mod tests {
 
         let root = directory();
         let db =
-            CredentialDb::initialize(Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap())).unwrap();
+            CredentialDb::initialize(Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap())).unwrap();
         let path = db.auth_dir().join("auth.json");
         db.save(&path, b"{\"token\":\"before\"}").unwrap();
         std::fs::remove_file(&path).unwrap();
@@ -1011,7 +1011,7 @@ mod tests {
     fn raw_documents_and_deletions_survive_a_discarded_cache() {
         let root = directory();
         let original = b"{\n  \"type\":\"opaque-type\",\"opaque\":{\"secret\":\"first\"}\n}\n";
-        let path = root.join("cook.db");
+        let path = root.join("cooker.db");
         let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store
             .import_yaml("server: {port: 8317}\n", "test", "preinitialized config")
@@ -1045,7 +1045,7 @@ mod tests {
     #[test]
     fn canonical_scan_preserves_external_documents_and_auth_indexes_across_restart() {
         let root = directory();
-        let path = root.join("cook.db");
+        let path = root.join("cooker.db");
         let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store.import_yaml("oauth: {}\n", "test", "").unwrap();
         let db = CredentialDb::initialize(store.clone()).unwrap();
@@ -1082,7 +1082,7 @@ mod tests {
     #[test]
     fn failed_batch_is_atomic_and_restores_working_documents() {
         let root = directory();
-        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap());
         let db = CredentialDb::initialize(store.clone()).unwrap();
         let first = db.auth_dir().join("first.json");
         let second = db.auth_dir().join("second.json");
@@ -1109,7 +1109,7 @@ mod tests {
     #[test]
     fn cooldown_records_survive_removal_of_working_directory() {
         let root = directory();
-        let path = root.join("cook.db");
+        let path = root.join("cooker.db");
         let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap())).unwrap();
         let records = vec![Record {
             auth_id: "auth.json".into(),

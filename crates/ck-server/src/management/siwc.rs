@@ -920,7 +920,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn mutation_paths_match_every_alias_of_the_file() {
-        let dir = std::env::temp_dir().join(format!("cpa-siwc-alias-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-siwc-alias-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join("real")).unwrap();
         let path = dir.join("real").join("auth.json");
         std::fs::write(&path, "{}").unwrap();
@@ -945,7 +945,7 @@ mod tests {
     fn a_gone_folder_compares_cleaned_paths() {
         let root = std::fs::canonicalize(std::env::temp_dir())
             .unwrap()
-            .join(format!("cpa-siwc-gone-{}", uuid::Uuid::new_v4()));
+            .join(format!("cooker-siwc-gone-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(root.join("auth")).unwrap();
         std::fs::write(root.join("auth/codex.json"), "{}").unwrap();
         let bound = std::fs::canonicalize(root.join("auth/codex.json")).unwrap();
@@ -962,7 +962,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_gone_folder_matches_the_verbatim_binding_path() {
-        let root = std::env::temp_dir().join(format!("cpa-siwc-gone-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("cooker-siwc-gone-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(root.join("auth")).unwrap();
         std::fs::write(root.join(r"auth\codex.json"), "{}").unwrap();
         let bound = std::fs::canonicalize(root.join(r"auth\codex.json")).unwrap();
@@ -1129,7 +1129,7 @@ mod tests {
 
     /// A private auth dir holding `codex.json` for account "old".
     fn fixture(login_base: Option<String>) -> (PathBuf, PathBuf, Arc<Management>) {
-        let dir = std::env::temp_dir().join(format!("cpa-siwc-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-siwc-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("codex.json");
         std::fs::write(&file, codex_file("old")).unwrap();

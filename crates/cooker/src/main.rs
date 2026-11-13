@@ -43,7 +43,7 @@ struct Args {
     /// later starts do not read it.
     #[arg(long, default_value = "")]
     config: String,
-    /// The config database (default: cook.db beside the config file, or CK_DB).
+    /// The config database (default: cooker.db beside the config file, or CK_DB).
     #[arg(long, default_value = "")]
     db: String,
     /// Write process logs to this file (10 MiB rotation), without a shell wrapper.
@@ -308,7 +308,7 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-/// The config database: `--db`, else `CK_DB`, else `cook.db` beside the config file.
+/// The config database: `--db`, else `CK_DB`, else `cooker.db` beside the config file.
 fn db_path(flag: &str, config_file: &Path) -> PathBuf {
     if !flag.trim().is_empty() {
         return PathBuf::from(flag);
@@ -320,7 +320,7 @@ fn db_path(flag: &str, config_file: &Path) -> PathBuf {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."))
-        .join("cook.db")
+        .join("cooker.db")
 }
 
 /// What a first start imports when its YAML file is absent.
@@ -1096,7 +1096,7 @@ async fn online_command(args: &Args) -> anyhow::Result<()> {
         client.login_config().await.map_err(anyhow::Error::msg)?
     };
     let sources = client.credential_sources().await.map_err(anyhow::Error::msg)?;
-    let scratch = Arc::new(tempfile::Builder::new().prefix("cook-router-login-").tempdir()?);
+    let scratch = Arc::new(tempfile::Builder::new().prefix("cooker-login-").tempdir()?);
     let mut args = args.clone();
     let siwc_report = if selected_command(&args) == Some(BuiltinCommand::Siwc) {
         let name = online_siwc_target(&args.siwc_bind, &sources)?;
@@ -1454,7 +1454,7 @@ mod tests {
     fn credential_test_dir() -> PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         std::env::temp_dir().join(format!(
-            "cook-cli-credential-{}-{}",
+            "cooker-cli-credential-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ))
@@ -1606,7 +1606,7 @@ mod tests {
             let blocked = (case == "storage").then(|| ck_server::testing::block_checkpoint_install(&store));
             let scratch = Arc::new(
                 tempfile::Builder::new()
-                    .prefix("cook-router-login-")
+                    .prefix("cooker-login-")
                     .tempdir_in(&root)
                     .unwrap(),
             );
@@ -1728,7 +1728,7 @@ mod tests {
             let selected = online_siwc_target(target.to_str().unwrap(), &sources).unwrap();
             let scratch = Arc::new(
                 tempfile::Builder::new()
-                    .prefix("cook-router-login-")
+                    .prefix("cooker-login-")
                     .tempdir_in(&root)
                     .unwrap(),
             );
@@ -1831,7 +1831,7 @@ mod tests {
                 let sources = client.credential_sources().await.unwrap();
                 let scratch = Arc::new(
                     tempfile::Builder::new()
-                        .prefix("cook-router-login-")
+                        .prefix("cooker-login-")
                         .tempdir_in(&root)
                         .unwrap(),
                 );
@@ -1894,7 +1894,7 @@ mod tests {
             let sources = client.credential_sources().await.unwrap();
             let scratch = Arc::new(
                 tempfile::Builder::new()
-                    .prefix("cook-router-login-")
+                    .prefix("cooker-login-")
                     .tempdir_in(&root)
                     .unwrap(),
             );
@@ -1953,7 +1953,7 @@ mod tests {
             let sources = client.credential_sources().await.unwrap();
             let scratch = Arc::new(
                 tempfile::Builder::new()
-                    .prefix("cook-router-login-")
+                    .prefix("cooker-login-")
                     .tempdir_in(&root)
                     .unwrap(),
             );
@@ -2044,7 +2044,7 @@ mod tests {
         let sources = client.credential_sources().await.unwrap();
         let scratch = Arc::new(
             tempfile::Builder::new()
-                .prefix("cook-router-login-")
+                .prefix("cooker-login-")
                 .tempdir_in(&root)
                 .unwrap(),
         );
@@ -2070,7 +2070,7 @@ mod tests {
         let sources = client.credential_sources().await.unwrap();
         let scratch = Arc::new(
             tempfile::Builder::new()
-                .prefix("cook-router-login-")
+                .prefix("cooker-login-")
                 .tempdir_in(&root)
                 .unwrap(),
         );
@@ -2118,7 +2118,7 @@ mod tests {
         let sources = client.credential_sources().await.unwrap();
         let scratch = Arc::new(
             tempfile::Builder::new()
-                .prefix("cook-router-login-")
+                .prefix("cooker-login-")
                 .tempdir_in(&root)
                 .unwrap(),
         );
@@ -2243,7 +2243,7 @@ mod tests {
     #[test]
     fn cli_changes_and_deletions_survive_reopen() {
         let root = credential_test_dir();
-        let path = root.join("cook.db");
+        let path = root.join("cooker.db");
         let mut config = Config::parse("").unwrap();
         let db =
             initialize_credentials(Arc::new(ck_server::testing::config_store(&path).unwrap()), &mut config).unwrap();
@@ -2280,7 +2280,7 @@ mod tests {
     #[test]
     fn cli_durable_failure_is_returned_and_restores_working_bytes() {
         let root = credential_test_dir();
-        let path = root.join("cook.db");
+        let path = root.join("cooker.db");
         let owner = Arc::new(ck_server::testing::config_store(&path).unwrap());
         let db = CredentialDb::initialize(owner.clone()).unwrap();
         let auth = db.auth_dir().join("login.json");
@@ -2308,7 +2308,7 @@ mod tests {
     #[test]
     fn cli_writer_cannot_be_reverted_by_concurrent_materialization() {
         let root = credential_test_dir();
-        let path = root.join("cook.db");
+        let path = root.join("cooker.db");
         let db = CredentialDb::initialize(Arc::new(ck_server::testing::config_store(&path).unwrap())).unwrap();
         let auth = db.auth_dir().join("login.json");
         db.save(&auth, b"{\"old\":true}").unwrap();
@@ -2559,10 +2559,10 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_server_starts_without_any_secret() {
-        let dir = std::env::temp_dir().join(format!("cpa-standalone-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-standalone-{}", std::process::id()));
         let auth = dir.join("auth");
         std::fs::create_dir_all(&auth).unwrap();
-        let store = Arc::new(ck_server::testing::config_store(&dir.join("cook.db")).unwrap());
+        let store = Arc::new(ck_server::testing::config_store(&dir.join("cooker.db")).unwrap());
         store
             .import_yaml("server:\n  host: 127.0.0.1\n  port: 0\n", "test", "standalone server")
             .unwrap();
@@ -2597,7 +2597,7 @@ mod tests {
     #[tokio::test]
     async fn siwc_bind_route_follows_management_availability() {
         use tower::ServiceExt as _;
-        let dir = std::env::temp_dir().join(format!("cpa-siwc-route-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-siwc-route-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("auth")).unwrap();
         let store = Arc::new(ConfigStore::memory_with(""));
         let config = store.load().unwrap().config;
@@ -2658,14 +2658,14 @@ mod tests {
     #[test]
     fn optional_first_import_only_tolerates_a_missing_file() {
         let dir = std::env::temp_dir().join(format!(
-            "cpa-cloud-{}",
+            "cooker-cloud-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let db = dir.join("cook.db");
+        let db = dir.join("cooker.db");
         let missing = dir.join("missing.yaml");
         let (store, cfg) = load_config(&db, &missing, FirstImport::Cloud).unwrap();
         assert_eq!(cfg.port, 0);
@@ -2700,7 +2700,7 @@ mod tests {
     #[test]
     fn a_fresh_volume_starts_with_defaults_on_the_default_port() {
         let dir = std::env::temp_dir().join(format!(
-            "cpa-fresh-{}",
+            "cooker-fresh-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -2711,7 +2711,7 @@ mod tests {
         let required = dir.join("required.db");
         assert!(load_config(&required, &missing, FirstImport::Required).is_err());
         assert!(!required.exists(), "a failed required import creates no database");
-        let db = dir.join("cook.db");
+        let db = dir.join("cooker.db");
         let (store, cfg) = load_config(&db, &missing, FirstImport::Defaults).unwrap();
         assert_eq!(cfg.port, ck_core::config::DEFAULT_PORT);
         assert!(!store.is_empty().unwrap(), "the defaults are the first revision");
@@ -2730,7 +2730,7 @@ mod tests {
     #[test]
     fn a_blank_default_config_starts_with_defaults_on_the_default_port() {
         let dir = std::env::temp_dir().join(format!(
-            "cpa-blank-{}",
+            "cooker-blank-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -2751,14 +2751,14 @@ mod tests {
     #[test]
     fn an_existing_database_does_not_reread_the_import_file() {
         let dir = std::env::temp_dir().join(format!(
-            "cpa-import-once-{}",
+            "cooker-import-once-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let db = dir.join("cook.db");
+        let db = dir.join("cooker.db");
         let file = dir.join("config.yaml");
         std::fs::write(&file, "server:\n  port: 9\n").unwrap();
         assert_eq!(load_config(&db, &file, FirstImport::Required).unwrap().1.port, 9);

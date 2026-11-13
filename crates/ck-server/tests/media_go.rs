@@ -301,7 +301,7 @@ async fn replay(tag: &str, fixture: &Fixture, expected: impl Fn(&Scenario) -> St
     let upstream = Arc::new(Capture::default());
     tokio::spawn(capture(listener, upstream.clone(), addr.clone()));
 
-    let auth_dir = std::env::temp_dir().join(format!("cpa-{tag}-{}", std::process::id()));
+    let auth_dir = std::env::temp_dir().join(format!("cooker-{tag}-{}", std::process::id()));
     let config = fixture
         .config
         .replace("UPSTREAM", &addr)

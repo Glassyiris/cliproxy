@@ -27,7 +27,7 @@ async fn server(management_password: Option<&str>) -> Server {
 async fn server_with(management_password: Option<&str>, credentials: Vec<ck_core::credential::Credential>) -> Server {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("cpa-resp-{}-{n}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-resp-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let yaml = "observability:\n  usage:\n    usage-statistics-enabled: true\n".to_owned();
     let store = Arc::new(ck_server::config_store::ConfigStore::memory_with(&yaml));

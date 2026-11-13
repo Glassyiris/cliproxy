@@ -29,7 +29,7 @@ def offline(program, args, cwd=None):
 
 class Repo(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory(prefix="cook-router-changelog-")
+        self._tmp = tempfile.TemporaryDirectory(prefix="cooker-changelog-")
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         (self.root / "changes").mkdir()

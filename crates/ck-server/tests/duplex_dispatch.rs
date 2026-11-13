@@ -134,7 +134,7 @@ struct AuthDir(std::path::PathBuf);
 
 impl AuthDir {
     fn new() -> Self {
-        let dir = std::env::temp_dir().join(format!("cpa-it-auth-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-it-auth-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
     }

@@ -116,7 +116,7 @@ async fn proxy(behaviour: Upstream) -> Proxy {
     // A private credential directory: `testing::runtime` stores its `.json` files in the test database.
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let auth_dir = std::env::temp_dir().join(format!("cpa-xai-cancel-{}-{n}", std::process::id()));
+    let auth_dir = std::env::temp_dir().join(format!("cooker-xai-cancel-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
     let config = Config::parse(&format!(
         "access:\n  api-keys: [client-key]\napi-keys:\n  xai:\n    - name: xai-1\n      base-url: http://{upstream}/v1\n      keys:\n        - api-key: sk-fake-xai\n"))

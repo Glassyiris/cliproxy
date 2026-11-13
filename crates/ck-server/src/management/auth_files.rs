@@ -2664,7 +2664,7 @@ mod tests {
         files: &[(&str, &str)],
         edit: impl FnOnce(&mut Vec<Credential>),
     ) -> (Arc<Management>, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("cpa-modify-{name}-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-modify-{name}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         for (file, body) in files {
             std::fs::write(dir.join(file), body).unwrap();
@@ -2697,8 +2697,8 @@ mod tests {
     }
 
     fn sqlite_management() -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>, PathBuf) {
-        let root = std::env::temp_dir().join(format!("cpa-management-sqlite-{}", uuid::Uuid::new_v4()));
-        let config = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
+        let root = std::env::temp_dir().join(format!("cooker-management-sqlite-{}", uuid::Uuid::new_v4()));
+        let config = Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap());
         config.import_yaml("oauth: {}\n", "test", "").unwrap();
         let db = crate::credential_store::CredentialDb::initialize(config.clone()).unwrap();
         db.save(
@@ -2869,7 +2869,7 @@ mod tests {
         let cache = db.auth_dir();
         drop(db);
         std::fs::remove_dir_all(&cache).unwrap();
-        let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
+        let store = Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap());
         let db = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         assert_eq!(std::fs::read(&auth).unwrap(), bytes);
         std::fs::remove_file(&auth).unwrap();
@@ -2878,7 +2878,7 @@ mod tests {
         drop(store);
         std::fs::remove_dir_all(&cache).unwrap();
         let db = crate::credential_store::CredentialDb::initialize(Arc::new(
-            crate::testing::config_store(&root.join("cook.db")).unwrap(),
+            crate::testing::config_store(&root.join("cooker.db")).unwrap(),
         ))
         .unwrap();
         assert!(db.read(&auth).unwrap().is_none());

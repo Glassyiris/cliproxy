@@ -360,7 +360,7 @@ async fn request_log_records_the_websocket_timeline_and_each_turn() {
             )
         }))
         .await;
-    let dir = std::env::temp_dir().join(format!("cpa-ws-timeline-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-ws-timeline-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
         "observability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n"))
@@ -620,7 +620,7 @@ async fn sent_turn(proxy: &str) -> wreq::ws::WebSocket {
 async fn the_socket_closes_before_the_request_log_is_delivered() {
     use futures_util::StreamExt;
     let mut servers = Servers::default();
-    let dir = std::env::temp_dir().join(format!("cpa-ws-gated-log-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-ws-gated-log-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let gate = Arc::new(tokio::sync::Notify::new());
     crate::request_logging::HELD_DELIVERIES
@@ -672,7 +672,7 @@ async fn the_socket_closes_before_the_request_log_is_delivered() {
 async fn logged_failure(status: u16, body: &'static str) -> (Vec<String>, String) {
     use futures_util::StreamExt;
     let mut servers = Servers::default();
-    let dir = std::env::temp_dir().join(format!("cpa-ws-timeline-error-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-ws-timeline-error-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let proxy = logging_proxy(&mut servers, &dir, status, body).await;
     let mut socket = sent_turn(&proxy).await;
@@ -779,7 +779,7 @@ async fn interrupt_diagnostics_are_sanitized() {
             )
         }))
         .await;
-    let dir = std::env::temp_dir().join(format!("cpa-ws-interrupt-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-ws-interrupt-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
         "observability: {{logs: {{request-log: true}}}}\napi-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n"))
@@ -936,7 +936,7 @@ async fn uninterrupted_claude_turns_send_masters_bytes() {
         }))
         .await
     };
-    let dir = std::env::temp_dir().join(format!("cpa-ws-claude-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-ws-claude-{}", uuid::Uuid::new_v4()));
     let cfg = Config::parse(&format!(
         "api-keys:\n  claude:\n  - name: claude-1\n    base-url: http://{upstream}\n    models:\n      - name: claude-opus-5-5\n    keys:\n      - api-key: sk-FAKE\n"))
     .unwrap();
@@ -1039,7 +1039,7 @@ async fn pinned_continuation_failure(shown: &'static [&'static str], failure: &'
             })
         }))
         .await;
-    let dir = std::env::temp_dir().join(format!("cpa-ws-pinned-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-ws-pinned-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = Config::parse(&format!(
         "api-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n"))
@@ -1169,7 +1169,7 @@ async fn an_upstream_error_that_loses_the_socket_still_cools_the_credential() {
                 })
             }))
             .await;
-        let dir = std::env::temp_dir().join(format!("cpa-ws-6503-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-ws-6503-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = Config::parse(&format!(
             "api-keys:\n  codex:\n  - name: codex-1\n    base-url: http://{upstream}\n    models:\n      - name: gpt-fixture\n    keys:\n      - api-key: sk-FAKE\n        websockets: true\n"))
@@ -1402,7 +1402,7 @@ async fn removal_closes_only_its_sockets(section: &str) {
         }))
         .await
     };
-    let dir = std::env::temp_dir().join(format!("cpa-ws-remove-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-ws-remove-{}", uuid::Uuid::new_v4()));
     let entry = |key: &str| {
         format!(
             "    - base-url: http://{upstream}\n      models:\n        - name: gpt-{key}\n      keys:\n        - api-key: {key}\n          websockets: true\n"

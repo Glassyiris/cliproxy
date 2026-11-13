@@ -207,7 +207,7 @@ function PageNav({ current }: { current: PageRoute }) {
       // Astryx keeps the width and the collapsed rail in localStorage under this key (read and
       // written in try/catch), so someone who prefers the rail keeps it across reloads. Collapsed,
       // each page is one icon with its name as SideNavItem's own tooltip (PageSections).
-      resizable={{ ...layout.sidebar, autoSaveId: "cook-router-side-nav" }}
+      resizable={{ ...layout.sidebar, autoSaveId: "cooker-side-nav" }}
       header={
         <SideNavHeading
           heading={t("app.brand.name")}

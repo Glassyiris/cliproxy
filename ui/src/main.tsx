@@ -14,7 +14,7 @@ import { defaultPalette, defaultTheme, loadPalette } from "./themes/site/index.t
 // them: the next lazy page or dialog fails to load. Reload once to pick up the new build; the
 // stored time stops a loop when the chunk is missing for another reason.
 window.addEventListener("vite:preloadError", (event) => {
-  const key = "cook-router.reloadedForBuild";
+  const key = "cooker.reloadedForBuild";
   try {
     const last = Number(sessionStorage.getItem(key) ?? 0);
     if (Date.now() - last < 10_000) return;

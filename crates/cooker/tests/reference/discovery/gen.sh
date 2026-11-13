@@ -7,7 +7,7 @@ reference=$1
 here=$(cd "$(dirname "$0")" && pwd)
 fixtures=$(cd "$here/../../fixtures" && pwd)
 tmp=$(mktemp -d)
-trap 'mv "$tmp" /tmp/cpa-fixture-trash.$$' EXIT
+trap 'mv "$tmp" /tmp/cooker-fixture-trash.$$' EXIT
 cat > "$tmp/overlay.json" <<EOF
 {"Replace": {
   "$reference/internal/discovery/zz_fixture_test.go": "$here/discovery_fixture_test.go",

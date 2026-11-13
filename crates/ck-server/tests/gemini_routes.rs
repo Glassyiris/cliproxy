@@ -538,7 +538,7 @@ async fn vertex_openapi_refused_url_cools_the_model_without_retry_rounds() {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../../ck-exec/tests/fixtures/vertex_go.json")).unwrap();
     let port = up.rsplit(':').next().unwrap().to_owned();
-    let dir = std::env::temp_dir().join(format!("cpa-gemini-vertex-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-gemini-vertex-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let file = serde_json::json!({
         "type": "vertex",

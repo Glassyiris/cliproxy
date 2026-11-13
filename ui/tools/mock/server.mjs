@@ -128,7 +128,7 @@ function makeAccount(i) {
     updated_at: iso(startedAt - int(1, 300) * 3_600_000),
     modtime: iso(startedAt - int(1, 300) * 3_600_000),
     last_refresh: iso(startedAt - int(1, 48) * 3_600_000),
-    path: `/var/lib/cook-router/auth/${name}`,
+    path: `/var/lib/cooker/auth/${name}`,
     cooldowns: [],
   };
   if (provider === "codex") {
@@ -644,7 +644,7 @@ on("POST", "/credentials", (ctx) => {
     }
     const a = makeAccount(accounts.length);
     a.name = a.id = file;
-    a.path = `/var/lib/cook-router/auth/${file}`;
+    a.path = `/var/lib/cooker/auth/${file}`;
     if (typeof meta.type === "string") a.type = a.provider = meta.type;
     if (typeof meta.email === "string") a.email = a.account = meta.email;
     accounts.push(a);

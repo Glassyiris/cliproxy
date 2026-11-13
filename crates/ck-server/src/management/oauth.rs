@@ -587,7 +587,7 @@ enum Outcome {
 struct PrivateLoginRender(PathBuf);
 impl PrivateLoginRender {
     fn new() -> anyhow::Result<Self> {
-        let path = std::env::temp_dir().join(format!("cook-login-render-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("cooker-login-render-{}", uuid::Uuid::new_v4()));
         let create = std::fs::DirBuilder::new();
         #[cfg(unix)]
         let mut create = create;

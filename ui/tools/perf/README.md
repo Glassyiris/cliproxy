@@ -16,8 +16,8 @@ Build the UI somewhere other than `ui/dist`, then run the harness from `ui/`:
 
 ```sh
 cd ui
-node_modules/.bin/vite build --outDir "${TMPDIR:-/tmp}/cook-router-perf/dist" --emptyOutDir
-node tools/perf/run.mjs --accounts 1000 --minutes 5 --dist "${TMPDIR:-/tmp}/cook-router-perf/dist"
+node_modules/.bin/vite build --outDir "${TMPDIR:-/tmp}/cooker-perf/dist" --emptyOutDir
+node tools/perf/run.mjs --accounts 1000 --minutes 5 --dist "${TMPDIR:-/tmp}/cooker-perf/dist"
 ```
 
 The harness starts the mock on a free port, starts `vite preview` of `--dist` (its `/v8` proxy
@@ -30,7 +30,7 @@ form and measures. It stops both servers on exit. Nothing is built or written in
 | `--minutes M` | 5 | how long to keep polling for M2 and M3 |
 | `--ui NAME` | react | adapter in `adapters/` |
 | `--dist DIR` | `ui/dist` | built UI to serve |
-| `--out DIR` | `<os tmpdir>/cook-router-perf/<timestamp>/` | where `report.json`, `report.md`, `mock.log`, `preview.log` go |
+| `--out DIR` | `<os tmpdir>/cooker-perf/<timestamp>/` | where `report.json`, `report.md`, `mock.log`, `preview.log` go |
 | `--seed N` | 1 | mock seed; the same seed gives the same accounts |
 | `--idle S` | 60 | seconds of M4 idle |
 | `--polls N` | 6 | polls M2 takes its median over |

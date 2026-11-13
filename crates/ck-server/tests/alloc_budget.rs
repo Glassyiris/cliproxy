@@ -298,7 +298,7 @@ async fn large_requests_stay_within_their_heap_budget() {
                 .unwrap()
         });
     });
-    let dir: PathBuf = std::env::temp_dir().join(format!("cpa-alloc-budget-{}", std::process::id()));
+    let dir: PathBuf = std::env::temp_dir().join(format!("cooker-alloc-budget-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("claude.json"),

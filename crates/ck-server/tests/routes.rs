@@ -799,7 +799,7 @@ async fn oauth_upstream(State(mock): State<Arc<OAuthMock>>, req: Request) -> Res
 async fn expired_token_is_used_then_refreshed_once_after_401() {
     let mock = Arc::new(OAuthMock::default());
     let upstream_url = serve(axum::Router::new().fallback(oauth_upstream).with_state(mock.clone())).await;
-    let dir = std::env::temp_dir().join(format!("cpa-routes-401-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-routes-401-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("claude.json");
     let metadata = serde_json::json!({"type":"claude","access_token":"sk-ant-oat-old-fake","refresh_token":"fake-refresh",
@@ -855,7 +855,7 @@ async fn expired_token_is_used_then_refreshed_once_after_401() {
 async fn a_siwc_map_never_refreshes_a_claude_credential_after_401() {
     let mock = Arc::new(OAuthMock::default());
     let upstream_url = serve(axum::Router::new().fallback(oauth_upstream).with_state(mock.clone())).await;
-    let dir = std::env::temp_dir().join(format!("cpa-routes-siwc-401-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-routes-siwc-401-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("claude.json");
     let metadata = serde_json::json!({"type":"claude","access_token":"sk-ant-oat-old-fake",

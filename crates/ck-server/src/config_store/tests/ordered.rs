@@ -31,7 +31,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let dir = std::env::temp_dir().join(format!("cpa-ordered-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-ordered-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let store = Arc::new(crate::testing::config_store(&dir.join("config.db")).unwrap());
         store

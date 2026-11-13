@@ -60,7 +60,7 @@ fn config_store_mode(path: &std::path::Path, create: bool) -> anyhow::Result<cra
     if create {
         std::fs::create_dir_all(parent)?;
     }
-    let root = std::fs::canonicalize(parent)?.join(".cook-router-test-storage");
+    let root = std::fs::canonicalize(parent)?.join(".cooker-test-storage");
     crate::config_store::ConfigStore::open_in(path, create, root)
 }
 
@@ -159,7 +159,7 @@ pub(crate) mod publication_effects {
 
     #[test]
     fn counter_is_target_scoped_and_counts_equal_byte_publications() {
-        let root = std::env::temp_dir().join(format!("cpa-publication-counter-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("cooker-publication-counter-{}", uuid::Uuid::new_v4()));
         let stores = ["one.db", "two.db"].map(|name| Arc::new(super::config_store(&root.join(name)).unwrap()));
         let backends = stores
             .each_ref()
@@ -279,7 +279,7 @@ pub fn without_auth_dir(yaml: &str) -> String {
 /// machine. The `.json` files a test staged in `config.auth_dir` and the files of
 /// `credentials` are saved to the database first.
 pub fn runtime(mut config: Config, mut credentials: Vec<Credential>, executors: Executors) -> Runtime {
-    let dir = std::env::temp_dir().join(format!("cpa-runtime-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-runtime-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&dir).expect("private runtime directory");
     let store = Arc::new(config_store(&dir.join("test.db")).expect("test database"));
     let original = config.auth_dir.clone();
@@ -485,7 +485,7 @@ mod tests {
             google: Default::default(),
         };
         let c = credential(&[], serde_json::json!({}));
-        let dir = std::env::temp_dir().join(format!("cpa-plain-runtime-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-plain-runtime-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let store = Arc::new(config_store(&dir.join("test.db")).unwrap());
         let db = crate::credential_store::CredentialDb::initialize(store).unwrap();

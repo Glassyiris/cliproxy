@@ -43,7 +43,7 @@ const POLLS = Number(opt.polls);
 const LOADS = Number(opt.loads);
 const REPS = Number(opt.reps);
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const out = path.resolve(opt.out || path.join(os.tmpdir(), "cook-router-perf", stamp));
+const out = path.resolve(opt.out || path.join(os.tmpdir(), "cooker-perf", stamp));
 mkdirSync(out, { recursive: true });
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);

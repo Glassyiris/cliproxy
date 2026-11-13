@@ -610,7 +610,7 @@ mod tests {
                 ck_core::registry::devin::validate(d).map(drop)
             }),
         ];
-        let dir = std::env::temp_dir().join(format!("cpa-catalog-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-catalog-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         for (name, data, validate) in catalogs {
             let official_hits = Arc::new(AtomicU64::new(0));
@@ -875,7 +875,7 @@ mod tests {
             openai: Default::default(),
             google: Default::default(),
         };
-        let dir = std::env::temp_dir().join(format!("cpa-updater-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-updater-{}", uuid::Uuid::new_v4()));
         let cfg = ck_core::config::Config::parse("").unwrap();
         let rt = Arc::new(crate::testing::runtime(cfg, Vec::new(), executors));
         start(&rt);

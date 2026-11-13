@@ -20,7 +20,7 @@ fn home_flags_are_unknown_and_home_variables_start_nothing() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("cook-router-no-home-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-no-home-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(dir.join("auth")).unwrap();
     std::fs::write(dir.join("config.yaml"), "config-version: 8\nserver:\n  port: 0\n").unwrap();
     let import = ["--local-model", "--vertex-import", "missing-key.json"];
@@ -50,7 +50,7 @@ fn go_single_dash_flags_are_rejected_and_discover_json_keeps_stdout_clean() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("cook-router-no-go-flags-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-no-go-flags-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for args in [
         &["-config", "config.yaml"][..],
@@ -59,7 +59,7 @@ fn go_single_dash_flags_are_rejected_and_discover_json_keeps_stdout_clean() {
     ] {
         let output = run(&dir, args, &[]);
         assert_eq!(output.status.code(), Some(2), "{args:?} was accepted");
-        assert!(!dir.join("cook.db").exists(), "{args:?} opened a database");
+        assert!(!dir.join("cooker.db").exists(), "{args:?} opened a database");
     }
     // An interface that does not exist: the scan finds nothing and sends nothing.
     let output = run(
@@ -69,13 +69,13 @@ fn go_single_dash_flags_are_rejected_and_discover_json_keeps_stdout_clean() {
             "--discover-timeout",
             "0",
             "--discover-include",
-            "cook-none0",
+            "cooker-none0",
         ],
         &[],
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     serde_json::from_str::<serde_json::Value>(&stdout).unwrap_or_else(|e| panic!("{e}: {stdout:?}"));
-    assert!(!dir.join("cook.db").exists());
+    assert!(!dir.join("cooker.db").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -85,7 +85,7 @@ fn a_possible_plugin_flag_before_discover_json_opens_no_database() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("cook-router-discover-order-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-discover-order-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("config.yaml"), "port: 0\n").unwrap();
     // Discovery loads no plugin, so the unknown flag is refused, as when it follows
@@ -98,7 +98,7 @@ fn a_possible_plugin_flag_before_discover_json_opens_no_database() {
             "--mine",
             "--discover-json",
             "--discover-include",
-            "cook-none0",
+            "cooker-none0",
         ],
         &[],
     );
@@ -109,6 +109,6 @@ fn a_possible_plugin_flag_before_discover_json_opens_no_database() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(output.stdout.is_empty(), "{}", String::from_utf8_lossy(&output.stdout));
-    assert!(!dir.join("cook.db").exists());
+    assert!(!dir.join("cooker.db").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }

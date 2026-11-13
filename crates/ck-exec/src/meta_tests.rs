@@ -18,7 +18,7 @@ struct TempDir(std::path::PathBuf);
 
 impl TempDir {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("cpa-meta-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("cooker-meta-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
     }

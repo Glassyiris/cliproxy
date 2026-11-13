@@ -44,7 +44,7 @@ async fn upstream() -> String {
 }
 
 fn scratch() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("cpa-live-capture-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-live-capture-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

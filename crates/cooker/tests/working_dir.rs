@@ -91,7 +91,7 @@ fn a_warning_before_the_runtime_starts_goes_to_the_log_file() {
 #[test]
 fn a_missing_working_dir_fails_before_anything_runs() {
     let output = Command::new(env!("CARGO_BIN_EXE_cooker"))
-        .args(["--working-dir=/nonexistent/cook-router-wd", "--vertex-import", "x.json"])
+        .args(["--working-dir=/nonexistent/cooker-wd", "--vertex-import", "x.json"])
         .current_dir(std::env::temp_dir())
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())

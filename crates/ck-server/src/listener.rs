@@ -442,7 +442,7 @@ mod tests {
             err.starts_with("failed to start HTTPS server: open /nonexistent/c.pem"),
             "{err}"
         );
-        let dir = std::env::temp_dir().join(format!("cpa-tls-mismatch-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-tls-mismatch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (cert, _) = self_signed(&dir);
         let other = dir.join("other");
@@ -493,7 +493,7 @@ mod tests {
     /// without a common protocol fails the handshake, and handlers see the peer address.
     #[tokio::test]
     async fn serves_https_h2_and_http1_by_alpn() {
-        let dir = std::env::temp_dir().join(format!("cpa-tls-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-tls-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (cert, key) = self_signed(&dir);
         let acceptor = tls_acceptor(&cfg(&format!(
@@ -621,7 +621,7 @@ mod tests {
                 },
             ),
         );
-        let dir = std::env::temp_dir().join(format!("cpa-tls-ws-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-tls-ws-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (cert, key) = self_signed(&dir);
         let acceptor = tls_acceptor(&cfg(&format!(

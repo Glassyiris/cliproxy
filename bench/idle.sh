@@ -44,9 +44,9 @@ SECONDS_=${3:-30}
 WARMUP=${WARMUP:-30}
 PORT=${PORT:-8341}
 KEY=sk-bench-client-key
-DIR=$(mktemp -d /tmp/cook-router-idle.XXXXXX)
+DIR=$(mktemp -d /tmp/cooker-idle.XXXXXX)
 # Samples live outside DIR: a write next to config.yaml is a file event the server sees.
-TMP=$(mktemp -d /tmp/cook-router-idle-samples.XXXXXX)
+TMP=$(mktemp -d /tmp/cooker-idle-samples.XXXXXX)
 trap 'kill "$PID" 2>/dev/null; wait "$PID" 2>/dev/null; rm -rf "$DIR" "$TMP"' EXIT
 
 mkdir -p "$DIR"
@@ -83,7 +83,7 @@ MGMT=bench-management-key
   printf ']}'
 } > "$TMP/credentials.json"
 
-CK_MANAGEMENT_PASSWORD="$MGMT" CK_DB="$DIR/cook.db" "$BIN" --config "$DIR/config.yaml" > "$DIR/server.log" 2>&1 &
+CK_MANAGEMENT_PASSWORD="$MGMT" CK_DB="$DIR/cooker.db" "$BIN" --config "$DIR/config.yaml" > "$DIR/server.log" 2>&1 &
 PID=$!
 ready=false
 for _ in $(seq 1 400); do

@@ -119,7 +119,7 @@ fn yaml(base: &str, strategy: &str) -> String {
 async fn proxy(name: &str, strategy: &str) -> Proxy {
     let up = Arc::new(Upstream::default());
     let base = serve(axum::Router::new().fallback(upstream).with_state(up.clone())).await;
-    let dir = std::env::temp_dir().join(format!("cpa-soonest-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-soonest-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let yaml = yaml(&base, strategy);
     let store = Arc::new(ConfigStore::memory_with(&yaml));

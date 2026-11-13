@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "cooker")]
 pub struct Cli {
-    /// Config database; defaults to CK_DB or cook.db beside --config.
+    /// Config database; defaults to CK_DB or cooker.db beside --config.
     #[arg(long, global = true, default_value = "")]
     db: String,
     #[arg(long, global = true, default_value = "config.yaml")]
@@ -243,7 +243,7 @@ mod tests {
         let store = ConfigStore::memory_with("access:\n  api-keys: [fake-client-secret]\nserver:\n  port: 8317\n");
         assert!(!export(&store, false).unwrap().contains("fake-client-secret"));
         assert!(export(&store, true).unwrap().contains("fake-client-secret"));
-        let dir = std::env::temp_dir().join(format!("cook-config-cli-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-config-cli-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let db = dir.join("invalid.db");
         let yaml = dir.join("invalid.yaml");

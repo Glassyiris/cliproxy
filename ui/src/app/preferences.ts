@@ -6,9 +6,9 @@ import { defaultPalette, isPalette, type Palette } from "../themes/site/index.ts
 // The only three choices this dashboard keeps across reloads. index.html reads the same keys
 // before first paint and sets <html data-theme>, <html data-palette> and <html lang>, which the
 // app then starts from.
-const THEME_KEY = "cook-router-theme";
-const PALETTE_KEY = "cook-router-palette";
-const LOCALE_KEY = "cook-router-locale";
+const THEME_KEY = "cooker-theme";
+const PALETTE_KEY = "cooker-palette";
+const LOCALE_KEY = "cooker-locale";
 
 export type ThemeMode = "system" | "light" | "dark";
 

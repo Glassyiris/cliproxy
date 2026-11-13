@@ -211,7 +211,7 @@ COPY --from=build /home/builder/out/cooker /usr/local/bin/cooker
 # The license, the MIT notices it carries forward, and the third-party licenses the binary needs.
 COPY LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES /usr/share/doc/cooker/
 USER cooker
-# The config database (/data/cook.db) and credentials live in /data; mount a volume there.
+# The config database (/data/cooker.db) and credentials live in /data; mount a volume there.
 # A first start imports /data/config.yaml when it exists, and otherwise starts with defaults
 # on port 8317. No VOLUME instruction: some hosts, Railway among them, refuse to build a
 # Dockerfile that has one.

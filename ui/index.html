@@ -19,9 +19,9 @@
       (function () {
         var root = document.documentElement, mode = null, palette = null, locale = null;
         try {
-          mode = localStorage.getItem("cook-router-theme");
-          palette = localStorage.getItem("cook-router-palette");
-          locale = localStorage.getItem("cook-router-locale");
+          mode = localStorage.getItem("cooker-theme");
+          palette = localStorage.getItem("cooker-palette");
+          locale = localStorage.getItem("cooker-locale");
         } catch (e) {}
         if (mode === "light" || mode === "dark") root.dataset.theme = mode;
         // Any stored palette but the default (Neutral, stored as nothing; a "neutral" kept from

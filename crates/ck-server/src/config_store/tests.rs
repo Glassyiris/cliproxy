@@ -176,8 +176,8 @@ fn history_hides_secrets_and_restore_keeps_the_current_ones() {
 
 #[test]
 fn a_deleted_key_leaves_no_trace_in_the_files() {
-    let dir = std::env::temp_dir().join(format!("cook-config-store-{}", uuid::Uuid::new_v4()));
-    let path = dir.join("cook.db");
+    let dir = std::env::temp_dir().join(format!("cooker-config-store-{}", uuid::Uuid::new_v4()));
+    let path = dir.join("cooker.db");
     let store = crate::testing::config_store(&path).unwrap();
     let secret = "sk-forget-me-0123456789";
     store
@@ -265,8 +265,8 @@ fn moves_reorder_list_entries() {
 
 #[test]
 fn owner_mutations_publish_current_memory_without_reloading() {
-    let dir = std::env::temp_dir().join(format!("cook-config-owner-{}", uuid::Uuid::new_v4()));
-    let server = std::sync::Arc::new(crate::testing::config_store(&dir.join("cook.db")).unwrap());
+    let dir = std::env::temp_dir().join(format!("cooker-config-owner-{}", uuid::Uuid::new_v4()));
+    let server = std::sync::Arc::new(crate::testing::config_store(&dir.join("cooker.db")).unwrap());
     server
         .commit(&[put("setting", "routing", json!({}))], "t", "", false)
         .unwrap();
@@ -361,7 +361,7 @@ fn collection_and_resource_preconditions_are_checked_inside_the_write() {
 
 #[test]
 fn unsupported_database_kinds_are_rejected_before_bootstrap() {
-    let dir = std::env::temp_dir().join(format!("cook-config-unsupported-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-config-unsupported-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let original = dir.join("original.db");
     let store = crate::testing::config_store(&original).unwrap();
@@ -416,8 +416,8 @@ fn public_digests_do_not_fingerprint_secrets() {
 
 #[test]
 fn snapshot_revision_and_rows_never_cross_owner_commits() {
-    let dir = std::env::temp_dir().join(format!("cook-config-snapshot-{}", uuid::Uuid::new_v4()));
-    let path = dir.join("cook.db");
+    let dir = std::env::temp_dir().join(format!("cooker-config-snapshot-{}", uuid::Uuid::new_v4()));
+    let path = dir.join("cooker.db");
     let store = Arc::new(crate::testing::config_store(&path).unwrap());
     store
         .commit(&[put("setting", "server", json!({"port":9000}))], "t", "", false)
@@ -459,8 +459,8 @@ fn limits_reject_oversized_states_and_operation_batches_atomically() {
 
 #[test]
 fn online_backup_is_consistent_and_never_overwrites_a_path() {
-    let dir = std::env::temp_dir().join(format!("cook-config-backup-{}", uuid::Uuid::new_v4()));
-    let store = crate::testing::config_store(&dir.join("cook.db")).unwrap();
+    let dir = std::env::temp_dir().join(format!("cooker-config-backup-{}", uuid::Uuid::new_v4()));
+    let store = crate::testing::config_store(&dir.join("cooker.db")).unwrap();
     store.import_yaml("server: {port: 9001}\n", "t", "").unwrap();
     let destination = dir.join("backup.db");
     store.backup(&destination).unwrap();
@@ -503,7 +503,7 @@ fn versioned_exports_preserve_scope_with_explicit_secret_access() {
 /// whole, whether the row is current or only in history, and the refusal names the kind.
 #[test]
 fn a_removed_resource_kind_refuses_the_database_and_a_clean_one_reopens() {
-    let dir = std::env::temp_dir().join(format!("cook-config-removed-kind-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-config-removed-kind-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let clean = dir.join("clean.db");
     let store = crate::testing::config_store(&clean).unwrap();
@@ -558,9 +558,9 @@ fn a_removed_resource_kind_refuses_the_database_and_a_clean_one_reopens() {
 
 #[test]
 fn stored_history_is_masked_on_read() {
-    let dir = std::env::temp_dir().join(format!("cook-config-history-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-config-history-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("cook.db");
+    let path = dir.join("cooker.db");
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch(SCHEMA).unwrap();
     conn.pragma_update(None, "user_version", SCHEMA_VERSION).unwrap();

@@ -109,7 +109,7 @@ fn tui_drives_the_management_api() {
 }
 
 async fn drive() {
-    let dir = std::env::temp_dir().join(format!("cpa-tui-e2e-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-tui-e2e-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let (base, management) = serve(&dir).await;
     let mut app = App::new(&base, "", None);

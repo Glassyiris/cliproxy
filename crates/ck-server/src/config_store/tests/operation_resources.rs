@@ -44,7 +44,7 @@ mod linux {
     }
 
     fn fixture() -> (PathBuf, PathBuf) {
-        let directory = std::env::temp_dir().join(format!("cook-operation-resources-{}", uuid::Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("cooker-operation-resources-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();
         let path = directory.join("config.db");
         (directory, path)
@@ -269,7 +269,7 @@ fn images_and_workspace_remain_private_before_and_after_installation() {
         }
     }
 
-    let dir = std::env::temp_dir().join(format!("cook-operation-privacy-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-operation-privacy-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&dir).unwrap();
     let path = dir.join("config.db");
     let store = crate::testing::config_store(&path).unwrap();

@@ -59,7 +59,7 @@ const secretExports = [];
 
 async function open(device, theme) {
   const context = await browser.newContext({ ...device, colorScheme: theme });
-  await context.addInitScript((t) => localStorage.setItem("cook-router-theme", t), theme);
+  await context.addInitScript((t) => localStorage.setItem("cooker-theme", t), theme);
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("request", (request) => {

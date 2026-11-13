@@ -97,7 +97,7 @@ async fn body_limit_answers_match_go() {
     let mut failures = Vec::new();
     for (i, case) in fixture.iter().enumerate() {
         let name = case["name"].as_str().unwrap();
-        let dir = std::env::temp_dir().join(format!("cpa-body-limit-{}-{i}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-body-limit-{}-{i}", std::process::id()));
         let (app, _, _) = app(&dir, case["yaml"].as_str().unwrap());
         let mut raw = base64::engine::general_purpose::STANDARD
             .decode(case["body_b64"].as_str().unwrap())
@@ -172,7 +172,7 @@ async fn body_limit_answers_match_go() {
 /// Go reads the limit from the current config on every request.
 #[tokio::test]
 async fn a_published_limit_applies_to_the_next_request() {
-    let dir = std::env::temp_dir().join(format!("cpa-body-limit-reload-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-body-limit-reload-{}", std::process::id()));
     let yaml = "config-version: 8\naccess:\n  api-keys:\n    - test-key\n";
     let (app, _, store) = app(&dir, yaml);
     let send = |app: axum::Router| async move {
@@ -195,7 +195,7 @@ async fn a_published_limit_applies_to_the_next_request() {
 #[tokio::test]
 async fn a_reload_during_a_request_keeps_its_limit() {
     use futures_util::StreamExt as _;
-    let dir = std::env::temp_dir().join(format!("cpa-body-limit-mid-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-body-limit-mid-{}", std::process::id()));
     let yaml = "config-version: 8\nserver:\n  max-request-body-bytes: 128\naccess:\n  api-keys:\n    - test-key\n";
     let (app, rt, store) = app(&dir, yaml);
     let decoded = format!(r#"{{"model":"gpt-5","input":"{}"}}"#, "z".repeat(512));

@@ -26,7 +26,7 @@ const DEFAULT_SUBTYPES: [&str; 5] = [
     "_generate-content",
     "_interactions",
 ];
-const DEFAULT_INSTANCE_PREFIX: &str = "CPA-";
+const DEFAULT_INSTANCE_PREFIX: &str = "Cooker-";
 const MAX_TXT_RECORD_BYTES: usize = 255;
 const MAX_TXT_BYTES: usize = 400;
 const MAX_BROWSE_TXT_RECORDS: usize = 64;
@@ -157,7 +157,11 @@ pub fn state_dir() -> Option<PathBuf> {
     if let Some(w) = trimmed("CK_WRITABLE_PATH") {
         return Some(Path::new(&w).join("discovery"));
     }
-    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    user_state_dir(&|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+}
+
+/// The user config directory's `cooker/discovery`; `env` reads one environment variable.
+fn user_state_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     let config_dir = if cfg!(target_os = "macos") {
         env("HOME").map(|h| Path::new(&h).join("Library/Application Support"))
     } else if cfg!(windows) {
@@ -168,7 +172,7 @@ pub fn state_dir() -> Option<PathBuf> {
             .map(PathBuf::from)
             .or_else(|| env("HOME").map(|h| Path::new(&h).join(".config")))
     };
-    config_dir.map(|d| d.join("cpa").join("discovery"))
+    config_dir.map(|d| d.join("cooker").join("discovery"))
 }
 
 static INSTANCE_IDS: Mutex<BTreeMap<PathBuf, String>> = Mutex::new(BTreeMap::new());
@@ -249,7 +253,7 @@ pub fn sanitize_instance_name(name: &str) -> String {
     truncate_chars(go_trim(&clean), 63).to_owned()
 }
 
-/// Go `FormatInstanceName`: `CPA-<ID>` or `<name>-<ID>` within the 63-byte label limit.
+/// Go `FormatInstanceName`: `Cooker-<ID>` or `<name>-<ID>` within the 63-byte label limit.
 pub fn format_instance_name(custom: &str, id: &str) -> String {
     let id = if is_hex4(id) { id.go_upper() } else { "0001".into() };
     let suffix = format!("-{id}");

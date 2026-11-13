@@ -9,7 +9,7 @@ for (const name of ["localStorage", "sessionStorage", "indexedDB"])
 test("forget tells the other tabs once, and touches no web storage", async () => {
   // Another tab: a second listener on the channel, as a page in another tab would hold.
   const heard: string[] = [];
-  const watcher = new BroadcastChannel("cook-router.session");
+  const watcher = new BroadcastChannel("cooker.session");
   watcher.onmessage = (event: MessageEvent) => heard.push(String(event.data));
   const signedOut = new Promise<void>((resolve) => {
     const stop = onForgotten(() => {
@@ -29,7 +29,7 @@ test("forget tells the other tabs once, and touches no web storage", async () =>
 test("other messages on the channel are not a sign-out", async () => {
   let calls = 0;
   const stop = onForgotten(() => calls++);
-  const other = new BroadcastChannel("cook-router.session");
+  const other = new BroadcastChannel("cooker.session");
   other.postMessage("something-else");
   await new Promise((resolve) => setTimeout(resolve, 20));
   other.close();

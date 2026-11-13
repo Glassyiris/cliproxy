@@ -87,7 +87,7 @@ async fn serve(app: axum::Router) -> String {
 }
 
 fn auth_dir(name: &str, files: &[(&str, &str)]) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("cpa-it-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-it-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for (file, json) in files {
         std::fs::write(dir.join(file), json).unwrap();

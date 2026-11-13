@@ -7,7 +7,7 @@ fn golden() -> Value {
 }
 
 fn temp_root() -> PathBuf {
-    let root = std::env::temp_dir().join(format!("cpa-siwc-bind-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("cooker-siwc-bind-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(root.join("auth")).unwrap();
     std::fs::create_dir_all(root.join("out")).unwrap();
     plain_path(std::fs::canonicalize(root).unwrap())

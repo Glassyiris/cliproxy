@@ -58,7 +58,7 @@ fn assert_standalone_private(path: &Path) {
 
 #[test]
 fn complete_state_exports_without_any_previous_database_or_credential_cache() {
-    let root = std::env::temp_dir().join(format!("cook-encode-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("cooker-encode-{}", uuid::Uuid::new_v4()));
     let clean = root.join("clean");
     std::fs::create_dir_all(&clean).unwrap();
     let source = root.join("source.db");
@@ -198,7 +198,7 @@ fn complete_state_exports_without_any_previous_database_or_credential_cache() {
 
 #[test]
 fn empty_and_initialized_memory_states_encode_without_a_disk_source() {
-    let root = std::env::temp_dir().join(format!("cook-encode-memory-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("cooker-encode-memory-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     for initialized in [false, true] {
         let store = ConfigStore::memory();
@@ -222,7 +222,7 @@ fn empty_and_initialized_memory_states_encode_without_a_disk_source() {
 
 #[test]
 fn ordinary_publication_encodes_only_the_admitted_candidate() {
-    let root = std::env::temp_dir().join(format!("cook-encode-publication-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("cooker-encode-publication-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let path = root.join("source.db");
     let store = crate::testing::config_store(&path).unwrap();
@@ -271,9 +271,9 @@ fn ordinary_publication_encodes_only_the_admitted_candidate() {
 
 #[test]
 fn checkpoint_failures_do_not_retain_an_uninstalled_candidate() {
-    let root = std::env::temp_dir().join(format!("cook-checkpoint-fault-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("cooker-checkpoint-fault-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
-    let path = root.join("cook.db");
+    let path = root.join("cooker.db");
     let store = Arc::new(crate::testing::config_store(&path).unwrap());
     store.import_yaml("server: {port: 8921}\n", "fixture", "").unwrap();
     let db = CredentialDb::initialize(store.clone()).unwrap();
@@ -302,7 +302,7 @@ fn checkpoint_failures_do_not_retain_an_uninstalled_candidate() {
     assert_standalone_private(&path);
     let clean = root.join("clean");
     std::fs::create_dir(&clean).unwrap();
-    let copy = clean.join("cook.db");
+    let copy = clean.join("cooker.db");
     std::fs::copy(&path, &copy).unwrap();
     let recovered_store = Arc::new(crate::testing::config_store(&copy).unwrap());
     let recovered = CredentialDb::initialize(recovered_store.clone()).unwrap();
@@ -321,9 +321,9 @@ fn checkpoint_failures_do_not_retain_an_uninstalled_candidate() {
 #[test]
 fn cold_copies_stay_lossless_while_publications_compete() {
     use std::io::Read as _;
-    let root = std::env::temp_dir().join(format!("cook-copy-images-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("cooker-copy-images-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
-    let path = root.join("cook.db");
+    let path = root.join("cooker.db");
     let store = Arc::new(crate::testing::config_store(&path).unwrap());
     let commit = |store: &ConfigStore, port: u16| {
         store

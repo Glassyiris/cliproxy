@@ -1003,7 +1003,7 @@ async fn tool_search_responses_match_go() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-        let dir = std::env::temp_dir().join(format!("cpa-claude-tool-search-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-claude-tool-search-{name}-{}", std::process::id()));
         let text = scenario["config"]
             .as_str()
             .unwrap()
@@ -1171,7 +1171,7 @@ async fn m1_0041_to_m1_0056_config_keys_match_go() {
 
 async fn scenarios_match_go(fixture: &str, run: &str, selected: fn(&str) -> bool) {
     let fixture: Value = serde_json::from_str(fixture).unwrap();
-    let root = std::env::temp_dir().join(format!("cpa-claude-go-{run}-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("cooker-claude-go-{run}-{}", std::process::id()));
     let executor = ClaudeExecutor::with_client(wreq::Client::new(), DEFAULT_BASE_URL);
     let prompt_id = regex::Regex::new(r"cc_prompt_id=[0-9a-f-]{36};").unwrap();
     for scenario in fixture["scenarios"].as_array().unwrap() {
@@ -2164,7 +2164,7 @@ async fn compat_replay_sequence_matches_go() {
         .unwrap();
     let executor = ClaudeExecutor::with_client(client, DEFAULT_BASE_URL);
     let usage = Arc::new(Usage::default());
-    let root = std::env::temp_dir().join(format!("cpa-claude-replay-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("cooker-claude-replay-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     for (step, scenario) in steps.iter().enumerate() {
         let text = scenario["config"]

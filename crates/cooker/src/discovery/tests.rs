@@ -1,8 +1,9 @@
 //! Replays outputs recorded from Go's discovery code at 6fecc6e
 //! (tests/reference/discovery -> tests/fixtures/discovery_*.json), with Go's product id
-//! `cliproxyapi` replaced by `cooker` in the recordings. Go's scan read interface
-//! filters from the top-level `discovery` key; cooker reads `server.discovery`, so the
-//! replay moves each recorded `discovery:` section under `server:` (`under_server`).
+//! `cliproxyapi` replaced by `cooker` and its `CPA-` instance prefix by `Cooker-` in the
+//! recordings. Go's scan read interface filters from the top-level `discovery` key; cooker
+//! reads `server.discovery`, so the replay moves each recorded `discovery:` section under
+//! `server:` (`under_server`).
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -19,8 +20,12 @@ fn fixture(name: &str) -> Value {
         "cmd" => include_str!("../../tests/fixtures/discovery_cmd_go.json"),
         _ => include_str!("../../tests/fixtures/discovery_main_go.json"),
     };
-    // The recordings name the product by its earlier id.
-    serde_json::from_str(&text.replace("cook-router", PRODUCT)).expect("fixture JSON")
+    // The recordings name the product and the default instance prefix by their earlier ids.
+    let text = text
+        .replace("cook-router", PRODUCT)
+        .replace("CPA-", DEFAULT_INSTANCE_PREFIX)
+        .replace("cpa-", &DEFAULT_INSTANCE_PREFIX.to_ascii_lowercase());
+    serde_json::from_str(&text).expect("fixture JSON")
 }
 
 /// A recorded scan config with its top-level `discovery:` section (always the last key)
@@ -282,7 +287,7 @@ fn service_spec_follows_config_bind_host_and_tls() {
 
 #[test]
 fn instance_id_persists_and_reuses_a_valid_file() {
-    let dir = std::env::temp_dir().join(format!("cpa-discovery-id-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-discovery-id-{}", std::process::id()));
     let fresh = dir.join("fresh");
     let id = instance_id(Some(&fresh));
     assert!(id.len() == 4 && id.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase()));
@@ -304,7 +309,7 @@ fn instance_id_persists_and_reuses_a_valid_file() {
     assert_eq!(instance_id(Some(&given)), "AB12", "cached per directory");
     let _ = std::fs::rename(
         &dir,
-        std::env::temp_dir().join(format!("cpa-trash-{}", std::process::id())),
+        std::env::temp_dir().join(format!("cooker-trash-{}", std::process::id())),
     );
 }
 
@@ -335,7 +340,7 @@ fn gw(v: Value) -> DiscoveredService {
 fn gateways() -> Vec<DiscoveredService> {
     vec![
         gw(serde_json::json!({
-            "instance_name": "CPA-8F3B", "service_type": "_ai-gateway._tcp", "domain": "local.", "host": "box.local.",
+            "instance_name": "Cooker-8F3B", "service_type": "_ai-gateway._tcp", "domain": "local.", "host": "box.local.",
             "port": 8317, "ipv4": ["192.168.1.5", "10.0.0.2"], "ipv6": ["fe80::1", "2001:db8::5"],
             "protocols": ["chat-completions", "responses"], "features": ["chat", "evil\u{1b}[31m"],
             "product": "cooker", "auth_required": true, "auth_methods": ["api_key"],
@@ -398,7 +403,7 @@ fn terminal_sanitizing_and_filters_match_go() {
     for case in f["interface_lists"].as_array().unwrap() {
         assert_eq!(cli::parse_interface_list(&list(&case["in"])), list(&case["out"]));
     }
-    let dir = std::env::temp_dir().join(format!("cpa-discover-filters-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-discover-filters-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("config.yaml");
     for case in f["config_filters"].as_array().unwrap() {
@@ -446,7 +451,7 @@ fn terminal_sanitizing_and_filters_match_go() {
     assert!(refused.contains("anchor name is defined more than once"), "{refused}");
     let _ = std::fs::rename(
         &dir,
-        std::env::temp_dir().join(format!("cpa-trash-f-{}", std::process::id())),
+        std::env::temp_dir().join(format!("cooker-trash-f-{}", std::process::id())),
     );
     let cli_filters = (vec!["docker0".to_owned()], vec![]);
     let cfg_filters = (vec!["en0".to_owned()], vec!["awdl0".to_owned()]);
@@ -472,4 +477,21 @@ fn go_durations() {
     ] {
         assert_eq!(cli::go_duration(Duration::from_millis(ms)), want);
     }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn state_dir_lives_under_the_cooker_config_directory() {
+    let vars = |pairs: &'static [(&str, &str)]| {
+        move |k: &str| pairs.iter().find(|(name, _)| *name == k).map(|(_, v)| (*v).to_owned())
+    };
+    assert_eq!(
+        user_state_dir(&vars(&[("XDG_CONFIG_HOME", "/xdg"), ("HOME", "/home/u")])),
+        Some(PathBuf::from("/xdg/cooker/discovery"))
+    );
+    assert_eq!(
+        user_state_dir(&vars(&[("XDG_CONFIG_HOME", "relative"), ("HOME", "/home/u")])),
+        Some(PathBuf::from("/home/u/.config/cooker/discovery"))
+    );
+    assert_eq!(user_state_dir(&vars(&[])), None);
 }

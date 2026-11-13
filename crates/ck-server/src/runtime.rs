@@ -4296,7 +4296,7 @@ pub(crate) mod tests {
     /// for changed credentials (which hands the caller the new credential).
     #[test]
     fn a_refresh_meeting_an_edit_then_a_new_registration_fails_as_stale() {
-        let dir = std::env::temp_dir().join(format!("cpa-refresh-stale-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-refresh-stale-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let credential = {
             let dir = dir.clone();
@@ -4380,7 +4380,7 @@ pub(crate) mod tests {
         metadata.insert("type".into(), provider.into());
         metadata.insert("disabled".into(), disabled.into());
         thread_local! {
-            static DIR: std::path::PathBuf = std::env::temp_dir().join(format!("cpa-runtime-credentials-{}", uuid::Uuid::new_v4()));
+            static DIR: std::path::PathBuf = std::env::temp_dir().join(format!("cooker-runtime-credentials-{}", uuid::Uuid::new_v4()));
         }
         DIR.with(|dir| {
             std::fs::create_dir_all(dir).unwrap();
@@ -4536,7 +4536,7 @@ pub(crate) mod tests {
 
     /// Seeds only explicit private fixtures.
     fn private_backend(credentials: &[Credential]) -> Arc<crate::credential_store::CredentialDb> {
-        let dir = std::env::temp_dir().join(format!("cpa-runtime-db-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-runtime-db-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let (_, backend) = sqlite_backend(&dir);
         for credential in credentials {
@@ -4581,7 +4581,7 @@ pub(crate) mod tests {
     }
     #[test]
     fn failed_sqlite_saves_never_publish_patches_equal_file_commits_or_normalization() {
-        let dir = std::env::temp_dir().join(format!("cpa-runtime-sqlite-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-runtime-sqlite-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let before = br#"{"type":"codex","access_token":"before","refresh_token":"rt"}"#;
         std::fs::write(dir.join("codex.json"), before).unwrap();
@@ -4634,7 +4634,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sqlite_file_commit_checks_sql_cas_after_working_file_removal() {
-        let dir = std::env::temp_dir().join(format!("cpa-runtime-cas-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-runtime-cas-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let before = br#"{"type":"codex","access_token":"before"}"#;
         std::fs::write(dir.join("codex.json"), before).unwrap();
@@ -4689,7 +4689,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sqlite_equal_file_commit_preserves_raw_sql_bytes_after_working_file_removal() {
-        let dir = std::env::temp_dir().join(format!("cpa-runtime-raw-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-runtime-raw-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let before = b"{\n  \"type\": \"codex\",\n  \"access_token\": \"before\"\n}\n";
         let document: Value = serde_json::from_slice(before).unwrap();
@@ -4737,7 +4737,7 @@ pub(crate) mod tests {
 
     #[test]
     fn patch_persists_atomically_preserves_unknown_fields_and_rejects_stale() {
-        let dir = std::env::temp_dir().join(format!("cpa-store-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-store-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("claude-a.json");
         std::fs::write(
@@ -4815,7 +4815,7 @@ pub(crate) mod tests {
     /// left.
     #[test]
     fn a_document_save_never_undoes_a_concurrent_patch() {
-        let dir = std::env::temp_dir().join(format!("cpa-save-patch-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-save-patch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("refreshed.json"), r#"{"type":"claude","refresh_token":"r0"}"#).unwrap();
@@ -4896,7 +4896,7 @@ pub(crate) mod tests {
         name: &str,
         files: &[&str],
     ) -> (std::path::PathBuf, ck_core::config::Config, Arc<CredentialStore>) {
-        let dir = std::env::temp_dir().join(format!("cpa-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for file in files {
@@ -5061,7 +5061,7 @@ pub(crate) mod tests {
     /// A scanned SQLite document cannot overwrite a later durable save or deletion.
     #[test]
     fn a_stale_scan_cannot_undo_a_later_write() {
-        let dir = std::env::temp_dir().join(format!("cpa-stale-scan-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-stale-scan-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("synthetic.json");
         std::fs::write(&path, br#"{"type":"codex","prefix":"pfx-8"}"#).unwrap();
@@ -5721,7 +5721,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn cooldown_sqlite_constructor_flushes_on_shutdown() {
-        let dir = std::env::temp_dir().join(format!("cpa-cooldown-sqlite-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-cooldown-sqlite-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let (database, backend) = sqlite_backend(&dir);
         let auth = backend.auth_dir().join("a.json");
@@ -5768,7 +5768,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn a_failed_final_cooldown_checkpoint_makes_shutdown_incomplete() {
-        let dir = std::env::temp_dir().join(format!("cpa-cooldown-failure-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-cooldown-failure-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let (database, backend) = sqlite_backend(&dir);
         backend
@@ -5820,7 +5820,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn cooldown_credential_normalization_leaves_async_worker_and_runs_once_per_revision() {
-        let dir = std::env::temp_dir().join(format!("cpa-result-sqlite-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-result-sqlite-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("a.json"),
@@ -6026,7 +6026,7 @@ pub(crate) mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let token_url = format!("http://{}/oauth/token", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let dir = std::env::temp_dir().join(format!("cpa-prepare-cancel-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-prepare-cancel-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("codex.json");
         std::fs::write(
@@ -6147,7 +6147,7 @@ pub(crate) mod tests {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let token_url = format!("http://{}/oauth/token", listener.local_addr().unwrap());
             tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-            let dir = std::env::temp_dir().join(format!("cpa-refresh-stale-{}", uuid::Uuid::new_v4()));
+            let dir = std::env::temp_dir().join(format!("cooker-refresh-stale-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
             let path = dir.join("codex.json");
             std::fs::write(
@@ -6271,7 +6271,7 @@ pub(crate) mod tests {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}", listener.local_addr().unwrap());
             tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-            let dir = std::env::temp_dir().join(format!("cpa-codex-disk-{}", uuid::Uuid::new_v4()));
+            let dir = std::env::temp_dir().join(format!("cooker-codex-disk-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
             for (name, body) in files {
                 std::fs::write(dir.join(name), body.to_string()).unwrap();
@@ -6406,7 +6406,7 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn pending_publication_preserves_two_inflight_codex_grants() {
         let mock = CodexDisk::gated(&[], 0).await;
-        let root = std::env::temp_dir().join(format!("cpa-pending-grants-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("cooker-pending-grants-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
         let (database, backend) = sqlite_backend(&root);
         database
@@ -6638,7 +6638,7 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn pending_publication_preserves_generic_oauth_grants_without_admitting_old_tokens() {
         let mock = CodexDisk::gated(&[], 0).await;
-        let root = std::env::temp_dir().join(format!("cpa-pending-oauth-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("cooker-pending-oauth-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
         let (database, backend) = sqlite_backend(&root);
         for name in ["a.json", "b.json", "c.json"] {
@@ -6829,7 +6829,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_private_codex_backend_prepares_its_canonical_documents_before_registration() {
-        let dir = std::env::temp_dir().join(format!("cpa-canonical-prepare-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-canonical-prepare-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let file = codex_file(
             ("keep", chrono::Duration::days(5)),
@@ -6972,7 +6972,7 @@ pub(crate) mod tests {
     /// no grant started) after shutdown. Polled by hand, so both are ready at once.
     #[tokio::test(start_paused = true)]
     async fn a_lock_wait_stops_at_shutdown_even_when_the_lock_frees() {
-        let dir = std::env::temp_dir().join(format!("cpa-lock-wait-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-lock-wait-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("codex.json");
         let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
@@ -7928,7 +7928,7 @@ pub(crate) mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let token_url = format!("http://{}/oauth/token", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let dir = std::env::temp_dir().join(format!("cpa-refresh-401-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-refresh-401-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let expires = (chrono::Utc::now() + chrono::Duration::days(9)).to_rfc3339();
         std::fs::write(
@@ -8323,7 +8323,7 @@ pub(crate) mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let dir = std::env::temp_dir().join(format!("cpa-refresh-fail-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-refresh-fail-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("claude-backoff.json");
         std::fs::write(
@@ -8490,7 +8490,7 @@ pub(crate) mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let dir = std::env::temp_dir().join(format!("cpa-{name}-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-{name}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(format!("{name}.json")), file.to_string()).unwrap();
         let mut cfg = Config::parse("").unwrap();
@@ -8794,7 +8794,7 @@ pub(crate) mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let dir = std::env::temp_dir().join(format!("cpa-refresh-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-refresh-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         for id in ids {
             std::fs::write(

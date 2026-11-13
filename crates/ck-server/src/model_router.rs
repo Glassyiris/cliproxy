@@ -1697,7 +1697,7 @@ mod tests {
             r#"{"data":[{"name":"Top One","evaluations":{"artificial_analysis_intelligence_index":70},"artificial_analysis_intelligence_index_cost":{"cost_per_task":{"total_cost":3}}}]}"#
         }))
         .await;
-        let cache = std::env::temp_dir().join(format!("cpa-router-aa-{}.json", std::process::id()));
+        let cache = std::env::temp_dir().join(format!("cooker-router-aa-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&cache);
         let (_url, _seen, _, rt) = proxy(&format!(
             "artificial-analysis:\n  api-key: aa-key\n  url: {aa}/models\n  cache-file: {}\n",

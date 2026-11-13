@@ -61,7 +61,7 @@ fn start(spec: &ServiceSpec) -> Result<Responder, String> {
     }
     spec.instance_name = super::sanitize_instance_name(&spec.instance_name);
     if spec.instance_name.is_empty() {
-        spec.instance_name = "CPA-0001".into();
+        spec.instance_name = "Cooker-0001".into();
     }
     let primary = std::iter::once(spec.service_type.clone())
         .chain(

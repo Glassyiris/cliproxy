@@ -2,7 +2,7 @@
 // every request, and no script can read it. This module carries the sign-out to the other tabs,
 // which share that cookie.
 
-const CHANNEL = "cook-router.session";
+const CHANNEL = "cooker.session";
 const SIGNED_OUT = "signed-out";
 function channel(): BroadcastChannel | null {
   try {

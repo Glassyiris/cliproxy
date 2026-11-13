@@ -2,14 +2,14 @@
 
 > **Design contract:** [State and concurrency](STATE-AND-CONCURRENCY.md) records the single-owner, memory-snapshot, callback, recovery and single-portable-file invariants of the configuration service. Interface names and code layout may evolve; that model must not drift. The operational details below describe the implemented behavior; the limits it does not prove are listed in that document.
 
-SQLite is the sole durable authority for configuration and OAuth credentials. Select the database with `--db PATH`, then `CK_DB`; otherwise it is `cook.db` beside the `--config` path (whose default is `config.yaml`). Use the same database path for the server, login commands and config commands. While the server runs it owns that database: change it through the dashboard, `/admin/v1` or `--management-base-url`, not through an offline command.
+SQLite is the sole durable authority for configuration and OAuth credentials. Select the database with `--db PATH`, then `CK_DB`; otherwise it is `cooker.db` beside the `--config` path (whose default is `config.yaml`). Use the same database path for the server, login commands and config commands. While the server runs it owns that database: change it through the dashboard, `/admin/v1` or `--management-base-url`, not through an offline command.
 
 YAML is a first-import format, not a watched runtime file. A first start imports the selected `--config` file, or `./config.yaml` when the flag is absent; subsequent starts do not read it. Only the current layout is accepted: pre-v8 keys such as `port`, `auth-dir` or `claude-api-key` are rejected as unknown settings. Prefer an explicit import before starting the server:
 
 ```sh
-cooker --db ~/.cook-router/cook.db config validate config.yaml
-cooker --db ~/.cook-router/cook.db config import config.yaml
-cooker --db ~/.cook-router/cook.db
+cooker --db ~/.cooker/cooker.db config validate config.yaml
+cooker --db ~/.cooker/cooker.db config import config.yaml
+cooker --db ~/.cooker/cooker.db
 ```
 
 There is no comment-preserving YAML save, file watcher or asynchronous YAML mirror. Change settings through the dashboard or `/admin/v1`; a successful atomic commit publishes the new runtime projection. Startup-only settings report `restart_required`, rather than silently claiming they are live. The settings and YAML examples below describe the YAML import and runtime projection shapes, **not the canonical persisted schema**. The store persists typed resources with stable IDs and revisions. Import preserves OAuth-only provider scope; unsupported or invalid input must be reviewed, not assumed to be silently dropped.
@@ -21,13 +21,13 @@ Accepted commands deliver configuration views directly. Credential changes wake 
 Without `--management-base-url`, these commands are offline. `config import` takes exclusive ownership, so a running service using the same database refuses it. `config validate`, `config export`, `config backup` and `config listener` only read: with the service running they read its published `--db` file without taking ownership. Copying that file directly is also a complete backup.
 
 ```sh
-cook-router --db cook.db config import config.yaml       # FILE=- reads stdin
-cook-router --db cook.db config validate config.yaml     # validate a candidate
-cook-router --db cook.db config validate                 # validate stored config
-cook-router --db cook.db config export --output export.json
-cook-router --db cook.db config export --secrets --output private-export.json
-cook-router --db cook.db config backup private-backup.db
-cook-router --db cook.db config listener                 # committed bind settings
+cooker --db cooker.db config import config.yaml       # FILE=- reads stdin
+cooker --db cooker.db config validate config.yaml     # validate a candidate
+cooker --db cooker.db config validate                 # validate stored config
+cooker --db cooker.db config export --output export.json
+cooker --db cooker.db config export --secrets --output private-export.json
+cooker --db cooker.db config backup private-backup.db
+cooker --db cooker.db config listener                 # committed bind settings
 ```
 
 To import into a running service, explicitly select its management endpoint and key:
@@ -120,7 +120,7 @@ Keep the `--db` snapshot in a private persistent directory writable by the servi
 
 The working checkpoint lives at `<TMPDIR>/cooker/<canonical-db-path-hash>/live.db`. SQLite operations use DELETE journaling and transient connections; the checkpoint is rebuilt from canonical memory. Its directory is private (0700); database images and transient journals are private (0600). Published snapshots do not depend on WAL/SHM files.
 
-Only one service or offline command may own a selected database. Before workspace inspection or SQLite bootstrap, it takes a nonblocking native file lock under `<snapshot-parent>/.cook-router-owners/<database-name>.lock`, using the canonical database path. The guard is held through workspace cleanup, so another process cannot split ownership by using a different TMPDIR or racing shutdown. Guard files are generated ownership bookkeeping, **not backup or restore inputs**; workspace cleanup never unlinks them. Do not delete them beneath an active owner or contender.
+Only one service or offline command may own a selected database. Before workspace inspection or SQLite bootstrap, it takes a nonblocking native file lock under `<snapshot-parent>/.cooker-owners/<database-name>.lock`, using the canonical database path. The guard is held through workspace cleanup, so another process cannot split ownership by using a different TMPDIR or racing shutdown. Guard files are generated ownership bookkeeping, **not backup or restore inputs**; workspace cleanup never unlinks them. Do not delete them beneath an active owner or contender.
 
 Offline writes, including `config import` and local logins or Vertex imports, refuse a database another process owns, even when its management API is unreachable. Read-only `config export`, `config validate`, `config backup` and `config listener` are not competing mutations: while another process owns the database they read its published snapshot file read-only, without taking ownership or touching the working checkpoint. They see the latest completed publication, which can trail an in-flight write.
 
@@ -357,7 +357,7 @@ A model router is a model name, such as `smart`, that picks the model and effort
 ```yaml
 artificial-analysis:
   api-key: aa-...            # without one, nothing is fetched
-  cache-file: /var/lib/cook-router/artificial-analysis.json   # optional: survives restarts
+  cache-file: /var/lib/cooker/artificial-analysis.json   # optional: survives restarts
 
 api-keys:
   openai-compatibility:

@@ -191,7 +191,7 @@ test("a sign-in answered after a sign-out elsewhere ends the session it set", as
 /** What the other tabs hear on the sign-out channel while `work` runs. */
 async function heardDuring(work: (heard: string[]) => Promise<void>) {
   const heard: string[] = [];
-  const otherTab = new BroadcastChannel("cook-router.session");
+  const otherTab = new BroadcastChannel("cooker.session");
   otherTab.onmessage = (event: MessageEvent) => heard.push(String(event.data));
   try {
     await work(heard);

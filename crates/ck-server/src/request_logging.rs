@@ -1715,7 +1715,7 @@ mod tests {
     }
 
     fn scratch() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("cpa-request-log-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-request-log-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

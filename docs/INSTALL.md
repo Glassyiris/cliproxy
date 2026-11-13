@@ -4,7 +4,7 @@ cooker is one executable, `cooker`, with the dashboard built in. It ships as the
 
 ## Docker
 
-The image runs as uid and gid 10001, exposes 8317, works in `/data` and runs `cook-router` with no default arguments. Without `--config`, a first start imports `./config.yaml` (`/data/config.yaml`) when it exists, and the database is `cook.db` beside it (`/data/cook.db`).
+The image runs as uid and gid 10001, exposes 8317, works in `/data` and runs `cooker` with no default arguments. Without `--config`, a first start imports `./config.yaml` (`/data/config.yaml`) when it exists, and the database is `cooker.db` beside it (`/data/cooker.db`).
 
 ```sh
 mkdir -m 700 -p data
@@ -14,7 +14,7 @@ docker run -d --name cooker -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e CK_MA
 
 To build the image yourself, run `docker build -t cooker .` in a checkout and use `cooker` as the image name. The build compiles BoringSSL and needs about 2 GB of memory; on a small machine add `--build-arg BUILD_JOBS=1`.
 
-On a fresh volume the first start creates `/data/cook.db` from `/data/config.yaml` when that file exists, and otherwise from the defaults with `server.port: 8317`. Later starts use `/data/cook.db`, not changes to the YAML. To set client keys before the first start, put a file like this in `data/`:
+On a fresh volume the first start creates `/data/cooker.db` from `/data/config.yaml` when that file exists, and otherwise from the defaults with `server.port: 8317`. Later starts use `/data/cooker.db`, not changes to the YAML. To set client keys before the first start, put a file like this in `data/`:
 
 ```yaml
 server:
@@ -31,7 +31,7 @@ Docker bridge requests are non-local. Setting `CK_MANAGEMENT_PASSWORD` admits th
 
 On a machine without a browser, such as a server you reach over SSH, keep the port published on `127.0.0.1` and open an SSH tunnel from your own computer, for example `ssh -L 8317:127.0.0.1:8317 you@server`, then open the dashboard address there. [Tailscale](MULTI-ACCOUNT.md#reach-the-proxy-from-other-machines) works too. Never listen on `0.0.0.0` without client keys.
 
-The image declares no `VOLUME`: mount `/data` as a persistent directory so published database snapshots survive replacement. Keep OS tmp writable for the private working database; it does not need persistent storage. Every acknowledged change is already in the published `/data/cook.db`, so losing tmp with the container only means the next start seeds a fresh working database from that file; a change reported as failed may be lost with it. A YAML-only mount, remote config store or unmounted container filesystem is insufficient. On Railway attach a Volume at `/data`; its volume ownership must permit writes by the service user (see [Railway permissions](https://docs.railway.com/volumes#permissions)). The image runs as UID/GID 10001. Older images up to 0.2.5 could create an anonymous `/data` volume; preserve/import its private legacy data before replacing it.
+The image declares no `VOLUME`: mount `/data` as a persistent directory so published database snapshots survive replacement. Keep OS tmp writable for the private working database; it does not need persistent storage. Every acknowledged change is already in the published `/data/cooker.db`, so losing tmp with the container only means the next start seeds a fresh working database from that file; a change reported as failed may be lost with it. A YAML-only mount, remote config store or unmounted container filesystem is insufficient. On Railway attach a Volume at `/data`; its volume ownership must permit writes by the service user (see [Railway permissions](https://docs.railway.com/volumes#permissions)). The image runs as UID/GID 10001. Older images up to 0.2.5 could create an anonymous `/data` volume; preserve/import its private legacy data before replacing it.
 
 The service must write the snapshot directory for atomic replacement and its OS temporary directory for working databases. Keep both private; SQLite contains configuration secrets and OAuth tokens. Copy the `--db` file directly for a complete live backup, or use `config backup`. See [Database safety](CONFIGURATION.md#database-safety-and-backup). Publish on loopback unless other machines need access.
 
@@ -41,7 +41,7 @@ Browser sign-in inside a container needs the OAuth callback ports (54545 for Cla
 docker exec -it cooker cooker --management-base-url http://127.0.0.1:8317 --codex-device-login --no-browser
 ```
 
-The running server owns `/data/cook.db`, so the sign-in goes through its management API and asks for the management key; `--db /data/cook.db` alone would be refused as `already owned`.
+The running server owns `/data/cooker.db`, so the sign-in goes through its management API and asks for the management key; `--db /data/cooker.db` alone would be refused as `already owned`.
 
 ## From source
 
@@ -70,7 +70,7 @@ The WebRTC media relay is an optional feature and is not part of the Docker imag
 
 Set up the database by hand:
 
-1. Create a private data directory (`mkdir -m 700 -p ~/.cook-router`), make two random keys (for example `openssl rand -hex 24`) and write a private bootstrap `config.yaml`:
+1. Create a private data directory (`mkdir -m 700 -p ~/.cooker`), make two random keys (for example `openssl rand -hex 24`) and write a private bootstrap `config.yaml`:
 
    ```yaml
    server:
@@ -87,13 +87,13 @@ Set up the database by hand:
 2. Import once, then run the database-backed server:
 
    ```sh
-   cooker --db ~/.cook-router/cook.db config validate config.yaml
-   cooker --db ~/.cook-router/cook.db config import config.yaml
-   cooker --db ~/.cook-router/cook.db
+   cooker --db ~/.cooker/cooker.db config validate config.yaml
+   cooker --db ~/.cooker/cooker.db config import config.yaml
+   cooker --db ~/.cooker/cooker.db
    ```
 
-   `--db` overrides `CK_DB`; without either the default is `cook.db` beside the config file (`./config.yaml` unless `--config` names another). `--config FILE` selects the file a first start imports and must exist. Without `--config`, a missing `./config.yaml` starts with the defaults on port 8317. Once the database exists, the server does not read or watch the file. Check `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
-3. Connect accounts from `/management.html`, or from a terminal through the running server with `--management-base-url http://127.0.0.1:8317` (it reads the management key from `CK_MANAGEMENT_KEY` or asks for it) and one of `--claude-login`, `--codex-login`, `--codex-device-login`, `--antigravity-login`, `--kimi-login`, `--kimi-ai-login`, `--meta-login`, `--xai-login` or `--devin-login`. Import a Vertex service account with `--vertex-import key.json`. Add `--no-browser` on a machine without a browser. With the server stopped, the same flags with `--db ~/.cook-router/cook.db` write the database directly. Sign-ins and refresh tokens are saved in SQLite, not a watched directory.
+   `--db` overrides `CK_DB`; without either the default is `cooker.db` beside the config file (`./config.yaml` unless `--config` names another). `--config FILE` selects the file a first start imports and must exist. Without `--config`, a missing `./config.yaml` starts with the defaults on port 8317. Once the database exists, the server does not read or watch the file. Check `curl http://127.0.0.1:8317/healthz`, which answers `{"status":"ok"}`.
+3. Connect accounts from `/management.html`, or from a terminal through the running server with `--management-base-url http://127.0.0.1:8317` (it reads the management key from `CK_MANAGEMENT_KEY` or asks for it) and one of `--claude-login`, `--codex-login`, `--codex-device-login`, `--antigravity-login`, `--kimi-login`, `--kimi-ai-login`, `--meta-login`, `--xai-login` or `--devin-login`. Import a Vertex service account with `--vertex-import key.json`. Add `--no-browser` on a machine without a browser. With the server stopped, the same flags with `--db ~/.cooker/cooker.db` write the database directly. Sign-ins and refresh tokens are saved in SQLite, not a watched directory.
 
 Change configuration through the dashboard or `/admin/v1`; old v0/v8 config endpoints are removed. `RUST_LOG=debug` enables detailed logging; the default is `info`.
 
@@ -110,21 +110,21 @@ Wants=network-online.target
 
 [Service]
 User=cooker
-WorkingDirectory=/var/lib/cook-router
-ExecStart=/usr/local/bin/cook-router --db /var/lib/cook-router/cook.db
+WorkingDirectory=/var/lib/cooker
+ExecStart=/usr/local/bin/cooker --db /var/lib/cooker/cooker.db
 Restart=on-failure
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/cook-router /tmp
+ReadWritePaths=/var/lib/cooker /tmp
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```sh
-sudo useradd --system --home /var/lib/cook-router --create-home cook-router
+sudo useradd --system --home /var/lib/cooker --create-home cooker
 sudo systemctl enable --now cooker
 journalctl -u cooker -f
 ```
 
-Initialize the database under `/var/lib/cook-router` before starting the service, using the service user. The persistent directory must be writable for atomic snapshot publication, and OS tmp must be writable for the private working database; keep both private and set `UMask=0077` in the unit as defense in depth. While the service runs, CLI changes go through its management API (`--management-base-url`); offline CLI writes wait for it to stop. Keep the same user and OS temporary directory across restarts so a surviving working database can resume; with `PrivateTmp=yes` every service restart, and with a tmpfs `/tmp` every reboot, cold-starts from the published file instead, which already holds every acknowledged change. Mount this directory persistently in ephemeral deployments. No remote config store or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).
+Initialize the database under `/var/lib/cooker` before starting the service, using the service user. The persistent directory must be writable for atomic snapshot publication, and OS tmp must be writable for the private working database; keep both private and set `UMask=0077` in the unit as defense in depth. While the service runs, CLI changes go through its management API (`--management-base-url`); offline CLI writes wait for it to stop. Keep the same user and OS temporary directory across restarts so a surviving working database can resume; with `PrivateTmp=yes` every service restart, and with a tmpfs `/tmp` every reboot, cold-starts from the published file instead, which already holds every acknowledged change. Mount this directory persistently in ephemeral deployments. No remote config store or asynchronous YAML mirror replaces it. See [backup guidance](CONFIGURATION.md#database-safety-and-backup).

@@ -115,7 +115,7 @@ mod tests {
 
     #[tokio::test]
     async fn startup_reload_paths_query_and_cors_order() {
-        let dir = std::env::temp_dir().join(format!("cpa-safe-mode-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("cooker-safe-mode-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         for startup in [false, true] {
             let config = |enabled| {

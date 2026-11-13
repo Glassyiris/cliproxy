@@ -20,7 +20,7 @@ The maintainer defaults B1-B9, C2, D1, D3 and F, and the pool-lifetime reading o
 | Frame size | Settled | Storage frames are 50,000 bytes, the non-SSE chunk size. | Owner ruling 2026-11-13 (G1′) |
 | Full storage | Settled | One cache queue holds all stream bytes. Under size pressure the stream read least recently goes first; a stream not read for 1 h expires. Disk-full/other edges best effort. | Settled; owner ruling 2026-11-14 (Settled 41, §6.4) |
 | Plugins | Settled | Plugins are deleted; extension means modifying the source and rebuilding. See §8. | Owner ruling 2026-11-13 |
-| G2 | Settled | Default directory `$XDG_RUNTIME_DIR/cook-router/` (tmpfs); configurable (§6.3). | Owner ruling 2026-11-13 |
+| G2 | Settled | Default directory `$XDG_RUNTIME_DIR/cooker/` (tmpfs); configurable (§6.3). | Owner ruling 2026-11-13 |
 | G3 | Settled | One preallocated mmap pool file per process, 50,000-byte frames. Padded per-thread LIFO free lists, 128-byte-aligned shared counters, per-stream frame table. The committed length lives in a per-stream header slot in the pool; the file header records only the pool's backed size (§6.1). Grow with `fallocate` and check its result; an `ftruncate`-only grow turns tmpfs exhaustion into SIGBUS. Per-request files cost -94% req/s on 2 KiB requests sequentially and -99% at 64 tasks (`mmap`/`munmap` lock and TLB shootdown); the pool matches or beats heap in every measured row except one that is still open (§6.1, §9.3). | Owner ruling 2026-11-13; shared pool confirmed 2026-11-14 |
 | G4/G5 | Settled | Unlink immediately (or O_TMPFILE) where possible; otherwise keep the path until the pool closes, then delete it. No startup sweep (§6.3). The pool-lifetime reading (the path lives until the pool closes) is accepted. | Owner ruling 2026-11-13; reading accepted 2026-11-14 (Settled 43) |
 | G6 | Settled | No application encryption; protection comes from OS disk and memory encryption. File 0600, directory 0700 (§6.3). | Owner ruling 2026-11-13 |
@@ -586,7 +586,7 @@ Terminal control state stores a bounded error code, not a heap data fallback; re
 ### 6.3 Lifecycle, directory and permissions
 
 Create the private directory before the pool, mode 0700, owned by the process user; reject an unsafe/symlinked location rather than using a public temporary directory.
-Default directory is `$XDG_RUNTIME_DIR/cook-router/` (G2); deployment must provide it on tmpfs or explicitly configure another private directory. Missing XDG_RUNTIME_DIR requires explicit configuration, not a silent fallback.
+Default directory is `$XDG_RUNTIME_DIR/cooker/` (G2); deployment must provide it on tmpfs or explicitly configure another private directory. Missing XDG_RUNTIME_DIR requires explicit configuration, not a silent fallback.
 Unlink the pool file immediately where possible (G4): use O_TMPFILE with mode 0600, or create exclusively with mode 0600 and unlink before accepting stream data. Where neither works, keep the path until the pool closes at shutdown, then delete it. There is no startup sweep (G5).
 The pool descriptor/mapping lives for the process; a stream's table and frames are removed by expiry or eviction (§6.4) once the last consumer releases them, not the shared pool inode.
 On disconnect, release only that reader's lease and connection state; the stream is neither cancelled nor released (§6.6). A reader that never releases retains its frames (§6.4). Shutdown stops work before unmapping; process death closes the unlinked inode after its last reference, with no startup sweep.
@@ -605,7 +605,7 @@ Owner ruling (G8, Settled 41, 2026-11-14): 「我记得这个 sse 缓存队列�
 
 | Configuration knob | Default and unit/scope | Accounting/rationale |
 | --- | --- | --- |
-| `stream.pool_directory` | `$XDG_RUNTIME_DIR/cook-router/`, directory/process | Private tmpfs location (§6.3); no fallback when XDG is absent. |
+| `stream.pool_directory` | `$XDG_RUNTIME_DIR/cooker/`, directory/process | Private tmpfs location (§6.3); no fallback when XDG is absent. |
 | `stream.pool_bytes` | min(4 GiB, 50% of the tmpfs size from `statvfs` at start, cgroup `memory.max` less heap headroom), rounded down to a frame multiple; log the derived value | Bounds mapped storage and holds the whole cache queue. 4 GiB is the owner's maximum; the tmpfs and cgroup terms are startup caps below it. Tmpfs is usually 10% of RAM under logind, so the tmpfs term is often the effective limit; a service may have no `XDG_RUNTIME_DIR`. Ignore the cgroup term when `memory.max` is `max`. The heap headroom size is an S1 choice. |
 | `stream.max_frames` | min(5,368, `pool_frames`) frames, where 5,368 = ⌊256 MiB / 50,000⌋ and `pool_frames` = `pool_bytes` / 50,000 (85,899 at the 4 GiB ceiling) | Request/response/scratch/replay of one exchange combined; a ceiling, not a reservation. At the 4 GiB ceiling at most 16 full-size streams fit (16 × 5,368 = 85,888 frames). |
 | `stream.max_event_bytes` | 1 MiB/event | Ordinary framed event including extensions; bound parser work, chunk large content/media instead. |

@@ -72,7 +72,7 @@ async fn proxy_keys(keys: &[&str]) -> (String, Arc<Seen>) {
     let seen = Arc::new(Seen::default());
     let upstream_url = serve(axum::Router::new().fallback(upstream).with_state(seen.clone())).await;
     // A private credential directory: `testing::runtime` stores its `.json` files in the test database.
-    let auth_dir = std::env::temp_dir().join(format!("cpa-compat-auths-{}", std::process::id()));
+    let auth_dir = std::env::temp_dir().join(format!("cooker-compat-auths-{}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
     let config = Config::parse(&format!(
         "access:\n  api-keys: [client-key]\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      models:\n        - name: up-model\n          alias: fast\n      keys:\n{keys}"))
@@ -345,7 +345,7 @@ async fn lcp_session_reaches_custom_headers_and_usage_records() {
         .with_state(sessions.clone());
     let upstream_url = serve(upstream).await;
     // A private credential directory: `testing::runtime` stores its `.json` files in the test database.
-    let auth_dir = std::env::temp_dir().join(format!("cpa-compat-lcp-auths-{}", std::process::id()));
+    let auth_dir = std::env::temp_dir().join(format!("cooker-compat-lcp-auths-{}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
     let config = Config::parse(&format!(
         "access:\n  api-keys: [client-key]\nrouting:\n  session-affinity: true\nobservability:\n  usage:\n    usage-statistics-enabled: true\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {upstream_url}/v1\n      headers:\n        X-Session: $CPA-SESSION-ID\n      models:\n        - name: up-model\n          alias: fast\n      keys:\n        - api-key: sk-fake-a\n"))

@@ -418,7 +418,7 @@ fn vertex_import_matches_go() {
     assert!(cases.len() >= 16);
     for (i, case) in cases.iter().enumerate() {
         let name = case["name"].as_str().unwrap();
-        let dir = std::env::temp_dir().join(format!("cpa-vertex-import-{}-{i}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-vertex-import-{}-{i}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let key = dir.join("key.json");
         if case["no_key_file"].as_bool() != Some(true) {

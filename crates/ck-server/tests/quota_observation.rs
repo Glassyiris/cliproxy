@@ -87,7 +87,7 @@ struct Proxy {
 async fn proxy(name: &str) -> Proxy {
     let seen: Seen = Arc::default();
     let upstream_url = serve(axum::Router::new().fallback(upstream).with_state(seen.clone())).await;
-    let dir = std::env::temp_dir().join(format!("cpa-quota-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-quota-{name}-{}", std::process::id()));
     let auth_dir = dir.join("auth");
     std::fs::create_dir_all(&auth_dir).unwrap();
     let credentials = vec![

@@ -17,11 +17,11 @@ Function names, type names, method signatures and file layout can change. The ow
 
 ```text
 persistent configuration directory
-  cook.db                     one required portable state artifact
+  cooker.db                     one required portable state artifact
 
 private OS temporary storage
   working checkpoint          owned recovery data, not a backup companion
-  ownership bookkeeping       never needed to restore cook.db
+  ownership bookkeeping       never needed to restore cooker.db
 ```
 
 Keep secret-bearing files private before publication. Containers mount the persistent directory, not an old database inode, so atomic replacement remains possible.

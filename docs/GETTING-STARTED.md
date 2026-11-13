@@ -12,7 +12,7 @@ sudo chown -R 10001:10001 data
 docker run -d --name cooker -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e CK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cooker:latest
 ```
 
-[INSTALL.md](INSTALL.md#docker) covers the volume, an optional initial `config.yaml` and upgrades. An empty volume starts with defaults on port 8317 and creates `/data/cook.db`; a `/data/config.yaml` that exists is imported on that first start, and later starts use the database. Two keys matter:
+[INSTALL.md](INSTALL.md#docker) covers the volume, an optional initial `config.yaml` and upgrades. An empty volume starts with defaults on port 8317 and creates `/data/cooker.db`; a `/data/config.yaml` that exists is imported on that first start, and later starts use the database. Two keys matter:
 
 - `CK_MANAGEMENT_PASSWORD` (or `management.secret-key` in the imported config) is the dashboard password. With neither, the management API, and so the dashboard sign-in, answers every request with 403.
 - An entry under `access.api-keys` is what your tools send to the proxy. Add it in the dashboard, or in the initial `config.yaml`.

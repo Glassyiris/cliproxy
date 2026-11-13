@@ -380,7 +380,7 @@ fn config_and_file_credentials_match_go_synthesizers() {
     let mut compared = 0;
     for case in fixture()["synth"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
-        let dir = std::env::temp_dir().join(format!("cpa-synth-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-synth-{name}-{}", std::process::id()));
         let root = dir.join("fixture-root");
         std::fs::create_dir_all(root.join("auth")).unwrap();
         for (file, body) in case["files"].as_object().into_iter().flatten() {
@@ -475,7 +475,7 @@ mod access {
         let mut steps = 0;
         for scenario in fixture()["access"].as_array().unwrap() {
             let name = scenario["name"].as_str().unwrap();
-            let dir = std::env::temp_dir().join(format!("cpa-access-{name}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("cooker-access-{name}-{}", std::process::id()));
             let (base, server) = serve(state(&dir, scenario)).await;
             for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
                 let mut req = client
@@ -532,7 +532,7 @@ mod routes {
         let mut compared = 0;
         for scenario in fixture()["routes"].as_array().unwrap() {
             let name = scenario["name"].as_str().unwrap();
-            let dir = std::env::temp_dir().join(format!("cpa-routes-{name}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("cooker-routes-{name}-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
             let yaml = |text: &str| format!("{}\n", text.replace("$HASH", &hash));
             let store = Arc::new(ConfigStore::memory_with(&yaml(scenario["yaml"].as_str().unwrap())));
@@ -757,7 +757,7 @@ mod creds {
                 continue;
             }
             let log_files = scenario["log_files"].as_array();
-            let dir = std::env::temp_dir().join(format!("cpa-creds-{name}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("cooker-creds-{name}-{}", std::process::id()));
             let root = dir.join("fixture-root");
             let auth = root.join("auth");
             std::fs::create_dir_all(&auth).unwrap();
@@ -1183,7 +1183,7 @@ mod creds {
             .unwrap()
             .clone();
         let hash = bcrypt::hash("fake-secret", 4).unwrap();
-        let dir = std::env::temp_dir().join(format!("cpa-probes-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cooker-probes-{}", std::process::id()));
         let auth = dir.join("fixture-root").join("auth");
         std::fs::create_dir_all(&auth).unwrap();
         for (file, body) in scenario["auth_files"].as_object().unwrap() {

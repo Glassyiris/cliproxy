@@ -1,9 +1,9 @@
 use super::*;
 
 fn database_path(name: &str) -> (PathBuf, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("cook-config-{name}-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("cooker-config-{name}-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("cook.db");
+    let path = dir.join("cooker.db");
     (dir, path)
 }
 
@@ -185,8 +185,8 @@ fn opening_fresh_databases_serializes_schema_creation() {
     // Exclusive ownership replaced the shared SQL coordinator: the namespace keeps
     // no global coordination database beside the per-database workspaces.
     assert!(!working_dir.parent().unwrap().join("coordination.db").exists());
-    assert!(!dir.join("cook.db-wal").exists());
-    assert!(!dir.join("cook.db-shm").exists());
+    assert!(!dir.join("cooker.db-wal").exists());
+    assert!(!dir.join("cooker.db-shm").exists());
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -203,7 +203,7 @@ fn other_schema_versions_are_refused_and_left_unchanged() {
             let mut names: Vec<_> = std::fs::read_dir(&dir)
                 .unwrap()
                 .map(|e| e.unwrap().file_name())
-                .filter(|name| name.to_string_lossy().starts_with("cook.db"))
+                .filter(|name| name.to_string_lossy().starts_with("cooker.db"))
                 .collect();
             names.sort();
             names
@@ -369,7 +369,7 @@ fn uncheckpointed_wal_is_preserved_in_the_published_backup() {
         )
         .unwrap();
     drop(writer);
-    assert!(dir.join("cook.db-wal").exists());
+    assert!(dir.join("cooker.db-wal").exists());
     let store = crate::testing::config_store(&path).unwrap();
     let copy = dir.join("restored.db");
     std::fs::copy(&path, &copy).unwrap();
@@ -379,8 +379,8 @@ fn uncheckpointed_wal_is_preserved_in_the_published_backup() {
         restored.get(Kind::Setting, "server").unwrap().unwrap().spec["port"],
         8123
     );
-    assert!(!dir.join("cook.db-wal").exists());
-    assert!(!dir.join("cook.db-shm").exists());
+    assert!(!dir.join("cooker.db-wal").exists());
+    assert!(!dir.join("cooker.db-shm").exists());
     drop(restored);
     drop(store);
     std::fs::remove_dir_all(dir).unwrap();
@@ -433,8 +433,8 @@ fn wal_conflict_preserves_sidecars_and_recovers_opaque_state_after_close() {
         .unwrap();
     writer.execute_batch("COMMIT; BEGIN;").unwrap();
     assert_eq!(head(&writer).unwrap(), 1); // Keep the real WAL reader transaction open.
-    let wal = dir.join("cook.db-wal");
-    let shm = dir.join("cook.db-shm");
+    let wal = dir.join("cooker.db-wal");
+    let shm = dir.join("cooker.db-shm");
     let before_wal = std::fs::read(&wal).unwrap();
     let before_main = std::fs::read(&path).unwrap();
     let error = crate::testing::config_store(&path)
@@ -903,7 +903,7 @@ fn exclusive_owner_cannot_be_bypassed_by_another_workspace() {
 fn a_duplicated_guard_descriptor_cannot_keep_a_released_owner_locked() {
     let (dir, path) = database_path("inherited-guard");
     let store = crate::testing::config_store(&path).unwrap();
-    let owners = path.parent().unwrap().join(".cook-router-owners");
+    let owners = path.parent().unwrap().join(".cooker-owners");
     let fd = std::fs::read_dir("/proc/self/fd")
         .unwrap()
         .filter_map(|entry| {

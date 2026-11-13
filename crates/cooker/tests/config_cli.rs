@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("cook-config-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cooker-config-{name}-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("tmp")).unwrap();
     dir
 }
@@ -52,7 +52,7 @@ fn help_never_creates_a_database_and_bad_databases_never_fall_back_to_yaml() {
         vec!["config", "validate", "--help", "--db", "nested/chosen.db"],
     ] {
         success(cli(&dir, &args));
-        assert!(!dir.join("cook.db").exists());
+        assert!(!dir.join("cooker.db").exists());
         assert!(!dir.join("nested").exists());
     }
     std::fs::write(dir.join("bad.db"), "not SQLite").unwrap();
@@ -72,7 +72,7 @@ fn import_validate_export_and_backup_share_the_selected_database() {
     )
     .unwrap();
     success(cli(&dir, &["--db", "chosen.db", "config", "import", "source.yaml"]));
-    assert!(!dir.join("cook.db").exists());
+    assert!(!dir.join("cooker.db").exists());
     std::fs::write(dir.join("source.yaml"), "server:\n  port: wrong\n").unwrap();
     success(cli(&dir, &["config", "validate", "--db", "chosen.db"]));
     let invalid = cli(&dir, &["--db", "chosen.db", "config", "import", "source.yaml"]);
@@ -317,7 +317,7 @@ async fn online_vertex_import_stages_privately_and_never_falls_back_on_one_worke
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
-                .starts_with("cook-router-login-")
+                .starts_with("cooker-login-")
         }),
         "private client staging must be removed on success and failure"
     );
@@ -598,7 +598,7 @@ async fn concurrent_cli_writers_publish_one_complete_latest_snapshot() {
     let exported: serde_json::Value = serde_json::from_str(&exported).unwrap();
     assert_eq!(exported["revision"], 1 + accepted);
     assert_eq!(&std::fs::read(dir.join("shared.db")).unwrap()[18..20], &[1, 1]);
-    let temporary = dir.join("tmp/cook-router");
+    let temporary = dir.join("tmp/cooker");
     assert!(!temporary.join("coordination.db").exists());
     assert!(
         !std::fs::read_dir(&temporary)
@@ -631,7 +631,7 @@ fn database_flag_overrides_environment_and_environment_overrides_default() {
     }
     assert!(dir.join("environment.db").is_file());
     assert!(dir.join("flag.db").is_file());
-    assert!(!dir.join("cook.db").exists());
+    assert!(!dir.join("cooker.db").exists());
     std::fs::remove_dir_all(dir).unwrap();
 }
 

@@ -75,7 +75,7 @@ api-keys:
       keys:
         - api-key: "sk-ant-api03-FAKE-bench-key"
 EOF
-  env "$@" CK_DB="$dir/cook.db" taskset -c "$SERVER_CPUS" "$BIN" --config "$dir/config.yaml" --local-model > "$OUT/logs/$LABEL.log" 2>&1 &
+  env "$@" CK_DB="$dir/cooker.db" taskset -c "$SERVER_CPUS" "$BIN" --config "$dir/config.yaml" --local-model > "$OUT/logs/$LABEL.log" 2>&1 &
   SRV_PID=$!
   for _ in $(seq 1 400); do
     curl -sf -H "Authorization: Bearer $KEY" "http://127.0.0.1:$PORT/v1/models" > /dev/null && break

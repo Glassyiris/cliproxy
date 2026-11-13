@@ -4636,7 +4636,7 @@ async fn siwc_only_codex_credentials_refresh_by_name_and_in_bulk() {
 #[test]
 fn integration_fixtures_never_sweep_the_production_temporary_namespace() {
     let dir = std::env::temp_dir().join(format!("management-sweep-isolation-{}", uuid::Uuid::new_v4()));
-    let sentinel = dir.join("cook-router").join("a".repeat(64));
+    let sentinel = dir.join("cooker").join("a".repeat(64));
     std::fs::create_dir_all(sentinel.join("refs")).unwrap();
     std::fs::write(sentinel.join("refs/0"), b"").unwrap();
     std::fs::write(sentinel.join("live.db"), b"unrelated simulated production database").unwrap();

@@ -85,7 +85,7 @@ impl ConfigStore {
 }
 
 pub(super) fn open(path: &Path, create: bool) -> anyhow::Result<ConfigStore> {
-    open_in(path, create, std::env::temp_dir().join("cook-router"))
+    open_in(path, create, std::env::temp_dir().join("cooker"))
 }
 
 pub(super) fn open_in(path: &Path, create: bool, root: PathBuf) -> anyhow::Result<ConfigStore> {
@@ -197,7 +197,7 @@ fn ownership(path: &Path) -> anyhow::Result<File> {
         let directory = path
             .parent()
             .context("config database needs a parent")?
-            .join(".cook-router-owners");
+            .join(".cooker-owners");
         private_dir(&directory)?;
         // Use the native name so filesystem case aliases share the same lock.
         let file = ck_exec::codex_siwc_bind::open_lock_file(
@@ -279,7 +279,7 @@ fn install(
     build: impl FnOnce(&Path) -> anyhow::Result<()>,
     replaced: impl FnOnce(),
 ) -> anyhow::Result<File> {
-    let temporary = destination.with_file_name(format!(".cook-snapshot-{}.tmp", uuid::Uuid::new_v4()));
+    let temporary = destination.with_file_name(format!(".cooker-snapshot-{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| {
         let file = private_file(&temporary)?;
         build(&temporary)?;
