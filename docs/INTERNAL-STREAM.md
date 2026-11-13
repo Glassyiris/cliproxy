@@ -2,7 +2,7 @@
 
 ## 1. Purpose and scope
 
-Define the sole internal representation for cook-router inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search, AI Studio relay inference traffic and plugin inference. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion; authentication and transport remain boundary responsibilities, while SDP, session commands and media content are inside. Current route evidence: `crates/cpa-server/src/lib.rs:81-146`, `crates/cpa-server/src/realtime.rs:85-112`, `crates/cpa-server/src/codex_alpha.rs:22-25`, `crates/cpa-server/src/relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/cpa-server/src/realtime.rs:12`. This is a normative target, not a claim of implementation; current-code citations refer to `prep-cook/cook-router` master `17608e94`.
+Define the sole internal representation for cook-router inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search and AI Studio relay inference traffic. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion; authentication and transport remain boundary responsibilities, while SDP, session commands and media content are inside. Current route evidence: `crates/cpa-server/src/lib.rs:81-146`, `crates/cpa-server/src/realtime.rs:85-112`, `crates/cpa-server/src/codex_alpha.rs:22-25`, `crates/cpa-server/src/relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/cpa-server/src/realtime.rs:12`. This is a normative target, not a claim of implementation; current-code citations refer to `prep-cook/cook-router` master `17608e94`.
 
 ## 2. Decisions
 
@@ -19,8 +19,15 @@ Owners directed S1 to proceed with these binding defaults; an owner ruling may r
 | Storage | Settled | mmap files, fixed blocks, positions only; no heap storage of stream data. | Settled; `crates/AGENTS.md:24` |
 | Block size | Settled | Storage blocks are 50,000 bytes, the non-SSE chunk size. | Owner ruling 2026-11-13 (G1′) |
 | Full storage | Settled | FIFO cache queue bounded by size and age; disk-full/other edges best effort. | Settled |
+| Plugins | Settled | Plugins are deleted; extension means modifying the source and rebuilding. See §8. | Owner ruling 2026-11-13 |
+| G2 | Settled | Default directory `$XDG_RUNTIME_DIR/cook-router/` (tmpfs); configurable (§6.3). | Owner ruling 2026-11-13 |
+| G3 | Settled | One preallocated mmap pool file per process, 50,000-byte frames. Padded per-thread LIFO free lists, 128-byte-aligned shared counters, per-stream logical-block→frame table. The committed length lives in a per-stream header slot in the pool; the file header records only the pool's backed size (§6.1). Grow with `fallocate` and check its result; an `ftruncate`-only grow turns tmpfs exhaustion into SIGBUS. Per-request files cost -94% req/s on 2 KiB requests sequentially and -99% at 64 tasks (`mmap`/`munmap` lock and TLB shootdown); the pool matches or beats heap in every measured row except one that is still open (§6.1, §9.3). Replaces the per-request file design and the single-list G3′ default. | Owner ruling 2026-11-13; shared pool confirmed 2026-11-14 |
+| G4/G5 | Settled | Unlink immediately (or O_TMPFILE) where possible; otherwise keep the path until the pool closes, then delete it. No startup sweep (§6.3). | Owner ruling 2026-11-13 |
+| G6 | Settled | No application encryption; protection comes from OS disk and memory encryption. File 0600, directory 0700 (§6.3). | Owner ruling 2026-11-13 |
+| G7 | Settled | Out of pool space or over a limit returns an error; no heap fallback (§6.4). | Owner ruling 2026-11-13 |
+| G8 | Default (2026-11-14) from measurement, change by owner ruling | Per-request limit 512 MiB and at most 1/8 of the total. Total default is min(4 GiB, half the tmpfs size at start, cgroup memory headroom) (§6.4). | Owner ruling 2026-11-13 (asked for the measured conclusion); S0 storage benchmark 2026-11-14 |
+| G9 | Settled | Performance tests mount the storage directory on tmpfs; no regression against heap buffering is accepted (§9.3). | Owner ruling 2026-11-13 |
 | Exhaustion/platform | Settled | Visible failure, no degradation; Linux server only. | Settled; `crates/AGENTS.md:75` |
-| Plugin migration | Settled | ABI cutover; maintainers own SDK/store migration; no old path. | Settled |
 | B1 | Default (2026-11-13), change by owner ruling | Claude signatures remain bound to their thinking block. | Q |
 | B2 | Default (2026-11-13), change by owner ruling | Redacted thinking has its own opaque event. | Q |
 | B3 | Default (2026-11-13), change by owner ruling | Gemini signatures remain part-bound, including signature-only parts. | Q |
@@ -31,15 +38,10 @@ Owners directed S1 to proceed with these binding defaults; an owner ruling may r
 | B8 | Default (2026-11-13), change by owner ruling | Tools have start/argument-delta/end; whole calls become one argument delta. | Q |
 | B9 | Default (2026-11-13), change by owner ruling | Grounding/code execution/URL context are named events; unsupported egress drops with debug logs. | Q |
 | C2 | Default (2026-11-13), change by owner ruling | Invalid textual UTF-8: client 400; upstream error; binary media is not text. | Q |
-| D1/G8 | Default (2026-11-13), change by owner ruling | Configurable stream/pool limits; start with §6.4 provisional capacities, replace after measurement. | Q |
+| D1 | Default (2026-11-13), change by owner ruling | Configurable stream limits; event, metadata and cache sizes and cache age start with the §6.4 provisional values, replace after measurement. | Q |
 | D2 | Default (2026-11-13), change by owner ruling | Slow clients pause upstream reads at the §6.4 watermark; FIFO pressure/expiry may terminate the stream, never overwrite leased frames. | Q |
 | D3 | Default (2026-11-13), change by owner ruling | No failover after the first event producing client-deliverable bytes. | Q |
-| E2 | Default (2026-11-13), change by owner ruling | Native ABI and RPC schema both bump; reject old plugins at load. | Q |
-| F/G9 | Default (2026-11-13), change by owner ruling | Measure first, obtain owner-approved thresholds; use §9 commands and codec metrics. | Q |
-| G3′ | Default (2026-11-13), change by owner ruling | S1 choice: one pool file/process, free-frame list and per-stream block table; centralize quotas and reuse without remapping. | Q |
-| G2 | Default (2026-11-13), change by owner ruling | `$XDG_RUNTIME_DIR/cook-router/` on tmpfs by default; directory configurable. | Q |
-| G4/G5 | Default (2026-11-13), change by owner ruling | O_TMPFILE or immediate unlink; no crash-surviving stream files or startup scavenger. | Q |
-| G6 | Default (2026-11-13), change by owner ruling | File 0600, directory 0700; no extra encryption. | Q |
+| F | Default (2026-11-13), change by owner ruling | Measure first, obtain owner-approved thresholds; use §9 commands and codec metrics. | Q |
 
 ## 3. Stream grammar
 
@@ -74,11 +76,11 @@ A finish-only chunk has `delta: {}` and a non-null `finish_reason`; native reaso
 
 `X` denotes this object; `?` denotes absence allowed, not implicit null. Integers used for counters are unsigned 64-bit unless specified otherwise.
 Local identifiers are ASCII strings of at most 64 bytes; preserve unrestricted provider identifiers separately in `source.ids`.
-The source protocol is provenance; internal routing, scheduling, accounting and interception MUST NOT branch on protocol wire shapes.
+The source protocol is provenance; internal routing, scheduling, accounting and in-process stages MUST NOT branch on protocol wire shapes.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `v` | integer, required, `1` | This grammar version, shared by chunks, named events, requests and plugin records. |
+| `v` | integer, required, `1` | This grammar version, shared by chunks, named events and requests. |
 | `request_id`, `stream_id` | local ID, required | One gateway request/turn; one unidirectional logical event stream. |
 | `attempt` | uint, required | Routing attempt; changes before failover, never after downstream commitment. |
 | `seq` | uint, required | Starts at 0, strictly increases by one in the published stream. |
@@ -135,7 +137,7 @@ The registry is closed for core behavior, open for opaque carriage: an unrecogni
 | `opaque` | `{name?: string, format: "json"\|"text", value: JSON}` | Source event/field without a registered semantic mapping. |
 | `heartbeat` | `{}` | Progress/liveness, never token usage or successful completion. |
 | `done` | `{}` | Successful logical stream termination, after final usage and closes. |
-| `error` | `{code: string, status: uint, message: string, scope: "client"\|"upstream"\|"resource"\|"plugin"}` | Terminal sanitized failure; source detail remains restricted provenance. |
+| `error` | `{code: string, status: uint, message: string, scope: "client"\|"upstream"\|"resource"}` | Terminal sanitized failure; source detail remains restricted provenance. |
 | `cancelled` | `{reason: "client_disconnect"\|"client_cancel"\|"shutdown"}` | Terminal cancellation; no fabricated success. |
 
 Tool argument deltas use Chat `delta.tool_calls[].function.arguments`; custom text uses the same string slot plus `arguments_format: text` on its start.
@@ -200,10 +202,10 @@ Suppress transport keepalives and headers that would start a success response be
 Preserve unknown JSON members recursively, including array order, scalar type, null versus absence and unrecognized enums; retention is semantic, not original JSON whitespace.
 Known Chat fields remain native; other fields live in `X.original` with source pointer/correlation. Do not duplicate known content in a whole-body shadow copy.
 Unknown SSE events become `opaque` with source name, payload and SSE fields; valid non-JSON SSE data is a text value. Unsupported internal version is an error, not an unknown event.
-A wire field named `x_cook_router` is untrusted source data: retain it in `original`, never interpret it as gateway control. Only the trusted internal/plugin boundary accepts this grammar.
+A wire field named `x_cook_router` is untrusted source data: retain it in `original`, never interpret it as gateway control. Only the trusted internal boundary accepts this grammar.
 If replay metadata is explicitly accepted by a client codec, validate its version and correlation; it cannot set trusted request IDs, routing attempts, resource limits or authorization.
 Unknown fields and events always reach the egress encoder intact. That encoder writes them out where the destination grammar has a place for them (original location, native equivalent or defined extension carrier), and otherwise drops them with a content-free debug log naming field/event, destination and reason.
-Known normalized mutations, including deletion, win over stale preserved values; never overwrite plugin edits with source JSON or inject source-specific options into an unrelated provider's request root.
+Known normalized mutations, including deletion, win over stale preserved values; never inject source-specific options into an unrelated provider's request root.
 Mapped request semantics are distinct from unknown data: unsupported semantics in the §4 capability list produce 400 at the `request.end` fence before any upstream request is sent; unknown fields alone do not trigger rejection.
 B7/B9 response projections occur inside the egress encoder after receipt: select choice 0 for single-choice destinations and drop unsupported grounding/code/URL-context events. Debug logs contain request ID, indexes/event kind and destination, never payload/signatures/tool arguments.
 
@@ -213,7 +215,7 @@ The logical request is a Chat-based document plus `x_cook_router`, with typed co
 `request.field` uses absolute JSON pointers into this document. Emit parent containers as empty objects/arrays before their child fields; arrays use consecutive numeric indexes.
 The reference spelling is `{type: "x_cook_router_media", media_id: string, value_kind: "bytes"|"utf8"}`. Egress resolves only references registered by trusted ingress at the exact document position in this stream's own media table, never by JSON shape or client-supplied `X.media`; literal look-alike objects pass through as data.
 Large strings use registered references with `mime: text/plain;charset=utf-8` and custom-data events; the logical value is concatenated decoded UTF-8. Encoders escape incrementally from positions after validation, not from a second accumulated body.
-Routing may select model/operation/destination early, but no upstream request is sent before the whole internal request, including final fields and media, passes syntax/schema and destination capability validation at `request.end`. Plugin edits invalidate validation and must pass the same fence before execution; authentication remains outside the document.
+Routing may select model/operation/destination early, but no upstream request is sent before the whole internal request, including final fields and media, passes syntax/schema and destination capability validation at `request.end`. Authentication remains outside the document.
 Capability validation covers supplied model/operation, roles and ordered content kinds, tool declarations/choice/call-result linkage, signed/encrypted replay, cache directives, sampling/token limits, output schema/modalities, session controls and mapped provider parameters. Unsupported members fail with 400; unknown unmapped fields follow §3.7. No unresolved field is exempt from the fence.
 
 | Logical location | Type/content | Contract |
@@ -257,7 +259,7 @@ Capability validation covers supplied model/operation, roles and ordered content
 
 `RealtimeConfig = {model?: string, modalities?: ("text"|"audio"|"image"|"video")[], voice?: string, instructions?: string, tools?: Q.tools, tool_choice?: Q.tool_choice, input_audio?: AudioFormat, output_audio?: AudioFormat, turn_detection?: {mode: "disabled"|"server_vad"|"semantic_vad", threshold?: number, prefix_ms?: uint, silence_ms?: uint}}`; `AudioFormat = {codec: string, sample_rate_hz?: uint, channels?: uint}`. Omission preserves existing session settings; provider-only extras use `X.provider_parameters`.
 Conversation items/tool results use Q history; audio append uses media events, whose packet attributes are `{track_id: string, packet_id: string, timestamp: uint, timebase_hz: uint, sequence?: uint, payload_type?: uint, flags?: string[]}`. Response controls reference a separately validated request; cancellation is not successful completion. Unknown sideband commands use `opaque`; mapped commands never do.
-An ingress codec parses and stores preserved fields once; egress overlays normalized values and explicit plugin mutations. Removing a field removes its stale source projection too.
+An ingress codec parses and stores preserved fields once; egress overlays normalized values. Removing a field removes its stale source projection too.
 Signature replay is opaque and provider-bound; never fabricate a signature, substitute a validator-bypass token or silently discard an unsupported signed history block.
 Wire capture, when enabled, occurs only at ingress/egress through the sanctioned redacting logging boundary, not by serializing internal events into logs (`crates/AGENTS.md:36-46`).
 
@@ -535,18 +537,24 @@ Current compact rejects stream=true (`crates/cpa-server/src/openai.rs:1064-1079`
 
 ## 6. Storage
 
-### 6.1 Pool, positions and ownership
+### 6.1 Pool, frames and ownership
 
-**S1 choice:** one fixed-capacity shared mmap pool file/process, using 50,000-byte frames (settled, §2); a single allocation domain keeps process quotas explicit. Fixed mmap blocks and position-based access are interoperability requirements; the file count is an S1 default. Blocks are byte offsets inside the mapping; only the mapping itself is page-aligned, so blocks need not be.
-**S1 choice:** a free-frame list and per-stream logical-block→physical-frame table permit FIFO reuse without moving live bytes. Pool capacity is a block-size multiple; no hot-path remap/growth.
-A `Position` is `(logical_block_number, offset)` scoped by a stream handle/generation; `offset` is in `[0, 50000)`. Logical block numbers do not wrap/reuse within a stream.
+Owner ruling (G3, 2026-11-14): each process keeps one preallocated mmap pool file that holds all stream bytes in 50,000-byte frames (§2). Fixed frames and position-based access are interoperability requirements. Frame `i` starts at `header + i × 50,000`; only the mapping is page-aligned, so frames need not be.
+The measured design, from the S0 storage benchmark (§9.3):
+
+- **Header, committed length and growth.** Two lengths exist and must not be confused. The pool file header records the backed size, the bytes backed by `fallocate`; only growth changes it. Each stream owns a header slot in the pool, 128-byte aligned and indexed by stream handle, that records the stream's committed end position and publication generation. This is the owner's G3 answer (the header records the committed length; readers learn a new length from the header), applied per stream because one pool holds many streams. The writer stores the committed end with Release ordering after the bytes and table entries are written, readers load it with Acquire, and every store is followed by a reader wake (§6.2). The slot count and layout are an **S1 choice**. The pool is preallocated to an initial size and grows by `fallocate` when no free frame is left and the limit in §6.4 allows. Check the `fallocate` result and return its error (G7). Never grow with `ftruncate` alone: it leaves sparse pages, and when tmpfs runs out the page fault raises SIGBUS instead of returning ENOSPC (measured on a 64 MiB tmpfs: `fallocate` returned ENOSPC cleanly, `ftruncate` killed the process). **S1 choice:** the initial size and the growth step are open, and the mapping covers the whole limit once so growth never moves it. The S0 benchmark measured growth stalls only on per-request files (1 MiB extents stalled at most 0.33 ms); the pool's own growth stall is unmeasured.
+- **Free lists.** Each thread has its own LIFO list of free frames, with the locks at least 128 bytes apart so two lists never share a cache line. A thread takes frames from its own list first, then steals resident frames from another thread's list, and only then takes a cold frame (§6.5), which it prefaults with one `MADV_POPULATE_WRITE`. Do not use one shared FIFO list: it measured -94% req/s against heap on 2 KiB requests at 64 tasks (644,185 against 10,719,382 req/s), because every request contends on one lock and touches a cold frame.
+- **Shared counters.** Every object that each request updates (the pool budget, the stream-table owner and their reference counts) is aligned to 128 bytes. Without it, false sharing doubled cycles per request at 64 tasks (27-33k against 12-13k) with the same instruction count.
+- **Why a pool.** One mmap file per request cost -94% req/s on 2 KiB requests sequentially and -99% at 64 tasks, because `mmap`, `MADV_POPULATE_WRITE` and `munmap` serialise on the process's mmap lock and `munmap` sends TLB-shootdown IPIs to every CPU running the process. The pool needs no `mmap` or `munmap` on the request path and matches or beats heap in every measured row except one that is still open (§9.3).
+- **Reader pinning.** A frame in use by a reader is never reused or reclaimed. A frame joins a free list only after its last lease and retention reference release it, and the reclaimer touches only frames already on a free list.
+
+A `Position` is `(logical_block_number, offset)` scoped by a stream handle/generation; `offset` is in `[0, 50000)`. Logical block numbers do not wrap/reuse within a stream. Each stream has a logical-block→frame table of integer frame indexes, like a page table, plus generation/ownership and committed extents. This is per-block state, not retained raw pointers; resolve temporary borrowed slices only under a read lease.
 Request/response directions of one exchange share its stream quota; reclaiming another exchange cannot raise this quota. Duplex sessions retain separate turn quotas, with shared session replay charged to the pool/cache and its retaining exchange until released.
-The block table holds integer frame indexes per logical block, like a page table, plus generation/ownership and committed extents. This is per-block state, not retained raw pointers; resolve temporary borrowed slices only under a read lease.
 Stages hold only start/current/end positions for byte access; retention watermarks are such positions. Identity indexes and bounded scalar counters are metadata; identity strings and variable metadata remain position-backed.
-No `Vec<Bytes>`, body-sized String, JSON tree, tool-argument accumulator, media queue or retained RPC payload may store stream content on the heap.
+No `Vec<Bytes>`, body-sized String, JSON tree, tool-argument accumulator or media queue may store stream content on the heap.
 Network/TLS library scratch is not a second stream store: consume it immediately into mapped storage, bound it by transport settings and include it in measurements.
 Codecs scan borrowed mapped spans and write encoding output into mapped blocks; string escaping/base64 and cross-block tokens are incremental, never assembled into a heap event.
-Request records, normalized events, boundary framing scratch, unknown payloads, plugin replacements and aggregation output all charge their actual live mapped blocks to stream and pool limits.
+Request records, normalized events, boundary framing scratch, unknown payloads, replacement records and aggregation output all charge their actual live mapped blocks to stream and pool limits.
 General records may span blocks; readers parse across positions. A text SSE event larger than a block occupies consecutive blocks, addressed as (block, offset). Custom-data records start at a fresh block boundary and fit one block; unused tail space is padding, not stream bytes.
 A separate event index stores only start/end positions and type/correlation indexes; retained index metadata has a configured ceiling too.
 
@@ -557,50 +565,67 @@ A separate event index stores only start/end positions and type/correlation inde
 | --- | --- |
 | Writer admission | One writer per stream; reserve every needed frame/table entry under allocator ownership before writing it. |
 | Append | Write only unpublished mapped bytes; published event bytes are immutable. Finish JSON and SSE delimiter before publishing the event. |
-| Publish | Under the stream metadata lock, install block-table extents/event boundaries and advance the committed end position plus monotonic publication generation. |
+| Publish | Under the stream metadata lock, install block-table extents/event boundaries and advance the stream's committed end position (header slot, Release store) plus monotonic publication generation. |
 | Wake | Notify readers after unlocking. Publication uses the lock's release/acquire ordering; mmap visibility alone is not synchronization. |
 | Read | Register a read lease under the same lock; copy only table/cursor metadata, then read immutable bytes no later than the committed end. |
 | Wait | Register notification before rechecking generation/end/terminal state under the lock; sleep only if unchanged, avoiding lost wakeups. |
-| Acknowledge | Advance consumer and replay/aggregation watermarks; release the lease; eligible frames enter the reclaimable FIFO. |
-| Transform | A plugin/mutator writes replacement records into fresh mapped spans; publish downstream sequence/correlation atomically, never mutate bytes another reader sees. |
+| Acknowledge | Advance consumer and replay/aggregation watermarks; release the lease; a frame with no remaining lease or retention reference returns to the releasing thread's free list (§6.1). |
+| Transform | A stage that rewrites an event writes replacement records into fresh mapped spans; publish downstream sequence/correlation atomically, never mutate bytes another reader sees. |
 | Fail/cancel | Atomically invalidate unread data, set terminal error/cancellation state and wake all readers; publish the terminal record when space permits. Readers receive that terminal event once then end-of-stream, not the invalidated unread backlog. Successful `done` instead follows the complete published prefix. |
 | Recycle | Reuse a frame only after all reader leases and retained references release it; generation checks reject stale handles. |
 
-Committed end covers complete records only. A reader may observe the old complete prefix or the new complete prefix, never half JSON, stale reused content or an uninitialized block-table entry.
-The OS file size is the pool capacity, not the stream's committed length; there is no polling of file size and no per-event msync/fsync durability promise.
+Committed end covers complete records only; it is the stream's header-slot position (§6.1), loaded with Acquire. A reader may observe the old complete prefix or the new complete prefix, never half JSON, stale reused content or an uninitialized block-table entry.
+The pool file header's backed size (§6.1) bounds where frames may exist; it is never a stream's committed end. There is no polling of file size and no per-event msync/fsync durability promise.
 Terminal control state stores a bounded error code, not a heap data fallback; readers synthesize the error event from it when no frame remains. Egress emits a bounded destination error or aborts transport if that is impossible; never report successful completion.
 
 ### 6.3 Lifecycle, directory and permissions
 
 Create the private directory before the pool, mode 0700, owned by the process user; reject an unsafe/symlinked location rather than using a public temporary directory.
-Default directory is `$XDG_RUNTIME_DIR/cook-router/`; deployment must provide it on tmpfs or explicitly configure another private directory. Missing XDG_RUNTIME_DIR requires explicit configuration, not a silent fallback.
-Use O_TMPFILE with mode 0600 where supported; otherwise create exclusively with mode 0600 and immediately unlink before accepting stream data.
+Default directory is `$XDG_RUNTIME_DIR/cook-router/` (G2); deployment must provide it on tmpfs or explicitly configure another private directory. Missing XDG_RUNTIME_DIR requires explicit configuration, not a silent fallback.
+Unlink the pool file immediately where possible (G4): use O_TMPFILE with mode 0600, or create exclusively with mode 0600 and unlink before accepting stream data. Where neither works, keep the path until the pool closes at shutdown, then delete it. There is no startup sweep (G5).
 The pool descriptor/mapping lives for the process; request end removes that stream's table/frames once all consumers release them, not the shared pool inode.
-On disconnect, cancel owned work and release cooperative leases; a stuck callback retains its frames until it releases (§6.4). Shutdown stops work before unmapping; process death closes the unlinked inode after its last reference, with no startup sweep.
-No additional encryption is specified. tmpfs is not free memory and may swap; disk-backed mappings may persist physical remnants after unlink. Permissions/unlink are not secure erasure.
-Never expose the pool FD, filesystem path or other streams' frames to a plugin or client. Do not mix transient stream storage with the durable configuration database.
+On disconnect, cancel owned work and release cooperative leases; a reader that never releases retains its frames (§6.4). Shutdown stops work before unmapping; process death closes the unlinked inode after its last reference, with no startup sweep.
+The application adds no encryption (G6); protection comes from OS disk and memory encryption, the 0600 file and the 0700 directory. tmpfs is not free memory and may swap; disk-backed mappings may persist physical remnants after unlink. Permissions/unlink are not secure erasure.
+Never expose the pool FD, filesystem path or other streams' frames to a client. Do not mix transient stream storage with the durable configuration database.
 
 ### 6.4 Limits and FIFO cache queue
 
-Unset capacity knobs use these provisional S1 defaults: **unmeasured, replace after the §9 benchmarks**. The server starts if directory/mapping and the validation below succeed; configured overrides remain supported.
+Two structures hold frames. The free lists (§6.1) hold unused frames for allocation. The FIFO cache queue below holds retained frames (unread backlog and replay) in first-enqueue order and decides which stream is invalidated under size or age pressure. A frame moves from the queue to a free list only after its last lease and retention reference release it.
+Default (G8, 2026-11-14): the per-request limit is 512 MiB and at most 1/8 of the total; the total defaults to the smallest of 4 GiB, half the tmpfs size at start and the cgroup memory headroom. The owner asked for the measured conclusion (「请你综合测试再给我结论」) and leaned to 512 MB and 4 GB; the 「好」 of 2026-11-14 answered the G3 question, so these numbers are maintainer defaults from the S0 benchmark that an owner ruling can change. Other unset capacity knobs use provisional S1 defaults, **unmeasured, replace after the §9 benchmarks**. The server starts if directory/mapping and the validation below succeed; configured overrides remain supported.
 
 | Configuration knob | Default and unit/scope | Accounting/rationale |
 | --- | --- | --- |
 | `stream.pool_directory` | `$XDG_RUNTIME_DIR/cook-router/`, directory/process | Private tmpfs location (§6.3); no fallback when XDG is absent. |
-| `stream.pool_bytes` | 250,000,000 bytes/process (5,000 blocks) | Fixed block-multiple capacity bounds total mapped storage while allowing several concurrent exchanges. |
-| `stream.max_blocks` | 640 blocks/exchange (32,000,000 bytes) | Request/response/scratch/replay combined; one exchange cannot monopolize the pool. |
+| `stream.pool_bytes` | min(4 GiB, 50% of the tmpfs size from `statvfs` at start, cgroup `memory.max` less heap headroom), rounded down to a frame multiple; log the derived value | Bounds mapped storage. Tmpfs is usually 10% of RAM under logind, so the tmpfs term is often the effective limit; a service may have no `XDG_RUNTIME_DIR`. Ignore the cgroup term when `memory.max` is `max`. The heap headroom size is an S1 choice. |
+| `stream.max_blocks` | min(⌊512 MiB / 50,000⌋, ⌊`pool_frames` / 8⌋) frames, where `pool_frames` = `pool_bytes` / 50,000 (10,737 at the 4 GiB ceiling, or 536,850,000 bytes) | Request/response/scratch/replay combined; a ceiling, not a reservation; one exchange cannot take the whole pool. |
 | `stream.max_event_bytes` | 1 MiB/event | Ordinary framed event including extensions; bound parser work, chunk large content/media instead. |
 | `stream.max_metadata_bytes` | 1 MiB/exchange | Tables/indexes/parser/consumer bookkeeping; bound tiny-event amplification. |
-| `stream.cache_bytes` | 125,000,000 bytes/process (2,500 blocks) | Retained backlog/replay is part of the pool, not another pool; leave capacity for active encoding. |
+| `stream.cache_bytes` | ⌊`pool_frames` / 2⌋ × 50,000 (42,949 frames, or 2,147,450,000 bytes, at the 4 GiB ceiling, where `pool_frames` is 85,899) | Retained backlog/replay is part of the pool, not another pool; leave capacity for active encoding. |
 | `stream.cache_max_age` | 60 s/block | Bound logical stalled retention; first enqueue sets age, reads never refresh it. |
 
-**S1 choice:** high/low unread-backlog watermarks are 75%/50% of `max_blocks` (480/320 by default), rounded down; hysteresis pauses early enough to leave room for in-flight collection.
-Startup rejects zero capacities/age, pool/cache sizes that are not block multiples, `cache_bytes > pool_bytes`, `max_blocks < 4`, `max_blocks * 50000 > pool_bytes`, or `max_event_bytes > max_blocks * 50000`. Metadata must hold the configured block table plus one event index and reader entry; validate against actual entry sizes with checked arithmetic.
+**S1 choice:** high/low unread-backlog watermarks are 75%/50% of `max_blocks` (8,052/5,368 for 512 MiB), rounded down; hysteresis pauses early enough to leave room for in-flight collection.
+Startup rejects zero capacities/age, pool/cache sizes that are not frame multiples, `cache_bytes > pool_bytes`, `max_blocks < 4`, `max_blocks * 50000 > pool_bytes / 8`, or `max_event_bytes > max_blocks * 50000`. Metadata must hold the configured block table plus one event index and reader entry; validate against actual entry sizes with checked arithmetic.
 1. Queue retained blocks in first-enqueue FIFO order, including unread/replay-pinned entries. Release consumed, unneeded blocks; physical reuse always waits for the last lease. Pause upstream reads at the high watermark, resume below the low watermark; already-arriving bytes and timer flushes still consume quota.
 2. At size/allocation pressure, process the oldest retained entries first: reclaim unneeded unleased entries; if a live retained entry must be removed, logically invalidate its owning stream. Age expiry invalidates that owner at 60 s by default even while reads are paused. Never skip live bytes and continue that stream.
 3. Invalidation cancels the producer, ends the stream with `stream.storage_exhausted` via §6.2, and makes readers see the terminal error then end-of-stream. Drop retention references; leased frames stay immutable and charged to pool/exchange limits until their last lease releases. FIFO logical removal is not physical reclamation.
-4. Retry the pending reservation only against actually free capacity. If stream/pool/cache/metadata limits still prevent it, fail the allocating stream visibly with an error event; no indefinite wait, provider failover, spill or degradation. A callback that never releases keeps its frames indefinitely; once the pool runs out, new allocations fail visibly too.
+4. Retry the pending reservation only against actually free capacity, including growth by `fallocate` under `pool_bytes`. Owner ruling (G7): if stream, pool, cache or metadata limits still prevent it, or `fallocate` returns ENOSPC, return an error and fail the allocating stream visibly with an error event; no heap fallback, no indefinite wait, provider failover, spill or degradation. A reader that never releases keeps its frames indefinitely; once the pool runs out, new allocations fail visibly too.
+
 Full-snapshot egress pins its source range and can exhaust its stream quota. Allocation/mapping/file failures return 503 before commitment when possible; after commitment emit an error or close abnormally. OS mmap faults/OOM may kill the process: no guaranteed in-band error, signal-recovery subsystem or alternate pool.
+
+### 6.5 Reclaim and memory accounting
+
+An idle pool must give tmpfs pages back. The S0 benchmark measured four ways to punch holes (`FALLOC_FL_PUNCH_HOLE`); only decay reclaim kept the request path at heap parity:
+
+| Reclaim | Result against heap |
+| --- | --- |
+| None | Parity, but the pool keeps its high-water mark (641 MiB stayed after ten 64 MiB streams ended). |
+| Eager, on every free | -97% req/s at 64 tasks: each punch zaps PTEs in a shared mapping and sends TLB-shootdown IPIs to every CPU running the process. |
+| Watermark, inside the free path | +132% (256 streams) and +408% (1024 streams) wall time. |
+| **Decay, background tick** | Parity or faster in every row except one that is still open (§9.3); tmpfs fell from 641 to 1 MiB about one second after the streams ended. |
+
+Decay is the rule. A background tick runs once per second and punches the frames that stayed idle on a free list for the whole interval. It keeps 8 free frames per thread list and coalesces neighbouring free frames into one call. The request path never punches. The tick holds the cold-list lock across the punch; without it, frames in flight sit on no list and a stream that fills the pool fails early. A thread taking a punched frame prefaults it (§6.1), which removed a +16% TTFB p99 regression with four readers.
+Since 50,000 is not page-aligned, only whole pages inside a run of free frames are punched. An isolated frame keeps up to one partial page at each edge, so the residue grows with the page size: 8 KiB with 4 KiB pages, the page size of the S0 host; hosts with 16 or 64 KiB pages (some arm64 kernels) are unmeasured. The measured residue after decay on that host was 1-2 MiB. Record the page size with every memory result (§9.2). Each tick still sends TLB-shootdown IPIs to the CPUs running the process; the cost on hosts with many more busy threads is unmeasured.
+Accounting: mapped tmpfs pages count as `RssShmem` inside `VmRSS`, as `shmem` in the cgroup's `memory.stat` and `memory.current`, and in `statvfs` on the tmpfs. They do not appear as `RssFile`. Monitoring and memory limits must read these, not `RssAnon` alone; a full pool puts `VmRSS` at about `pool_bytes`.
 
 ## 7. Bounds and flow
 
@@ -611,7 +636,7 @@ Full-snapshot egress pins its source range and can exhaust its stream quota. All
 | Partial input record | Hold only mapped spans up to event/stream limits; timer-flush custom data; ordinary incomplete JSON is not published. |
 | Slow consumer | Apply §6.4 high/low watermarks, then FIFO pressure/age invalidation and visible failure if space cannot be reclaimed; already-arriving bytes remain charged, never queued without a bound. |
 | Stream block/cache limit | Apply §6.4 FIFO expiry/eviction and visible whole-stream failure; no resource-exhaustion provider failover. |
-| Cancellation | Cancel upstream HTTP/WS/media I/O and cooperative plugin work, stop producers, wake readers; outstanding leases obey §6.4, never forced reuse or retry. |
+| Cancellation | Cancel upstream HTTP/WS/media I/O and cooperative work, stop producers, wake readers; outstanding leases obey §6.4, never forced reuse or retry. |
 | Pre-delivery upstream failure | Routing may retry another permitted upstream/credential with a fresh attempt stream; do not mix failed-attempt events into the selected response. |
 | First deliverable event | Egress sets commit once before scheduling the first output bytes; status/headers become fixed; retry is disabled. |
 | Post-delivery failure | Preserve delivered prefix, emit destination error/abnormal close, never append successful terminal output or restart content. |
@@ -624,25 +649,14 @@ Where a final response requires old content, do not evict it silently to meet a 
 A destination that only accepts whole tool JSON may delay tool serialization at egress by reading mapped fragments; internal argument delivery remains incremental.
 SSE, JSON array streams, raw media HTTP bodies, WS JSON/binary messages and WebRTC packets are egress encodings, not alternate internal pipelines.
 Today `crates/cpa-server/src/dispatch.rs:2653-2675` bootstraps `Done::Stream` on the first nonempty upstream chunk and concatenates non-streaming output in `BytesMut`; bootstrap is not transport commitment.
-Chunk interceptors may drop that first chunk and return a later error into bootstrap retry (`crates/cpa-server/src/dispatch.rs:785-831`; `crates/cpa-server/src/plugins/interceptors.rs:779-806`). Separately, configured nonstream/media keepalives can commit headers/body before an inference event (`crates/cpa-server/src/dispatch.rs:583-632`).
-The new single commit point is egress scheduling the first client-deliverable bytes after interception and encoding; suppressed metadata cannot commit, and pre-delivery keepalives/success headers are forbidden (§3.6).
+Configured nonstream/media keepalives can commit headers/body before an inference event (`crates/cpa-server/src/dispatch.rs:583-632`).
+The new single commit point is egress scheduling the first client-deliverable bytes after encoding; suppressed metadata cannot commit, and pre-delivery keepalives/success headers are forbidden (§3.6).
 Today's framer has a 16 MiB per-event default and a BytesMut buffer (`crates/cpa-translate/src/sse.rs:9-13,28-34`); that number is evidence, not an adopted S0 stream/pool limit.
 
-## 8. Plugins
+## 8. Extension
 
-Plugins consume the logical internal request and version-1 events, not client-wire SSE or negotiated pairwise protocol bodies.
-An executor plugin encodes its own upstream boundary and produces internal events; a codec plugin implements a boundary codec, not an arbitrary source/destination translation pair.
-Interceptors receive correlation and a borrowed event view/stream handle; modifications append mapped replacements subject to grammar, ordering and quota validation.
-SDK reads/writes use position-scoped host callbacks, not retained raw pointers or whole-history arrays; an RPC transport streams bounded fragments into/out of host mmap storage.
-Do not serialize mmap positions as dereferenceable cross-process addresses. Handles are stream-scoped, generation-checked and invalid after callback/lease completion.
-Unknown fields/events remain present through interception; an explicit authorized plugin edit can replace/remove them, but omission by a restrictive decoder cannot.
-Plugin output cannot change trusted request identity, attempt ownership, usage authority or commitment state. Revalidate starts/ends, tool IDs and terminal ordering before publication.
-**S1 choice:** native C ABI **2** and RPC schema **7** identify this incompatible cutover without colliding with ABI 1/schema 6; grammar remains **1**. Exact version numbers are S1 assignments; rejecting incompatible plugins is an interoperability requirement.
-Current versions are ABI 1/schema 6 (`crates/cpa-plugin/src/abi.rs:7-19`); current executor/translator/interceptor APIs exchange Bytes and format names (`crates/cpa-plugin/src/api.rs:576-628,711-723`).
-Require exact cutover ABI/schema match before registering or invoking plugin hooks; reject old or unsupported newer versions with plugin ID, expected/actual versions and an SDK rebuild instruction.
-Remove obsolete pair translator negotiation, wire-body interceptors and original/history body payloads; no compatibility adapter, dual dispatch or old schema fallback.
-Maintainers MUST migrate the SDK and supported store packages with the cutover, publish the version requirements, and verify rejection of an unmigrated package before claiming plugin readiness.
-Plugin cancellation/backpressure/allocations obey §6.4: age expiry logically ends the stream but cannot revoke a borrowed slice from a stuck callback. Such leases retain frames indefinitely; subsequent pool exhaustion fails new allocations visibly, never overwrites them.
+Plugins are deleted (owner ruling 2026-11-13, 「目前完全删除外挂功能，如果用户想要拓展功能，需要修改源码并自行编译部署」). There is no runtime plugin, interceptor, SDK or ABI boundary. Extending cook-router means changing the source and rebuilding.
+Every stage that reads or rewrites stream content is in-process code. It follows the §3 grammar, the §6.2 publication protocol and the §6.4 quotas, and cannot change trusted request identity, attempt ownership, usage authority or commitment state.
 
 ## 9. Verification
 
@@ -661,20 +675,19 @@ Cover every registered client/upstream combination and applicable request/stream
 | Tools | Start/fragments/end remain incremental; IDs and choices survive; historical JSON input stays structured until Chat egress serializes it, while custom text remains text. |
 | Usage | Partial/repeated/corrected snapshots, explicit zero/absent/null, cache TTL buckets and multiple attempts count once; count_tokens never becomes generation usage. |
 | Fidelity | Choice-scoped `delta: {}` logprobs-only chunks need no fabricated text; refusal/safety/citation offsets and provider sequences survive; unknown nested fields/events reach egress before destination-specific emission/debug-logged drop. |
-| Request fields | Both sampling fields, audio modalities, legacy options, speech instructions and provider options survive. Late unsupported mapped semantics cause 400 with zero upstream requests; plugin edits revalidate. Typed content/controls round-trip; literal media-marker look-alikes remain data, references cannot cross streams. |
+| Request fields | Both sampling fields, audio modalities, legacy options, speech instructions and provider options survive. Late unsupported mapped semantics cause 400 with zero upstream requests; Typed content/controls round-trip; literal media-marker look-alikes remain data, references cannot cross streams. |
 | Destination projections | Choice 0 selected by index, not array position; dropped choices and unsupported B9 events produce content-free debug diagnostics. |
 | Framing | Fragment every UTF-8/SSE delimiter/base64 unit across reads; exercise multiline data, CR/LF variants, empty events and source terminal markers. |
 | Failures | Client invalid UTF-8→400; upstream invalid UTF-8/malformed/truncated input→error; no success after error/cancel or post-terminal content. |
 | Commitment | Metadata-only output that egress suppresses permits retry; deliverable role/event bytes prevent it; keepalive cannot commit early. |
 | Media | Exact bytes/MIME/timing, 36,864-byte full chunks, whole encoded event ≤50,000 bytes, framing overflow shortens the chunk; ≤100 ms collection while allocation succeeds, including backpressure; failed reservation ends with error. |
 | Duplex | Responses append/history and realtime control/media/sideband preserve direction/turn/session/packet identity; cancellation closes owned work. |
-| Storage | Concurrent publication exposes complete prefixes; cross-block JSON, lost-wakeup races, cancellation, stale handles and frame reuse cannot leak/corrupt content. |
+| Storage | Concurrent publication exposes complete prefixes; cross-block JSON, lost-wakeup races, cancellation, stale handles and frame reuse cannot leak/corrupt content. A frame held by a reader is never reused or punched. |
 | Bounds | Exercise default and small-limit high/low watermarks, FIFO size/age invalidation, error then EOF, and last-lease-only reuse; a stuck lease survives expiry and forces visible allocation failure, never overwrite/heap growth. |
-| Permissions/lifecycle | Real private mmap files on tmpfs and configured disk directory; modes, unlink, process death and last-reader release verified. |
-| Plugins | SDK mutations preserve unknown values; version mismatch fails before hooks; stuck callbacks retain leases after logical termination, and physical exhaustion rejects new allocations. |
+| Permissions/lifecycle | Real private mmap pool on tmpfs and configured disk directory; modes, unlink, process death and last-reader release verified. Pool exhaustion on a small tmpfs returns an error (ENOSPC from `fallocate`), never SIGBUS. |
 | Loss ledger | L01–L18 receive consumer-visible regression coverage where applicable; no test merely greps source or repeats implementation wiring. |
 
-New gates require planted violations and a recorded failing result: erase a signature, replace absent usage with zero, overwrite a Gemini part, publish before event completion, reuse a leased frame, bypass chunk timer/size, commit on suppressed metadata, or admit an old plugin.
+New gates require planted violations and a recorded failing result: erase a signature, replace absent usage with zero, overwrite a Gemini part, publish before event completion, reuse a leased frame, bypass chunk timer/size or commit on suppressed metadata.
 Use deterministic clocks and local mock upstreams; concurrency/storage checks use real temporary mappings and isolated process lifetimes, not fake success adapters.
 No live-provider traffic without owner approval. Cache-semantic changes require warm/changed-context/idle checks with observed cache read/write usage (`crates/AGENTS.md:88,92-94`).
 
@@ -716,9 +729,41 @@ Latency harness peak memory includes proxy, mock and client (`crates/cpa-server/
 Record host architecture/page size, kernel, filesystem, CPU affinity/load, build flags, configuration, binaries/revisions, repetitions and raw results.
 A lower heap/RSS reading alone is not a memory improvement claim: account for mmap/tmpfs residency and OS page cache; compare total charged resources under the same workload.
 
+### 9.3 Storage regression gate (S1)
+
+Owner ruling (G9): performance tests mount the storage directory on tmpfs, and no regression against heap buffering is accepted. S1 may not merge the pool until every row below holds. The comparison is the chosen pool backend (per-thread LIFO lists, 128-byte alignment, decay reclaim) against heap blocks of the same size and layout, on the same host, with `stream.pool_directory` on tmpfs. The per-request-file backend was rejected (§6.1) and is not measured here.
+**S1 choice:** use at least 7 alternating runs per row and compare medians. A row regresses when the pool's median is worse than heap's and falls outside heap's own min..max range. The open row below uses a stricter rule.
+
+| Row | Workload | Measured | Pool must be |
+| --- | --- | --- | --- |
+| Small request | 2 KiB (32 × 64 B), create, write, read, drop; 1 task and 64 tasks; req/s, p50, p99 | 64 tasks: +2.5% req/s, p99 -19%; 1 task: -0.4% req/s, p99 +7.2% (other runs -1.3%, within noise) | Not slower than heap |
+| Concurrent streams | 256 and 1024 streams of 256 KiB in 256 B deltas, 1 reader each; wall time and TTFB p99 | 256: -18% wall; 1024: -40% wall; TTFB p99 -27% in both | Not slower than heap |
+| Throughput | 1 writer, 1 and 4 readers, 64 B and 48 KiB appends, streams of 1, 32 and 256 MiB; MB/s | +2% to +121% except the open row below | Not slower than heap |
+| Latency | 64 B deltas 20 µs apart, 1 and 4 readers; append-to-observe p50 and p99; TTFB | p50 equal; p99 +4% with 1 reader (inside heap's range), -21% with 4 readers | Not slower than heap |
+| Memory | 100 × 1 MiB and 10 × 64 MiB held, then dropped; `VmRSS`, `RssAnon`, `RssShmem`, cgroup `memory.current`, tmpfs used; sampled after the first eligible reclaim tick, at most two decay intervals after the release, because frames freed just after a tick are not yet idle for a full interval at the next one (§6.5) | Sampled about 1 s after release: 100 × 1 MiB: `VmRSS` 3 MiB and tmpfs 2 MiB against heap's 17 MiB `VmRSS`; 10 × 64 MiB: 2 and 1 MiB against heap's 2 MiB | `VmRSS` at or below heap's, and tmpfs used and `VmRSS` each at most 4 MiB over the pre-test baseline, plus 8 × 50,000 bytes for each free-frame list beyond the S0 run's thread count |
+| Total-budget exhaustion | 4 GiB pool on a tmpfs with at least 4 GiB free, 512 MiB per stream: each stream is capped at 10,737 frames (§6.4), and streams append until refused | Not measured with these quotas. The S0 `totalcap` run rounded each stream to 10,738 frames, so its eighth stream hit the total cap; with 10,737 frames, eight streams hold 85,896 of 85,899 frames | Streams 1-8 stop at the per-stream limit; stream 9 stops at the total cap after at most 3 frames; each refusal is an error, no SIGBUS, no heap spill |
+| Tmpfs exhaustion (ENOSPC) | Private tmpfs of 64 MiB (`unshare -Urm`), growth by `fallocate` | ENOSPC returned after 66,158,592 committed bytes; the same run grown by `ftruncate` died of SIGBUS | `fallocate` error becomes a stream error, no SIGBUS, no heap spill, process keeps running |
+
+The 4 MiB memory margin sits just above the 1-3 MiB the S0 run reported, which is MiB-granular and varies between runs, and far below the residue of a failed reclaim (112 and 641 MiB). The `8 × 50,000` term is the free frames each list keeps by design (§6.5).
+
+One row is open: 4 readers, 64 B appends, 1 MiB streams. It does not pass by default. S0 results over 101 repetitions: the decay pool's median was +0.4% and -2.9% in two runs, the fixed pool without reclaim -4.1% and -3.7%, and heap's own runs spread from 254 to 1320 MB/s. The harness could not attribute or remove the possible few-percent loss. S1 runs this row for the pool and for heap, 101 alternating runs each, and reports both medians and the difference. Heap's run-to-run spread is the interquartile range of its 101 runs (P25..P75). The row passes only when the pool's median is not below heap's P25; a median below it blocks the merge until fixed or until an owner accepts the loss.
+The S0 prototype `s0-bench` (outside this repository) produced the numbers. S1 ports these workloads into `bench/` and keeps the gate there. Commands used, from the prototype directory with `$TMPFS` an existing tmpfs directory (the S0 `rss` rows ran the `pool-fixed+reclaim` backend, which is the chosen decay pool; `totalcap` must first be changed to give each stream 10,737 frames):
+
+```sh
+cargo build --release
+sh scripts/run-all.sh "$TMPFS/s0-bench"        # about 7 min; includes the ENOSPC check
+sh scripts/followup.sh "$TMPFS/s0-bench"       # padded LIFO pool, decay reclaim; about 1 min
+./target/release/s0-bench small --tasks 64 --variants "pool sharded LIFO,decay" --counters 1
+./target/release/s0-bench throughput --set followup --reps 101 --readers 4 --chunks 64 --sizes 1m
+./target/release/s0-bench rss pool-fixed+reclaim 100 1m --dir "$TMPFS/s0-bench"
+./target/release/s0-bench rss pool-fixed+reclaim 10 64m --dir "$TMPFS/s0-bench"
+./target/release/s0-bench totalcap --dir "$TMPFS/s0-bench" --total 4g --max 512m
+sh scripts/enospc.sh
+```
+
 ## 10. Defaults an owner may revise
 
-Every default below is binding for S1: **Default (2026-11-13), change by owner ruling**. Owners directed implementation to proceed, not to wait for another design approval.
+Every default below is binding for S1: **Default (2026-11-13), change by owner ruling**; G8 is **Default (2026-11-14) from measurement, change by owner ruling**. Owners directed implementation to proceed, not to wait for another design approval.
 
 | Default | Owner action/status |
 | --- | --- |
@@ -732,14 +777,10 @@ Every default below is binding for S1: **Default (2026-11-13), change by owner r
 | B8: tool start/deltas/end | Owner may revise (§3.3, §3.6). |
 | B9: grounding/code/URL events and egress drops | Owner may revise (§3.7). |
 | C2: invalid-text UTF-8 failures | Owner may revise (§7). |
-| D1/G8: capacity knobs and provisional values | Owner may revise; approve measured pool/stream/event/metadata/cache size/age replacements after §9 benchmarks (§6.4). |
+| D1: event, metadata and cache sizes and cache age | Owner may revise; approve measured replacements after §9 benchmarks (§6.4). |
+| G8: per-request limit and pool total | Owner may revise the 512 MiB, 1/8 and 4 GiB defaults (§6.4). |
 | D2: slow-client watermarks/FIFO sequence | Owner may revise, including S1 75%/50% hysteresis (§6.4). |
 | D3: first-deliverable-byte commit | Owner may revise (§3.6, §7). |
-| E2: ABI/schema bump and exact S1 2/7 assignments | Owner may revise (§8). |
-| F/G9: measurements and regression thresholds | Owner may revise; approve throughput/latency/CPU/allocation/total-storage tolerances after baseline, before accepting performance (§9). |
-| G3′: S1 one file, free list/block table/metadata lock | Owner may revise these mechanisms, preserving mmap/position/publication/lease invariants (§6.1–6.2). |
-| G2: configurable tmpfs runtime directory | Owner may revise (§6.3). |
-| G4/G5: O_TMPFILE/unlink, no scavenger | Owner may revise (§6.3). |
-| G6: 0600/0700, no extra encryption | Owner may revise (§6.3). |
+| F: codec and pipeline thresholds | Owner may revise; approve throughput/latency/CPU/allocation/total-storage tolerances after baseline, before accepting performance (§9). |
 
-SDK/store migration ownership, Linux-only scope, one representation and visible resource failure remain owner decisions, not pending design questions.
+Linux-only scope, one representation, the storage rulings in §2 and visible resource failure remain owner decisions, not pending design questions.
