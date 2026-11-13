@@ -64,14 +64,20 @@ deps.x86_64-unknown-linux-gnu.duplicate_crates  11  0
 # median of 29,200 KB and 69faf5f2 at 30,380, with RssAnon flat at about 4.2 MB and
 # 1,672 KB of SQLite's 1,801 KB text resident. CI read 28,104 at 69faf5f2 and 28,104 to
 # 29,184 after it, against 26,848 to 27,056 before.
+# 2026-11-13: both RSS budgets re-based with a maintainer's approval when the gate moved
+# into the Dockerfile perf stage (a BuildKit RUN, isolation proxy-env) on ci/docker-stages.
+# The same binary idles higher there than on the runner host: GitHub runner 33,556 KB (1
+# file) and 85,824 KB (2,000 files) in the stage, against 28,104-29,184 and about 77,500
+# measured natively before; on the build host one docker-built binary read 29,776 natively
+# and 33,556 in the stage. The binary did not grow; the measuring environment changed.
 idle.linux.1.wakeups           3   0
 idle.linux.1.cpu_ticks         1   0
 idle.linux.1.threads           6   0
-idle.linux.1.rss_kb       27_500  10
+idle.linux.1.rss_kb       33_500  10
 idle.linux.2000.wakeups        3   0
 idle.linux.2000.cpu_ticks      1   0
 idle.linux.2000.threads        6   0
-idle.linux.2000.rss_kb    77_492  10
+idle.linux.2000.rss_kb    85_800  10
 
 # Field-mix soak (bench/soak.sh MIX=field: Claude, Codex and count_tokens requests of
 # 200 KB to 2 MB from 4 sessions, run by hand before a release): VmHWM at the end of the

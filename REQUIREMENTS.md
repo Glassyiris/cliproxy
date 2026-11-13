@@ -59,7 +59,7 @@ UI scale/layout values remain in `ui/DESIGN.md` and code limits in `ui/CONVENTIO
 | Commit subject length | 72 characters; source: CONTRIBUTING.md, Commits and pull request titles | A setting, not measured | .github/scripts/pr-title.py checks PR titles; commit hook absent |
 | Linux release sizes | Binary 52000000 B; text 35000000 B; rodata 11000000 B; zero tolerance; source: bench/budgets.txt size.x86_64-unknown-linux-gnu | | bench/gate.sh size |
 | Duplicate linked crate versions | 11 crates, zero tolerance; source: bench/budgets.txt deps.x86_64-unknown-linux-gnu.duplicate_crates | | bench/gate.sh size |
-| Linux idle | With 1 and 2000 credentials: 3 wakeups, 1 CPU tick, 6 threads; RSS 27500 and 77492 KB with 10% tolerance; source: bench/budgets.txt idle.linux | | bench/gate.sh idle |
+| Linux idle | With 1 and 2000 credentials: 3 wakeups, 1 CPU tick, 6 threads; RSS 33500 and 85800 KB with 10% tolerance, measured in the Dockerfile perf stage; source: bench/budgets.txt idle.linux | | bench/gate.sh idle |
 | Field-mix soak peak | 173072 KB with 20% tolerance; source: bench/budgets.txt soak.field.peak_hwm_kb | | bench/soak.sh |
 | Request heap budgets | Per-route peak bytes, allocations and held bytes with keyed tolerances in bench/budgets.txt alloc.* | | crates/cpa-server/tests/alloc_budget.rs through nextest |
 | Dashboard npm run check wall time | 90 s local, 5 min CI | 5.8 s (2026-11-08, shell and System page; host/load not recorded) | ui/tools/check-all.mjs enforces 90 s, including in CI. The 5 min CI figure is the recorded target; the dashboard job's workflow timeout is 30 min (`.github/workflows/ci.yml`) |
