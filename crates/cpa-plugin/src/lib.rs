@@ -20,7 +20,6 @@ pub mod client;
 pub mod config;
 pub mod executor;
 pub mod gojson;
-pub mod homeplugins;
 pub mod host;
 pub mod hostauth;
 mod hosthttp;

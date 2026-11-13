@@ -1,7 +1,6 @@
 //! The plugin store (internal/pluginstore): registries that list installable
 //! plugins, GitHub release and direct-download installs verified by SHA-256, store
-//! authentication rules, the shared GitHub rate limiter, and the Home plugin-sync
-//! payloads.
+//! authentication rules and the shared GitHub rate limiter.
 //!
 //! The HTTP side goes through a [`Doer`] (Go's `httpfetch.Doer`), so the server
 //! supplies its proxy-aware client and tests a local fake; nothing here opens a
@@ -11,7 +10,6 @@ mod auth;
 mod checksum;
 mod client;
 mod doer;
-mod home_sync;
 mod install;
 mod manifest;
 mod rate_limit;
@@ -20,11 +18,10 @@ mod url;
 mod version;
 mod zip;
 
-pub use auth::{AuthConfig, Headers, ResolvedAuthConfig, Secret, normalize_auth_configs, plugin_auth_configured};
+pub use auth::{AuthConfig, Headers, normalize_auth_configs, plugin_auth_configured};
 pub use checksum::{parse_checksums, verify_checksum};
 pub use client::{Client, Doer, DoerResponse, Release, ReleaseAsset, StoreError, archive_name, select_release_assets};
 pub use doer::WreqDoer;
-pub use home_sync::{PLUGIN_SYNC_SCHEMA_VERSION, PluginSyncItem, PluginSyncRequest, PluginSyncResponse};
 #[cfg(unix)]
 pub(crate) use install::create_temp;
 pub use install::{InstallOptions, InstallResult, LOADED_PLUGIN_LOCKED, install_archive};

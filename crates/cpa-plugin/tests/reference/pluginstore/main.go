@@ -222,7 +222,6 @@ func main() {
 	authCases()
 	clientCases()
 	installCases()
-	homeSyncCases()
 	out, err := json.MarshalIndent(map[string]any{"cases": cases}, "", "  ")
 	check(err)
 	check(os.WriteFile(os.Args[1], append(out, '\n'), 0o644))
@@ -707,27 +706,4 @@ func installCases() {
 	runInstall(installArgs{Call: "install_archive", Plugin: plugin, Zip: base64.StdEncoding.EncodeToString([]byte("not a zip")), GOOS: "linux", GOARCH: "amd64"})
 	runInstall(installArgs{Call: "install_archive", Plugin: pluginstore.Plugin{ID: "-p", Version: "1"}, Zip: makeZip(nil), GOOS: "linux", GOARCH: "amd64"})
 	runInstall(installArgs{Call: "install_archive", Plugin: pluginstore.Plugin{ID: "p", Version: "x"}, Zip: makeZip(nil), GOOS: "linux", GOARCH: "amd64"})
-}
-
-func homeSyncCases() {
-	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	ghManifest := `{"id":"gh","name":"GH","description":"d","author":"a","repository":"https://github.com/o/r","version":"1.0","release_tag":"v1.0"}`
-	pinned := `{"id":"d","version":"1.0","install":{"type":"direct","artifacts":[{"goos":"linux","goarch":"amd64","url":"URL","sha256":"` + sha64 + `"}]}}`
-	for _, body := range []string{
-		`{"schema_version":1,"expires_at":"2026-01-03T00:00:00Z","items":[{"manifest":` + ghManifest + `,"auth":[{"match":"https://api.github.com/","type":"github-token","token":"dG9r"}]}]}`,
-		`{"schema_version":2,"expires_at":"2026-01-03T00:00:00Z","items":[]}`,
-		`{"schema_version":1,"items":[]}`,
-		`{"schema_version":1,"expires_at":"2026-01-02T03:04:05Z","items":[]}`,
-		`{"schema_version":1,"expires_at":"2026-01-03T00:00:00Z","items":[{"manifest":{"id":"d","version":"1.0","install":{"type":"direct"},"source_url":"https://x/r.json"}}]}`,
-		`{"schema_version":1,"expires_at":"2026-01-03T00:00:00Z","items":[{"manifest":` + strings.ReplaceAll(pinned, "URL", "http://x/a.zip") + `}]}`,
-		`{"schema_version":1,"expires_at":"2026-01-03T00:00:00Z","items":[{"manifest":` + strings.ReplaceAll(pinned, "URL", "https://x/a.zip") + `},{"manifest":` + strings.ReplaceAll(pinned, "URL", "https://x/b.zip") + `}]}`,
-		`{"schema_version":1,"expires_at":"2026-01-03T00:00:00Z","items":[{"manifest":` + ghManifest + `,"auth":[{"match":"http://x/"}]}]}`,
-		`{"schema_version":1,"expires_at":"2026-01-03T00:00:00Z","items":[{"manifest":` + ghManifest + `,"auth":[{"match":"https://x/","apply_to":["everything"]}]}]}`,
-		`{"schema_version":1,"expires_at":"2026-01-03T00:00:00Z","items":[{"manifest":` + ghManifest + `,"auth":[{"match":"https://x/","type":"header","header_name":"X-A:"}]}]}`,
-		`{"schema_version":1,"expires_at":"2026-01-03T00:00:00Z","items":[{"manifest":` + ghManifest + `,"auth":[{"match":"https://x/","type":"basic","username":"dQ=="}]}]}`,
-	} {
-		var response pluginstore.PluginSyncResponse
-		check(json.Unmarshal([]byte(body), &response))
-		add("home_sync_validate", map[string]any{"body": body, "now": now}, outcome(nil, response.Validate(now)))
-	}
 }
