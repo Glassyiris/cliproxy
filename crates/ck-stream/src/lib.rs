@@ -3,15 +3,19 @@
 //! Codecs own record syntax. This crate publishes only fully written reservations.
 
 mod cache;
+mod grammar;
 mod limits;
 mod pool;
 mod position;
 mod publication;
+mod request;
 
 pub use cache::{Clock, ManualClock, MonotonicClock, Store};
+pub use grammar::{ByteSpan, EventView};
 pub use limits::{Config, Limits, MAX_POOL_BYTES, MAX_STREAM_FRAMES};
 pub use position::{Position, Record};
 pub use publication::{Lease, Read, Reader, Reservation, Writer};
+pub use request::RequestFieldView;
 
 pub const FRAME_BYTES: usize = 50_000;
 

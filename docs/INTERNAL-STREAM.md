@@ -232,6 +232,9 @@ B7/B9 response projections occur inside the egress encoder after receipt: select
 ## 4. Internal request
 
 The logical request is a Chat-based document plus `x_ck`, with typed content and structured historical tool input as specified below; it is a view over mmap positions, not a heap `Value` tree or buffered body.
+
+`ck-stream::ByteSpan` borrows a published lease and checks end-exclusive coordinates, generation and record bounds. `EventView` supplies event-name/data spans; `RequestFieldView` supplies pointer/value spans without retaining a second body. Spans can cross frames, clip reads to their own boundaries and reject new reads after invalidation. Empty spans are allowed through the record's exclusive end. Codecs provide parsed locations and remain responsible for SSE/JSON syntax, JSON-pointer meaning, capability checks and the `request.end` fence.
+
 `request.field` uses absolute JSON pointers into this document. Emit parent containers as empty objects/arrays before their child fields; arrays use consecutive numeric indexes.
 The reference spelling is `{type: "x_ck_media", media_id: string, value_kind: "bytes"|"utf8"}`. Egress resolves only references registered by trusted ingress at the exact document position in this stream's own media table, never by JSON shape or client-supplied `X.media`; literal look-alike objects pass through as data.
 Large strings use registered references with `mime: text/plain;charset=utf-8` and custom-data events; the logical value is concatenated decoded UTF-8. Encoders escape incrementally from positions after validation, not from a second accumulated body.
