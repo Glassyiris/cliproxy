@@ -1,5 +1,5 @@
-//! The config store: every setting, provider key, client key, model router and plugin
-//! config as one row of a SQLite database, written in transactions that each make one
+//! The config store: every setting, provider key, client key and model router as one
+//! row of a SQLite database, written in transactions that each make one
 //! numbered revision. The runtime reads the [`Config`] the rows compile to
 //! ([`resources::config`]).
 //!
@@ -46,8 +46,6 @@ pub struct ConfigStore {
     writer: Mutex<Option<state::Pending>>,
     // Owner-derived dispatch fence: a consumed grant requires these source bytes.
     grant_sources: RwLock<BTreeMap<String, Option<[u8; 32]>>>,
-    // Volatile plugin-child results are execution state, never snapshot documents.
-    virtual_grants: Mutex<Vec<crate::runtime::HeldVirtualGrant>>,
     held_logins: Mutex<Vec<crate::management::HeldLogin>>,
     held_login_sources: RwLock<std::collections::BTreeSet<String>>,
     rejected_login_sources: RwLock<BTreeMap<String, [u8; 32]>>,

@@ -98,7 +98,6 @@ impl ConfigStore {
             state: RwLock::new(Arc::new(state)),
             writer: Mutex::new(None),
             grant_sources: RwLock::default(),
-            virtual_grants: Mutex::default(),
             held_logins: Mutex::default(),
             held_login_sources: RwLock::default(),
             rejected_login_sources: RwLock::default(),

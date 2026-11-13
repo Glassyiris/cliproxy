@@ -553,7 +553,6 @@ fn seed_protocol_credential(f: &Fixture) -> Arc<cpa_core::credential::Credential
     f.db.save(&path, br#"{"type":"codex","access_token":"T0","refresh_token":"R0"}"#)
         .unwrap();
     let scan = crate::testing::with_builtin_auth_parser(|| {
-        f.db.preparse(&f.rt.config()).unwrap();
         f.db.scan(&f.rt.config()).unwrap()
     });
     f.rt.store().reconcile_scanned(scan.credentials, &scan.read);
@@ -618,7 +617,6 @@ fn configuration_and_public_credential_patch_complete_coherently() {
     assert!(received.try_recv().is_err());
     assert_eq!(f.rt.config().routing.strategy, "fill-first");
     let scan = crate::testing::with_builtin_auth_parser(|| {
-        f.db.preparse(&f.rt.config()).unwrap();
         f.db.scan(&f.rt.config()).unwrap()
     });
     assert_eq!(scan.credentials[0].str("access_token"), Some("T1"));

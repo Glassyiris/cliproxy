@@ -16,26 +16,29 @@ use cpa_core::exec::Caller;
 
 use crate::runtime::Runtime;
 
-/// Go `AuthMiddleware`: client keys, then plugin frontend auth providers.
-pub async fn require_client_key(State(rt): State<Arc<Runtime>>, req: Request, next: Next) -> Response {
-    let (mut req, access) = crate::plugins::authenticate(&rt, req).await;
-    let caller = match access {
-        Ok(crate::plugins::Access::Open) => Caller {
-            principal: String::new(),
-            source: "",
-            provider: String::new(),
+/// Go `AuthMiddleware` over the config access provider: open without client keys, else
+/// one of them must match. A matched caller carries the provider name Go records.
+pub async fn require_client_key(State(rt): State<Arc<Runtime>>, mut req: Request, next: Next) -> Response {
+    let config = rt.config();
+    let query = req.uri().query().unwrap_or_default();
+    let caller = match authenticate(&config.api_keys, req.headers(), query) {
+        Ok(caller) if config.api_keys.is_empty() => caller,
+        Ok(caller) => Caller {
+            provider: CONFIG_PROVIDER.to_owned(),
+            ..caller
         },
-        Ok(crate::plugins::Access::Granted(caller)) => caller,
-        // gin `AbortWithStatusJSON(status, gin.H{"error": msg})`.
-        Err(denied) => {
-            let body = crate::gojson::Obj::new().str("error", denied.message).finish();
-            return crate::respond::gin_json(denied.status, body);
+        // gin `AbortWithStatusJSON(401, gin.H{"error": msg})`.
+        Err(message) => {
+            let body = crate::gojson::Obj::new().str("error", message).finish();
+            return crate::respond::gin_json(401, body);
         }
     };
     req.extensions_mut().insert(caller);
-    let query = req.uri().query().unwrap_or_default().to_owned();
-    crate::plugins::execution::with_query(&query, next.run(req)).await
+    next.run(req).await
 }
+
+/// Go `configaccess` provider name, recorded on callers a client key admitted.
+pub(crate) const CONFIG_PROVIDER: &str = "config-inline";
 
 pub(crate) fn authenticate(keys: &[String], headers: &HeaderMap, query: &str) -> Result<Caller, &'static str> {
     if keys.is_empty() {
