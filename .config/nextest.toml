@@ -31,14 +31,6 @@ filter = '''
         | test(=antigravity_request::tests::tool_schemas_are_cleaned_in_one_pass)))
     | (binary_id(cpa-server) & test(/^websocket::tests::/))
     | (binary_id(cpa-server) & test(=pprof::tests::pprof_cpu_profile_is_decodable_and_exclusive))
-    | (binary_id(cook-router::bin/cook-router) & (
-        test(=home::tests::usage_and_in_flight_reach_home_and_drains_cancel_running_work)
-        | test(=home::tests::a_drain_cancels_a_stalled_alpha_search)
-        | test(=home::tests::a_drain_ends_a_retained_live_pick)
-        | test(=home::tests::a_pooled_codex_socket_keeps_its_home_pick)
-        | test(=home::tests::a_drain_cancels_stalled_live_reads_and_handshakes)
-        | test(=home::tests::an_available_next_round_starts_immediately)
-        | test(=home::tests::home_busy_skips_outer_retries)))
 '''
 threads-required = 'num-test-threads'
 priority = 90

@@ -15,13 +15,12 @@ import sys
 
 TYPES = {"feat", "fix", "refactor", "test", "style", "chore", "docs", "deps", "ci", "release"}
 SCOPES = {
-    "cli": "the cook-router binary: command line, TUI, discovery, Home node (crates/cook-router)",
+    "cli": "the cook-router binary: command line, TUI, discovery (crates/cook-router)",
     "server": "HTTP routes, client auth, credential selection, management API (crates/cpa-server)",
     "exec": "upstream provider executors (crates/cpa-exec)",
     "translate": "request and response translation (crates/cpa-translate)",
     "core": "config, credentials, formats, shared helpers (crates/cpa-core, crates/cpa-common)",
     "plugin": "the native plugin host and plugin store (crates/cpa-plugin)",
-    "home": "the Home control-plane client (crates/cpa-home)",
     "ui": "the dashboard (ui/)",
     "docker": "the Dockerfile and image",
     "ci": "workflows and CI scripts (.github/)",
