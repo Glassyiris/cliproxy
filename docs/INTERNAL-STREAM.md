@@ -39,7 +39,7 @@ Owners directed S1 to proceed with these binding defaults; an owner ruling may r
 | B9 | Default (2026-11-13), change by owner ruling | Grounding/code execution/URL context are named events; unsupported egress drops with debug logs. | Q |
 | C2 | Default (2026-11-13), change by owner ruling | Invalid textual UTF-8: client 400; upstream error; binary media is not text. | Q |
 | D1 | Default (2026-11-13), change by owner ruling | Configurable stream limits; event, metadata and cache sizes and cache age start with the §6.4 provisional values, replace after measurement. | Q |
-| D2 | Default (2026-11-13), change by owner ruling | Slow clients pause upstream reads at the §6.4 watermark; FIFO pressure/expiry may terminate the stream, never overwrite leased frames. | Q |
+| D2 | Settled | The gateway buffers like a router: a slow client never pauses upstream reads; upstream bytes are collected into the pool and relayed at the client's pace. The per-stream limit, the pool and FIFO age bound the buffer; exceeding them fails the stream visibly (G7). Leased frames are never overwritten. | Owner ruling 2026-11-14 |
 | D3 | Default (2026-11-13), change by owner ruling | No failover after the first event producing client-deliverable bytes. | Q |
 | F | Default (2026-11-13), change by owner ruling | Measure first, obtain owner-approved thresholds; use §9 commands and codec metrics. | Q |
 
@@ -152,7 +152,7 @@ Use full decoded chunks of 36,864 bytes (49,152 base64 ASCII bytes; 36,864 = 3 �
 The whole encoded `data` event (SSE framing, JSON and base64) MUST NOT exceed 50,000 bytes, the size of one storage block. A full chunk leaves 848 bytes (50,000 − 49,152) for framing. When an event's framing would exceed 848 bytes, shorten the decoded chunk to the largest multiple of 3 bytes not above 3 × ⌊(50,000 − framing) / 4⌋. 50,000 raw bytes would require 66,668 base64 bytes before framing and MUST NOT be used.
 A complete `data` record MUST fit one storage block. It contains only compact common correlation and the three payload fields; emit large source metadata in `media.start`/`opaque`, not every chunk.
 Measure collection delay from the first byte of an uncommitted chunk using a monotonic clock; while allocation succeeds, publish within 100 ms or immediately at the chunk ceiling/object end.
-A stalled consumer delays transmission, not collection: publish to mmap, then pause reads under §6.4. Allocation failure instead ends the stream with an error event via §6.2 terminal state; it does not extend the timer or permit heap spill.
+A stalled consumer delays transmission, not collection: publish to mmap and keep reading upstream (D2). Allocation failure instead ends the stream with an error event via §6.2 terminal state; it does not extend the timer or permit heap spill.
 Preserve MIME, codec, sample rate, channels, dimensions, transcript, source timestamps/timebase, message/packet boundaries and original base64 spelling when semantically relevant metadata requires it.
 Binary data bytes are exact after base64 decoding; JSON whitespace, escaping and transport frames are not byte-preservation contracts.
 For realtime, `media.start.attributes` names track, packet/message ID, timestamp/timebase and flags; `media.end` closes that packet/message, not the whole session.
@@ -603,10 +603,10 @@ Default (G8, 2026-11-14): the per-request limit is 512 MiB and at most 1/8 of th
 | `stream.cache_bytes` | ⌊`pool_frames` / 2⌋ × 50,000 (42,949 frames, or 2,147,450,000 bytes, at the 4 GiB ceiling, where `pool_frames` is 85,899) | Retained backlog/replay is part of the pool, not another pool; leave capacity for active encoding. |
 | `stream.cache_max_age` | 60 s/block | Bound logical stalled retention; first enqueue sets age, reads never refresh it. |
 
-**S1 choice:** high/low unread-backlog watermarks are 75%/50% of `max_blocks` (8,052/5,368 for 512 MiB), rounded down; hysteresis pauses early enough to leave room for in-flight collection.
+Owner ruling (D2, 2026-11-14): a slow consumer never pauses upstream reads. The stream keeps collecting into the pool and the gateway relays at the client's pace; `max_blocks`, the pool and `cache_max_age` bound that buffer.
 Startup rejects zero capacities/age, pool/cache sizes that are not frame multiples, `cache_bytes > pool_bytes`, `max_blocks < 4`, `max_blocks * 50000 > pool_bytes / 8`, or `max_event_bytes > max_blocks * 50000`. Metadata must hold the configured block table plus one event index and reader entry; validate against actual entry sizes with checked arithmetic.
-1. Queue retained blocks in first-enqueue FIFO order, including unread/replay-pinned entries. Release consumed, unneeded blocks; physical reuse always waits for the last lease. Pause upstream reads at the high watermark, resume below the low watermark; already-arriving bytes and timer flushes still consume quota.
-2. At size/allocation pressure, process the oldest retained entries first: reclaim unneeded unleased entries; if a live retained entry must be removed, logically invalidate its owning stream. Age expiry invalidates that owner at 60 s by default even while reads are paused. Never skip live bytes and continue that stream.
+1. Queue retained blocks in first-enqueue FIFO order, including unread/replay-pinned entries. Release consumed, unneeded blocks; physical reuse always waits for the last lease. Upstream reads never pause for a slow consumer (D2); every arriving byte and timer flush consumes quota.
+2. At size/allocation pressure, process the oldest retained entries first: reclaim unneeded unleased entries; if a live retained entry must be removed, logically invalidate its owning stream. Age expiry invalidates that owner at 60 s by default even while its client lags. Never skip live bytes and continue that stream.
 3. Invalidation cancels the producer, ends the stream with `stream.storage_exhausted` via §6.2, and makes readers see the terminal error then end-of-stream. Drop retention references; leased frames stay immutable and charged to pool/exchange limits until their last lease releases. FIFO logical removal is not physical reclamation.
 4. Retry the pending reservation only against actually free capacity, including growth by `fallocate` under `pool_bytes`. Owner ruling (G7): if stream, pool, cache or metadata limits still prevent it, or `fallocate` returns ENOSPC, return an error and fail the allocating stream visibly with an error event; no heap fallback, no indefinite wait, provider failover, spill or degradation. A reader that never releases keeps its frames indefinitely; once the pool runs out, new allocations fail visibly too.
 
@@ -634,7 +634,7 @@ Accounting: mapped tmpfs pages count as `RssShmem` inside `VmRSS`, as `shmem` in
 | Ordinary event exceeds limit | Client 413 for oversized input; upstream error for oversized output; never silently truncate. |
 | Invalid textual UTF-8/JSON | Client 400; upstream terminal error; no replacement-character repair or raw passthrough. Binary media remains valid arbitrary bytes. |
 | Partial input record | Hold only mapped spans up to event/stream limits; timer-flush custom data; ordinary incomplete JSON is not published. |
-| Slow consumer | Apply §6.4 high/low watermarks, then FIFO pressure/age invalidation and visible failure if space cannot be reclaimed; already-arriving bytes remain charged, never queued without a bound. |
+| Slow consumer | Keep reading upstream into the pool (D2); unread bytes stay charged; the per-stream limit, FIFO pressure or age invalidation fail the stream visibly; never an unbounded queue. |
 | Stream block/cache limit | Apply §6.4 FIFO expiry/eviction and visible whole-stream failure; no resource-exhaustion provider failover. |
 | Cancellation | Cancel upstream HTTP/WS/media I/O and cooperative work, stop producers, wake readers; outstanding leases obey §6.4, never forced reuse or retry. |
 | Pre-delivery upstream failure | Routing may retry another permitted upstream/credential with a fresh attempt stream; do not mix failed-attempt events into the selected response. |
@@ -680,10 +680,10 @@ Cover every registered client/upstream combination and applicable request/stream
 | Framing | Fragment every UTF-8/SSE delimiter/base64 unit across reads; exercise multiline data, CR/LF variants, empty events and source terminal markers. |
 | Failures | Client invalid UTF-8→400; upstream invalid UTF-8/malformed/truncated input→error; no success after error/cancel or post-terminal content. |
 | Commitment | Metadata-only output that egress suppresses permits retry; deliverable role/event bytes prevent it; keepalive cannot commit early. |
-| Media | Exact bytes/MIME/timing, 36,864-byte full chunks, whole encoded event ≤50,000 bytes, framing overflow shortens the chunk; ≤100 ms collection while allocation succeeds, including backpressure; failed reservation ends with error. |
+| Media | Exact bytes/MIME/timing, 36,864-byte full chunks, whole encoded event ≤50,000 bytes, framing overflow shortens the chunk; ≤100 ms collection while allocation succeeds, including a slow consumer; failed reservation ends with error. |
 | Duplex | Responses append/history and realtime control/media/sideband preserve direction/turn/session/packet identity; cancellation closes owned work. |
 | Storage | Concurrent publication exposes complete prefixes; cross-block JSON, lost-wakeup races, cancellation, stale handles and frame reuse cannot leak/corrupt content. A frame held by a reader is never reused or punched. |
-| Bounds | Exercise default and small-limit high/low watermarks, FIFO size/age invalidation, error then EOF, and last-lease-only reuse; a stuck lease survives expiry and forces visible allocation failure, never overwrite/heap growth. |
+| Bounds | Exercise a throttled client against a fast upstream (upstream reads never pause; the per-stream limit fails visibly), FIFO size/age invalidation, error then EOF, and last-lease-only reuse; a stuck lease survives expiry and forces visible allocation failure, never overwrite/heap growth. |
 | Permissions/lifecycle | Real private mmap pool on tmpfs and configured disk directory; modes, unlink, process death and last-reader release verified. Pool exhaustion on a small tmpfs returns an error (ENOSPC from `fallocate`), never SIGBUS. |
 | Loss ledger | L01–L18 receive consumer-visible regression coverage where applicable; no test merely greps source or repeats implementation wiring. |
 
@@ -714,7 +714,7 @@ done
 
 `bench/run.sh` resolves its second binary argument even for SERVERS=rust, so repeat the Rust path there; it is not a Go comparison (`bench/run.sh:30-33,155-158`).
 Scenario names and current measures are in `bench/run.sh:120-151`; Messages MIN/MAX/DELAY and affinity are in `bench/messages.sh:40-51,98-110`; latency arguments/isolation are in `bench/latency.sh:5-28`.
-The current `chat-stream-slow` scenario delays the upstream, not the downstream consumer (`bench/run.sh:121-130`); additionally run an explicitly throttled downstream reader to prove backpressure.
+The current `chat-stream-slow` scenario delays the upstream, not the downstream consumer (`bench/run.sh:121-130`); additionally run an explicitly throttled downstream reader to prove upstream collection continues (D2) and the per-stream limit fails visibly.
 Latency harness peak memory includes proxy, mock and client (`crates/cpa-server/examples/claude_latency.rs:7-28`); report it separately from proxy-only measures.
 
 | Measurement | Required dimensions |
@@ -779,7 +779,6 @@ Every default below is binding for S1: **Default (2026-11-13), change by owner r
 | C2: invalid-text UTF-8 failures | Owner may revise (§7). |
 | D1: event, metadata and cache sizes and cache age | Owner may revise; approve measured replacements after §9 benchmarks (§6.4). |
 | G8: per-request limit and pool total | Owner may revise the 512 MiB, 1/8 and 4 GiB defaults (§6.4). |
-| D2: slow-client watermarks/FIFO sequence | Owner may revise, including S1 75%/50% hysteresis (§6.4). |
 | D3: first-deliverable-byte commit | Owner may revise (§3.6, §7). |
 | F: codec and pipeline thresholds | Owner may revise; approve throughput/latency/CPU/allocation/total-storage tolerances after baseline, before accepting performance (§9). |
 
