@@ -21,7 +21,6 @@ exclude = ["tests/"]
 cpa-common = { path = "crates/cpa-common", version = "0.4.1" }
 cpa-core = { path = "crates/cpa-core", version = "0.4.1" }
 cpa-exec = { path = "crates/cpa-exec", version = "0.4.1" }
-cpa-plugin = { path = "crates/cpa-plugin", version = "0.4.1" }
 cpa-server = { path = "crates/cpa-server", version = "0.4.1" }
 cpa-translate = { path = "crates/cpa-translate", version = "0.4.1" }
 

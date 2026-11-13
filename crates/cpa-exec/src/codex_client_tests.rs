@@ -55,7 +55,7 @@ fn replays_go_translation_and_optimization() {
                 };
                 let got = translate_request(from, to, &ctx, input, &client).unwrap();
                 assert_eq!(
-                    String::from_utf8(got.body).unwrap(),
+                    String::from_utf8(got).unwrap(),
                     want,
                     "{} -> {} compat={} target={:?} ua={}",
                     from.as_str(),
@@ -87,4 +87,30 @@ fn orphan_delegation_is_shared_with_api_keys() {
     assert!(Settings::from_config(&cfg).orphan_delegation);
     let api_key = Settings::from_config(&cfg.for_api_key());
     assert!(api_key.orphan_delegation && api_key.optimize_multi_agent_v2);
+}
+
+/// The is-compat Claude translator skips the registered pair, so the summary intent read
+/// from the client body is applied here: `thinking.display` decides `reasoning.summary`
+/// exactly as on the ordinary path.
+#[test]
+fn compat_translation_applies_the_claude_summary_intent() {
+    let cfg = Config::default();
+    let headers = HeaderMap::new();
+    let ctx = RequestCtx {
+        model: "gpt-5.4",
+        stream: false,
+        tool_search: false,
+    };
+    for (display, want) in [("summarized", Value::from("auto")), ("omitted", Value::Null)] {
+        let body = format!(
+            r#"{{"model":"gpt-5.4","max_tokens":64,"thinking":{{"type":"adaptive","display":"{display}"}},"messages":[{{"role":"user","content":"hi"}}]}}"#
+        );
+        let summary = |compat| {
+            let client = Client::new(&headers, &cfg, "codex", compat);
+            let out = translate_request(Format::Claude, Format::Codex, &ctx, body.as_bytes(), &client).unwrap();
+            serde_json::from_slice::<Value>(&out).unwrap()["reasoning"]["summary"].clone()
+        };
+        assert_eq!(summary(true), want, "compat, display {display}");
+        assert_eq!(summary(false), want, "ordinary, display {display}");
+    }
 }

@@ -474,14 +474,10 @@ fn online_backup_is_consistent_and_never_overwrites_a_path() {
 }
 
 #[test]
-fn versioned_exports_preserve_scope_and_raw_plugin_nodes_with_explicit_secret_access() {
+fn versioned_exports_preserve_scope_with_explicit_secret_access() {
     let store = ConfigStore::memory();
     store
-        .import_yaml(
-            "upstream:\n  codex:\n    disable-codex-cloaking: true\nplugins: {configs: {acme: {ratio: 1.50, binary: !!binary YWJj}}}\n",
-            "t",
-            "",
-        )
+        .import_yaml("upstream:\n  codex:\n    disable-codex-cloaking: true\n", "t", "")
         .unwrap();
     let loaded = store.load().unwrap();
     let private = resources::export_json(loaded.rev, &loaded.resources, true).to_string();
@@ -490,9 +486,7 @@ fn versioned_exports_preserve_scope_and_raw_plugin_nodes_with_explicit_secret_ac
         .unwrap();
     let again = copy.load().unwrap();
     assert_eq!(again.config.oauth_only, loaded.config.oauth_only);
-    assert_eq!(again.config.plugin_configs, loaded.config.plugin_configs);
     let safe = resources::export_json(loaded.rev, &loaded.resources, false).to_string();
-    assert!(!safe.contains("@raw-yaml"));
     let restored = store
         .replace(resources::import_json(&safe).unwrap(), "t", "", false)
         .unwrap();
@@ -714,9 +708,9 @@ fn patch_and_set_cannot_bypass_secret_resends_by_omitting_the_key() {
     }
 }
 
-/// The removed Home settings (the `home` section, the credential settings and the plugin
-/// auth revision) are unknown keys: YAML import and management writes refuse them in every
-/// spelling and publish no revision.
+/// The removed Home settings (the `home` section and the credential settings) and the
+/// removed `plugins` section are unknown keys: YAML import and management writes refuse
+/// them in every spelling and publish no revision.
 #[test]
 fn removed_home_settings_are_rejected_without_a_revision() {
     let store = ConfigStore::memory();
@@ -737,10 +731,15 @@ fn removed_home_settings_are_rejected_without_a_revision() {
         "home: null",
         "plugins: {auth-revision: 10}",
         "plugins: {auth-revision: null}",
+        "plugins: {enabled: true}",
+        "plugins: {configs: {acme: {enabled: true, ratio: 1.5}}}",
     ] {
         assert!(store.import_yaml(&format!("{yaml}\n"), "t", "").is_err(), "{yaml}");
         assert_eq!(store.head().unwrap(), head, "{yaml}");
     }
+    // Decision 1: a `plugins:` section fails with the ordinary unknown-key error.
+    let err = store.import_yaml("plugins: {enabled: true}\n", "t", "").unwrap_err();
+    assert!(format!("{err:#}").contains("unknown setting config.plugins"), "{err:#}");
     for (setting, spec) in [
         ("credentials", json!({"concurrency": {"max-limit": 5}})),
         ("credentials", json!({"in-flight": {"max-details": 9}})),
@@ -749,6 +748,7 @@ fn removed_home_settings_are_rejected_without_a_revision() {
         ("home", json!({"enabled": true})),
         ("home", json!({})),
         ("plugins", json!({"auth-revision": 9})),
+        ("plugins", json!({"configs": {"acme": {"enabled": true}}})),
     ] {
         assert!(
             store
@@ -762,6 +762,7 @@ fn removed_home_settings_are_rejected_without_a_revision() {
         ("home/enabled", json!(true)),
         ("home", json!({"enabled": true})),
         ("plugins/auth-revision", json!(9)),
+        ("plugins/configs/acme/enabled", json!(true)),
     ] {
         let op = Op::Set {
             path: path.into(),

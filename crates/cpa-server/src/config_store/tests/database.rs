@@ -390,7 +390,7 @@ fn uncheckpointed_wal_is_preserved_in_the_published_backup() {
 fn wal_conflict_preserves_sidecars_and_recovers_opaque_state_after_close() {
     let (dir, path) = database_path("active-wal");
     let expected = resources::import_yaml(
-        "server: {port: 8124}\nplugins: {enabled: true, configs: {acme: {ratio: 1.50, binary: !!binary YWJj}}}\n",
+        "server: {port: 8124}\nrequests: {payload: {default: [{models: [{name: m}], params: {ratio: 1.50}}]}}\n",
     )
     .unwrap();
     let writer = Connection::open(&path).unwrap();

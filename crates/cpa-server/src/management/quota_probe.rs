@@ -1,7 +1,6 @@
 //! The declarative quota probe (plugin_quota.go `executeQuotaProbe`): a credential's
 //! `quota_probe` metadata names an HTTP request whose JSON answer is read as a
-//! normalized quota, directly or through a gjson path mapping. `quota/fetch` uses it
-//! when no plugin quota provider handles the credential.
+//! normalized quota, directly or through a gjson path mapping. `quota/fetch` runs it.
 
 use cpa_core::gostr::GoStr;
 use std::time::SystemTime;

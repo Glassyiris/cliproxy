@@ -680,8 +680,6 @@ impl Write for OutputGuard {
 const FIELD_ORDER: &[&str] = &[
     "provider",
     "model",
-    "plugin_id",
-    "plugin_name",
     "source_id",
     "version",
     "active_version",

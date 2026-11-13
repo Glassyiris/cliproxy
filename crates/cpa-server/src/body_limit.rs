@@ -1,8 +1,8 @@
 //! `server.max-request-body-bytes`, Go v8.0.35 `maxRequestBodyBytesMiddleware`
 //! (dd7b4334). Off by default. When set, a declared `Content-Length` over the limit is
 //! refused before anything is read, and every other body ends in [`TooLarge`] as soon
-//! as it passes the limit, so whoever reads it (request capture, client auth plugins,
-//! handlers) answers Go's 413 for its route.
+//! as it passes the limit, so whoever reads it (request capture, handlers)
+//! answers Go's 413 for its route.
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll, ready};

@@ -54,7 +54,6 @@ fn upgrade_url(url: &str) -> String {
 pub(crate) struct Wire {
     sink: CaptureSink,
     /// Go `EmitWebSocketResponseEvent`, called with every `AppendCodexAPIWebsocketResponse`.
-    websocket: Option<cpa_core::exec::WebSocketEmitter>,
     auth_id: String,
     auth_label: String,
     auth_type: &'static str,
@@ -69,18 +68,11 @@ impl Wire {
         let (auth_type, auth_value) = cpa_core::registry::dynamic::account_info(credential);
         Self {
             sink: sink.clone(),
-            websocket: None,
             auth_id: credential.id.clone(),
             auth_label: credential.label.clone(),
             auth_type,
             auth_value,
         }
-    }
-
-    /// Reports the WebSocket frames this wire records to the attempt's observer.
-    pub(crate) fn with_websocket(mut self, websocket: Option<cpa_core::exec::WebSocketEmitter>) -> Self {
-        self.websocket = websocket;
-        self
     }
 
     pub(crate) fn enabled(&self) -> bool {
@@ -182,16 +174,8 @@ impl Wire {
     }
 
     /// `AppendCodexAPIWebsocketResponse`.
-    /// `AppendCodexAPIWebsocketResponse`, and the `EmitWebSocketResponseEvent`
-    /// observation the caller awaits before it handles the message, if any.
-    pub(crate) fn ws_response_observation(
-        &self,
-        payload: &str,
-    ) -> Option<futures_util::future::BoxFuture<'static, ()>> {
+    pub(crate) fn ws_response(&self, payload: &str) {
         self.sink.record(CaptureEvent::WebsocketResponse(payload.as_bytes()));
-        let websocket = self.websocket.clone()?;
-        let payload = payload.to_owned();
-        Some(Box::pin(async move { websocket.emit(payload.as_bytes()).await }))
     }
 
     /// `RecordAPIWebsocketError`.

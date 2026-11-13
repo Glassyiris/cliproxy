@@ -79,10 +79,6 @@ requests:
     default:
       - models: [{name: "gpt-*"}]
         params: {"reasoning.effort": high, when: 2001-12-14}
-plugins:
-  enabled: true
-  configs:
-    acme: {enabled: true, ratio: 1.5}
 "#
         .to_owned(),
     );
@@ -116,7 +112,6 @@ fn an_imported_config_compiles_to_what_the_file_loads_to() {
             }
         }
         assert_eq!(got.oauth_only, want.oauth_only, "{text}");
-        assert_eq!(got.plugin_configs, want.plugin_configs, "{text}");
         assert_eq!(got.api_keys, want.api_keys, "{text}");
         assert_eq!(got.routing, want.routing, "{text}");
         assert_eq!((got.host.clone(), got.port), (want.host.clone(), want.port), "{text}");
@@ -339,12 +334,11 @@ fn all_secret_carriers_are_masked_and_annotation_stripping_is_positioned() {
     ] {
         assert_eq!(shown.spec.pointer(pointer).unwrap(), SECRET);
     }
-    let doc = json!({"api-keys":{"claude":[{"auth_index":"drop", "keys":[{"auth-index":"drop", "api-key":"x"}], "payload":{"auth_index":"keep"}}]}, "requests":{"payload":{"auth_index":"keep","auth-index":"keep"}}, "plugins":{"configs":{"acme":{"auth_index":"keep"}}}});
+    let doc = json!({"api-keys":{"claude":[{"auth_index":"drop", "keys":[{"auth-index":"drop", "api-key":"x"}], "payload":{"auth_index":"keep"}}]}, "requests":{"payload":{"auth_index":"keep","auth-index":"keep"}}});
     let clean = strip_read_annotations_at(doc, &[]);
     assert!(clean["api-keys"]["claude"][0].get("auth_index").is_none());
     assert_eq!(clean["api-keys"]["claude"][0]["payload"]["auth_index"], "keep");
     assert_eq!(clean["requests"]["payload"]["auth_index"], "keep");
-    assert_eq!(clean["plugins"]["configs"]["acme"]["auth_index"], "keep");
 }
 
 #[test]

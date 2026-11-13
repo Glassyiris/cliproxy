@@ -290,7 +290,8 @@ pub(super) fn valid_state(state: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
 
-/// Go `NormalizeOAuthCallbackProvider`: the built-in aliases, else a plugin-style name.
+/// Go `NormalizeOAuthCallbackProvider`: the built-in aliases, else the lowercased
+/// name when it holds only letters, digits and hyphens.
 pub(crate) fn normalize_callback_provider(provider: &str) -> Option<String> {
     let p = provider.trim().go_lower();
     let builtin = match p.as_str() {
@@ -2297,7 +2298,6 @@ mod tests {
             original_body: body.clone(),
             body,
             stream: false,
-            stream_payloads: false,
             alt: None,
             session: None,
             execution_session: None,

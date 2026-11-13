@@ -360,7 +360,7 @@ fn run(
         e.body = Some(body.clone());
         e
     })?;
-    let mut applied = apply_fn.apply(&body, &validated, Some(info))?;
+    let mut applied = apply_fn(&body, &validated, Some(info))?;
     if fully_disabled(&validated) || native_responses {
         return Ok(applied);
     }
@@ -475,7 +475,7 @@ fn apply_user_defined_model(
         return Ok(body.to_vec());
     };
     let config = normalize_user_defined_config(config, to);
-    let applied = apply_fn.apply(body, &config, info)?;
+    let applied = apply_fn(body, &config, info)?;
     if fully_disabled(&config) || native_responses {
         return Ok(applied);
     }

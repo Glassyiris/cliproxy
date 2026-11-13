@@ -201,7 +201,6 @@ fn request(body: &str) -> ExecRequest {
         operation: Operation::Generate,
         source_format: Format::OpenAIResponse,
         response_format: Format::OpenAIResponse,
-        stream_payloads: false,
         requested_model: "gpt-fixture".into(),
         model: "gpt-fixture".into(),
         original_body: body.clone(),
@@ -1085,87 +1084,6 @@ async fn capture_records_an_upstream_error_event() {
     );
 }
 
-/// Go's executor holds the session lock through its synchronous observer: a turn
-/// abandoned while an observation runs keeps the session until the observer returns, so
-/// the next turn can neither write upstream nor be observed before that.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_abandoned_turn_keeps_its_session_until_its_observation_returns() {
-    /// Holds every message until `release`.
-    struct Holding {
-        calls: std::sync::atomic::AtomicUsize,
-        release: tokio::sync::Semaphore,
-    }
-    impl cpa_core::exec::WebSocketObserver for Holding {
-        fn response<'a>(
-            &'a self,
-            _: &'a str,
-            _: &'a Credential,
-            _: &'a str,
-            _: &'a [u8],
-        ) -> futures_util::future::BoxFuture<'a, ()> {
-            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Box::pin(async move {
-                let _ = self.release.acquire().await.unwrap();
-            })
-        }
-    }
-    let (up, url) = upstream(vec![
-        Act::Send(vec![CREATED, COMPLETED]),
-        Act::Send(vec![CREATED, COMPLETED]),
-    ])
-    .await;
-    let executor = Arc::new(CodexExecutor::new().unwrap());
-    let observer = Arc::new(Holding {
-        calls: Default::default(),
-        release: tokio::sync::Semaphore::new(0),
-    });
-    let turn = |executor: Arc<CodexExecutor>| {
-        let (url, observer) = (url.clone(), observer.clone());
-        tokio::spawn(async move {
-            let mut req = request(BODY);
-            req.usage = cpa_core::exec::UsageSink::default().with_websocket(Some(observer));
-            if let Ok(response) = executor
-                .execute_in_session(&credential(&url), req, &Config::default(), &session(false))
-                .await
-            {
-                collect(response).await;
-            }
-        })
-    };
-    let a = turn(executor.clone());
-    let calls = || observer.calls.load(std::sync::atomic::Ordering::SeqCst);
-    for _ in 0..250 {
-        if calls() == 1 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert_eq!(calls(), 1, "turn A's first message was not observed");
-    a.abort();
-    let _ = a.await;
-    let lock = executor.ws.session("conn-1").turn.clone();
-    assert!(
-        lock.try_lock().is_err(),
-        "dropping A released the session during its observation"
-    );
-    let b = turn(executor.clone());
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(
-        up.frames.lock().unwrap().len(),
-        1,
-        "turn B wrote while A's observation ran"
-    );
-    assert_eq!(calls(), 1, "turn B was observed while A's observation ran");
-    observer.release.add_permits(100);
-    tokio::time::timeout(Duration::from_secs(10), b).await.unwrap().unwrap();
-    assert!(lock.try_lock().is_ok(), "the session stayed locked after both turns");
-    assert_eq!(
-        up.frames.lock().unwrap().len(),
-        2,
-        "turn B did not run after the release"
-    );
-}
-
 /// A pooled socket on session "conn-1" to the mock at `url`, its reader running.
 async fn pooled(executor: &CodexExecutor, url: &str) -> Arc<super::Upstream> {
     let session = executor.ws.session("conn-1");
@@ -1248,6 +1166,45 @@ async fn interrupt_needs_a_turn_reading_on_the_socket() {
         .await
         .unwrap();
     assert_eq!(received(&up, 1).await, [INTERRUPT_R1]);
+}
+
+/// A client that goes away mid-turn drops the turn: the socket stays pooled but no turn
+/// reads on it, so a later `response.interrupt` finds no current upstream and is not
+/// written to the socket.
+#[tokio::test]
+async fn a_dropped_turn_stops_reading_on_its_socket() {
+    let (up, url) = upstream(vec![Act::Send(vec![CREATED])]).await;
+    let executor = CodexExecutor::new().unwrap();
+    let response = executor
+        .execute_in_session(&credential(&url), request(BODY), &Config::default(), &session(false))
+        .await
+        .unwrap();
+    let ResponseBody::Stream(mut stream) = response.body else {
+        panic!("websocket turns stream");
+    };
+    let first = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .unwrap();
+    assert!(matches!(first, Some(Ok(_))), "{first:?}");
+    let conn = executor.ws.session("conn-1").current().expect("the socket is pooled");
+    assert!(conn.link.lock().unwrap().active.is_some(), "the turn reads");
+    drop(stream);
+    assert!(
+        conn.link.lock().unwrap().active.is_none(),
+        "the dropped turn still reads"
+    );
+    assert_eq!(
+        executor
+            .interrupt_session("conn-1", INTERRUPT_R1.as_bytes(), |_| true)
+            .await,
+        Err(InterruptError::NoActive)
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        up.frames.lock().unwrap().len(),
+        1,
+        "only the turn's request reached the socket"
+    );
 }
 
 /// Go `TestInterruptExecutionSessionCompletesDuringAuthCheck`: the response finishes

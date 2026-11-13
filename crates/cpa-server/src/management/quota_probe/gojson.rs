@@ -441,8 +441,8 @@ pub(crate) type Header = BTreeMap<String, Vec<String>>;
 
 /// Go `strconv.ParseFloat(s, 64)`: out of range is an error rather than ±Inf, NaN takes
 /// no sign, and underscores may separate digits.
-/// ponytail: Go's hexadecimal form (`0x1p-2`) is rejected; plugin flags are decimal in
-/// practice. Upgrade by porting `atofHex` if a plugin needs it.
+/// ponytail: Go's hexadecimal form (`0x1p-2`) is rejected; probe answers are decimal in
+/// practice. Upgrade by porting `atofHex` if one needs it.
 pub(crate) fn parse_float(s: &str) -> Option<f64> {
     let unsigned = s.strip_prefix(['+', '-']).unwrap_or(s);
     if unsigned.len() != s.len() && unsigned.eq_ignore_ascii_case("nan") {

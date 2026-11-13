@@ -79,7 +79,6 @@ testing = []
 flate2 = "1.1.10"
 
 [dev-dependencies]
-cpa-core = { workspace = true, features = ["test-support"] }
 cpa-server = { path = ".", features = ["testing"] }
 tokio = { workspace = true, features = ["test-util"] }
 wreq = { workspace = true, features = ["ws"] }

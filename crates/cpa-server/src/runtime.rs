@@ -2879,7 +2879,7 @@ impl CredentialStore {
     }
 
     /// [`Self::apply_patch`], with `edit` applied to the credential before it is
-    /// published (fields outside the document, such as a plugin refresh's proxy URL),
+    /// published (fields outside the document),
     /// and a token refresh's `fence` ([`Self::apply_refresh`]).
     fn apply_patch_with(
         &self,

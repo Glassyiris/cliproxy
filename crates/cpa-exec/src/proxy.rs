@@ -728,7 +728,7 @@ fn ended_early(error: &std::io::Error) -> bool {
 }
 
 /// [`send_request`] without error sanitising, for callers that report Go's own error
-/// text (the plugin host's `host.http.*`).
+/// text (the declarative quota probe).
 pub async fn send_request_raw(
     route: &(dyn Fn(&url::Url) -> Result<Route, ExecError> + Sync),
     method: wreq::Method,

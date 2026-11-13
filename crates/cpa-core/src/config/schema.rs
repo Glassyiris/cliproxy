@@ -69,20 +69,9 @@ pub fn go_int(value: &Value) -> Option<i64> {
     })
 }
 
-/// `plugins.configs`: Go keeps each entry's raw YAML (`PluginInstanceConfig.Raw`) and
-/// decodes only `enabled` and `priority` from it, so its scalars are never rewritten.
-fn is_raw_entries(schema: &Schema) -> bool {
-    static RAW: LazyLock<&'static Schema> = LazyLock::new(|| {
-        SCHEMA
-            .pointer("/fields/plugins/fields/configs")
-            .expect("generated schema has plugins.configs")
-    });
-    std::ptr::eq(schema, *RAW)
-}
-
 /// Rewrites scalars of a canonical v8 document the way yaml.v3 decodes them into the
 /// Go config: YAML 1.1 bool spellings in typed bool fields become booleans, floats in
-/// int fields are truncated. Plugin entries keep their raw scalars ([`is_raw_entries`]).
+/// int fields are truncated.
 pub fn coerce_typed_scalars(value: &mut Value) {
     fn walk(value: &mut Value, schema: &Schema) {
         let schema = schema.get("optional").unwrap_or(schema);
@@ -113,7 +102,7 @@ pub fn coerce_typed_scalars(value: &mut Value) {
         match value {
             Value::Mapping(map) => {
                 for (key, item) in map.iter_mut() {
-                    if let Some(field) = child(schema, key).filter(|f| !is_raw_entries(f)) {
+                    if let Some(field) = child(schema, key) {
                         walk(item, field);
                     }
                 }
@@ -277,19 +266,7 @@ fn walk_at(value: &Value, schema: &Schema, path: &str, pointer: &str, strict: bo
             ));
         }
         if let Some(inner) = schema.get("map") {
-            // A null plugin entry is a configured, disabled plugin (Go's custom
-            // unmarshaler starts from the zero config).
-            if value.is_null() && is_raw_entries(schema) {
-                continue;
-            }
-            // Other keys of a plugin entry are the plugin's own settings.
-            walk(
-                value,
-                inner,
-                &format!("{path}.{key}"),
-                &child_pointer,
-                strict && !is_raw_entries(schema),
-            )?;
+            walk(value, inner, &format!("{path}.{key}"), &child_pointer, strict)?;
         } else if let Some(inner) = schema.get("fields").and_then(|f| f.get(key)) {
             walk(value, inner, &format!("{path}.{key}"), &child_pointer, strict)?;
         } else if strict || native_group {

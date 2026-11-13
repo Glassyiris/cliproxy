@@ -99,7 +99,7 @@ class Paths(unittest.TestCase):
     def test_test_only_rust_skips_the_release_gates(self):
         for path in ("crates/cpa-server/tests/management.rs",
                      "crates/cpa-exec/tests/fixtures/gemini_go.json",
-                     "crates/cpa-plugin/tests/goplugins/go.mod",
+                     "crates/cpa-exec/tests/reference/xai/main.go",
                      "crates/cpa-server/examples/x.rs", "crates/cpa-core/benches/b.rs"):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), {"check", "test"})

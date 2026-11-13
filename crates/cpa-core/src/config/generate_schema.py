@@ -16,6 +16,7 @@ revision = subprocess.check_output(["git", "-C", str(reference), "rev-parse", "H
 assert revision.startswith("ae3ee3be"), "Use the pinned parity reference"
 structs = {}
 aliases = {}
+# Go's plugin section names pluginstore types; they are resolved, then the section is dropped below.
 for directory, prefix in [("internal/config", ""), ("internal/registry", "registry."), ("internal/pluginstore", "sdkpluginstore.")]:
     for file in sorted((reference / directory).glob("*.go")):
         if file.name.endswith("_test.go"):
@@ -80,9 +81,10 @@ source = (reference / "internal/config/config_v8.go").read_text()
 prefixes = source.split("prefixes := []configPath{", 1)[1].split("var out", 1)[0]
 for old, current in re.findall(r'\{"([^"]+)", "([^"]+)"\}', prefixes):
     put(current, take(old))
-# Home mode's credential lease settings and plugin auth revision were removed with Home mode.
+# Home mode's credential lease settings were removed with Home mode.
 schema["fields"].pop("credentials")
-schema["fields"]["plugins"]["fields"].pop("auth-revision")
+# Plugins were removed; extending the gateway means changing its source.
+schema["fields"].pop("plugins")
 # cook-router keeps credentials in the database; nothing reads a credential directory setting.
 schema["fields"]["oauth"]["fields"].pop("auth-dir")
 # Client aliases are removed, not part of the canonical writable schema.

@@ -23,7 +23,6 @@ fn request(v: &Value) -> ExecRequest {
         operation: Operation::CountTokens,
         source_format: source,
         response_format: Format::parse(v["response"].as_str().unwrap()).unwrap(),
-        stream_payloads: false,
         requested_model: v["model"].as_str().unwrap().into(),
         model: v["model"].as_str().unwrap().into(),
         original_body: body.clone(),
@@ -59,7 +58,6 @@ async fn count_tokens_matches_go() {
         attributes: [("base_url".to_owned(), "http://127.0.0.1:1".to_owned())].into(),
         metadata: Default::default(),
         revision: 0,
-        next_refresh_after: None,
     };
     let executor = crate::codex::CodexExecutor::new().unwrap();
     let cfg = Config::default();
@@ -91,5 +89,64 @@ fn encodings_follow_go_model_prefixes() {
         ("", Encoding::Cl100kBase),
     ] {
         assert_eq!(encoding_for_model(model), want, "{model}");
+    }
+}
+
+/// Go `TestCodexExecutorCountTokensPreservesToolNumberSchemas`: a Codex client's
+/// `number` tool parameters stay numbers in the counted body, from Responses and Claude,
+/// with and without an is-compat binding. The integer normalization is for non-Codex
+/// executors only.
+#[test]
+fn counted_body_keeps_tool_number_schemas() {
+    use cpa_core::exec::{ResolvedModel, ResolvedSource};
+    use cpa_core::registry::ModelInfo;
+    let properties =
+        r#"{"yield_time_ms":{"type":"number"},"timeout_ms":{"type":"number"},"max_output_tokens":{"type":"number"}}"#;
+    let sources = [
+        (
+            Format::OpenAIResponse,
+            format!(
+                r#"{{"input":"hi","tools":[{{"type":"function","name":"exec_command","parameters":{{"type":"object","properties":{properties}}}}}]}}"#
+            ),
+        ),
+        (
+            Format::Claude,
+            format!(
+                r#"{{"messages":[{{"role":"user","content":"hi"}}],"tools":[{{"name":"exec_command","input_schema":{{"type":"object","properties":{properties}}}}}]}}"#
+            ),
+        ),
+    ];
+    for (source, payload) in sources {
+        for compat in [false, true] {
+            let mut req = request(&serde_json::json!({
+                "from": source.as_str(),
+                "response": source.as_str(),
+                "model": "gpt-5.4",
+                "in": payload,
+                "headers": {"user-agent": "codex_cli_rs/0.1"},
+            }));
+            let mut raw = serde_json::Map::new();
+            if compat {
+                raw.insert("is_compat".into(), Value::Bool(true));
+            }
+            req.resolved_model = Some(ResolvedModel {
+                info: ModelInfo {
+                    id: "gpt-5.4".into(),
+                    kind: String::new(),
+                    thinking: None,
+                    raw,
+                },
+                source: ResolvedSource::ApiKey,
+            });
+            let body = crate::codex::count_tokens_body(&req, &Config::default(), "gpt-5.4").unwrap();
+            let body: Value = serde_json::from_slice(&body).unwrap();
+            let counted = &body["tools"][0]["parameters"]["properties"];
+            for field in ["yield_time_ms", "timeout_ms", "max_output_tokens"] {
+                assert_eq!(
+                    counted[field]["type"], "number",
+                    "{source:?} compat={compat} {field}: {body}"
+                );
+            }
+        }
     }
 }

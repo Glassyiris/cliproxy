@@ -732,8 +732,6 @@ fn validate_compaction(data: &[u8]) -> Result<(String, Vec<u8>), ExecError> {
 /// and the events of its socket. A no-op without an observer.
 struct WsCapture {
     sink: CaptureSink,
-    /// Go `EmitWebSocketResponseEvent`, called with every `AppendAPIWebsocketResponse`.
-    websocket: Option<cpa_core::exec::WebSocketEmitter>,
     url: String,
     headers: Vec<(String, String)>,
     frame: Vec<u8>,
@@ -746,12 +744,10 @@ struct WsCapture {
 impl WsCapture {
     fn new(req: &ExecRequest, credential: &Credential, url: &str, headers: &HeaderMap, frame: &[u8]) -> Self {
         let sink = req.capture().clone();
-        let websocket = req.websocket_emitter(crate::xai::PROVIDER, credential);
         if !sink.enabled() {
             // Nothing reads the fields without an observer: keep no copy of the frame.
             return Self {
                 sink,
-                websocket,
                 url: String::new(),
                 headers: Vec::new(),
                 frame: Vec::new(),
@@ -765,7 +761,6 @@ impl WsCapture {
         Self {
             headers: crate::openai_compat_http::header_pairs(headers),
             sink,
-            websocket,
             url: url.to_owned(),
             frame: frame.to_vec(),
             auth_id: credential.id.clone(),
@@ -848,12 +843,8 @@ impl WsCapture {
     }
 
     /// `AppendAPIWebsocketResponse`.
-    /// Records the message and returns its observation, if any.
-    fn response(&self, payload: &[u8]) -> Option<futures_util::future::BoxFuture<'static, ()>> {
+    fn response(&self, payload: &[u8]) {
         self.sink.record(CaptureEvent::WebsocketResponse(payload));
-        let websocket = self.websocket.clone()?;
-        let payload = payload.to_vec();
-        Some(Box::pin(async move { websocket.emit(&payload).await }))
     }
 }
 
@@ -876,8 +867,6 @@ struct Turn {
     conn: Arc<Upstream>,
     session: Arc<Session>,
     _turn: Option<OwnedMutexGuard<()>>,
-    /// The observation of the message being read, while it runs.
-    observing: Option<crate::ws_observation::Observation>,
     apply_patch: apply_patch::State,
     restorer: NamespaceRestorer,
     filter: XSearchFilter,
@@ -901,10 +890,8 @@ struct Turn {
 
 impl Drop for Turn {
     fn drop(&mut self) {
-        // An abandoned turn keeps its session until an observation it started returns,
-        // as Go's executor holds the session lock through the synchronous observer.
-        let conn = self.conn.clone();
-        crate::ws_observation::release_after(self.observing.take(), self._turn.take(), move || conn.deactivate());
+        self.conn.deactivate();
+        drop(self._turn.take());
     }
 }
 
@@ -953,7 +940,7 @@ impl Turn {
             return;
         }
         self.usage.first_byte();
-        crate::ws_observation::observe(&mut self.observing, self.capture.response(payload)).await;
+        self.capture.response(payload);
         if let Some(error) = ws_error(payload) {
             self.capture.error("upstream_error", &error);
             crate::openai_compat_http::publish_failure(&self.usage, &error);
@@ -1244,7 +1231,6 @@ impl XaiExecutor {
             conn,
             session,
             _turn: Some(guard),
-            observing: None,
             apply_patch: prepared.apply_patch,
             restorer: NamespaceRestorer::new(prepared.namespace_tools),
             filter: XSearchFilter::new(prepared.filter_internal_x_search, prepared.client_declared_tools),

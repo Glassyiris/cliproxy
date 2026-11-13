@@ -102,7 +102,6 @@ func main() {
 		{"merge of a locally tagged sequence", "<<: !keep [{server: {port: 1}}]\n"},
 		{"nested locally tagged merge", "inner: &i !keep {server: {port: 1}}\nouter: &o !keep {<<: *i}\n<<: *o\n"},
 		{"binary secret through a tagged merge source", "base: &b !keep {secret-key: !!binary c2VjcmV0}\nmanagement:\n  <<: *b\n"},
-		{"binary plugin pin through a tagged merge source", "base: &b !keep {version: !!binary MS4yLjM=}\nplugins:\n  configs:\n    x:\n      store:\n        <<: *b\n"},
 		// Collection keys, a merge key inside one included.
 		{"merge key inside a collection key", "extra:\n  ? {\"<<\": {port: 1}}\n  : ignored\nserver:\n  port: 2\n"},
 		{"collection key", "extra: {? {a: 1} : x}\n"},
@@ -129,12 +128,6 @@ func main() {
 		{"not UTF-8", "management:\n  secret-key: !!binary /w==\n"},
 		{"binary port", "server:\n  port: !!binary ODMxNw==\n"},
 		{"binary boolean", "observability:\n  logs:\n    debug: !!binary dHJ1ZQ==\n"},
-		// Go reads a plugin's pin from the raw node, so these stay unpinned there.
-		{"binary plugin pin", "plugins:\n  configs:\n    x:\n      store:\n        version: !!binary MS4yLjM=\n"},
-		{"aliased binary plugin pin", "pin: &v !!binary MS4yLjM=\nplugins:\n  configs:\n    x:\n      store:\n        version: *v\n"},
-		{"binary plugin pin through a merge", "base: &b\n  release-tag: !!binary djEuMi4z\nplugins:\n  configs:\n    x:\n      store:\n        <<: *b\n"},
-		{"shadowed binary plugin pin", "defaults: &d {version: !!binary MS4yLjM=}\nplugins:\n  configs:\n    x:\n      store: {<<: *d, version: !keep 4.5.6}\n"},
-		{"binary plugin setting", "plugins:\n  configs:\n    x:\n      store:\n        channel: !!binary c3RhYmxl\n"},
 	}
 	var out []result
 	for _, c := range cases {

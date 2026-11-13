@@ -85,7 +85,7 @@ go_struct! {
 }
 
 /// Applies the snake_case fallbacks of the quota `UnmarshalJSON` methods to a decoded
-/// `quota.fetch` result. `raw` is the result object the plugin returned.
+/// `quota.fetch` result. `raw` is the decoded probe answer.
 pub(crate) fn quota_fetch_from_value(raw: &Node) -> Result<QuotaFetchResponse, gojson::DecodeError> {
     let mut out = QuotaFetchResponse::decode(raw)?;
     let top: QuotaFetchResponseAlt = gojson::decode_struct(raw)?;

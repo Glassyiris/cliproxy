@@ -18,7 +18,6 @@ mod schema;
 mod timestamp;
 mod trusted;
 mod validate;
-pub use binary::{PLAIN as PLAIN_SCALAR, double_quoted as yaml_double_quoted};
 pub use document::ConfigDocument;
 pub use schema::ValidationPath;
 pub use schema::validate as validate_config_fields;
@@ -305,7 +304,7 @@ fn go_big_integer(text: &str, key: bool) -> Option<String> {
 pub fn yaml_value(text: &str) -> anyhow::Result<Value> {
     let mut value = parse_yaml(text)?;
     timestamp::refuse_wide_offsets(&value)?;
-    binary::decode(text, &mut value, None, binary::Mode::File)?;
+    binary::decode(text, &mut value, None)?;
     Ok(value)
 }
 
@@ -316,46 +315,8 @@ pub fn yaml_value(text: &str) -> anyhow::Result<Value> {
 pub fn config_value(text: &str) -> anyhow::Result<Value> {
     let mut value = parse_yaml(text)?;
     timestamp::refuse_wide_offsets(&value)?;
-    binary::decode(text, &mut value, Some(&[]), binary::Mode::File)?;
+    binary::decode(text, &mut value, Some(&[]))?;
     Ok(value)
-}
-
-/// [`Config::plugin_configs`] of `text`, whose parsed root is `root`.
-fn plugin_configs(text: &str, root: &Mapping) -> Value {
-    if !lookup(root, "plugins.configs").is_some_and(|c| c.as_mapping().is_some_and(|m| !m.is_empty())) {
-        return Value::Null;
-    }
-    let raw = || {
-        let mut value = parse_yaml(text)?;
-        binary::decode(text, &mut value, Some(&[]), binary::Mode::Plugins)?;
-        expand_merges(&mut value)?;
-        anyhow::Ok(value)
-    };
-    match raw() {
-        Ok(v) => v
-            .get("plugins")
-            .and_then(|p| p.get("configs"))
-            .cloned()
-            .unwrap_or(Value::Null),
-        // The same text loaded, so only a limit this read alone hits (alias copies of
-        // plugin scalars) gets here.
-        Err(e) => {
-            // Management reads re-parse the file: warn once per text.
-            static WARNED: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
-            let hash = {
-                use std::hash::{Hash, Hasher};
-                let mut h = std::collections::hash_map::DefaultHasher::new();
-                text.hash(&mut h);
-                h.finish()
-            };
-            let mut warned = WARNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if *warned != hash {
-                *warned = hash;
-                tracing::warn!("plugin configs keep their parsed values: {e:#}");
-            }
-            Value::Null
-        }
-    }
 }
 
 /// yaml.v3's error for a merge value that is not a mapping or a list of mappings.
@@ -442,11 +403,6 @@ pub struct Config {
     /// `Config.OAuthOnlyFields`, keyed by path). They apply to OAuth credentials only;
     /// see [`Config::for_api_key`].
     pub oauth_only: std::collections::BTreeSet<String>,
-    /// `plugins.configs` as Go hands each plugin its raw node (pluginhost
-    /// `runtimeConfigYAML`): a plain scalar that is not plain text to serde_yaml_ng is its
-    /// YAML text tagged [`PLAIN_SCALAR`] (`1.50`, `1e3`, `0x1F`, `007`, `!!float 1`), where
-    /// [`Config::document`] holds what serde_yaml_ng reads. Null without plugin configs.
-    pub plugin_configs: Value,
     /// Values derived from this snapshot, built on first use ([`Config::derived`]).
     pub derived: Derived,
 }
@@ -669,7 +625,6 @@ impl Config {
         trusted::validate(&trusted_proxies)?;
         validate::go_custom(document.value())?;
         let oauth_only = schema::oauth_only_paths(&Value::Mapping(root.clone()));
-        let plugin_configs = plugin_configs(text, &root);
         Ok(Config {
             host,
             port,
@@ -680,7 +635,6 @@ impl Config {
             management,
             document: document.into_value(),
             oauth_only,
-            plugin_configs,
             derived: Derived::default(),
         })
     }
@@ -838,6 +792,12 @@ mod tests {
                 "oauth: {providers: {xai: {inject-x-search: true}}}\n",
                 "unknown setting config.oauth.providers.xai",
             ),
+            // Plugins were removed: their section is an ordinary unknown setting.
+            (
+                "plugins: {configs: {p: {enabled: true}}}\n",
+                "unknown setting config.plugins",
+            ),
+            ("plugins: {}\n", "unknown setting config.plugins"),
         ] {
             let doc = ConfigDocument::parse(yaml).unwrap();
             let err = schema::validate(doc.value(), true).unwrap_err();
@@ -1086,12 +1046,6 @@ oauth: {{excluded-models: {{c: [{numbers}]}}}}
             "0x1FFFFFFFFFFFFFFFFF".into(),
         ];
         assert_eq!(any["x"].as_sequence().unwrap(), &want);
-        // A plugin gets the text, which its yaml.v3 reads as Go's float.
-        let cfg = Config::parse(&format!("plugins: {{configs: {{p: {{n: {token}}}}}}}\n")).unwrap();
-        let Value::Tagged(n) = &cfg.plugin_configs["p"]["n"] else {
-            panic!("{:?}", cfg.plugin_configs)
-        };
-        assert_eq!(n.value, Value::from(token));
         // Any number of them, read in one pass; marks after a BOM still line up.
         let many = yaml_value(&format!("x: [{}]\n", vec!["-18446744073709551616"; 100].join(", "))).unwrap();
         assert!(
@@ -1433,8 +1387,8 @@ oauth: {{excluded-models: {{c: [{numbers}]}}}}
             let cfg = Config::parse(case["yaml"].as_str().unwrap()).unwrap();
             for check in case["checks"].as_array().unwrap() {
                 let path = check["rust"].as_str().unwrap();
-                // The recording predates the removal of `oauth.auth-dir`.
-                if path == "oauth.auth-dir" {
+                // The recording predates the removal of `oauth.auth-dir` and of plugins.
+                if path == "oauth.auth-dir" || path.starts_with("plugins.") {
                     continue;
                 }
                 let mut node = &cfg.document;

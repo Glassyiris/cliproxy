@@ -265,8 +265,8 @@ mod tests {
     }
 
     #[test]
-    fn json_export_preserves_oauth_scope_and_raw_plugin_semantics() {
-        let source = "upstream:\n  codex:\n    disable-codex-cloaking: true\noauth:\n  providers:\n    codex:\n      chatgpt-keep-alive: true\nplugins:\n  enabled: true\n  configs:\n    acme:\n      ratio: 1.50\n      tagged: !!float 1\n      binary: !!binary YWJj\n      quoted: '007'\n";
+    fn json_export_preserves_oauth_scope() {
+        let source = "upstream:\n  codex:\n    disable-codex-cloaking: true\noauth:\n  providers:\n    codex:\n      chatgpt-keep-alive: true\n";
         let original = ConfigStore::memory_with(source);
         let expected = original.load().unwrap().config;
         let text = export(&original, true).unwrap();
@@ -278,13 +278,12 @@ mod tests {
             .unwrap();
         let actual = restored.load().unwrap().config;
         assert_eq!(actual.oauth_only, expected.oauth_only);
-        assert_eq!(actual.plugin_configs, expected.plugin_configs);
         assert_eq!(actual.for_api_key().document, expected.for_api_key().document);
         let masked = export(&restored, false).unwrap();
         restored
             .replace(import_config(&masked).unwrap(), "cli", "masked roundtrip", false)
             .unwrap();
-        assert_eq!(restored.load().unwrap().config.plugin_configs, expected.plugin_configs);
+        assert_eq!(restored.load().unwrap().config.oauth_only, expected.oauth_only);
         assert!(
             import_config("{server: {port: 8317}}").is_ok(),
             "flow YAML remains valid input"
