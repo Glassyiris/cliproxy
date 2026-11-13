@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     io,
     sync::{
-        Arc, Condvar, Mutex, Weak,
+        Arc, Condvar, Mutex, RwLock, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::JoinHandle,
@@ -67,46 +67,46 @@ pub(crate) struct Inner {
     pub pool: Arc<Pool>,
     pub limits: Limits,
     pub clock: Arc<dyn Clock>,
-    cache: Mutex<Cache>,
+    cache: RwLock<Cache>,
     closed: AtomicBool,
     reclaim_error: Mutex<Option<io::Error>>,
 }
 
 impl Inner {
     pub(crate) fn touch(&self, stream: &Stream) {
-        let mut cache = self.cache.lock().unwrap();
-        if !cache.streams.contains_key(&stream.id) {
-            return;
-        }
+        let _retention = self.cache.read().unwrap();
         let mut state = stream.state.lock().unwrap();
-        cache.order.remove(&(state.last_read, stream.id));
         state.last_read = self.clock.now();
-        cache.order.insert((state.last_read, stream.id));
     }
 
     pub(crate) fn evict_one(&self, exclude: u64) -> bool {
-        let mut cache = self.cache.lock().unwrap();
-        let Some(key) = cache.order.iter().find(|(_, id)| *id != exclude).copied() else {
-            return false;
-        };
-        cache.order.remove(&key);
-        let stream = cache.streams.remove(&key.1).unwrap();
-        // Lock order is cache -> stream; writers never acquire cache with stream locked.
-        stream.invalidate();
-        true
+        let mut cache = self.cache.write().unwrap();
+        while let Some(key) = cache.order.iter().find(|(_, id)| *id != exclude).copied() {
+            let stream = cache.streams[&key.1].clone();
+            let mut state = stream.state.lock().unwrap();
+            cache.order.remove(&key);
+            // Queue timestamps are lower bounds. Refresh stale heads before choosing a victim.
+            if state.last_read != key.0 {
+                cache.order.insert((state.last_read, key.1));
+                continue;
+            }
+            cache.streams.remove(&key.1);
+            if stream.invalidate_locked(&mut state) > 0 {
+                return true;
+            }
+        }
+        false
     }
     pub(crate) fn reading<R>(
         &self,
         stream: &Stream,
         read: impl FnOnce(&mut crate::publication::State) -> (R, bool),
     ) -> R {
-        let mut cache = self.cache.lock().unwrap();
+        let _retention = self.cache.read().unwrap();
         let mut state = stream.state.lock().unwrap();
         let (result, acquired) = read(&mut state);
-        if acquired && cache.streams.contains_key(&stream.id) {
-            cache.order.remove(&(state.last_read, stream.id));
+        if acquired {
             state.last_read = self.clock.now();
-            cache.order.insert((state.last_read, stream.id));
         }
         result
     }
@@ -114,13 +114,20 @@ impl Inner {
     fn tick(&self) -> io::Result<()> {
         let now = self.clock.now();
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self.cache.write().unwrap();
             while let Some(&(read, id)) = cache.order.first() {
                 if now.saturating_sub(read) <= self.limits.cache_ttl {
                     break;
                 }
+                let stream = cache.streams[&id].clone();
+                let mut state = stream.state.lock().unwrap();
                 cache.order.remove(&(read, id));
-                cache.streams.remove(&id).unwrap().invalidate();
+                if state.last_read != read {
+                    cache.order.insert((state.last_read, id));
+                    continue;
+                }
+                cache.streams.remove(&id);
+                stream.invalidate_locked(&mut state);
             }
         }
         self.pool.decay()
@@ -166,7 +173,7 @@ impl Store {
             pool,
             limits,
             clock,
-            cache: Mutex::new(Cache::default()),
+            cache: RwLock::new(Cache::default()),
             closed: AtomicBool::new(false),
             reclaim_error: Mutex::new(None),
         });
@@ -216,7 +223,7 @@ impl Store {
 
     /// Admit one exclusive producer. The returned id is an internal generation, not an auth token.
     pub fn create(&self) -> Result<Writer, Error> {
-        let mut cache = self.inner.cache.lock().unwrap();
+        let mut cache = self.inner.cache.write().unwrap();
         if self.inner.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
@@ -234,7 +241,7 @@ impl Store {
         let stream = self
             .inner
             .cache
-            .lock()
+            .read()
             .unwrap()
             .streams
             .get(&id)
@@ -257,7 +264,7 @@ impl Store {
     pub fn shutdown(&mut self) -> io::Result<()> {
         self.inner.closed.store(true, Ordering::Release);
         {
-            let mut cache = self.inner.cache.lock().unwrap();
+            let mut cache = self.inner.cache.write().unwrap();
             for stream in cache.streams.values() {
                 stream.finish(Terminal::Shutdown);
             }

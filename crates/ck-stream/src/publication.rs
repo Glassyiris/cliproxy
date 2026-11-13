@@ -117,7 +117,11 @@ impl Stream {
     }
 
     pub(crate) fn invalidate(&self) {
-        let mut state = self.state.lock().unwrap();
+        self.invalidate_locked(&mut self.state.lock().unwrap());
+    }
+
+    pub(crate) fn invalidate_locked(&self, state: &mut State) -> u32 {
+        let mut released = 0;
         state.gone = true;
         state.terminal = Some(Terminal::Gone);
         for frame in &mut state.frames {
@@ -126,12 +130,13 @@ impl Stream {
                 && let Some(index) = frame.pool.take()
             {
                 self.pool.release(index);
+                released += 1;
             }
         }
         state.records.clear();
         self.pool.header(self.slot).generation.fetch_add(1, Ordering::Release);
-        drop(state);
         self.notify.notify_waiters();
+        released
     }
 }
 
@@ -453,9 +458,9 @@ impl Reader {
         if self.terminal_seen {
             return Poll::Ready(None);
         }
-        let inner = self.inner.clone();
-        let stream = self.stream.clone();
-        inner.reading(&stream, |state| {
+        let inner = &self.inner;
+        let stream = &self.stream;
+        inner.reading(stream, |state| {
             if state.gone || self.next < state.base_sequence {
                 self.terminal_seen = true;
                 return (Poll::Ready(Some(Read::Terminal(Terminal::Gone))), false);
