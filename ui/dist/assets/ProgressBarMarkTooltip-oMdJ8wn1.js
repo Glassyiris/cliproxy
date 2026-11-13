@@ -1,1 +1,0 @@
-import{t as e}from"./Tooltip-PvWQab65.js";import{x as t}from"./tokens.stylex-BRBC-NZS.js";var n=t();function r({content:t,children:r}){return(0,n.jsx)(e,{content:t,placement:`above`,focusTrigger:`always`,children:r})}export{r as default};

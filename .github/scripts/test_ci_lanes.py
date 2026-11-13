@@ -46,8 +46,7 @@ class Paths(unittest.TestCase):
                      "scripts/check-requirements.py", "scripts/test_check_requirements.py"):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), set())
-        # The embedded bundle and vendored source keep their own rules.
-        self.assertEqual(lanes("ui/dist/AGENTS.md"), {"dashboard"})
+        # Vendored source keeps its own rules.
         self.assertEqual(lanes("vendor/gjson/AGENTS.md"), RUST)
         # Only the exact names: a near miss, another script or a nested REQUIREMENTS.md is
         # not covered.
@@ -83,7 +82,6 @@ class Paths(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(lanes(path), ALL)
         self.assertEqual(lanes("ui/DESIGN.md", "ui/scripts/measure.mjs"), {"dashboard"})
-        self.assertEqual(lanes("ui/dist/index.html"), {"dashboard"})
 
     def test_rust(self):
         for path in ("crates/cpa-server/src/main.rs", "crates/cpa-server/build.rs",

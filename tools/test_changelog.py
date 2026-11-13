@@ -232,7 +232,7 @@ class Release(Repo):
 class NeedsFragment(unittest.TestCase):
     def test_shipped_paths_need_a_fragment(self):
         for path in [
-            "crates/cpa-server/src/lib.rs", "ui/src/app/App.tsx", "ui/dist/assets/a.js", "ui/index.html",
+            "crates/cpa-server/src/lib.rs", "ui/src/app/App.tsx", "ui/index.html",
             "ui/public/favicon.svg", "Dockerfile", "vendor/gjson/a.go",
             "Cargo.toml", "Cargo.lock", "crates/cook-router/Cargo.toml",
         ]:

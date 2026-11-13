@@ -1,1 +1,0 @@
-var e={get:e=>{try{return localStorage.getItem(`cliproxy-${e}`)}catch{return null}},set:(e,t)=>{try{localStorage.setItem(`cliproxy-${e}`,t)}catch{}}};export{e as t};

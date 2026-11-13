@@ -24,7 +24,7 @@ Write each bullet for the person who runs cook-router: say what they see change.
 A PR that touches a shipped path must add a new fragment. Shipped paths are:
 
 - `crates/`
-- `ui/src/`, `ui/dist/`, `ui/public/` and `ui/index.html`
+- `ui/src/`, `ui/public/` and `ui/index.html`
 - `Dockerfile`
 - `vendor/`
 - `Cargo.toml` and `Cargo.lock`

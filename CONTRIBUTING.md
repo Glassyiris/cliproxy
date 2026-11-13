@@ -43,7 +43,7 @@ Fixed
 - The relay stops waiting when the upstream request times out.
 ```
 
-A pull request that touches shipped code needs a new fragment: `crates/`, `ui/src/`, `ui/dist/`, `ui/public/`, `ui/index.html`, `Dockerfile`, `vendor/`, `Cargo.toml` or `Cargo.lock`. Tests and documentation do not. A maintainer can apply the `no-changelog` label when an entry is unnecessary. The `Changes` workflow checks every fragment; `python3 -I tools/changelog.py check` runs the same check locally and `python3 -I tools/changelog.py render` previews the Unreleased section. [changes/README.md](changes/README.md) has the full rules and the release command.
+A pull request that touches shipped code needs a new fragment: `crates/`, `ui/src/`, `ui/public/`, `ui/index.html`, `Dockerfile`, `vendor/`, `Cargo.toml` or `Cargo.lock`. Tests and documentation do not. A maintainer can apply the `no-changelog` label when an entry is unnecessary. The `Changes` workflow checks every fragment; `python3 -I tools/changelog.py check` runs the same check locally and `python3 -I tools/changelog.py render` previews the Unreleased section. [changes/README.md](changes/README.md) has the full rules and the release command.
 
 ## Pull requests
 

@@ -50,10 +50,9 @@ RULES = (
      frozenset({"check"})),
     # The agent rule files and the requirements check over them; the changes job runs the
     # check and its tests on every run. AGENTS.md and CLAUDE.md at any depth, except under
-    # ui/dist (embedded into the binary) and vendor (vendored source), which keep the rules
-    # below. No job builds or reads these files otherwise.
+    # vendor (vendored source), which keeps the rules below. No job builds or reads these files otherwise.
     (r"scripts/(check-requirements|test_check_requirements)\.py|REQUIREMENTS\.md|REVIEW\.md"
-     r"|(?!ui/dist/|vendor/)([^/]+/)*(AGENTS|CLAUDE)\.md", NONE),
+     r"|(?!vendor/)([^/]+/)*(AGENTS|CLAUDE)\.md", NONE),
     # Repository metadata that no job reads.
     (r"\.github/(ISSUE_TEMPLATE/.*|PULL_REQUEST_TEMPLATE/.*|pull_request_template[^/]*"
      r"|CODEOWNERS|dependabot\.yml|[^/]+\.md)", NONE),
@@ -61,9 +60,6 @@ RULES = (
     # measures; their compressed bytes are far inside its tolerance, and every push to master
     # measures them again. .gitignore does not filter the Docker build context.
     (r"[^/]+\.md|LICENSE[^/]*|NOTICE|CODEOWNERS|docs/.*|changes/.*|\.coderabbit\.yaml|\.gitignore", NONE),
-    # The stages embed the dashboard stage's build, not the committed copy, which only the
-    # dashboard stage compares with its build.
-    (r"ui/dist/.*", frozenset({"dashboard"})),
     # What the dashboard build is made of. Its output is embedded into the binary
     # (crates/cpa-server/build.rs), so the tests, the gates and THIRD-PARTY-NOTICES (the npm
     # packages the bundle pulls in) all depend on it.

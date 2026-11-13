@@ -62,10 +62,7 @@ RUN --mount=type=cache,id=cook-router-npm,target=/home/builder/.npm,uid=1000,gid
 # API check reads the Rust routes, so the whole tree is copied.
 FROM deps AS dashboard
 COPY --chown=builder:builder . .
-# The committed ui/dist must equal this build until the image stops reading it.
-RUN mv ui/dist /tmp/committed-dist \
- && cd ui && npm run check \
- && if ! diff -r /tmp/committed-dist dist; then echo 'ui/dist is stale; run npm run build in ui and commit the result'; exit 1; fi
+RUN cd ui && npm run check
 
 # The tree with the dashboard build that the binary embeds (crates/cpa-server/build.rs), and
 # every dependency fetched, so the stages below build offline.

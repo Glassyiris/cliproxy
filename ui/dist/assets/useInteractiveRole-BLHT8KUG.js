@@ -1,1 +1,0 @@
-import{S as e,T as t}from"./tokens.stylex-BRBC-NZS.js";var n=t(e(),1),r=(0,n.createContext)(null);r.displayName=`InteractiveRoleContext`;function i(){return(0,n.use)(r)}function a({href:e,onClick:t,isDisabled:n=!1}){let r=i();return e!=null&&!n?`link`:t==null?r??`inert`:`button`}export{r as n,a as t};

@@ -29,7 +29,7 @@ Before opening a PR, run on the final tree:
 
 - `docker buildx build --target check .`
 - `docker buildx build --target test .`
-- `docker buildx build --target dashboard .`; commit rebuilt `ui/dist` when it changes.
+- `docker buildx build --target dashboard .`
 - `python3 -I scripts/check-requirements.py`; also `python3 -I scripts/test_check_requirements.py` when scripts/ changes.
 - After changes to anything running while the server is idle, also run `docker buildx build --target perf .`.
 
@@ -240,4 +240,4 @@ Every incomplete Commands, Numbers or Enforcement row has one entry below. Due d
 | Enforcement: crates/AGENTS.md: Management response schemas | Actual-response schema/header/example coverage gate absent | Cover every operation and response status, envelopes/links, filters, authority-specific preconditions and atomic failures, request ids and removed routes including fallbacks; plant field-shape and required-header violations | 2026-12-22 |
 | Enforcement: crates/AGENTS.md: Management API version | Version/fragment gate absent | Check schema changes increment the version and add a fragment; prove bidirectional headers and mismatch rejection before mutation | 2026-12-22 |
 | Enforcement: crates/AGENTS.md: Management error catalog | Stable-code/shared-schema gate absent | Reject unregistered or renamed codes and errors outside the common schema | 2026-12-22 |
-| Enforcement: crates/AGENTS.md: Dashboard artifact integrity | Builds embed committed ui/dist; per-file manifest gate absent | Artifact PR: allow backend-only development, require real assets for shipping, and prove missing assets or a checksum mismatch fail | 2026-12-08 |
+| Enforcement: crates/AGENTS.md: Dashboard artifact integrity | Builds embed the Dockerfile dashboard stage's ui/dist; per-file manifest gate absent | Artifact PR: allow backend-only development, require real assets for shipping, and prove missing assets or a checksum mismatch fail | 2026-12-08 |

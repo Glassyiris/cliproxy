@@ -1,1 +1,0 @@
-function e(){return()=>{location.hash=`#connect`}}export{e as t};

@@ -25,10 +25,10 @@ SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.md")
 SHA = re.compile(r"[a-f0-9]{40,64}")
 NO_CHANGELOG = "no-changelog"
 
-# Paths whose changes reach users: the Rust workspace, the dashboard sources and its
-# embedded build, the Dockerfile, vendored code and the manifests.
+# Paths whose changes reach users: the Rust workspace, the dashboard sources, the
+# Dockerfile, vendored code and the manifests.
 SHIPPED = re.compile(
-    r"^(?:crates/|ui/src/|ui/dist/|ui/public/|vendor/)"
+    r"^(?:crates/|ui/src/|ui/public/|vendor/)"
     r"|^(?:ui/index\.html|Dockerfile|Cargo\.toml|Cargo\.lock)$"
 )
 # Tests and examples under a shipped prefix. Markdown is exempt separately.
@@ -216,7 +216,7 @@ def check_pull_request(base: str, head: str, labels: list[str], root: Path, runn
         parse_fragment(runner("git", ["show", f"{head}:{file}"], root), name)
     if needs_fragment(paths) and not added and NO_CHANGELOG not in labels:
         raise FragmentError(
-            "PRs touching shipped paths (crates/, ui/src/, ui/dist/, ui/public/, ui/index.html, "
+            "PRs touching shipped paths (crates/, ui/src/, ui/public/, ui/index.html, "
             "Dockerfile, vendor/, Cargo.toml, Cargo.lock) must add a new "
             f"changes/<branch-slug>.md fragment, or carry the {NO_CHANGELOG} label."
         )

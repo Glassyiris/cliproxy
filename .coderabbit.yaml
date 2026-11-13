@@ -14,7 +14,6 @@ reviews:
     - "!vendor/**"
     - "!Cargo.lock"
     - "!ui/package-lock.json"
-    - "!ui/dist/**"
     - "!docs/parity-audit/status.md"
     - "!crates/cpa-core/src/config/schema.json"
     - "!crates/**/tests/fixtures/**"

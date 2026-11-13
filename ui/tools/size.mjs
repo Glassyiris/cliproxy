@@ -27,7 +27,7 @@ const args = process.argv.slice(2);
 const jsonAt = args.indexOf("--json");
 const jsonFile = jsonAt === -1 ? null : args[jsonAt + 1];
 if (jsonAt !== -1) args.splice(jsonAt, 2);
-// The first argument names another build directory; the default is the committed ui/dist.
+// The first argument names another build directory; the default is ui/dist.
 const dist = resolve(ui, args[0] ?? "dist");
 const budgetFile = fileURLToPath(new URL("./size-budget.json", import.meta.url));
 const STATIC_IMPORT =

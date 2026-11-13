@@ -1,1 +1,0 @@
-var e=()=>`sk-${Array.from(crypto.getRandomValues(new Uint8Array(24)),e=>e.toString(16).padStart(2,`0`)).join(``)}`,t=e=>e.length>10?`${e.slice(0,3)}…${e.slice(-4)}`:`••••`;export{e as n,t};
