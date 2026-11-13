@@ -1,4 +1,4 @@
-//! Go's `-tui` management client (internal/tui), a Bubble Tea program ported to
+//! Go's `--tui` management client (internal/tui), a Bubble Tea program ported to
 //! ratatui. The [`app::App`] model receives keys and messages and returns commands
 //! (futures run on the tokio runtime whose results come back as messages), as Bubble
 //! Tea's `Update` returns `tea.Cmd`s. Everything goes through the management API.

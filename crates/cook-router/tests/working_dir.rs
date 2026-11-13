@@ -25,12 +25,12 @@ fn working_dir_applies_before_dotenv_config_and_log_paths() {
     std::fs::write(work.join(".env"), "WRITABLE_PATH=from-dotenv\n").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_cook-router"))
         .args([
-            "-local-model",
+            "--local-model",
             "--working-dir",
             "work",
             "--log-file",
             "process.log",
-            "-vertex-import",
+            "--vertex-import",
             "missing-key.json",
         ])
         .current_dir(&root)
@@ -69,10 +69,10 @@ fn a_warning_before_the_runtime_starts_goes_to_the_log_file() {
     .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_cook-router"))
         .args([
-            "-local-model",
+            "--local-model",
             "--log-file",
             "process.log",
-            "-vertex-import",
+            "--vertex-import",
             "missing-key.json",
         ])
         .current_dir(&root)
@@ -95,7 +95,7 @@ fn a_warning_before_the_runtime_starts_goes_to_the_log_file() {
 #[test]
 fn a_missing_working_dir_fails_before_anything_runs() {
     let output = Command::new(env!("CARGO_BIN_EXE_cook-router"))
-        .args(["-working-dir=/nonexistent/cook-router-wd", "-vertex-import", "x.json"])
+        .args(["--working-dir=/nonexistent/cook-router-wd", "--vertex-import", "x.json"])
         .current_dir(std::env::temp_dir())
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())

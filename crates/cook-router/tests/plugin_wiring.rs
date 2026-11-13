@@ -193,9 +193,9 @@ impl Runner {
         std::fs::write(&config, runner.placeholders(scenario["config"].as_str().unwrap())).unwrap();
         let log = std::fs::File::create(runner.work.join("server.log")).unwrap();
         runner.child = Command::new(env!("CARGO_BIN_EXE_cook-router"))
-            .arg("-config")
+            .arg("--config")
             .arg(&config)
-            .arg("-local-model")
+            .arg("--local-model")
             .current_dir(&runner.work)
             .env_clear()
             .env("HOME", &runner.work)
