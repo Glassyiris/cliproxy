@@ -22,11 +22,7 @@ fn home_flags_are_unknown_and_home_variables_start_nothing() {
         .as_nanos();
     let dir = std::env::temp_dir().join(format!("cook-router-no-home-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(dir.join("auth")).unwrap();
-    std::fs::write(
-        dir.join("config.yaml"),
-        "config-version: 8\nserver:\n  port: 0\noauth:\n  auth-dir: ./auth\n",
-    )
-    .unwrap();
+    std::fs::write(dir.join("config.yaml"), "config-version: 8\nserver:\n  port: 0\n").unwrap();
     let import = ["--local-model", "--vertex-import", "missing-key.json"];
     for flag in [&["--home-jwt", "fake-jwt"][..], &["--home-disable-cluster-discovery"]] {
         let args: Vec<&str> = flag.iter().chain(&import).copied().collect();

@@ -42,7 +42,12 @@ test("each refused sign-in names what to change, and leaves the tab signed out",
   );
   await signedOutNow();
   assert.equal(
-    await refusal(() => new Response(null, { status: 404 })),
+    await refusal(() =>
+      Response.json(
+        { error: "management key not set: start the server with COOK_MANAGEMENT_PASSWORD" },
+        { status: 403 },
+      ),
+    ),
     catalog.en["app.signIn.apiOff"],
   );
   assert.equal(
@@ -85,7 +90,7 @@ test("the help follows the chosen language", async () => {
   await loadLocale("zh-TW");
   setLocale("zh-TW");
   assert.equal(
-    await refusal(() => new Response(null, { status: 404 })),
+    await refusal(() => Response.json({ error: "management key not set" }, { status: 403 })),
     zhTW["zh-TW"]["app.signIn.apiOff"],
   );
   setLocale("en");

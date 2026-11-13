@@ -33,7 +33,8 @@ remain first-party, including OAuth refresh. TLS verification stays enabled usin
 an ephemeral test CA, not an insecure TLS setting. No real credentials are read.
 Each proxy gets a whitelist-only environment and its own generated working/auth
 directory. The input credentials, caller key, device/account identity and request
-bytes are identical. Config differs only in bind port and writable auth path.
+bytes are identical. Config differs only in bind port and Go's `oauth.auth-dir`; the
+Rust driver saves the same credential file to its database before it starts.
 
 The Go binary's unrelated background update attempts can appear as denied network
 errors in its log. They cannot leave the network namespace. `-local-model` and

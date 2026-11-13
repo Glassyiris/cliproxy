@@ -83,6 +83,8 @@ for old, current in re.findall(r'\{"([^"]+)", "([^"]+)"\}', prefixes):
 # Home mode's credential lease settings and plugin auth revision were removed with Home mode.
 schema["fields"].pop("credentials")
 schema["fields"]["plugins"]["fields"].pop("auth-revision")
+# cook-router keeps credentials in the database; nothing reads a credential directory setting.
+schema["fields"]["oauth"]["fields"].pop("auth-dir")
 # Client aliases are removed, not part of the canonical writable schema.
 schema["fields"]["oauth"]["fields"]["providers"]["fields"]["codex"]["fields"].pop("optimize-multi-agent-v2", None)
 families = source.split("var v8KeyFamilies = []configPath{", 1)[1].split("func buildV8Paths", 1)[0]

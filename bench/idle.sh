@@ -5,8 +5,8 @@
 #   bench/idle.sh <server binary> [auth files] [seconds]
 #
 # Starts the binary on a config with one OpenAI-compatible API key, one client key and
-# <auth files> Claude credential files (default 1) whose tokens are valid for 30 days,
-# so nothing is due for refresh. After WARMUP seconds (default 30: the startup heap trim
+# <auth files> Claude credentials (default 1), uploaded through the management API, whose
+# tokens are valid for 30 days, so nothing is due for refresh. After WARMUP seconds (default 30: the startup heap trim
 # runs on the blocking pool 5 to 10 s after start, and its thread exits after a 10 s
 # keep-alive) without any request, it samples for <seconds> (default 30) and
 # prints one JSON line:
@@ -20,8 +20,7 @@
 #                 script then exits non-zero)
 #   rss_kb        VmRSS at the end of the window
 #
-# Per-thread context switches go to stderr, so a regression names its thread. The same
-# script measures Go's CLIProxyAPI binary, which reads the same config and files.
+# Per-thread context switches go to stderr, so a regression names its thread.
 #
 # External network is denied as in bench/run.sh: the script re-runs itself in a
 # loopback-only network namespace, or points every proxy variable at a closed port.
@@ -50,7 +49,7 @@ DIR=$(mktemp -d /tmp/cook-router-idle.XXXXXX)
 TMP=$(mktemp -d /tmp/cook-router-idle-samples.XXXXXX)
 trap 'kill "$PID" 2>/dev/null; wait "$PID" 2>/dev/null; rm -rf "$DIR" "$TMP"' EXIT
 
-mkdir -p "$DIR/auth"
+mkdir -p "$DIR"
 cat > "$DIR/config.yaml" <<EOF
 config-version: 8
 server:
@@ -59,8 +58,6 @@ server:
 access:
   api-keys:
     - "$KEY"
-oauth:
-  auth-dir: "$DIR/auth"
 api-keys:
   openai-compatibility:
     - name: bench
@@ -71,13 +68,22 @@ api-keys:
         - name: "bench-model"
           alias: "bench-model"
 EOF
+# Credentials live in the database: they are uploaded through the management API once
+# the server answers, not read from a directory.
 expiry=$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ)
-for i in $(seq 1 "$FILES"); do
-  printf '{"type":"claude","email":"idle%d@example.com","access_token":"bench-access-%d","refresh_token":"bench-refresh-%d","expired":"%s"}\n' \
-    "$i" "$i" "$i" "$expiry" > "$DIR/auth/claude-idle$i.json"
-done
+MGMT=bench-management-key
+{
+  printf '{"documents":['
+  for i in $(seq 1 "$FILES"); do
+    ((i == 1)) || printf ','
+    data=$(printf '{"type":"claude","email":"idle%d@example.com","access_token":"bench-access-%d","refresh_token":"bench-refresh-%d","expired":"%s"}\n' \
+      "$i" "$i" "$i" "$expiry" | base64 -w0)
+    printf '{"name":"claude-idle%d.json","data":"%s"}' "$i" "$data"
+  done
+  printf ']}'
+} > "$TMP/credentials.json"
 
-COOK_DB="$DIR/cook.db" "$BIN" --config "$DIR/config.yaml" > "$DIR/server.log" 2>&1 &
+COOK_MANAGEMENT_PASSWORD="$MGMT" COOK_DB="$DIR/cook.db" "$BIN" --config "$DIR/config.yaml" > "$DIR/server.log" 2>&1 &
 PID=$!
 ready=false
 for _ in $(seq 1 400); do
@@ -86,6 +92,9 @@ for _ in $(seq 1 400); do
   sleep 0.025
 done
 $ready || { echo "server did not answer" >&2; cat "$DIR/server.log" >&2; exit 1; }
+curl -sf -m 60 -o /dev/null -H "Authorization: Bearer $MGMT" -H 'Content-Type: application/json' \
+  --data-binary @"$TMP/credentials.json" "http://127.0.0.1:$PORT/admin/v1/credentials/batch" ||
+  { echo "credential upload failed" >&2; cat "$DIR/server.log" >&2; exit 1; }
 sleep "$WARMUP"
 
 switches() { # "<tid> <name> <context switches>" per thread

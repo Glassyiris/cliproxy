@@ -419,8 +419,8 @@ mod tests {
     }
 
     /// `oauth.providers.codex.chatgpt-keep-alive` is a cook-router addition in the schema:
-    /// strict management writes accept it as a bool, still reject other keys Go does not
-    /// know, and the v8 migration keeps it instead of commenting it out.
+    /// strict management writes accept it as a bool and still reject other keys Go does not
+    /// know.
     #[test]
     fn chatgpt_keep_alive_is_a_known_codex_bool() {
         let on = yaml("oauth:\n  providers:\n    codex:\n      chatgpt-keep-alive: true\n");
@@ -432,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_cache_telemetry_survives_strict_writes_and_migration() {
+    fn claude_cache_telemetry_survives_strict_writes() {
         let on = yaml("observability: {usage: {claude-cache-telemetry: true}}");
         validate(&on, true).unwrap();
         assert!(validate(&yaml("observability: {usage: {claude-cache-telemetry: [true]}}"), true).is_err());

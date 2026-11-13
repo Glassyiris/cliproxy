@@ -349,10 +349,15 @@ pub(crate) async fn owned(State(state): State<Arc<Management>>, req: Request, ne
     next.run(req).await
 }
 
-/// Go `managementAvailabilityMiddleware` alone (the OAuth callback routes).
+/// The refusal while no management key exists at all (no `COOK_MANAGEMENT_PASSWORD`, no
+/// `management.secret-key`, no standalone TUI password). CLIProxyAPI hid the routes behind an
+/// empty 404, which reads as a wrong URL; this names the setting that turns the API on.
+const KEY_NOT_SET: &str = "management key not set: start the server with COOK_MANAGEMENT_PASSWORD";
+
+/// Availability alone (the OAuth callback routes).
 pub(crate) async fn available(State(state): State<Arc<Management>>, req: Request, next: Next) -> Response {
     if !state.access.available() {
-        return not_found();
+        return json_error(StatusCode::FORBIDDEN, KEY_NOT_SET);
     }
     next.run(req).await
 }
@@ -360,7 +365,13 @@ pub(crate) async fn available(State(state): State<Arc<Management>>, req: Request
 /// Availability plus `Handler.Middleware`, applied per matched route and method.
 pub(crate) async fn guard(State(state): State<Arc<Management>>, req: Request, next: Next) -> Response {
     if !state.access.available() {
-        return not_found();
+        let mut response = if req.uri().path().starts_with("/admin/v1/") {
+            super::admin::error(&state, 403, "forbidden", KEY_NOT_SET)
+        } else {
+            json_error(StatusCode::FORBIDDEN, KEY_NOT_SET)
+        };
+        version_headers(response.headers_mut());
+        return response;
     }
     let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
     let ip = state.access.client_ip(peer, req.headers());
@@ -477,7 +488,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("access-purge-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let config = std::sync::Arc::new(crate::testing::config_store(&root.join("config.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(config.clone(), &root.join("legacy")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(config.clone()).unwrap();
         let mut cfg = config.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let rt = std::sync::Arc::new(crate::testing::runtime_with_db(

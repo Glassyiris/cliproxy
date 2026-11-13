@@ -132,7 +132,6 @@ export const settings: readonly Setting[] = [
     kind: "switch",
     fallback: false,
   },
-  { path: "oauth/auth-dir", group: "advanced", kind: "text", fallback: "~/.cli-proxy-api" },
 ];
 
 export const settingsOf = (group: Group) => settings.filter((s) => s.group === group);

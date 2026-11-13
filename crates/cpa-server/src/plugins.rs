@@ -968,11 +968,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_auth_reads_a_bounded_body() {
         let dir = cpa_plugin::testing::scratch(&std::env::temp_dir(), "plugin-auth-body");
-        let cfg = Config::parse(&format!(
-            "config-version: 8\noauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key]\n",
-            dir.display()
-        ))
-        .unwrap();
+        let cfg = Config::parse("config-version: 8\naccess:\n  api-keys: [client-key]\n").unwrap();
         let rt = crate::testing::runtime(
             cfg,
             Vec::new(),

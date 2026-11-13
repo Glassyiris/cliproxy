@@ -4,6 +4,8 @@
 //! management and resource route tables and responses, host callback answers, and the
 //! exact request bytes every plugin received (config YAML compared as YAML, since the
 //! emitters format differently).
+//! The recording is untouched; replay drops its `oauth.auth-dir` line and hands the value to
+//! `Config::auth_dir`, since the setting no longer exists.
 
 // Native plugins load only on Unix (the host's `native` module).
 #![cfg(unix)]
@@ -73,7 +75,23 @@ impl Runner {
                 Value::Null
             }
             "apply" => {
-                let cfg = cpa_core::config::Config::parse(&self.placeholders(args.as_str().unwrap())).unwrap();
+                // The recorded configs name `oauth.auth-dir`, which no longer exists:
+                // replay takes the line out and hands its value to `Config::auth_dir`.
+                let text = self.placeholders(args.as_str().unwrap());
+                let auth_dir = text
+                    .lines()
+                    .find_map(|line| line.trim_start().strip_prefix("auth-dir:"))
+                    .map(|dir| PathBuf::from(dir.trim()));
+                let text: String = text
+                    .split_inclusive('\n')
+                    .filter(|line| !line.trim_start().starts_with("auth-dir:"))
+                    .collect::<String>()
+                    // `oauth:` is left empty.
+                    .replace("oauth:\nplugins:", "plugins:");
+                let mut cfg = cpa_core::config::Config::parse(&text).unwrap();
+                if let Some(dir) = auth_dir {
+                    cfg.auth_dir = dir;
+                }
                 self.host.apply_config(Arc::new(cfg)).await;
                 self.registered()
             }

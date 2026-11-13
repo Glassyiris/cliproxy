@@ -120,11 +120,7 @@ impl OnlineOwner {
     async fn start(dir: &Path, database: &Path) -> Self {
         let store = std::sync::Arc::new(cpa_server::testing::config_store(database).unwrap());
         let mut cfg = store.load().unwrap().config;
-        assert!(
-            cfg.auth_dir.starts_with(dir),
-            "the fixture must never use a real auth directory"
-        );
-        let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &cfg.auth_dir).unwrap();
+        let db = cpa_server::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         cfg.auth_dir = db.auth_dir();
         let runtime = std::sync::Arc::new(cpa_server::testing::runtime_with_db(
             cfg,
@@ -204,11 +200,7 @@ impl OnlineOwner {
 #[tokio::test]
 async fn online_vertex_import_stages_privately_and_never_falls_back_on_one_worker() {
     let dir = scratch("online-vertex");
-    let source = format!(
-        "server:\n  port: 0\noauth: {{auth-dir: {}}}\n",
-        dir.join("legacy-auth").display()
-    );
-    std::fs::write(dir.join("source.yaml"), source).unwrap();
+    std::fs::write(dir.join("source.yaml"), "server:\n  port: 0\n").unwrap();
     success(cli(&dir, &["--db", "service.db", "config", "import", "source.yaml"]));
     std::fs::copy(dir.join("service.db"), dir.join("local.db")).unwrap();
     let local_before = std::fs::read(dir.join("local.db")).unwrap();
@@ -265,7 +257,7 @@ async fn online_vertex_import_stages_privately_and_never_falls_back_on_one_worke
     let copy = dir.join("portable.db");
     std::fs::copy(owner.store.path().unwrap(), &copy).unwrap();
     let cold = std::sync::Arc::new(cpa_server::testing::config_store(&copy).unwrap());
-    let restored = cpa_server::credential_store::CredentialDb::initialize(cold.clone(), &dir.join("absent")).unwrap();
+    let restored = cpa_server::credential_store::CredentialDb::initialize(cold.clone()).unwrap();
     assert_eq!(
         restored.read(&restored.auth_dir().join(name)).unwrap().unwrap(),
         expected
@@ -370,8 +362,7 @@ async fn online_native_plugin_host_save_and_returned_auths_share_the_owner() {
     std::fs::create_dir_all(&respond).unwrap();
     std::fs::copy(built.join("recorder.so"), plugins.join("rec.so")).unwrap();
     let source = format!(
-        "config-version: 8\nserver:\n  port: 0\noauth: {{auth-dir: {}}}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    rec:\n      enabled: true\n      record: {}\n      label: a\n      caps: command_line_plugin\n",
-        dir.join("legacy").display(),
+        "config-version: 8\nserver:\n  port: 0\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    rec:\n      enabled: true\n      record: {}\n      label: a\n      caps: command_line_plugin\n",
         plugins.display(),
         records.display()
     );
@@ -488,8 +479,7 @@ async fn online_native_plugin_host_save_and_returned_auths_share_the_owner() {
     let copy = dir.join("plugin-portable.db");
     std::fs::copy(owner.store.path().unwrap(), &copy).unwrap();
     let restored = std::sync::Arc::new(cpa_server::testing::config_store(&copy).unwrap());
-    let restored_db =
-        cpa_server::credential_store::CredentialDb::initialize(restored.clone(), &dir.join("absent")).unwrap();
+    let restored_db = cpa_server::credential_store::CredentialDb::initialize(restored.clone()).unwrap();
     assert_eq!(
         restored_db
             .read(&restored_db.auth_dir().join("shared-online.json"))
@@ -545,12 +535,7 @@ async fn online_native_plugin_host_save_and_returned_auths_share_the_owner() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn online_import_uses_the_owner_without_local_fallback() {
     let dir = scratch("online-owner");
-    let source = |port| {
-        format!(
-            "server:\n  port: {port}\noauth: {{auth-dir: {}}}\n",
-            dir.join("auth").display()
-        )
-    };
+    let source = |port| format!("server:\n  port: {port}\n");
     std::fs::write(dir.join("source.yaml"), source(8450)).unwrap();
     success(cli(&dir, &["--db", "service.db", "config", "import", "source.yaml"]));
     std::fs::copy(dir.join("service.db"), dir.join("local.db")).unwrap();
@@ -681,10 +666,7 @@ async fn online_import_uses_the_owner_without_local_fallback() {
 #[tokio::test]
 async fn a_live_owner_allows_snapshot_reads_and_refuses_offline_logins() {
     let dir = scratch("owned-reads");
-    let source = format!(
-        "server:\n  port: 8460\naccess:\n  api-keys: [fake-owned-client-secret]\noauth: {{auth-dir: {}}}\n",
-        dir.join("auth").display()
-    );
+    let source = "server:\n  port: 8460\naccess:\n  api-keys: [fake-owned-client-secret]\n";
     std::fs::write(dir.join("source.yaml"), source).unwrap();
     success(cli(&dir, &["--db", "service.db", "config", "import", "source.yaml"]));
     let fixture: serde_json::Value =
@@ -757,7 +739,7 @@ async fn a_live_owner_allows_snapshot_reads_and_refuses_offline_logins() {
     let output = success(cli(&dir, &["--db", "service.db", "--vertex-import", "account.json"]));
     assert!(output.contains("Vertex credentials imported:"));
     let store = std::sync::Arc::new(cpa_server::testing::config_store(&dir.join("service.db")).unwrap());
-    let restored = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &dir.join("absent")).unwrap();
+    let restored = cpa_server::credential_store::CredentialDb::initialize(store.clone()).unwrap();
     assert_eq!(
         restored.read(&restored.auth_dir().join(name)).unwrap().unwrap(),
         expected.as_str().unwrap().as_bytes()
@@ -769,28 +751,13 @@ async fn a_live_owner_allows_snapshot_reads_and_refuses_offline_logins() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn concurrent_cli_writers_publish_one_complete_latest_snapshot() {
     let dir = scratch("process-race");
-    std::fs::write(
-        dir.join("initial.yaml"),
-        format!(
-            "server:\n  port: 8500\noauth: {{auth-dir: {}}}\n",
-            dir.join("auth").display()
-        ),
-    )
-    .unwrap();
+    std::fs::write(dir.join("initial.yaml"), "server:\n  port: 8500\n").unwrap();
     success(cli(&dir, &["--db", "shared.db", "config", "import", "initial.yaml"]));
     let owner = OnlineOwner::start(&dir, &dir.join("shared.db")).await;
     let children: Vec<_> = (1..=4)
         .map(|writer| {
             let source = format!("writer-{writer}.yaml");
-            std::fs::write(
-                dir.join(&source),
-                format!(
-                    "server:\n  port: {}\noauth: {{auth-dir: {}}}\n",
-                    8500 + writer,
-                    dir.join("auth").display()
-                ),
-            )
-            .unwrap();
+            std::fs::write(dir.join(&source), format!("server:\n  port: {}\n", 8500 + writer)).unwrap();
             Command::new(env!("CARGO_BIN_EXE_cook-router"))
                 .current_dir(&dir)
                 .env_clear()
@@ -896,45 +863,31 @@ fn listener_reports_committed_defaults_and_tls_without_secrets_or_yaml_reads() {
 }
 
 #[test]
-fn read_commands_leave_older_schema_versions_unchanged_and_refuse_newer_ones() {
-    let dir = scratch("old-schema");
+fn read_commands_refuse_other_schema_versions_and_leave_them_unchanged() {
+    let dir = scratch("other-schema");
     std::fs::write(dir.join("source.yaml"), "server:\n  host: 127.0.0.1\n  port: 8345\n").unwrap();
     success(cli(&dir, &["--db", "chosen.db", "config", "import", "source.yaml"]));
     let path = dir.join("chosen.db");
     let mut database = std::fs::read(&path).unwrap();
-    let current_version = database[60..64].to_vec();
-    // SQLite's user_version is a big-endian u32 in the database header.
-    database[60..64].copy_from_slice(&1u32.to_be_bytes());
-    std::fs::write(&path, &database).unwrap();
-    for args in [
-        vec!["config", "listener"],
-        vec!["config", "export"],
-        vec!["config", "validate"],
-        vec!["config", "validate", "source.yaml"],
-        vec!["config", "backup", "backup.db"],
-    ] {
-        let mut command = vec!["--db", "chosen.db"];
-        command.extend(args);
-        success(cli(&dir, &command));
-        assert_eq!(&std::fs::read(&path).unwrap()[60..64], &1u32.to_be_bytes());
+    for version in [1u32, 3, u32::MAX] {
+        // SQLite's user_version is a big-endian u32 in the database header.
+        database[60..64].copy_from_slice(&version.to_be_bytes());
+        std::fs::write(&path, &database).unwrap();
+        for args in [
+            vec!["config", "listener"],
+            vec!["config", "export"],
+            vec!["config", "validate"],
+            vec!["config", "backup", "backup.db"],
+        ] {
+            let mut command = vec!["--db", "chosen.db"];
+            command.extend(&args);
+            let output = cli(&dir, &command);
+            assert!(!output.status.success(), "{version} {args:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("not supported"), "{version} {args:?}: {stderr}");
+            assert_eq!(std::fs::read(&path).unwrap(), database, "{version} {args:?}");
+        }
     }
-    assert_eq!(
-        &std::fs::read(dir.join("backup.db")).unwrap()[60..64],
-        current_version.as_slice(),
-        "a fresh backup uses the supported encoder schema without migrating the source"
-    );
-    assert_eq!(
-        success(cli(&dir, &["--db", "backup.db", "config", "export", "--secrets"])),
-        success(cli(&dir, &["--db", "chosen.db", "config", "export", "--secrets"])),
-        "fresh encoding preserves the complete exported configuration"
-    );
-    assert_eq!(&std::fs::read(&path).unwrap()[60..64], &1u32.to_be_bytes());
-    database[60..64].copy_from_slice(&u32::MAX.to_be_bytes());
-    std::fs::write(&path, &database).unwrap();
-    let output = cli(&dir, &["--db", "chosen.db", "config", "listener"]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("newer than this build"));
-    database[60..64].copy_from_slice(&current_version);
-    std::fs::write(&path, database).unwrap();
+    assert!(!dir.join("backup.db").exists());
     std::fs::remove_dir_all(dir).unwrap();
 }

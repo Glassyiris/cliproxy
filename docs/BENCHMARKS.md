@@ -563,7 +563,7 @@ Measured on 2026-10-06 on Linux, to see what a server costs while nobody uses it
 
 - A virtual machine with 4 vCPUs (Intel Xeon at 2.60 GHz) and 7.8 GB of memory, running Debian 12 (glibc 2.36) with Linux 6.1.
 - cook-router master at `1849512`, and the change that replaces the polling loops with file change notifications and deadline timers and starts two request threads by default. Both are release builds made with rustc 1.99.0 on that machine.
-- [`bench/idle.sh`](../bench/idle.sh) runs each server in a loopback-only network namespace with one OpenAI-compatible API key, one client key and 1 or 2,000 Claude credential files whose tokens are valid for 30 days, so none is due for refresh. Without `-local-model`, so the catalog downloads at start are attempted (and fail at once, with no network).
+- [`bench/idle.sh`](../bench/idle.sh) runs each server in a loopback-only network namespace with one OpenAI-compatible API key, one client key and 1 or 2,000 Claude credentials, uploaded through the management API, whose tokens are valid for 30 days, so none is due for refresh. Without `-local-model`, so the catalog downloads at start are attempted (and fail at once, with no network).
 - After a 30-second warm-up without requests, which outlasts the startup heap trim (5 to 10 seconds after start, on the blocking pool) and the pool's 10-second keep-alive, it sums the context switches of every thread alive across the next 30 seconds from `/proc/<pid>/task/*/status` (each one is a thread waking up), and reads the CPU ticks (1/100 s), the thread count at both ends and `VmRSS`. A thread that exits inside the window makes the run fail, since its wakeups would go uncounted.
 
 ```sh

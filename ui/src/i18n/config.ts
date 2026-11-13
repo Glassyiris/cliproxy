@@ -26,7 +26,6 @@ const ids = {
     "logsMaxTotalSizeMb",
     "requestLog",
     "usageStatisticsEnabled",
-    "authDir",
   ],
   unit: ["seconds", "megabytes", "bytes"],
 };
@@ -49,7 +48,6 @@ export const hinted = [
   "loggingToFile",
   "requestLog",
   "usageStatisticsEnabled",
-  "authDir",
 ] as const;
 
 export const dynamicKeys = [
@@ -107,7 +105,7 @@ export default {
     "config.hint.transientErrorCooldownSeconds":
       "0 rests an account for 60 seconds; a negative value does not rest it.",
     "config.label.saveCooldownStatus": "Keep cooldowns across restarts",
-    "config.hint.saveCooldownStatus": "Writes cooldowns to .cds files in the auth directory.",
+    "config.hint.saveCooldownStatus": "Saves cooldowns in the config database.",
     "config.label.allowRemote": "Remote management",
     "config.label.disableControlPanel": "Turn off this dashboard",
     "config.hint.disableControlPanel": "The Management API keeps working.",
@@ -136,8 +134,6 @@ export default {
       "One file per request. Bodies can contain credentials; keep the folder private.",
     "config.label.usageStatisticsEnabled": "Usage statistics",
     "config.hint.usageStatisticsEnabled": "The Activity page needs it.",
-    "config.label.authDir": "Auth directory",
-    "config.hint.authDir": "Changes in it apply at once.",
     "config.unit.seconds": "s",
     "config.unit.megabytes": "MB",
     "config.unit.bytes": "bytes",

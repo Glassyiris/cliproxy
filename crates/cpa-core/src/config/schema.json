@@ -369,7 +369,6 @@
     },
     "oauth": {
       "fields": {
-        "auth-dir": "string",
         "auth-auto-refresh-workers": "int",
         "model-alias": {
           "map": {

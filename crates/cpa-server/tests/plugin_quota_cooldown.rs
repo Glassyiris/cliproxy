@@ -39,14 +39,14 @@ async fn plugin_quota_reset_persists_cleared_cooldowns_to_the_backend() {
     .unwrap();
     let hash = bcrypt::hash("fake-secret", 4).unwrap();
     let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&format!(
-        "config-version: 8\noauth:\n  auth-dir: {auths}\nrouting:\n  cooldown:\n    save-cooldown-status: true\n\
+        "config-version: 8\nrouting:\n  cooldown:\n    save-cooldown-status: true\n\
          management:\n  secret-key: {hash}\nplugins:\n  enabled: true\n  dir: {plugins}\n  configs:\n    \
          recorder-a:\n      enabled: true\n      record: {records}\n      label: a\n      caps: quota_provider\n",
-        auths = auths.display(),
         plugins = plugins.display(),
         records = records.display(),
     )));
-    let config = store.load().unwrap().config;
+    let mut config = store.load().unwrap().config;
+    config.auth_dir = auths.clone();
     let credentials = cpa_core::config::credentials::load(&config);
     let rt = Arc::new(cpa_server::testing::runtime(
         config,

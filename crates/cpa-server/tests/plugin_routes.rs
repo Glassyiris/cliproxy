@@ -4,6 +4,8 @@
 //! plugin-declared routes and resources through NoRoute, quota,
 //! and the plugin store through a fake HTTP client (every request it receives compared).
 //! Retired v0 config cases are removed; successful config setup uses admin resources.
+//! The recording is untouched; replay drops its `oauth.auth-dir` line (`without_auth_dir`) and
+//! stages the credentials in `Config::auth_dir`, since the setting no longer exists.
 
 // Native plugins load only on Unix (the host's `native` module).
 #![cfg(unix)]
@@ -346,10 +348,13 @@ async fn start(
     Arc<cpa_server::Runtime>,
 ) {
     let hash = bcrypt::hash("fake-secret", 4).unwrap();
+    // The recorded config names `oauth.auth-dir`, which no longer exists: the fixture
+    // drops that line and stages the credentials in `Config::auth_dir` instead.
     let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(
-        &dirs.placeholders(yaml).replace("$HASH", &hash),
+        &cpa_server::testing::without_auth_dir(&dirs.placeholders(yaml)).replace("$HASH", &hash),
     ));
-    let config = store.load().unwrap().config;
+    let mut config = store.load().unwrap().config;
+    config.auth_dir = dirs.auths.clone();
     let credentials = cpa_core::config::credentials::load(&config);
     let rt = Arc::new(cpa_server::testing::runtime(
         config,

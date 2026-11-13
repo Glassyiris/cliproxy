@@ -100,10 +100,7 @@ async fn proxy(name: &str) -> Proxy {
         credential(&auth_dir, "kimi-k.json", json!({"type":"kimi"}), &[]),
         credential(&auth_dir, "devin-d.json", json!({"type":"devin"}), &[]),
     ];
-    let yaml = format!(
-        "access:\n  api-keys: [client-key]\noauth:\n  auth-dir: {}\n",
-        dir.join("auth").display()
-    );
+    let yaml = "access:\n  api-keys: [client-key]\n".to_owned();
     let store = Arc::new(cpa_server::config_store::ConfigStore::memory_with(&yaml));
     let rt = Arc::new(cpa_server::testing::runtime(
         store.load().unwrap().config,

@@ -28,10 +28,7 @@ async fn codex_passive_quota_snapshots_appear_in_credential_entries() {
             r#"{"type":"claude","email":"b@example.invalid"}"#,
         )
         .unwrap();
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-            auth.display()
-        )
+        format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",)
     });
     let snapshot = f.rt.store().snapshot();
     let id = |provider: &str| snapshot.iter().find(|c| c.provider == provider).unwrap().id.clone();
@@ -111,14 +108,14 @@ async fn codex_passive_quota_snapshots_appear_in_credential_entries() {
 
 impl Fixture {
     fn new(name: &str) -> Self {
-        Self::from_yaml(name, |auth, hash| {
+        Self::from_yaml(name, |_, hash| {
             format!(
-                "config-version: 8\nserver: {{host: '127.0.0.1', port: 0}}\nmanagement: {{secret-key: '{hash}'}}\noauth: {{auth-dir: {}}}\nrouting: {{retry: {{request-retry: 3}}}}\naccess: {{api-keys: [fake-client]}}\n",
-                auth.display()
+                "config-version: 8\nserver: {{host: '127.0.0.1', port: 0}}\nmanagement: {{secret-key: '{hash}'}}\nrouting: {{retry: {{request-retry: 3}}}}\naccess: {{api-keys: [fake-client]}}\n",
             )
         })
     }
-    /// A fixture whose runtime holds the credentials `yaml` synthesizes.
+    /// A fixture whose runtime holds the credentials `yaml` synthesizes. `yaml` gets the
+    /// directory where it stages credential files, saved to the database before the runtime starts.
     fn from_yaml(name: &str, yaml: impl Fn(&std::path::Path, &str) -> String) -> Self {
         Self::from_yaml_with(name, yaml, Default::default())
     }
@@ -134,7 +131,8 @@ impl Fixture {
         let store = Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap());
         store.import_yaml(&yaml(&dir.join("auth"), &hash), "test", "").unwrap();
         let mut cfg = store.load().unwrap().config;
-        let db = CredentialDb::initialize(store.clone(), &cfg.auth_dir).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
+        cpa_server::testing::seed_credentials(&db, &dir.join("auth"));
         cfg.auth_dir = db.auth_dir();
         let scan = db.scan(&cfg).unwrap();
         let mut loaded = scan.credentials;
@@ -193,10 +191,7 @@ async fn authorized_credential_reads_and_cooldown_views_need_no_storage() {
     let raw = b"{ \"type\": \"claude\", \"access_token\": \"test-only\", \"opaque\": [1,2] }\n";
     let f = Fixture::from_yaml("credential-memory", |auth, hash| {
         std::fs::write(auth.join("raw.json"), raw).unwrap();
-        format!(
-            "config-version: 8\nmanagement: {{secret-key: '{hash}'}}\noauth: {{auth-dir: {}}}\n",
-            auth.display()
-        )
+        format!("config-version: 8\nmanagement: {{secret-key: '{hash}'}}\n",)
     });
     let db = f.rt.store().credential_backend();
     let name = f.auth().join("raw.json");
@@ -891,11 +886,8 @@ async fn config_api_keys_become_scheduled_credentials_on_write_and_reload() {
 
 #[tokio::test]
 async fn management_secret_keys_are_hashed_and_rotated() {
-    let f = Fixture::from_yaml("secret", |auth, _| {
-        format!(
-            "management: {{secret-key: fake-management-only}}\noauth: {{auth-dir: {}}}\n",
-            auth.display()
-        )
+    let f = Fixture::from_yaml("secret", |_, _| {
+        "management: {secret-key: fake-management-only}\n".to_owned()
     });
     assert!(
         bcrypt::verify(
@@ -946,7 +938,8 @@ async fn management_secret_keys_are_hashed_and_rotated() {
             .await
             .unwrap()
             .status(),
-        404
+        403,
+        "no key left: management is refused by name"
     );
     server.abort();
 }
@@ -954,7 +947,7 @@ async fn management_secret_keys_are_hashed_and_rotated() {
 #[tokio::test]
 async fn unreadable_auth_dir_never_blocks_secret_rotation_or_removal() {
     let f = Fixture::new("authfile");
-    // A broken legacy import path cannot change the active credential authority.
+    // An auth-dir that is not a directory changes nothing: credentials live in SQLite.
     let blocker = f.dir.join("not-a-dir");
     std::fs::write(&blocker, "x").unwrap();
     let text = f.state.config_store().load().unwrap().text.replace(
@@ -1004,7 +997,12 @@ async fn unreadable_auth_dir_never_blocks_secret_rotation_or_removal() {
         .unwrap();
     watching::reload(&f.state).unwrap();
     let r = get("fake-rotated").await.unwrap();
-    assert_eq!((r.status().as_u16(), r.text().await.unwrap()), (404, String::new()));
+    assert_eq!(r.status().as_u16(), 403);
+    let body: Value = r.json().await.unwrap();
+    assert_eq!(
+        body["message"],
+        "management key not set: start the server with COOK_MANAGEMENT_PASSWORD"
+    );
     server.abort();
 }
 
@@ -1076,10 +1074,9 @@ async fn config_key_toggle_edits_only_the_target_key_in_the_current_store() {
         )
     };
     let (a, b) = ("- api-key: fake-a # first key", "- api-key: fake-b # second key");
-    let f = Fixture::from_yaml("toggle", |auth, hash| {
+    let f = Fixture::from_yaml("toggle", |_, hash| {
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n{}",
-            auth.display(),
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\n{}",
             groups(a, b)
         )
     });
@@ -1125,10 +1122,9 @@ async fn config_key_toggle_edits_only_the_target_key_in_the_current_store() {
 /// A config API key is not an auth file; field patches must not alter it.
 #[tokio::test]
 async fn config_key_field_patch_is_not_found() {
-    let f = Fixture::from_yaml("cfgfields", |auth, hash| {
+    let f = Fixture::from_yaml("cfgfields", |_, hash| {
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\napi-keys:\n  claude:\n    - excluded-models: [config-*]\n      keys:\n        - api-key: fake-k\n",
-            auth.display()
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\napi-keys:\n  claude:\n    - excluded-models: [config-*]\n      keys:\n        - api-key: fake-k\n",
         )
     });
     let before = f.rt.store().snapshot()[0].clone();
@@ -1161,10 +1157,7 @@ async fn config_key_field_patch_is_not_found() {
 async fn openapi_field_aliases_patch_their_canonical_keys() {
     let f = Fixture::from_yaml("openapi-fields", |auth, hash| {
         std::fs::write(auth.join("vertex.json"), r#"{"type":"vertex","project_id":"p"}"#).unwrap();
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-            auth.display()
-        )
+        format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",)
     });
     let id = f.rt.store().snapshot()[0].id.clone();
     let (base, server) = f.server().await;
@@ -1207,10 +1200,7 @@ async fn a_service_account_file_lists_its_client_email_as_the_account() {
             r#"{"type":"vertex","project_id":"p","service_account":{"client_email":" sa@p.iam.gserviceaccount.com ","private_key":"unused"}}"#,
         )
         .unwrap();
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-            auth.display()
-        )
+        format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",)
     });
     let (base, server) = f.server().await;
     for path in ["/v8/management/credentials", "/v0/management/auth-files"] {
@@ -1249,8 +1239,7 @@ async fn credential_excluded_models_take_priority_over_the_global_list() {
     let f = Fixture::from_yaml("excl-priority", |auth, hash| {
         std::fs::write(auth.join("codex.json"), r#"{"type":"codex"}"#).unwrap();
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n  excluded-models:\n    codex: ['{global}']\n",
-            auth.display()
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  excluded-models:\n    codex: ['{global}']\n",
         )
     });
     let id = f.rt.store().snapshot()[0].id.clone();
@@ -1305,8 +1294,7 @@ async fn excluded_models_writes_are_validated() {
         )
         .unwrap();
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n  excluded-models:\n    codex: [global-*]\n",
-            auth.display()
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  excluded-models:\n    codex: [global-*]\n",
         )
     });
     let auth = f.auth();
@@ -1430,10 +1418,7 @@ async fn fields_refuses_values_its_auth_loader_cannot_read() {
     // object, is refused before anything is written.
     let f = Fixture::from_yaml("fields-limits", |auth, hash| {
         std::fs::write(auth.join("credential.json"), r#"{"type":"claude"}"#).unwrap();
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-            auth.display()
-        )
+        format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",)
     });
     let auth = f.auth();
     let (base, server) = f.server().await;
@@ -1496,10 +1481,7 @@ async fn fields_refuses_values_its_auth_loader_cannot_read() {
 async fn a_codex_save_refuses_a_stored_subtree_its_loader_cannot_read() {
     let f = Fixture::from_yaml("codex-deep", |auth, hash| {
         std::fs::write(auth.join("codex.json"), r#"{"type":"codex","access_token":"fake-a"}"#).unwrap();
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-            auth.display()
-        )
+        format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",)
     });
     let file = f.auth().join("codex.json");
     let nested = |n: usize| format!("{}{}", "[".repeat(n), "]".repeat(n));
@@ -1541,10 +1523,9 @@ async fn a_codex_save_refuses_a_stored_subtree_its_loader_cannot_read() {
 
 #[tokio::test]
 async fn credential_models_come_from_registrations() {
-    let f = Fixture::from_yaml("models", |auth, hash| {
+    let f = Fixture::from_yaml("models", |_, hash| {
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\napi-keys:\n  claude:\n    - models: [{{name: claude-sonnet-4-6, alias: sonnet}}]\n      keys:\n        - api-key: fake-k\n",
-            auth.display()
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\napi-keys:\n  claude:\n    - models: [{{name: claude-sonnet-4-6, alias: sonnet}}]\n      keys:\n        - api-key: fake-k\n",
         )
     });
     let id = f.rt.store().snapshot()[0].id.clone();
@@ -1588,10 +1569,9 @@ async fn credential_models_come_from_registrations() {
 /// `TestGetStaticModelDefinitions_RejectsUnknownChannel`).
 #[tokio::test]
 async fn model_definitions_fall_back_to_registered_models_by_channel() {
-    let f = Fixture::from_yaml("definitions", |auth, hash| {
+    let f = Fixture::from_yaml("definitions", |_, hash| {
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: http://127.0.0.1:9/v1\n      models: [{{name: up-z, alias: zeta}}, {{name: up-a, alias: alpha}}]\n      keys: [{{api-key: fake-acme}}]\n",
-            auth.display()
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: http://127.0.0.1:9/v1\n      models: [{{name: up-z, alias: zeta}}, {{name: up-a, alias: alpha}}]\n      keys: [{{api-key: fake-acme}}]\n",
         )
     });
     let (base, server) = f.server().await;
@@ -1647,11 +1627,8 @@ async fn model_definitions_fall_back_to_registered_models_by_channel() {
 async fn model_definitions_match_go_by_channel() {
     let go: serde_json::Map<String, Value> =
         serde_json::from_str(include_str!("fixtures/model_definitions_go.json")).unwrap();
-    let f = Fixture::from_yaml("definitions-go", |auth, hash| {
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-            auth.display()
-        )
+    let f = Fixture::from_yaml("definitions-go", |_, hash| {
+        format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",)
     });
     let (base, server) = f.server().await;
     let get = |channel: String| {
@@ -1711,10 +1688,9 @@ async fn model_definitions_fall_back_to_plugin_static_models() {
         json!({"ok": true, "result": models}).to_string(),
     )
     .unwrap();
-    let f = Fixture::from_yaml("definitions-plugin", |auth, hash| {
+    let f = Fixture::from_yaml("definitions-plugin", |_, hash| {
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    workbuddy:\n      enabled: true\n      label: workbuddy\n      record: {}\n      caps: model_provider\n",
-            auth.display(),
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    workbuddy:\n      enabled: true\n      label: workbuddy\n      record: {}\n      caps: model_provider\n",
             plugins.display(),
             records.display()
         )
@@ -1746,13 +1722,10 @@ async fn model_definitions_fall_back_to_plugin_static_models() {
 #[tokio::test]
 async fn effective_api_keys_carry_auth_indexes_and_writes_drop_them() {
     let fixture: Value = serde_json::from_str(include_str!("fixtures/config_v8_auth_index_go.json")).unwrap();
-    let f = Fixture::from_yaml("authindex", |auth, hash| {
+    let f = Fixture::from_yaml("authindex", |_, hash| {
         fixture["config"].as_str().unwrap().replace(
             "config-version: 8\n",
-            &format!(
-                "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-                auth.display()
-            ),
+            &format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",),
         )
     });
     let (base, server) = f.server().await;
@@ -1840,21 +1813,11 @@ async fn effective_api_keys_carry_auth_indexes_and_writes_drop_them() {
     server.abort();
 }
 
-/// Importing a relative auth-dir still gives an unclaimed upload one credential,
-/// which becomes synthesized when its type is patched.
+/// An unclaimed upload gets one credential, which becomes synthesized when its type is
+/// patched.
 #[tokio::test]
-async fn fallback_with_relative_auth_dir_is_retired_once_synthesized() {
-    let f = Fixture::from_yaml("relfallback", |auth, hash| {
-        let cwd = std::env::current_dir().unwrap();
-        let up = "../".repeat(cwd.components().count() - 1);
-        let relative = std::path::Path::new(&up).join(auth.strip_prefix("/").unwrap());
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-            relative.display()
-        )
-    });
-    assert!(f.state.config_store().load().unwrap().config.auth_dir.is_relative());
-    assert_eq!(f.rt.config().auth_dir, f.auth());
+async fn an_unclaimed_upload_is_retired_once_synthesized() {
+    let f = Fixture::new("relfallback");
     let (base, server) = f.server().await;
     let client = wreq::Client::new();
     let call = |method: wreq::Method, path: &str, body: &str| {
@@ -1937,10 +1900,7 @@ async fn config_reloads_never_publish_a_value_older_than_a_save() {
 async fn file_credential_prefix_patch_refreshes_the_registry() {
     let f = Fixture::from_yaml("fileprefix", |auth, hash| {
         std::fs::write(auth.join("claude.json"), r#"{"type":"claude"}"#).unwrap();
-        format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-            auth.display()
-        )
+        format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",)
     });
     assert!(
         !f.rt.registry().ids().any(|m| m.starts_with("new/")),
@@ -2072,11 +2032,8 @@ async fn latest_version_uses_configured_and_environment_proxies() {
     use std::sync::Mutex;
     if let Ok(case) = std::env::var("COOK_ROUTER_TEST_RELEASE_PROXY") {
         let configured = std::env::var("COOK_ROUTER_TEST_PROXY_URL").unwrap_or_default();
-        let f = Fixture::from_yaml(&format!("release-proxy-{case}"), |auth, hash| {
-            format!(
-                "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\nrequests:\n  proxy-url: '{configured}'\n",
-                auth.display()
-            )
+        let f = Fixture::from_yaml(&format!("release-proxy-{case}"), |_, hash| {
+            format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\nrequests:\n  proxy-url: '{configured}'\n",)
         });
         let state = Management::with_options(
             f.rt.clone(),
@@ -2280,10 +2237,9 @@ async fn latest_version_keeps_tls_verification_through_proxy() {
         let _ = tokio::io::copy_bidirectional(&mut socket, &mut upstream).await;
         String::from_utf8(head).unwrap()
     });
-    let f = Fixture::from_yaml("release-proxy-tls", |auth, hash| {
+    let f = Fixture::from_yaml("release-proxy-tls", |_, hash| {
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\nrequests:\n  proxy-url: 'http://proxy-user:proxy-password@{proxy}'\n",
-            auth.display()
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\nrequests:\n  proxy-url: 'http://proxy-user:proxy-password@{proxy}'\n",
         )
     });
     let state = Management::with_options(
@@ -2410,10 +2366,9 @@ async fn runtime_credential_delete_spares_same_named_file() {
 /// is not JSON comes back as a string. Disabling statistics stops queueing.
 #[tokio::test]
 async fn usage_queue_pops_records_in_order() {
-    let f = Fixture::from_yaml("usageq", |auth, hash| {
+    let f = Fixture::from_yaml("usageq", |_, hash| {
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\nobservability:\n  usage:\n    usage-statistics-enabled: true\n",
-            auth.display()
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\nobservability:\n  usage:\n    usage-statistics-enabled: true\n",
         )
     });
     let (base, server) = f.server().await;
@@ -2688,11 +2643,8 @@ async fn devin_login_completes_through_the_main_listener_callback() {
     assert_eq!(r, json!({"error": "callback server unavailable"}));
     server.abort();
 
-    let f = Fixture::from_yaml("devinlogin", |auth, hash| {
-        format!(
-            "config-version: 8\nserver:\n  port: 18999\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-            auth.display()
-        )
+    let f = Fixture::from_yaml("devinlogin", |_, hash| {
+        format!("config-version: 8\nserver:\n  port: 18999\nmanagement:\n  secret-key: '{hash}'\n",)
     });
     let (base, _state, server) = login_server(&f, &fake).await;
     let deliver = |state: &str, code: &str, error: &str| {
@@ -3518,16 +3470,16 @@ async fn claude_login_completes_from_a_posted_redirect_url() {
     fake_server.abort();
 }
 
-/// Go `saveTokenRecord` for Claude: the legacy file a new login replaces is deleted
-/// through the store only after the canonical credential is stored.
+/// A Claude login stores its credential under its own name only when the store
+/// accepts it; an email-only file of the same account is neither merged nor removed.
 #[tokio::test]
-async fn claude_login_removes_the_legacy_file_only_after_the_store_has_the_new_one() {
+async fn claude_login_stores_its_own_file_and_keeps_other_names() {
     let (fake, _seen, fake_server) = fake_logins().await;
     for down in [true, false] {
-        let f = Fixture::new(&format!("claudelegacy-{down}"));
-        let legacy = f.auth().join("claude-a@example.invalid.json");
+        let f = Fixture::new(&format!("claudelogin-{down}"));
+        let other = f.auth().join("claude-a@example.invalid.json");
         let original = br#"{"type":"claude","email":"a@example.invalid","organization_uuid":"org-1"}"#;
-        f.writer().save(&legacy, original).unwrap();
+        f.writer().save(&other, original).unwrap();
         let _blocked = down.then(|| f.reject_saves());
         let options = management::Options {
             login_base: Some(fake.clone()),
@@ -3550,13 +3502,12 @@ async fn claude_login_removes_the_legacy_file_only_after_the_store_has_the_new_o
                 status,
                 json!({"status": "error", "error": "Failed to save authentication tokens"})
             );
-            assert!(legacy.exists(), "kept while the canonical credential is not stored");
-            assert_eq!(documents, [(legacy.clone(), original.to_vec())]);
+            assert_eq!(documents, [(other.clone(), original.to_vec())]);
         } else {
             assert_eq!(status, json!({"status": "ok"}));
-            assert!(!legacy.exists());
-            assert_eq!(documents.len(), 1);
-            let (path, bytes) = &documents[0];
+            assert_eq!(std::fs::read(&other).unwrap(), original);
+            assert_eq!(documents.len(), 2);
+            let (path, bytes) = documents.iter().find(|(path, _)| *path != other).unwrap();
             let name = path.file_name().unwrap().to_str().unwrap();
             assert!(
                 name.starts_with("claude-") && name.ends_with("-a@example.invalid.json"),
@@ -3686,10 +3637,7 @@ async fn an_inflight_siwc_binding_is_preserved_while_new_bindings_are_paused() {
     let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let f = Fixture::from_yaml("siwc-pending", |auth, hash| {
         std::fs::write(auth.join("codex.json"),r#"{"type":"codex","email":"private@example.invalid","account_id":"account","access_token":"outer-access","refresh_token":"outer-refresh","opaque":{"keep":true}}"#).unwrap();
-        format!(
-            "management: {{secret-key: '{hash}'}}\noauth: {{auth-dir: {}}}\n",
-            auth.display()
-        )
+        format!("management: {{secret-key: '{hash}'}}\n",)
     });
     let (settled_tx, mut settled_rx) = tokio::sync::mpsc::unbounded_channel();
     let (base, state, server) = serve_with(
@@ -3874,8 +3822,7 @@ async fn siwc_binding_flows_follow_go() {
         .unwrap();
         std::fs::write(auth.join("no-refresh.json"), r#"{"type":"codex","access_token":"a"}"#).unwrap();
         format!(
-            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n  providers:\n    codex:\n      signin-with-chatgpt-identifier: '  Custom Agent  '\n",
-            auth.display()
+            "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  providers:\n    codex:\n      signin-with-chatgpt-identifier: '  Custom Agent  '\n",
         )
     });
     let file = f.auth().join("codex.json");
@@ -4506,16 +4453,14 @@ async fn auth_files_list_v8_quota_plugin_id_and_no_quota_probe() {
     let store = Arc::new(cpa_server::testing::config_store(&auth.join("config.db")).unwrap());
     store
         .import_yaml(
-            &format!(
-                "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-                auth.display()
-            ),
+            &format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",),
             "test",
             "",
         )
         .unwrap();
     let mut cfg = store.load().unwrap().config;
-    let db = CredentialDb::initialize(store.clone(), &cfg.auth_dir).unwrap();
+    let db = CredentialDb::initialize(store.clone()).unwrap();
+    cpa_server::testing::seed_credentials(&db, &auth);
     cfg.auth_dir = db.auth_dir();
     let mut credentials = db.scan(&cfg).unwrap().credentials;
     // A provider that isn't lowercased yet: Go's strings.ToLower maps U+0130 to a plain
@@ -4712,10 +4657,7 @@ async fn siwc_only_codex_credentials_refresh_by_name_and_in_bulk() {
             std::fs::write(auth.join("active.json"), siwc("siwc-rt-1", true)).unwrap();
             std::fs::write(auth.join("bound.json"), siwc("siwc-rt-2", false)).unwrap();
             std::fs::write(auth.join("plain.json"), r#"{"type":"codex","access_token":"a"}"#).unwrap();
-            format!(
-                "config-version: 8\nmanagement:\n  secret-key: '{hash}'\noauth:\n  auth-dir: {}\n",
-                auth.display()
-            )
+            format!("config-version: 8\nmanagement:\n  secret-key: '{hash}'\n",)
         },
         codex,
     );
@@ -4839,16 +4781,10 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         let store = Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap());
         let hash = bcrypt::hash("fake-management-only", 4).unwrap();
         store
-            .import_yaml(
-                &format!(
-                    "management: {{secret-key: '{hash}'}}\noauth: {{auth-dir: {}}}\n",
-                    legacy.display()
-                ),
-                "test",
-                "",
-            )
+            .import_yaml(&format!("management: {{secret-key: '{hash}'}}\n"), "test", "")
             .unwrap();
-        let db = CredentialDb::initialize(store.clone(), &legacy).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
+        cpa_server::testing::seed_credentials(&db, &legacy);
         let mut cfg = store.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let scan = db.scan(&cfg).unwrap();
@@ -4891,11 +4827,8 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         drop(blocked);
         let failed_copy = dir.join("failed-delete-copy.db");
         std::fs::copy(store.path().unwrap(), &failed_copy).unwrap();
-        let reopened = CredentialDb::initialize(
-            Arc::new(cpa_server::testing::config_store(&failed_copy).unwrap()),
-            &legacy,
-        )
-        .unwrap();
+        let reopened =
+            CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&failed_copy).unwrap())).unwrap();
         assert_eq!(reopened.documents().unwrap().len(), 2);
         drop(reopened);
         let response = client
@@ -4912,11 +4845,8 @@ async fn sqlite_http_deletes_are_durable_and_sql_failure_keeps_documents() {
         // Restore only the published file with a new cache; the live owner stays exclusive.
         let deleted_copy = dir.join("deleted-copy.db");
         std::fs::copy(store.path().unwrap(), &deleted_copy).unwrap();
-        let reopened = CredentialDb::initialize(
-            Arc::new(cpa_server::testing::config_store(&deleted_copy).unwrap()),
-            &legacy,
-        )
-        .unwrap();
+        let reopened =
+            CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&deleted_copy).unwrap())).unwrap();
         let cache = reopened.auth_dir();
         assert!(reopened.read(&cache.join("a.json")).unwrap().is_none());
         assert!(!cache.join("a.json").exists());

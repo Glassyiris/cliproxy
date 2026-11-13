@@ -30,8 +30,7 @@ async fn interceptor_content_type_decides_the_audio_type() {
     let audio = axum::Router::new().fallback(|| async { ([("content-type", "audio/wav")], "AUDIO") });
     tokio::spawn(async move { axum::serve(upstream, audio).await.unwrap() });
     let yaml = format!(
-        "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key-1]\napi-keys:\n  xai:\n    - name: xai-1\n      base-url: {upstream_url}/v1\n      keys:\n        - api-key: sk-fake-xai-a\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    shaper:\n      enabled: true\n      label: shaper\n      record: {}\n      caps: response_interceptor\n",
-        auths.display(),
+        "access:\n  api-keys: [client-key-1]\napi-keys:\n  xai:\n    - name: xai-1\n      base-url: {upstream_url}/v1\n      keys:\n        - api-key: sk-fake-xai-a\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    shaper:\n      enabled: true\n      label: shaper\n      record: {}\n      caps: response_interceptor\n",
         plugins.display(),
         records.display()
     );

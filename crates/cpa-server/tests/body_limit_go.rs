@@ -60,10 +60,7 @@ fn app(
     plugin_auth: bool,
 ) -> (axum::Router, Arc<cpa_server::Runtime>, Arc<ConfigStore>) {
     std::fs::create_dir_all(dir.join("auth")).unwrap();
-    let store = Arc::new(ConfigStore::memory_with(&format!(
-        "{yaml}oauth:\n  auth-dir: {}\n",
-        dir.join("auth").display()
-    )));
+    let store = Arc::new(ConfigStore::memory_with(yaml));
     let rt = Arc::new(cpa_server::testing::runtime(
         store.load().unwrap().config,
         vec![],
@@ -192,10 +189,7 @@ async fn a_published_limit_applies_to_the_next_request() {
         app.oneshot(request).await.unwrap().status().as_u16()
     };
     assert_eq!(send(app.clone()).await, 400, "no limit: the model lookup answers");
-    let text = format!(
-        "{yaml}oauth:\n  auth-dir: {}\nserver:\n  max-request-body-bytes: 29\n",
-        dir.join("auth").display()
-    );
+    let text = format!("{yaml}server:\n  max-request-body-bytes: 29\n");
     store.import_yaml(&text, "test", "reload body limit").unwrap();
     assert_eq!(send(app).await, 413);
     let _ = std::fs::remove_dir_all(&dir);
@@ -229,8 +223,7 @@ async fn a_reload_during_a_request_keeps_its_limit() {
     while tx.capacity() < tx.max_capacity() {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
-    let text = format!("{yaml}oauth:\n  auth-dir: {}\n", dir.join("auth").display())
-        .replace("max-request-body-bytes: 128", "max-request-body-bytes: 0");
+    let text = yaml.replace("max-request-body-bytes: 128", "max-request-body-bytes: 0");
     store.import_yaml(&text, "test", "reload body limit").unwrap();
     assert_eq!(rt.config().max_request_body_bytes(), None);
     tx.send(Bytes::copy_from_slice(tail)).await.unwrap();

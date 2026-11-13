@@ -123,7 +123,7 @@ function signInHelp(e: unknown): string {
     return e.reason === "timeout" ? t("app.connection.timeout") : t("app.connection.unreachable");
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : String(e);
   const m = e.message;
-  if (e.status === 404 || /key not set/.test(m)) return t("app.signIn.apiOff");
+  if (/key not set/.test(m)) return t("app.signIn.apiOff");
   if (/remote management disabled/.test(m)) return t("app.signIn.remoteDisabled");
   if (/banned/i.test(m)) return t("app.signIn.banned", { message: m });
   if (e.status === 401) return t("app.signIn.wrongKey");

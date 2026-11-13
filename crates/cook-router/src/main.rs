@@ -40,7 +40,8 @@ const BUILD_DATE: &str = match option_env!("COOK_BUILD_DATE") {
 )]
 struct Args {
     /// The config file a first start imports into the config database (default
-    /// ./config.yaml); later starts do not read it.
+    /// ./config.yaml; without that file the first start uses defaults and port 8317);
+    /// later starts do not read it.
     #[arg(long, default_value = "")]
     config: String,
     /// The config database (default: cook.db beside the config file, or COOK_DB).
@@ -325,15 +326,35 @@ fn db_path(flag: &str, config_file: &Path) -> PathBuf {
         .join("cook.db")
 }
 
+/// What a first start imports when its YAML file is absent.
+#[derive(Clone, Copy)]
+enum FirstImport {
+    /// An explicit `--config`: the file must exist.
+    Required,
+    /// The default `./config.yaml`: a fresh volume, or a blank file, starts with defaults and
+    /// listens on `DEFAULT_PORT`. `Config::parse` itself still leaves an omitted port at 0.
+    Defaults,
+    /// `COOK_DEPLOY=cloud`: an absent or blank file initializes an empty config, and the
+    /// server waits for one.
+    Cloud,
+}
+
 /// Opens the one config authority and imports YAML only before its first revision.
-/// Cloud may initialize an empty config when the import file is absent or
-/// blank (Go `LoadConfigOptional`). A missing import fails before a new database file
-/// is created.
-fn load_config(db: &Path, config_file: &Path, optional: bool) -> anyhow::Result<(Arc<ConfigStore>, Config)> {
+/// A required import that is missing fails before a new database file is created.
+fn load_config(db: &Path, config_file: &Path, first: FirstImport) -> anyhow::Result<(Arc<ConfigStore>, Config)> {
+    let cloud = matches!(first, FirstImport::Cloud);
+    let default_config = || format!("server:\n  port: {}\n", cpa_core::config::DEFAULT_PORT);
     let read_import = || match std::fs::read_to_string(config_file) {
-        Ok(text) if optional && text.trim().is_empty() => Ok(String::new()),
+        Ok(text) if cloud && text.trim().is_empty() => Ok(String::new()),
+        Ok(text) if matches!(first, FirstImport::Defaults) && text.trim().is_empty() => Ok(default_config()),
         Ok(text) => Ok(text),
-        Err(e) if optional && e.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => match first {
+            FirstImport::Required => {
+                Err(e).with_context(|| format!("read first config import {}", config_file.display()))
+            }
+            FirstImport::Defaults => Ok(default_config()),
+            FirstImport::Cloud => Ok(String::new()),
+        },
         Err(e) => Err(e).with_context(|| format!("read first config import {}", config_file.display())),
     };
     let mut text = if db.exists() { None } else { Some(read_import()?) };
@@ -495,8 +516,14 @@ fn main() -> anyhow::Result<()> {
     let loaded = if discover_mode || remote_client {
         None
     } else {
-        let optional = std::env::var("COOK_DEPLOY").is_ok_and(|v| v == "cloud");
-        let loaded = load_config(&db, &config_file, optional);
+        let first = if std::env::var("COOK_DEPLOY").is_ok_and(|v| v == "cloud") {
+            FirstImport::Cloud
+        } else if config_flag.is_empty() {
+            FirstImport::Defaults
+        } else {
+            FirstImport::Required
+        };
+        let loaded = load_config(&db, &config_file, first);
         // Like a failure inside `run`: the process log keeps why startup stopped.
         if let Err(error) = &loaded
             && log_file.is_some()
@@ -932,7 +959,7 @@ async fn standalone_tui(
 }
 
 fn initialize_credentials(store: Arc<ConfigStore>, config: &mut Config) -> anyhow::Result<Arc<CredentialDb>> {
-    let backend = CredentialDb::initialize(store, &config.auth_dir)?;
+    let backend = CredentialDb::initialize(store)?;
     config.auth_dir = backend.auth_dir();
     Ok(backend)
 }
@@ -1016,8 +1043,8 @@ fn hydrate_claude_sources(
     sources: &std::collections::BTreeMap<String, tui::CredentialSource>,
 ) -> io::Result<()> {
     use cpa_core::gostr::GoStr as _;
-    // Every canonical/legacy name from credential_file_name has this namespace.
-    // Enumeration for case-folded aliases happens before the final save callback.
+    // Every name from credential_file_name has this prefix; the login merges the
+    // existing file of its own name.
     for (name, source) in sources
         .iter()
         .filter(|(name, _)| name.go_lower().starts_with("claude-"))
@@ -1262,24 +1289,6 @@ async fn online_plugin_command(raw: &[String]) -> anyhow::Result<i32> {
     .await
     .context("prepare private plugin inputs")??;
     config.auth_dir = scratch.path().to_owned();
-    // Plugins can read the raw configuration as well as the typed host summary.
-    let document = config
-        .document
-        .as_mapping_mut()
-        .context("owner configuration is not a mapping")?;
-    let oauth = document
-        .entry(serde_yaml_ng::Value::String("oauth".into()))
-        .or_insert_with(|| serde_yaml_ng::Value::Mapping(Default::default()));
-    if oauth.is_null() {
-        *oauth = serde_yaml_ng::Value::Mapping(Default::default());
-    }
-    oauth
-        .as_mapping_mut()
-        .context("owner OAuth options are not a mapping")?
-        .insert(
-            serde_yaml_ng::Value::String("auth-dir".into()),
-            serde_yaml_ng::Value::String(scratch.path().to_string_lossy().into_owned()),
-        );
     let (save, failure) = online_login_save(
         scratch.clone(),
         client,
@@ -1461,26 +1470,6 @@ fn standalone_base_url((addr, tls): (SocketAddr, bool)) -> Result<String, String
     Ok(format!("http://{}", SocketAddr::new(ip, addr.port())))
 }
 
-/// Go `Service.ensureAuthDir`.
-fn ensure_auth_dir(dir: &Path) -> anyhow::Result<()> {
-    match std::fs::metadata(dir) {
-        Ok(meta) if meta.is_dir() => Ok(()),
-        Ok(_) => anyhow::bail!("cliproxy: auth path exists but is not a directory: {}", dir.display()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            let mut builder = std::fs::DirBuilder::new();
-            builder.recursive(true);
-            #[cfg(unix)]
-            std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o755);
-            builder
-                .create(dir)
-                .with_context(|| format!("cliproxy: failed to create auth directory {}", dir.display()))?;
-            tracing::info!("created missing auth directory: {}", dir.display());
-            Ok(())
-        }
-        Err(e) => Err(e).with_context(|| format!("cliproxy: error checking auth directory {}", dir.display())),
-    }
-}
-
 /// The served routes.
 fn app(rt: &Arc<Runtime>, management: &Arc<cpa_server::management::Management>) -> axum::Router {
     let app = cpa_server::app(rt.clone(), cpa_server::management::router(management.clone()));
@@ -1507,10 +1496,7 @@ async fn serve(
     if config.api_keys.is_empty() {
         tracing::warn!("access.api-keys is empty: the proxy API is open to anyone who can reach it");
     }
-    // Go `ensureAuthDir`: a missing auth-dir is created, so the watcher has a folder
-    // to watch for the first login.
-    ensure_auth_dir(&config.auth_dir)?;
-    // Auth-dir files and config API keys, synthesized as Go's watcher does.
+    // Stored credential documents and config API keys, synthesized as Go's watcher does.
     let scan = backend.scan(&config)?;
     let mut credentials = scan.credentials;
     credentials.extend(cpa_core::config::credentials::from_config(&config));
@@ -1657,10 +1643,9 @@ mod tests {
         use axum::middleware::Next;
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         let root = credential_test_dir();
-        std::fs::create_dir_all(root.join("legacy")).unwrap();
         let store = Arc::new(cpa_server::testing::config_store(&root.join("service.db")).unwrap());
         store.import_yaml("oauth: {}\n", "test", "device flow").unwrap();
-        let db = CredentialDb::initialize(store.clone(), &root.join("legacy")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         let mut config = store.load().unwrap().config;
         config.auth_dir = db.auth_dir();
         let rt = Arc::new(cpa_server::testing::runtime_with_db(
@@ -1851,7 +1836,7 @@ mod tests {
                     let copy = root.join("portable.db");
                     std::fs::copy(store.path().unwrap(), &copy).unwrap();
                     let cold = Arc::new(cpa_server::testing::config_store(&copy).unwrap());
-                    let restored = CredentialDb::initialize(cold.clone(), &root.join("absent")).unwrap();
+                    let restored = CredentialDb::initialize(cold.clone()).unwrap();
                     assert_eq!(restored.read(&restored.auth_dir().join(&name)).unwrap().unwrap(), bytes);
                     drop((restored, cold));
                 }
@@ -2133,14 +2118,15 @@ mod tests {
             Arc::try_unwrap(scratch).unwrap().close().unwrap();
         }
         assert_eq!(xai_grants.load(Ordering::SeqCst), 3);
-        let legacy = db.auth_dir().join("CLAUDE-a@example.invalid.json");
+        // The file the login writes: org-1 hashes to c24787a7 (credential_file_name).
+        let existing = db.auth_dir().join("claude-c24787a7-a@example.invalid.json");
         let claude_seed = br#"{"type":"claude","email":"a@example.invalid","organization_uuid":"org-1","access_token":"old","note":"<kept>","proxy_url":"socks5://keep:1"}"#;
         let mut canonical: Option<PathBuf> = None;
         for case in ["success", "storage", "replaced"] {
             if let Some(path) = canonical.take() {
                 db.delete(&path).unwrap();
             }
-            db.save(&legacy, claude_seed).unwrap();
+            db.save(&existing, claude_seed).unwrap();
             client.credential_admission().await.unwrap();
             let sources = client.credential_sources().await.unwrap();
             let scratch = Arc::new(
@@ -2158,7 +2144,7 @@ mod tests {
             );
             if case == "replaced" {
                 db.save(
-                    &legacy,
+                    &existing,
                     br#"{"type":"claude","access_token":"replacement","note":"never delete"}"#,
                 )
                 .unwrap();
@@ -2206,17 +2192,13 @@ mod tests {
                 let path = result.unwrap();
                 assert!(error.is_none());
                 let target = db.auth_dir().join(path.file_name().unwrap());
-                assert_ne!(target, legacy);
+                assert_eq!(target, existing);
                 let bytes = db.read(&target).unwrap().unwrap();
                 assert_eq!(bytes, std::fs::read(path).unwrap());
                 let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
                 assert_eq!(doc["access_token"], "sk-ant-oat-login-fake");
                 assert_eq!(doc["note"], "<kept>");
                 assert_eq!(doc["proxy_url"], "socks5://keep:1");
-                assert!(
-                    db.read(&legacy).unwrap().is_none(),
-                    "case-folded legacy alias is part of the same commit"
-                );
                 canonical = Some(target);
             } else {
                 assert!(result.is_err());
@@ -2228,7 +2210,7 @@ mod tests {
                 assert_eq!(
                     db.documents().unwrap(),
                     before,
-                    "neither new canonical file nor legacy deletion may partially commit"
+                    "a failed login must not partially commit"
                 );
             }
             drop(blocked);
@@ -2437,17 +2419,18 @@ mod tests {
     }
 
     #[test]
-    fn cli_changes_and_claude_legacy_deletion_survive_reopen() {
+    fn cli_changes_and_deletions_survive_reopen() {
         let root = credential_test_dir();
-        let legacy = root.join("legacy");
-        std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::write(legacy.join("claude-old.json"), b"{\"type\":\"claude\",\"old\":true}").unwrap();
         let path = root.join("cook.db");
         let mut config = Config::parse("").unwrap();
-        config.auth_dir = legacy.clone();
         let db =
             initialize_credentials(Arc::new(cpa_server::testing::config_store(&path).unwrap()), &mut config).unwrap();
         assert_eq!(config.auth_dir, db.auth_dir());
+        db.save(
+            &config.auth_dir.join("claude-old.json"),
+            b"{\"type\":\"claude\",\"old\":true}",
+        )
+        .unwrap();
         let canonical = config.auth_dir.join("claude-new.json");
         let bytes = b"{\"type\":\"claude\",\"access_token\":\"new\",\"unknown\":[1,2]}";
         let (save, failure) = login_save(db.clone());
@@ -2464,8 +2447,7 @@ mod tests {
         drop(save);
         drop(db);
         std::fs::remove_dir_all(&config.auth_dir).unwrap();
-        let db =
-            CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&path).unwrap()), &legacy).unwrap();
+        let db = CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&path).unwrap())).unwrap();
         assert_eq!(std::fs::read(&canonical).unwrap(), bytes);
         assert!(db.read(&config.auth_dir.join("claude-old.json")).unwrap().is_none());
         assert!(!config.auth_dir.join("claude-old.json").exists());
@@ -2478,7 +2460,7 @@ mod tests {
         let root = credential_test_dir();
         let path = root.join("cook.db");
         let owner = Arc::new(cpa_server::testing::config_store(&path).unwrap());
-        let db = CredentialDb::initialize(owner.clone(), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(owner.clone()).unwrap();
         let auth = db.auth_dir().join("login.json");
         db.save(&auth, b"{\"old\":true}").unwrap();
         let (save, failure) = login_save(db.clone());
@@ -2505,11 +2487,7 @@ mod tests {
     fn cli_writer_cannot_be_reverted_by_concurrent_materialization() {
         let root = credential_test_dir();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(
-            Arc::new(cpa_server::testing::config_store(&path).unwrap()),
-            &root.join("missing"),
-        )
-        .unwrap();
+        let db = CredentialDb::initialize(Arc::new(cpa_server::testing::config_store(&path).unwrap())).unwrap();
         let auth = db.auth_dir().join("login.json");
         db.save(&auth, b"{\"old\":true}").unwrap();
         let watcher = db.clone();
@@ -2633,17 +2611,9 @@ mod tests {
             status
         }
         let root = credential_test_dir();
-        std::fs::create_dir_all(root.join("legacy")).unwrap();
         let store = Arc::new(cpa_server::testing::config_store(&root.join("service.db")).unwrap());
         store
-            .import_yaml(
-                &format!(
-                    "server:\n  host: 127.0.0.1\n  port: 0\noauth:\n  auth-dir: '{}'\n",
-                    root.join("legacy").display()
-                ),
-                "test",
-                "shutdown driver",
-            )
+            .import_yaml("server:\n  host: 127.0.0.1\n  port: 0\n", "test", "shutdown driver")
             .unwrap();
         let mut config = store.load().unwrap().config;
         let backend = initialize_credentials(store.clone(), &mut config).unwrap();
@@ -2773,14 +2743,7 @@ mod tests {
         std::fs::create_dir_all(&auth).unwrap();
         let store = Arc::new(cpa_server::testing::config_store(&dir.join("cook.db")).unwrap());
         store
-            .import_yaml(
-                &format!(
-                    "server:\n  host: 127.0.0.1\n  port: 0\noauth:\n  auth-dir: '{}'\n",
-                    auth.display()
-                ),
-                "test",
-                "standalone server",
-            )
+            .import_yaml("server:\n  host: 127.0.0.1\n  port: 0\n", "test", "standalone server")
             .unwrap();
         let mut config = store.load().unwrap().config;
         let backend = initialize_credentials(store.clone(), &mut config).unwrap();
@@ -2808,22 +2771,20 @@ mod tests {
     }
 
     /// Go `TestSIWCManagementRouteAccessControl`: the v8 SIWC bind route answers its
-    /// own validation once authorized, 401 without the key, and 404 when management is
-    /// disabled.
+    /// own validation once authorized, 401 without the key, and 403 naming
+    /// COOK_MANAGEMENT_PASSWORD when no key exists (Go answers an empty 404; changed on
+    /// purpose, owner ruling 2026-11-13).
     #[tokio::test]
     async fn siwc_bind_route_follows_management_availability() {
         use tower::ServiceExt as _;
         let dir = std::env::temp_dir().join(format!("cpa-siwc-route-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("auth")).unwrap();
-        let store = Arc::new(ConfigStore::memory_with(&format!(
-            "oauth:\n  auth-dir: '{}'\n",
-            dir.join("auth").display()
-        )));
+        let store = Arc::new(ConfigStore::memory_with(""));
         let config = store.load().unwrap().config;
         for (name, enabled, authorized, want) in [
             ("authorized invalid target", true, true, 400),
             ("missing management key", true, false, 401),
-            ("management disabled", false, true, 404),
+            ("management disabled", false, true, 403),
         ] {
             let executors = Executors {
                 claude: ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
@@ -2863,8 +2824,11 @@ mod tests {
             assert_eq!(status, want, "{name}: {}", String::from_utf8_lossy(&body));
             match want {
                 400 => assert_eq!(&body[..], br#"{"error":"name is required"}"#, "{name}"),
-                // gin `AbortWithStatus`: no body.
-                404 => assert!(body.is_empty(), "{name}: {}", String::from_utf8_lossy(&body)),
+                403 => assert_eq!(
+                    &body[..],
+                    br#"{"error":"management key not set: start the server with COOK_MANAGEMENT_PASSWORD"}"#,
+                    "{name}"
+                ),
                 _ => {}
             }
         }
@@ -2883,13 +2847,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let db = dir.join("cook.db");
         let missing = dir.join("missing.yaml");
-        let (store, cfg) = load_config(&db, &missing, true).unwrap();
+        let (store, cfg) = load_config(&db, &missing, FirstImport::Cloud).unwrap();
         assert_eq!(cfg.port, 0);
         assert!(!store.is_empty().unwrap(), "even an empty initial import is durable");
         assert!(!cloud_config_present(&store, &cfg));
         std::fs::write(&missing, "server:\n  port: 9000\n").unwrap();
         drop(store);
-        assert_eq!(load_config(&db, &missing, false).unwrap().1.port, 0);
+        assert_eq!(load_config(&db, &missing, FirstImport::Required).unwrap().1.port, 0);
         for (i, text) in ["server:\n  port: [\n", "server:\n  port: wrong\n", "- a\n- b\n"]
             .iter()
             .enumerate()
@@ -2897,17 +2861,70 @@ mod tests {
             let broken = dir.join("broken.yaml");
             std::fs::write(&broken, text).unwrap();
             assert!(
-                load_config(&dir.join(format!("invalid-{i}.db")), &broken, true).is_err(),
+                load_config(&dir.join(format!("invalid-{i}.db")), &broken, FirstImport::Cloud).is_err(),
                 "{text}"
             );
         }
-        assert!(load_config(&dir.join("directory.db"), &dir, true).is_err());
+        assert!(load_config(&dir.join("directory.db"), &dir, FirstImport::Cloud).is_err());
         let invalid_db = dir.join("invalid.db");
         std::fs::write(&invalid_db, "not SQLite").unwrap();
         assert!(
-            load_config(&invalid_db, &missing, true).is_err(),
+            load_config(&invalid_db, &missing, FirstImport::Cloud).is_err(),
             "a valid YAML file cannot mask a bad DB"
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A fresh volume: no database and no ./config.yaml start with defaults on port 8317;
+    /// an explicit `--config` that is missing still fails and creates no database.
+    #[test]
+    fn a_fresh_volume_starts_with_defaults_on_the_default_port() {
+        let dir = std::env::temp_dir().join(format!(
+            "cpa-fresh-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("config.yaml");
+        let required = dir.join("required.db");
+        assert!(load_config(&required, &missing, FirstImport::Required).is_err());
+        assert!(!required.exists(), "a failed required import creates no database");
+        let db = dir.join("cook.db");
+        let (store, cfg) = load_config(&db, &missing, FirstImport::Defaults).unwrap();
+        assert_eq!(cfg.port, cpa_core::config::DEFAULT_PORT);
+        assert!(!store.is_empty().unwrap(), "the defaults are the first revision");
+        drop(store);
+        std::fs::write(&missing, "server:\n  port: 9\n").unwrap();
+        assert_eq!(
+            load_config(&db, &missing, FirstImport::Defaults).unwrap().1.port,
+            cpa_core::config::DEFAULT_PORT,
+            "later starts do not read the file"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A blank default `./config.yaml` (an empty or whitespace-only file) starts like a missing
+    /// one, on the default port, instead of importing a config that listens on port 0.
+    #[test]
+    fn a_blank_default_config_starts_with_defaults_on_the_default_port() {
+        let dir = std::env::temp_dir().join(format!(
+            "cpa-blank-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("config.yaml");
+        for (i, blank) in ["", "  \n\t\n"].into_iter().enumerate() {
+            std::fs::write(&file, blank).unwrap();
+            let db = dir.join(format!("blank-{i}.db"));
+            let (store, cfg) = load_config(&db, &file, FirstImport::Defaults).unwrap();
+            assert_eq!(cfg.port, cpa_core::config::DEFAULT_PORT, "blank file {i}");
+            assert!(!store.is_empty().unwrap(), "the defaults are the first revision");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -2924,9 +2941,9 @@ mod tests {
         let db = dir.join("cook.db");
         let file = dir.join("config.yaml");
         std::fs::write(&file, "server:\n  port: 9\n").unwrap();
-        assert_eq!(load_config(&db, &file, false).unwrap().1.port, 9);
+        assert_eq!(load_config(&db, &file, FirstImport::Required).unwrap().1.port, 9);
         std::fs::write(&file, "server:\n  port: 10\n").unwrap();
-        assert_eq!(load_config(&db, &file, false).unwrap().1.port, 9);
+        assert_eq!(load_config(&db, &file, FirstImport::Required).unwrap().1.port, 9);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

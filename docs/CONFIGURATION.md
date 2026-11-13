@@ -4,7 +4,7 @@
 
 SQLite is the sole durable authority for configuration and OAuth credentials. Select the database with `--db PATH`, then `COOK_DB`; otherwise it is `cook.db` beside the `--config` path (whose default is `config.yaml`). Use the same database path for the server, login commands and config commands. While the server runs it owns that database: change it through the dashboard, `/admin/v1` or `--management-base-url`, not through an offline command.
 
-Legacy YAML is a first-import format, not a watched runtime file. A first bootstrap can import the selected `--config` file; subsequent starts do not read it. Prefer an explicit import before starting the server:
+YAML is a first-import format, not a watched runtime file. A first start imports the selected `--config` file, or `./config.yaml` when the flag is absent; subsequent starts do not read it. Only the current layout is accepted: pre-v8 keys such as `port`, `auth-dir` or `claude-api-key` are rejected as unknown settings. Prefer an explicit import before starting the server:
 
 ```sh
 cook-router --db ~/.cook-router/cook.db config validate config.yaml
@@ -12,7 +12,7 @@ cook-router --db ~/.cook-router/cook.db config import config.yaml
 cook-router --db ~/.cook-router/cook.db
 ```
 
-There is no comment-preserving YAML save, file watcher or asynchronous YAML mirror. Change settings through the dashboard or `/admin/v1`; a successful atomic commit publishes the new runtime projection. Startup-only settings report `restart_required`, rather than silently claiming they are live. The settings and YAML examples below describe legacy import/runtime projection shapes, **not the canonical persisted schema**. The store persists typed resources with stable IDs and revisions. Import preserves versioned plugin raw configuration and OAuth-only provider scope; unsupported or invalid input must be reviewed, not assumed to be silently dropped.
+There is no comment-preserving YAML save, file watcher or asynchronous YAML mirror. Change settings through the dashboard or `/admin/v1`; a successful atomic commit publishes the new runtime projection. Startup-only settings report `restart_required`, rather than silently claiming they are live. The settings and YAML examples below describe the YAML import and runtime projection shapes, **not the canonical persisted schema**. The store persists typed resources with stable IDs and revisions. Import preserves versioned plugin raw configuration and OAuth-only provider scope; unsupported or invalid input must be reviewed, not assumed to be silently dropped.
 
 Accepted commands deliver configuration views directly. Credential/plugin changes wake a notification-only reconciliation task; idle operation does not hash or inspect the published database for changes. Replacing that file while the service runs is not an online command and does not hot-load its rows.
 
@@ -45,7 +45,7 @@ The TUI's setting and client-key commands acknowledge `/admin/v1/apply` only aft
 
 Among config commands the online context supports **import** only. `config export`, `config validate`, `config backup` and `config listener` stay local: while a service owns the database they read its published file read-only. Online logins, Vertex import, SIWC binding and plugin commands are described under [Online credential commands](#online-credential-commands).
 
-`config import` and file-based `config validate` accept legacy YAML or the versioned JSON resource envelope. `config export` emits that same management-compatible JSON envelope (`format: "cook-router-config"`, `version: 1`, `revision`, `resources`), not YAML. This preserves versioned plugin raw data and OAuth-only scope that canonical YAML would lose. Exports redact secrets by default; `--secrets` includes configuration secrets for a lossless full-config export. Protect it as credentials. New output files are private (0600 on Unix). A configuration export is not a credential backup; use `config backup` for the complete SQLite database, including history and credential secrets.
+`config import` and file-based `config validate` accept YAML of the current layout or the versioned JSON resource envelope. `config export` emits that same management-compatible JSON envelope (`format: "cook-router-config"`, `version: 1`, `revision`, `resources`), not YAML. This preserves versioned plugin raw data and OAuth-only scope that canonical YAML would lose. Exports redact secrets by default; `--secrets` includes configuration secrets for a lossless full-config export. Protect it as credentials. New output files are private (0600 on Unix). A configuration export is not a credential backup; use `config backup` for the complete SQLite database, including history and credential secrets.
 
 Installers and health-probe scripts can use `config listener` without parsing YAML or printing secrets. It reads the committed SQLite config and outputs exactly three newline-terminated lines: host (an empty line means wildcard), decimal port (`0` means ephemeral), and TLS enabled (`true` or `false`). It performs no network access or certificate/key-file reads. These are committed startup settings, not proof of the currently bound address after an unapplied restart-only change; a wildcard probe should use loopback, and an ephemeral port needs the actual runtime address.
 
@@ -70,7 +70,7 @@ Plugin PATCH may change `enabled` or `priority` while preserving hidden versione
 | `GET /effective/config` | Read the compiled runtime projection, including stable `@id` values and live `auth_index` values. |
 | `GET /revisions`, `GET /revisions/{rev}` | Read configuration history. |
 | `POST /revisions/{rev}/restore` | Restore configuration as a new revision, not credential state. |
-| `GET /export`, `POST /import` | Export resources or import a resource envelope/legacy YAML. |
+| `GET /export`, `POST /import` | Export resources or import a resource envelope or YAML. |
 | `GET /credentials` | Read an authorized coherent snapshot of managed original documents and their content hashes. |
 | `POST /credentials/batch` | Save managed credential documents atomically, without creating a configuration revision. |
 
@@ -184,7 +184,7 @@ observability:
 
 | Setting | What it does |
 |---|---|
-| `secret-key` | The dashboard and Management API password. A plaintext imported value is stored as its bcrypt hash, not rewritten into YAML. The `COOK_MANAGEMENT_PASSWORD` environment variable works too. When neither is set, the management API is off. Changing or removing it signs out every dashboard session for good: restoring the old value later brings none back. |
+| `secret-key` | The dashboard and Management API password. A plaintext imported value is stored as its bcrypt hash, not rewritten into YAML. The `COOK_MANAGEMENT_PASSWORD` environment variable works too. When neither is set, every management request answers 403 ("management key not set"). Changing or removing it signs out every dashboard session for good: restoring the old value later brings none back. |
 | `allow-remote` | `false` (the default) accepts management requests from this computer only. |
 | `disable-control-panel` | `true` stops serving the dashboard at `/management.html`; the Management API keeps working. |
 
@@ -192,7 +192,6 @@ observability:
 
 | Setting | What it does |
 |---|---|
-| `auth-dir` | Legacy credential import source only. The first local server start or credential/plugin CLI use imports its top-level JSON credential files, including symlinks to files, once into the selected SQLite database; nested directories are not scanned. This happens even if `config import` initialized configuration earlier. A separate durable import marker prevents later starts from reimporting leftover files or resurrecting deleted credentials. Sign-ins, refreshes, edits and revocations then use SQLite, separately from config revisions. |
 | `providers.codex.signin-with-chatgpt-identifier` | The agent name sent when binding Sign in with ChatGPT tokens to a Codex credential (`POST /v8/management/oauth/siwc/bind`), `CLIProxyAPI` when empty. Legacy spelling: `codex.signin-with-chatgpt-identifier`. Go also uses it as the SIWC request User-Agent prefix; cook-router does not send SIWC requests yet. |
 | `providers.codex.chatgpt-keep-alive` | `false` by default. `true` keeps up to 2 idle connections to `chatgpt.com` per proxy for 90 seconds, so Codex HTTP requests skip the TCP and TLS handshake. Off, every Codex request opens its own connection. A published change applies from the next request, without a restart. |
 
@@ -211,7 +210,7 @@ Provider settings shared by account sign-ins and provider API keys. Settings lef
 | `claude.tool-search` | `false` by default. `true` turns Codex client `tool_search` on Responses requests to Claude into Anthropic native tool search (`defer_loading` tools and `tool_reference` results) on credentials that support it: Anthropic's own API, or a Claude API key with `native-tool-search: true`. Other credentials and models that predate tool search get the request without `tool_search`. The Codex model catalog then advertises the search tool for a Claude model only when every credential serving it supports native tool search. |
 | `xai.inject-x-search` | Adds the `x_search` tool to xAI requests. |
 
-Legacy imports spell these as `oauth.providers.codex.*`, `oauth.providers.claude.*` (with `claude-code.disable-cloaking-model-list`) and `oauth.providers.xai.*`, or as the flat `codex`, `claude`, `claude-code`, `disable-claude-cloak-mode`, `claude-header-defaults` and `xai` keys. Precedence on import is `upstream`, then `oauth.providers`, then the flat key. OAuth-only settings retain their scope rather than being broadened to API-key credentials. New configuration edits use `/admin/v1` resources, not the removed v8 setting paths.
+The flat `codex`, `claude`, `claude-code`, `disable-claude-cloak-mode`, `claude-header-defaults` and `xai` keys, and `oauth.providers.claude` and `oauth.providers.xai`, are rejected as unknown settings. OAuth-only settings retain their scope rather than being broadened to API-key credentials. New configuration edits use `/admin/v1` resources, not the removed v8 setting paths.
 
 With `upstream.codex.stream-bootstrap-buffering: true`, HTTP/SSE and non-steering WebSocket attempts hold their initial handshake frames within the existing 48-frame / 1 MiB bounds and optional `stream-bootstrap-timeout`. A retryable disconnect or upstream rejection before those frames are released can move an unpinned request to the next eligible credential through normal selection. Invalid client requests and request-scoped empty-incomplete failures still stop; once output is released, the router does not replay it on another credential. Stateful continuations remain pinned: a lost upstream session needs client replay, not an in-place credential switch.
 
@@ -256,7 +255,7 @@ How the server picks an account for each request. [MULTI-ACCOUNT.md](MULTI-ACCOU
 | `retry.max-retry-interval` | The longest wait, in seconds, for an account to come out of cooldown before retrying; `0` means do not wait. |
 | `cooldown.disable-cooling` | `true` keeps failing accounts in rotation instead of resting them. |
 | `cooldown.transient-error-cooldown-seconds` | How long to rest an account after a temporary upstream error; `0` means 60 seconds, a negative value turns it off. |
-| `cooldown.save-cooldown-status` | `true` preserves cooldowns in SQLite's separate credential state across restarts. Saves are coalesced through one background writer, with pending writes drained on graceful shutdown. Legacy `.cds` files are imported once from the legacy `auth-dir`; a workspace `.cds` is ignored when the SQLite backend is configured at runtime construction. Cooldowns are not config revisions; config restore is neither a cooldown reset nor restoration of token state. |
+| `cooldown.save-cooldown-status` | `true` preserves cooldowns in SQLite's separate credential state across restarts. Saves are coalesced through one background writer, with pending writes drained on graceful shutdown. Cooldowns are read from and written to SQLite only; `.cds` files are never read. Cooldowns are not config revisions; config restore is neither a cooldown reset nor restoration of token state. |
 | `cooldown.max-trusted-cooldown` | A cook-router addition. When an account hits its usage limit, the provider says when it resets, sometimes days ahead, and the account rests until then. Providers often reset early, so cook-router trusts the stated time for at most this long (`"1h"` by default; a Go duration such as `"90m"`, or a bare number meaning seconds; at least 10 seconds), then lets the next request through to check. If the account is still limited, the next rest is twice as long, and never longer than the stated reset. `0` trusts the stated reset, as CLIProxyAPI does. An unreadable value is logged and the default is used. See [differences from Go](DIFFERENCES-FROM-GO.md#deliberate-differences). |
 | `providers.exclude`, `providers.order` | A cook-router addition: which providers a request may use and in what order. See [Provider scope and order](#provider-scope-and-order). |
 
@@ -285,23 +284,24 @@ routing:
 
 This commented preset keeps 429 cooldown and failover for Claude and Codex OAuth accounts. It stops ordinary failover after a failed attempt for the listed non-429 statuses, without adding a cooldown. Credential-preparation failures and an enabled `requests.streaming.bootstrap-retries` can still cause another attempt. Unlisted statuses keep normal handling. The preset applies only to OAuth accounts and leaves plan limits and provider checks unchanged. A credential's own `request_scoped_errors` rules take precedence.
 
-Uncomment the block to use it. `oauth-request-scoped-errors` is the legacy spelling of `oauth.request-scoped-errors`; use only one. `(?s).*` matches any body, including an empty one. Rules need a body matcher; status alone does not match.
+Uncomment the block to use it. `(?s).*` matches any body, including an empty one. Rules need a body matcher; status alone does not match.
 
 ```yaml
-# oauth-request-scoped-errors:
-#   claude: &plan-limits-only
-#     - {status: 429, match-regexr: ["(?s).*"], action: continue-and-cooldown}
-#     - {status: 400, match-regexr: ["(?s).*"], action: stop}
-#     - {status: 401, match-regexr: ["(?s).*"], action: stop}
-#     - {status: 402, match-regexr: ["(?s).*"], action: stop}
-#     - {status: 403, match-regexr: ["(?s).*"], action: stop}
-#     - {status: 404, match-regexr: ["(?s).*"], action: stop}
-#     - {status: 408, match-regexr: ["(?s).*"], action: stop}
-#     - {status: 500, match-regexr: ["(?s).*"], action: stop}
-#     - {status: 502, match-regexr: ["(?s).*"], action: stop}
-#     - {status: 503, match-regexr: ["(?s).*"], action: stop}
-#     - {status: 504, match-regexr: ["(?s).*"], action: stop}
-#   codex: *plan-limits-only
+# oauth:
+#   request-scoped-errors:
+#     claude: &plan-limits-only
+#       - {status: 429, match-regexr: ["(?s).*"], action: continue-and-cooldown}
+#       - {status: 400, match-regexr: ["(?s).*"], action: stop}
+#       - {status: 401, match-regexr: ["(?s).*"], action: stop}
+#       - {status: 402, match-regexr: ["(?s).*"], action: stop}
+#       - {status: 403, match-regexr: ["(?s).*"], action: stop}
+#       - {status: 404, match-regexr: ["(?s).*"], action: stop}
+#       - {status: 408, match-regexr: ["(?s).*"], action: stop}
+#       - {status: 500, match-regexr: ["(?s).*"], action: stop}
+#       - {status: 502, match-regexr: ["(?s).*"], action: stop}
+#       - {status: 503, match-regexr: ["(?s).*"], action: stop}
+#       - {status: 504, match-regexr: ["(?s).*"], action: stop}
+#     codex: *plan-limits-only
 ```
 
 ## requests
@@ -324,7 +324,7 @@ Claude accounts ignore `HTTPS_PROXY` and `HTTP_PROXY`. Without an explicit proxy
 | `pprof.enable` | `false` by default. `true` starts a separate plain-HTTP debug listener, without API keys, management authentication or TLS. Keep it on loopback: its command-line route can expose arguments, and profiling consumes CPU. Changes apply without a restart. |
 | `pprof.addr` | The debug listener address, `"127.0.0.1:8316"` by default, also used for an empty or whitespace-only value. Changes move the listener without a restart. A bind failure is logged without stopping the main server; another config publication retries it. |
 
-The legacy top-level `pprof` mapping works too. `/debug/pprof/` lists the routes;
+`/debug/pprof/` lists the routes;
 `cmdline` returns NUL-separated arguments and `symbol` accepts program counters in
 the raw query or a POST body, separated by `+`. Go runtime profiles return plain-text
 `501` answers. CPU `profile?seconds=30` requires a Unix build with
@@ -406,4 +406,3 @@ The benchmarks are fetched at start, daily, and an hour after a failure, which k
 - `RUST_LOG`: overrides the log level, for example `RUST_LOG=debug`.
 - A `.env` file in the working directory is loaded at start, as in CLIProxyAPI.
 - `COOK_DB`: the database path when `--db` is not supplied.
-- `PGSTORE_*`, `OBJECTSTORE_*` and `GITSTORE_*` no longer select a runtime config authority. A selected legacy remote store fails startup with an actionable migration error; no remote data is modified. Export its legacy YAML/credentials separately, explicitly import them into SQLite, remove the remote-store selection variables, and keep `--db`/`COOK_DB` on a persistent volume. There is no asynchronous YAML mirroring.

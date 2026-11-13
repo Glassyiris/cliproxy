@@ -1269,8 +1269,7 @@ mod tests {
         )
         .unwrap();
         let yaml = format!(
-            "oauth:\n  auth-dir: {}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    watcher:\n      enabled: true\n      label: watcher\n      record: {}\n      caps: websocket_response_observer\n",
-            auths.display(),
+            "plugins:\n  enabled: true\n  dir: {}\n  configs:\n    watcher:\n      enabled: true\n      label: watcher\n      record: {}\n      caps: websocket_response_observer\n",
             plugins.display(),
             records.display()
         );

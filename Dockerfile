@@ -215,9 +215,10 @@ COPY --from=build /home/builder/out/cook-router /usr/local/bin/cook-router
 # The license, the MIT notices it carries forward, and the third-party licenses the binary needs.
 COPY LICENSE LICENSE-MIT NOTICE THIRD-PARTY-NOTICES /usr/share/doc/cook-router/
 USER cook-router
-# Config and credentials live in /data; mount a volume there. No VOLUME instruction:
-# some hosts, Railway among them, refuse to build a Dockerfile that has one.
+# The config database (/data/cook.db) and credentials live in /data; mount a volume there.
+# A first start imports /data/config.yaml when it exists, and otherwise starts with defaults
+# on port 8317. No VOLUME instruction: some hosts, Railway among them, refuse to build a
+# Dockerfile that has one.
 WORKDIR /data
 EXPOSE 8317
 ENTRYPOINT ["cook-router"]
-CMD ["--config", "/data/config.yaml"]

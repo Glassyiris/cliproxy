@@ -53,7 +53,7 @@ cat > "$OUT/messages-stream.json" <<EOF
 EOF
 
 write_config() { # dir
-  mkdir -p "$1/auth"
+  mkdir -p "$1"
   cat > "$1/config.yaml" <<EOF
 config-version: 8
 server:
@@ -62,8 +62,6 @@ server:
 access:
   api-keys:
     - "$KEY"
-oauth:
-  auth-dir: "$1/auth"
 api-keys:
   openai-compatibility:
     - name: bench

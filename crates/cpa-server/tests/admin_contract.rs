@@ -46,10 +46,8 @@ impl Fixture {
         };
         let store = Arc::new(cpa_server::testing::config_store(&dir.join("config.db")).unwrap());
         store.import_yaml(&format!(
-            "config-version: 8\nserver: {{host: '127.0.0.1', port: 0, {trusted}}}\nmanagement: {{secret-key: '{hash}', allow-remote: false}}\noauth: {{auth-dir: {}}}\nrouting: {{retry: {{request-retry: 3}}}}\naccess: {{api-keys: [client-http-test-secret]}}\nobservability: {{logs: {{request-log: true}}}}\n",
-            dir.join("auth").display()
-        ), "test", "fixture").unwrap();
-        let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &dir.join("auth")).unwrap();
+            "config-version: 8\nserver: {{host: '127.0.0.1', port: 0, {trusted}}}\nmanagement: {{secret-key: '{hash}', allow-remote: false}}\nrouting: {{retry: {{request-retry: 3}}}}\naccess: {{api-keys: [client-http-test-secret]}}\nobservability: {{logs: {{request-log: true}}}}\n"), "test", "fixture").unwrap();
+        let db = cpa_server::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         let mut cfg = store.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let credentials = cpa_core::config::credentials::from_config(&cfg);
@@ -213,7 +211,7 @@ async fn credential_batch_preserves_bytes_and_is_in_the_portable_snapshot() {
     let copy = f.dir.join("portable.db");
     std::fs::copy(f.state.config_store().path().unwrap(), &copy).unwrap();
     let store = Arc::new(cpa_server::testing::config_store(&copy).unwrap());
-    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &f.dir.join("absent")).unwrap();
+    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone()).unwrap();
     assert_eq!(db.read(&db.auth_dir().join("a.json")).unwrap().unwrap(), first);
     assert_eq!(db.read(&db.auth_dir().join("b.json")).unwrap().unwrap(), second);
     drop((db, store));
@@ -322,7 +320,7 @@ async fn credential_batch_saves_and_deletes_atomically_with_raw_source_condition
     let copy = f.dir.join("mixed-portable.db");
     std::fs::copy(f.state.config_store().path().unwrap(), &copy).unwrap();
     let store = Arc::new(cpa_server::testing::config_store(&copy).unwrap());
-    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone(), &f.dir.join("absent")).unwrap();
+    let db = cpa_server::credential_store::CredentialDb::initialize(store.clone()).unwrap();
     assert_eq!(db.read(&db.auth_dir().join("a.json")).unwrap().unwrap(), replacement);
     assert!(db.read(&db.auth_dir().join("b.json")).unwrap().is_none());
     let remove_last =
@@ -1138,7 +1136,7 @@ async fn successful_config_restore_reports_restart_without_restoring_revoked_cre
     let copy = f.dir.join("restored-config-only.db");
     std::fs::copy(f.state.config_store().path().unwrap(), &copy).unwrap();
     let restored = Arc::new(cpa_server::testing::config_store(&copy).unwrap());
-    let db = cpa_server::credential_store::CredentialDb::initialize(restored.clone(), &f.dir.join("absent")).unwrap();
+    let db = cpa_server::credential_store::CredentialDb::initialize(restored.clone()).unwrap();
     assert!(db.read(&db.auth_dir().join(name)).unwrap().is_none());
     assert_eq!(restored.load().unwrap().config.port, startup_port);
     assert_eq!(restored.load().unwrap().config.routing.retry.request_retry, 8);

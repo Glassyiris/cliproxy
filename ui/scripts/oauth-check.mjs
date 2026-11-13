@@ -16,12 +16,12 @@ import { chromium } from "playwright-core";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import assert from "node:assert/strict";
-import { assertPrivateAuthDir } from "./private-auth-dir.mjs";
+import { assertPrivateCredentialStore } from "./private-credential-store.mjs";
 
 const [url, , mode, dir] = process.argv.slice(2);
 assert.ok(url && ["fake", "dead", "plugin"].includes(mode), "usage: oauth-check.mjs <page-url> --mode fake|dead|plugin [capture-dir]");
 // fake and dead sign in through a real server; plugin mode answers every request itself.
-if (mode !== "plugin") await assertPrivateAuthDir(url, "orb-dashboard-test-only");
+if (mode !== "plugin") await assertPrivateCredentialStore(url, "orb-dashboard-test-only");
 const out = resolve(dir || "oauth-check");
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH });

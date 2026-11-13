@@ -56,7 +56,6 @@ oauth:
   providers:
     codex:
       header-defaults: {user-agent: "codex-cli/1"}
-  auth-dir: /tmp/cook-test-auth
 upstream:
   claude: {tool-search: true}
   codex:

@@ -116,7 +116,7 @@ mod linux {
         assert!(!store.commit(&[op], "test", "", true).unwrap().written);
         assert_eq!(std::fs::read(&path).unwrap(), before);
         assert_closed(&dir);
-        let db = CredentialDb::initialize(store.clone(), &dir.join("legacy")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         assert_closed(&dir);
         let credential = db.auth_dir().join("fixture.json");
         db.save(&credential, b"{\"refresh_token\":\"fixture-only\"}").unwrap();
@@ -138,7 +138,7 @@ mod linux {
         assert!(!failed_output.exists(), "failed encoding must remove its output");
         assert_closed(&dir);
         drop((subscription, db, store));
-        let reopened = crate::testing::config_store_without_migration(&path).unwrap();
+        let reopened = crate::testing::existing_config_store(&path).unwrap();
         assert_closed(&dir);
         assert_eq!(reopened.load().unwrap().config.port, 8702);
         drop(reopened);
@@ -226,7 +226,7 @@ mod linux {
                     .err()
                     .expect("invalid bootstrap must fail");
                 if newer {
-                    assert!(error.to_string().contains("newer"));
+                    assert!(error.to_string().contains("not supported"), "{error}");
                 }
                 assert_closed(&dir);
                 assert_closed(&dir);

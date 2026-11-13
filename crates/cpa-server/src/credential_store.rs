@@ -44,9 +44,8 @@ pub fn credential_path_key(path: &Path) -> std::io::Result<PathBuf> {
 }
 
 impl CredentialDb {
-    /// Imports legacy credentials exactly once, independently of config import, and
-    /// recreates the working copies from SQLite. Never attach this in Home mode.
-    pub fn initialize(store: Arc<ConfigStore>, legacy_auth_dir: &Path) -> anyhow::Result<Arc<Self>> {
+    /// Recreates the working copies from SQLite.
+    pub fn initialize(store: Arc<ConfigStore>) -> anyhow::Result<Arc<Self>> {
         let path = store
             .path()
             .context("credential persistence requires an on-disk database")?;
@@ -59,7 +58,6 @@ impl CredentialDb {
         });
         private_dir(&db.dir)?;
         let _init = cpa_exec::codex_siwc_bind::lock_file(&db.dir.join(".initialize")).map_err(anyhow::Error::msg)?;
-        db.import_legacy(legacy_auth_dir)?;
         db.materialize()?;
         Ok(db)
     }
@@ -98,28 +96,6 @@ impl CredentialDb {
             return Ok(absolute.to_owned());
         }
         bail!("invalid stored credential path")
-    }
-
-    fn import_legacy(&self, dir: &Path) -> anyhow::Result<()> {
-        let mut pending = self.store.writer()?;
-        let current = self.store.current();
-        if current.metadata.contains_key("legacy_auth_imported") {
-            return Ok(());
-        }
-        let mut candidate = current.as_ref().clone();
-        for path in json_files(dir, false)? {
-            let relative = path.strip_prefix(dir)?;
-            let name = self.name(&self.dir.join(relative))?;
-            if !candidate.documents.contains_key(&name) {
-                let bytes =
-                    std::fs::read(&path).with_context(|| format!("read legacy credential {}", path.display()))?;
-                candidate.put_document(name, Some(bytes));
-            }
-        }
-        let records = crate::cooldown_store::load(dir).map_err(anyhow::Error::msg)?;
-        candidate.cooldowns = cooldowns(records, SystemTime::now())?;
-        candidate.metadata.insert("legacy_auth_imported".into(), "1".into());
-        self.store.accept(candidate, &mut pending)
     }
 
     pub(crate) fn retain_login(
@@ -354,7 +330,7 @@ impl CredentialDb {
     /// holds the owner gate through the copy; it cannot overwrite a newer save.
     pub fn materialize(&self) -> anyhow::Result<()> {
         private_dir(&self.dir)?;
-        let mut paths: BTreeSet<PathBuf> = json_files(&self.dir, true)?.into_iter().collect();
+        let mut paths: BTreeSet<PathBuf> = json_files(&self.dir)?.into_iter().collect();
         paths.extend(self.documents()?.into_iter().map(|(path, _)| path));
         for path in paths {
             self.restore(&path)?;
@@ -656,7 +632,7 @@ fn remove(path: &Path) -> anyhow::Result<()> {
     }
 }
 
-fn json_files(dir: &Path, recursive: bool) -> anyhow::Result<Vec<PathBuf>> {
+fn json_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -666,8 +642,8 @@ fn json_files(dir: &Path, recursive: bool) -> anyhow::Result<Vec<PathBuf>> {
     for entry in entries {
         let entry = entry?;
         let ty = entry.file_type()?;
-        if ty.is_dir() && recursive {
-            out.extend(json_files(&entry.path(), true)?);
+        if ty.is_dir() {
+            out.extend(json_files(&entry.path())?);
         } else if (ty.is_file() || (ty.is_symlink() && std::fs::metadata(entry.path()).is_ok_and(|m| m.is_file())))
             && entry
                 .path()
@@ -698,44 +674,10 @@ mod tests {
     }
 
     #[test]
-    fn retrying_a_failed_legacy_import_republishes_with_the_same_store() {
-        let root = directory();
-        let path = root.join("cook.db");
-        let store = Arc::new(crate::testing::config_store(&path).unwrap());
-        let legacy = root.join("legacy");
-        std::fs::create_dir(&legacy).unwrap();
-        let bytes = br#"{"type":"private","access_token":"test-only"}"#;
-        std::fs::write(legacy.join("login.json"), bytes).unwrap();
-        let mut working = path.as_os_str().to_owned();
-        working.push(".credentials");
-        std::fs::create_dir_all(Path::new(&working)).unwrap();
-        let blocked = crate::testing::block_publication(&path);
-        assert!(CredentialDb::initialize(store.clone(), &legacy).is_err());
-        drop(blocked);
-        let retried = CredentialDb::initialize(store.clone(), &legacy).unwrap();
-        let published = rusqlite::Connection::open(&path).unwrap();
-        let count: i64 = published
-            .query_row("SELECT count(*) FROM credential_document", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(
-            count, 1,
-            "successful initialization must publish the previously committed import"
-        );
-        assert_eq!(
-            retried.read(&retried.auth_dir().join("login.json")).unwrap().as_deref(),
-            Some(bytes.as_slice())
-        );
-        drop(published);
-        drop(retried);
-        drop(store);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn rendered_grant_batch_is_durable_before_cache_materialization() {
         let root = directory();
         let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
-        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         let documents = vec![
             (
                 db.auth_dir().join("a.json"),
@@ -754,7 +696,7 @@ mod tests {
         let backup = root.join("backup.db");
         std::fs::copy(store.path().unwrap(), &backup).unwrap();
         let cold = Arc::new(crate::testing::config_store(&backup).unwrap());
-        let recovered = CredentialDb::initialize(cold.clone(), &root.join("missing")).unwrap();
+        let recovered = CredentialDb::initialize(cold.clone()).unwrap();
         for ((path, bytes), (recovered_path, recovered_bytes)) in documents.iter().zip(recovered.documents().unwrap()) {
             assert_eq!(path.file_name(), recovered_path.file_name());
             assert_eq!(bytes, &recovered_bytes);
@@ -774,7 +716,7 @@ mod tests {
         let root = directory();
         let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
         store.import_yaml("server: {port: 8317}\n", "test", "initial").unwrap();
-        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         let a = db.auth_dir().join("a.json");
         let b = db.auth_dir().join("b.json");
         db.save(&a, br#"{"refresh_token":"R0","opaque":[1,2]}"#).unwrap();
@@ -822,7 +764,7 @@ mod tests {
         let path = root.join("cook.db");
         let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store.import_yaml("server: {port: 8317}\n", "test", "history").unwrap();
-        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         let auth = db.auth_dir().join("a.json");
         db.save(&auth, br#"{"refresh_token":"R0"}"#).unwrap();
         let live = PathBuf::from(crate::testing::database_connection(&store).path().unwrap());
@@ -844,7 +786,7 @@ mod tests {
         drop(other);
         drop(blocked);
         let resumed = Arc::new(crate::testing::config_store(&path).unwrap());
-        let db = CredentialDb::initialize(resumed.clone(), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(resumed.clone()).unwrap();
         assert_eq!(
             db.read(&db.auth_dir().join("a.json")).unwrap().unwrap(),
             br#"{"refresh_token":"R1"}"#
@@ -865,7 +807,7 @@ mod tests {
         let path = root.join("cook.db");
         let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store.import_yaml("server: {port: 8317}\n", "test", "").unwrap();
-        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         let auth = db.auth_dir().join("auth.json");
         let old = br#"{"type":"private","access_token":"test-R0"}"#;
         let grant = br#"{"type":"private","access_token":"test-R1"}"#;
@@ -910,7 +852,7 @@ mod tests {
         let copy = root.join("standalone.db");
         std::fs::copy(&path, &copy).unwrap();
         let recovered_store = Arc::new(crate::testing::config_store(&copy).unwrap());
-        let recovered = CredentialDb::initialize(recovered_store.clone(), &root.join("missing")).unwrap();
+        let recovered = CredentialDb::initialize(recovered_store.clone()).unwrap();
         assert_eq!(recovered_store.load().unwrap().config.port, 8318);
         assert_eq!(
             recovered
@@ -927,11 +869,7 @@ mod tests {
     fn initialize_save_reopen_documents_round_trip() {
         let root = directory();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&path).unwrap()),
-            &root.join("missing"),
-        )
-        .unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap())).unwrap();
         let local = db.auth_dir().join("auth.json");
         let nested = db.auth_dir().join("nested/auth.json");
         let external = root.join("external.json");
@@ -944,11 +882,7 @@ mod tests {
         assert!(db.name(&external).unwrap().starts_with("external:"));
         let before = db.documents().unwrap();
         drop(db);
-        let db = CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&path).unwrap()),
-            &root.join("missing"),
-        )
-        .unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap())).unwrap();
         assert_eq!(db.documents().unwrap(), before);
         drop(db);
         std::fs::remove_dir_all(root).unwrap();
@@ -960,11 +894,8 @@ mod tests {
         use std::os::unix::fs::{FileTypeExt as _, symlink};
 
         let root = directory();
-        let db = CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap()),
-            &root.join("missing"),
-        )
-        .unwrap();
+        let db =
+            CredentialDb::initialize(Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap())).unwrap();
         let path = db.auth_dir().join("auth.json");
         db.save(&path, b"{\"token\":\"before\"}").unwrap();
         std::fs::remove_file(&path).unwrap();
@@ -988,46 +919,6 @@ mod tests {
         assert_eq!(db.read(&path).unwrap().as_deref(), Some(bytes.as_slice()));
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         drop(db);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn legacy_import_ignores_nested_and_unreadable_directories() {
-        let root = directory();
-        let legacy = root.join("legacy");
-        let nested = legacy.join("..2024_mount");
-        let unreadable = legacy.join("lost+found");
-        std::fs::create_dir_all(&nested).unwrap();
-        std::fs::create_dir_all(&unreadable).unwrap();
-        std::fs::write(nested.join("nested.json"), b"{}").unwrap();
-        std::fs::write(legacy.join("auth.JSON"), b"{}").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{PermissionsExt as _, symlink};
-            symlink("..2024_mount/nested.json", legacy.join("linked.json")).unwrap();
-            std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
-        }
-        let db = CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap()),
-            &legacy,
-        )
-        .unwrap();
-        let names: Vec<_> = db
-            .documents()
-            .unwrap()
-            .into_iter()
-            .map(|(path, _)| db.name(&path).unwrap())
-            .collect();
-        #[cfg(unix)]
-        assert_eq!(names, ["local:auth.JSON", "local:linked.json"]);
-        #[cfg(not(unix))]
-        assert_eq!(names, ["local:auth.JSON"]);
-        drop(db);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        }
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1080,20 +971,18 @@ mod tests {
     }
 
     #[test]
-    fn raw_documents_and_deletions_survive_discarded_cache_without_legacy_resurrection() {
+    fn raw_documents_and_deletions_survive_a_discarded_cache() {
         let root = directory();
-        let legacy = root.join("legacy");
-        std::fs::create_dir_all(&legacy).unwrap();
         let original = b"{\n  \"type\":\"plugin-private\",\"opaque\":{\"secret\":\"first\"}\n}\n";
-        std::fs::write(legacy.join("auth.json"), original).unwrap();
         let path = root.join("cook.db");
         let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store
             .import_yaml("server: {port: 8317}\n", "test", "preinitialized config")
             .unwrap();
         let config_head = store.snapshot().unwrap().0;
-        let db = CredentialDb::initialize(store.clone(), &legacy).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         let auth = db.auth_dir().join("auth.json");
+        db.save(&auth, original).unwrap();
         assert_eq!(db.read(&auth).unwrap().unwrap(), original);
         let updated = b"{\"type\":\"plugin-private\",\"opaque\":[1,2],\"access_token\":\"second\"}\n";
         db.save(&auth, updated).unwrap();
@@ -1103,16 +992,15 @@ mod tests {
         drop(db);
         drop(store);
         std::fs::remove_dir_all(&dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap()), &legacy).unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap())).unwrap();
         assert_eq!(std::fs::read(&auth).unwrap(), updated);
         std::fs::remove_file(&auth).unwrap();
         db.delete(&auth).unwrap();
         drop(db);
         std::fs::remove_dir_all(&dir).unwrap();
-        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap()), &legacy).unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap())).unwrap();
         assert!(db.read(&auth).unwrap().is_none());
         assert!(!auth.exists());
-        assert!(legacy.join("auth.json").exists());
         drop(db);
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -1123,7 +1011,7 @@ mod tests {
         let path = root.join("cook.db");
         let store = Arc::new(crate::testing::config_store(&path).unwrap());
         store.import_yaml("oauth: {}\n", "test", "").unwrap();
-        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         let nested = db.auth_dir().join("nested/auth.json");
         let external = root.join("explicit.json");
         let bytes = br#"{"type":"claude","access_token":"durable","opaque":{"plugin":"kept"}}"#;
@@ -1146,11 +1034,7 @@ mod tests {
         drop(store);
         std::fs::remove_dir_all(dir).unwrap();
         std::fs::remove_file(&external).unwrap();
-        let db = CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&path).unwrap()),
-            &root.join("missing"),
-        )
-        .unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap())).unwrap();
         assert_eq!(identities(&db), before);
         assert_eq!(db.read(&nested).unwrap().unwrap(), bytes);
         assert_eq!(std::fs::read(&external).unwrap(), bytes);
@@ -1162,7 +1046,7 @@ mod tests {
     fn failed_batch_is_atomic_and_restores_working_documents() {
         let root = directory();
         let store = Arc::new(crate::testing::config_store(&root.join("cook.db")).unwrap());
-        let db = CredentialDb::initialize(store.clone(), &root.join("missing")).unwrap();
+        let db = CredentialDb::initialize(store.clone()).unwrap();
         let first = db.auth_dir().join("first.json");
         let second = db.auth_dir().join("second.json");
         db.save(&first, b"{\"old\":true}").unwrap();
@@ -1189,11 +1073,7 @@ mod tests {
     fn cooldown_records_survive_removal_of_working_directory() {
         let root = directory();
         let path = root.join("cook.db");
-        let db = CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&path).unwrap()),
-            &root.join("missing"),
-        )
-        .unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap())).unwrap();
         let records = vec![Record {
             auth_id: "auth.json".into(),
             model: "model".into(),
@@ -1204,11 +1084,7 @@ mod tests {
         let dir = db.auth_dir();
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
-        let db = CredentialDb::initialize(
-            Arc::new(crate::testing::config_store(&path).unwrap()),
-            &root.join("missing"),
-        )
-        .unwrap();
+        let db = CredentialDb::initialize(Arc::new(crate::testing::config_store(&path).unwrap())).unwrap();
         let saved = Backend::load(&*db).unwrap();
         assert_eq!(saved.len(), 1);
         assert_eq!(

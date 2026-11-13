@@ -113,15 +113,13 @@ struct Proxy {
 
 async fn proxy(behaviour: Upstream) -> Proxy {
     let (upstream, ready) = mock(behaviour).await;
-    // A private auth-dir: without one, credential loading reads the real ~/.cli-proxy-api.
+    // A private credential directory: `testing::runtime` stores its `.json` files in the test database.
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let auth_dir = std::env::temp_dir().join(format!("cpa-xai-cancel-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&auth_dir).unwrap();
     let config = Config::parse(&format!(
-        "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [client-key]\napi-keys:\n  xai:\n    - name: xai-1\n      base-url: http://{upstream}/v1\n      keys:\n        - api-key: sk-fake-xai\n",
-        auth_dir.display()
-    ))
+        "access:\n  api-keys: [client-key]\napi-keys:\n  xai:\n    - name: xai-1\n      base-url: http://{upstream}/v1\n      keys:\n        - api-key: sk-fake-xai\n"))
     .unwrap();
     let credentials = cpa_core::config::credentials::load(&config);
     let executors = Executors {

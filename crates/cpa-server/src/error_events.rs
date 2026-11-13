@@ -2,8 +2,8 @@
 //! channel for every failed attempt, with the credential's state after the failure was
 //! recorded.
 //!
-//! The state comes from the scheduler's live cooldown records, the same view the `.cds`
-//! files persist (Go `ModelStates`).
+//! The state comes from the scheduler's live cooldown records, the same view the
+//! cooldown store persists (Go `ModelStates`).
 // ponytail: Go keeps a separate quota-recovery clock, so a 429 after a longer transient
 // cooldown reports the quota's own `next_recover_at`; here both are the one cooldown
 // deadline. Go's error `code` and `retryable` are not carried (always omitted), and a

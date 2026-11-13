@@ -1,7 +1,7 @@
 //! Go 35af74f9 (sdk/cliproxy/auth/conductor_issue6643_test.go) through the real router:
 //! a success from a request dispatched before a cooldown was recorded leaves that cooldown,
 //! and a request dispatched after it clears it. Loopback upstreams, fake keys and private
-//! `auth-dir`s only.
+//! credential directories only.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -85,17 +85,14 @@ async fn until(what: &str, done: impl Fn() -> bool) {
     .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
 }
 
-/// A private `auth-dir` holding one Claude API-key credential at `upstream_url`, and
+/// A private credential directory holding one Claude API-key credential at `upstream_url`, and
 /// the config YAML that points at it (plus `extra`).
 fn claude_credential(name: &str, upstream_url: &str, extra: &str) -> (Config, Credential, std::path::PathBuf) {
     let dir =
         std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("cooldown-races-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let yaml = format!(
-        "access:\n  api-keys: [client-key]\noauth:\n  auth-dir: {}\n{extra}",
-        dir.display()
-    );
+    let yaml = format!("access:\n  api-keys: [client-key]\n{extra}");
     let meta = json!({"type": "claude", "api_key": "sk-fake-claude", "base_url": upstream_url});
     std::fs::write(dir.join("claude.json"), meta.to_string()).unwrap();
     let mut credential =

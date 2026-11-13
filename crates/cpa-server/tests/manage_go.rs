@@ -1,5 +1,10 @@
 //! Replays expectations recorded from the pinned Go reference
 //! (tests/reference/manage/main.go -> tests/fixtures/manage_go.json).
+//! The recording is untouched; replay drops its `oauth.auth-dir` line (`without_auth_dir`) and
+//! stages the recorded credentials in `Config::auth_dir`, since the setting no longer exists.
+//! Where Go answers an empty 404 because no management key exists, replay expects
+//! cook-router's 403 naming COOK_MANAGEMENT_PASSWORD: a deliberate divergence from Go
+//! (owner ruling 2026-11-13).
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -40,7 +45,8 @@ const GUARD_REFUSALS: [&str; 5] = [
     "missing management key",
     "invalid management key",
     "remote management disabled",
-    "remote management key not set",
+    // Also covers cook-router's "management key not set: ..." refusal.
+    "management key not set",
     "IP banned",
 ];
 
@@ -461,7 +467,7 @@ mod access {
         if let Some(t) = scenario["trusted"].as_array() {
             yaml += &format!("server:\n  trusted-proxies: {}\n", Value::Array(t.clone()));
         }
-        yaml += &format!("oauth:\n  auth-dir: '{}'\n", dir.join("auth").display());
+        yaml += "";
         let store = Arc::new(ConfigStore::memory_with(&yaml));
         let rt = Arc::new(cpa_server::testing::runtime(
             store.load().unwrap().config,
@@ -547,14 +553,7 @@ mod routes {
             let name = scenario["name"].as_str().unwrap();
             let dir = std::env::temp_dir().join(format!("cpa-routes-{name}-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
-            let auth = dir.join("auth");
-            let yaml = |text: &str| {
-                format!(
-                    "{}\noauth: {{auth-dir: '{}'}}\n",
-                    text.replace("$HASH", &hash),
-                    auth.display()
-                )
-            };
+            let yaml = |text: &str| format!("{}\n", text.replace("$HASH", &hash));
             let store = Arc::new(ConfigStore::memory_with(&yaml(scenario["yaml"].as_str().unwrap())));
             let cfg = store.load().unwrap().config;
             let rt = Arc::new(cpa_server::testing::runtime(
@@ -588,6 +587,22 @@ mod routes {
                     for key in ["status", "resp_body", "resp_headers"] {
                         step[key] = scenario["steps"][0][key].clone();
                     }
+                }
+                if name == "availability_follows_secret_across_reloads" && step["status"] == 404 {
+                    // Go hides management behind an empty 404 while no key exists. cook-router
+                    // answers 403 naming COOK_MANAGEMENT_PASSWORD instead: a deliberate change
+                    // (owner ruling 2026-11-13), so the recording is untouched and these steps
+                    // take the recorded 403 refusal's headers.
+                    let refusal = &fixture()["routes"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|s| s["name"] == "local_password_only_until_reload")
+                        .unwrap()["steps"][0];
+                    step["status"] = 403.into();
+                    step["resp_body"] =
+                        r#"{"error":"management key not set: start the server with COOK_MANAGEMENT_PASSWORD"}"#.into();
+                    step["resp_headers"] = refusal["resp_headers"].clone();
                 }
                 if let Some(update) = step["update"].as_str() {
                     state.config_store().import_yaml(&yaml(update), "test", "").unwrap();
@@ -779,8 +794,9 @@ mod creds {
                 .unwrap()
                 .replace("$HASH", &hash)
                 .replace("$AUTH", &auth.display().to_string());
-            let store = Arc::new(ConfigStore::memory_with(&yaml));
-            let cfg = store.load().unwrap().config;
+            let store = Arc::new(ConfigStore::memory_with(&cpa_server::testing::without_auth_dir(&yaml)));
+            let mut cfg = store.load().unwrap().config;
+            cfg.auth_dir = auth.clone();
             let scan = credentials::scan_auth_dir(&cfg);
             let mut loaded = scan.credentials;
             loaded.extend(credentials::from_config(&cfg));
@@ -1183,8 +1199,9 @@ mod creds {
             .unwrap()
             .replace("$HASH", &hash)
             .replace("$AUTH", &auth.display().to_string());
-        let store = Arc::new(ConfigStore::memory_with(&yaml));
-        let cfg = store.load().unwrap().config;
+        let store = Arc::new(ConfigStore::memory_with(&cpa_server::testing::without_auth_dir(&yaml)));
+        let mut cfg = store.load().unwrap().config;
+        cfg.auth_dir = auth.clone();
         let rt = Arc::new(cpa_server::testing::runtime(
             cfg.clone(),
             credentials::load(&cfg),

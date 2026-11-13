@@ -49,7 +49,7 @@ fn assert_standalone_private(path: &Path) {
             .unwrap(),
         "ok"
     );
-    assert_eq!(schema_version(&conn).unwrap(), MIGRATIONS.len());
+    assert_eq!(user_version(&conn).unwrap(), SCHEMA_VERSION);
     assert!(
         conn.prepare("SELECT kind,id,rev FROM change INDEXED BY change_resource_rev")
             .is_ok()
@@ -60,10 +60,7 @@ fn assert_standalone_private(path: &Path) {
 fn complete_state_exports_without_any_previous_database_or_credential_cache() {
     let root = std::env::temp_dir().join(format!("cook-encode-{}", uuid::Uuid::new_v4()));
     let clean = root.join("clean");
-    let legacy = root.join("legacy");
     std::fs::create_dir_all(&clean).unwrap();
-    std::fs::create_dir(&legacy).unwrap();
-    std::fs::write(legacy.join("revoked.json"), b"{\"type\":\"private\"}").unwrap();
     let source = root.join("source.db");
     let store = Arc::new(crate::testing::config_store(&source).unwrap());
     store.import_yaml(
@@ -87,8 +84,10 @@ fn complete_state_exports_without_any_previous_database_or_credential_cache() {
             false,
         )
         .unwrap();
-    let db = CredentialDb::initialize(store.clone(), &legacy).unwrap();
-    db.delete(&db.auth_dir().join("revoked.json")).unwrap();
+    let db = CredentialDb::initialize(store.clone()).unwrap();
+    let revoked = db.auth_dir().join("revoked.json");
+    db.save(&revoked, b"{\"type\":\"private\"}").unwrap();
+    db.delete(&revoked).unwrap();
     let local = db.auth_dir().join("nested/raw.json");
     let external = root.join("explicit.json");
     db.save(&local, b"{\"type\":\"private\",\"old\":true}").unwrap();
@@ -155,11 +154,8 @@ fn complete_state_exports_without_any_previous_database_or_credential_cache() {
         "only one artifact is required"
     );
     assert_eq!(artifact_rows(&output), expected_rows);
-    // Legacy import metadata must survive: neither a revoked old file nor a new
-    // legacy file can re-enter an already initialized credential domain.
-    std::fs::write(legacy.join("late.json"), b"{}").unwrap();
-    let recovered_store = Arc::new(crate::testing::config_store_without_migration(&output).unwrap());
-    let recovered = CredentialDb::initialize(recovered_store.clone(), &legacy).unwrap();
+    let recovered_store = Arc::new(crate::testing::existing_config_store(&output).unwrap());
+    let recovered = CredentialDb::initialize(recovered_store.clone()).unwrap();
     let again = recovered_store.load().unwrap();
     assert_eq!(again.resources, expected.resources);
     assert_eq!(again.rev, expected.rev);
@@ -193,12 +189,6 @@ fn complete_state_exports_without_any_previous_database_or_credential_cache() {
             .unwrap()
             .is_none()
     );
-    assert!(
-        recovered
-            .read(&recovered.auth_dir().join("late.json"))
-            .unwrap()
-            .is_none()
-    );
     assert_eq!(Backend::load(recovered.as_ref()).unwrap(), cooldowns);
     drop((recovered, recovered_store, db, store));
     std::fs::remove_dir_all(root).unwrap();
@@ -216,7 +206,7 @@ fn empty_and_initialized_memory_states_encode_without_a_disk_source() {
         let output = root.join(format!("{initialized}.db"));
         store.backup(&output).unwrap();
         assert_standalone_private(&output);
-        let recovered = crate::testing::config_store_without_migration(&output).unwrap();
+        let recovered = crate::testing::existing_config_store(&output).unwrap();
         assert_eq!(recovered.is_empty().unwrap(), !initialized);
         assert_eq!(recovered.snapshot().unwrap(), store.snapshot().unwrap());
         assert_eq!(
@@ -269,7 +259,7 @@ fn ordinary_publication_encodes_only_the_admitted_candidate() {
     );
     let copy = root.join("cold.db");
     std::fs::copy(&path, &copy).unwrap();
-    let recovered = crate::testing::config_store_without_migration(&copy).unwrap();
+    let recovered = crate::testing::existing_config_store(&copy).unwrap();
     assert_eq!(recovered.load().unwrap().config.port, 8914);
     assert!(recovered.snapshot().unwrap().1.iter().all(|r| r.id != "unadmitted"));
     assert_eq!(recovered.snapshot().unwrap(), store.snapshot().unwrap());
@@ -284,7 +274,7 @@ fn checkpoint_failures_do_not_retain_an_uninstalled_candidate() {
     let path = root.join("cook.db");
     let store = Arc::new(crate::testing::config_store(&path).unwrap());
     store.import_yaml("server: {port: 8921}\n", "fixture", "").unwrap();
-    let db = CredentialDb::initialize(store.clone(), &root.join("absent")).unwrap();
+    let db = CredentialDb::initialize(store.clone()).unwrap();
     let credential = db.auth_dir().join("grant.json");
     db.save(&credential, b"{\"refresh_token\":\"R0\"}").unwrap();
     let checkpoint = PathBuf::from(crate::testing::database_connection(&store).path().unwrap());
@@ -313,7 +303,7 @@ fn checkpoint_failures_do_not_retain_an_uninstalled_candidate() {
     let copy = clean.join("cook.db");
     std::fs::copy(&path, &copy).unwrap();
     let recovered_store = Arc::new(crate::testing::config_store(&copy).unwrap());
-    let recovered = CredentialDb::initialize(recovered_store.clone(), &clean.join("absent")).unwrap();
+    let recovered = CredentialDb::initialize(recovered_store.clone()).unwrap();
     assert_eq!(
         recovered
             .read(&recovered.auth_dir().join("grant.json"))
@@ -351,7 +341,7 @@ fn cold_copies_stay_lossless_while_publications_compete() {
             .unwrap();
     };
     commit(&store, 8930);
-    let db = CredentialDb::initialize(store.clone(), &root.join("absent")).unwrap();
+    let db = CredentialDb::initialize(store.clone()).unwrap();
     let raw = b"{\n \"type\": \"private\", \"opaque\": [1, 2]\n}\n";
     db.save(&db.auth_dir().join("raw.json"), raw).unwrap();
     let old_rows = artifact_rows(&path);
@@ -388,7 +378,7 @@ fn cold_copies_stay_lossless_while_publications_compete() {
         assert_eq!(plugin.spec["padding"].as_str().unwrap(), "x".repeat(131_072));
         assert_eq!(plugin.rev, config.rev);
         assert_eq!(recovered_store.revisions(100, None).unwrap().len() as u64, config.rev);
-        let recovered = CredentialDb::initialize(recovered_store.clone(), &clean.join("absent")).unwrap();
+        let recovered = CredentialDb::initialize(recovered_store.clone()).unwrap();
         assert_eq!(
             recovered.read(&recovered.auth_dir().join("raw.json")).unwrap().unwrap(),
             raw

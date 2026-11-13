@@ -1,5 +1,5 @@
 //! `config.yaml` in the current (v8) layout (`server.port`, `access.api-keys`,
-//! `oauth.auth-dir`), decoded the way CLIProxyAPI v8 decodes it
+//! `oauth.auth-auto-refresh-workers`), decoded the way CLIProxyAPI v8 decodes it
 //! (internal/config/config_v8.go, config_load.go). A root section the schema does not
 //! know is an error, and so is a present section that is not a mapping, so
 //! `access: null` is rejected instead of silently opening the proxy.
@@ -417,10 +417,9 @@ fn untagged(value: Value) -> Value {
 pub use trusted::{TrustedProxies, go_trim_space};
 pub use validate::{catalog_sources as validate_catalog_sources, go_is_abs, parse_duration};
 
-/// Default port used only where CLIProxyAPI falls back to it (management base URL).
-/// The loader itself leaves an omitted port at 0, as Go does.
+/// The port a fresh volume's first start imports, and the management base URL's
+/// fallback. The loader itself leaves an omitted port at 0.
 pub const DEFAULT_PORT: u16 = 8317;
-pub const DEFAULT_AUTH_DIR: &str = "~/.cli-proxy-api";
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Config {
@@ -432,6 +431,8 @@ pub struct Config {
     pub api_keys: Vec<String>,
     /// `server.trusted-proxies`, validated. Go applies it at startup only.
     pub trusted_proxies: Vec<String>,
+    /// Empty after parsing. A server or CLI command sets it to the credential working
+    /// directory of its database.
     pub auth_dir: PathBuf,
     pub routing: RoutingConfig,
     pub management: ManagementConfig,
@@ -661,7 +662,6 @@ impl Config {
                 .collect::<anyhow::Result<_>>()?,
             Some(_) => bail!("access.api-keys must be a list of strings"),
         };
-        let auth_dir = string_or_empty(lookup(&root, "oauth.auth-dir"), "oauth.auth-dir")?;
         let trusted_proxies: Vec<String> = match lookup(canonical, "server.trusted-proxies") {
             Some(Value::Sequence(seq)) => seq.iter().map(go_string).collect(),
             _ => Vec::new(),
@@ -675,7 +675,7 @@ impl Config {
             port,
             api_keys: normalize_keys(api_keys),
             trusted_proxies,
-            auth_dir: resolve_auth_dir(&auth_dir),
+            auth_dir: PathBuf::new(),
             routing,
             management,
             document: document.into_value(),
@@ -791,39 +791,19 @@ fn normalize_keys(keys: Vec<String>) -> Vec<String> {
     out
 }
 
-/// Go's util.ResolveAuthDir: empty means the default, and a leading `~` is the home
-/// directory with any following slashes dropped (so `~other/x` is `$HOME/other/x`).
-fn resolve_auth_dir(dir: &str) -> PathBuf {
-    let dir = if dir.is_empty() { DEFAULT_AUTH_DIR } else { dir };
-    let (Some(rest), Some(home)) = (dir.strip_prefix('~'), std::env::var_os("HOME")) else {
-        return PathBuf::from(dir);
-    };
-    let rest = rest.trim_start_matches(['/', '\\']).replace('\\', "/");
-    if rest.is_empty() {
-        PathBuf::from(home)
-    } else {
-        PathBuf::from(home).join(rest)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn home() -> PathBuf {
-        PathBuf::from(std::env::var("HOME").unwrap())
-    }
-
     #[test]
     fn present_values_win_even_when_null_or_empty() {
         let cfg = Config::parse(
-            "server: {port: 9100, host: null}\naccess: {api-keys: []}\noauth: {auth-dir: /v8}\n\
+            "server: {port: 9100, host: null}\naccess: {api-keys: []}\n\
              management: {allow-remote: false, disable-auto-update-panel: true}\n",
         )
         .unwrap();
         assert_eq!((cfg.port, cfg.host.as_str()), (9100, ""));
         assert!(cfg.api_keys.is_empty());
-        assert_eq!(cfg.auth_dir, PathBuf::from("/v8"));
         assert!(!cfg.management.allow_remote && cfg.management.disable_auto_update_panel);
     }
 
@@ -836,6 +816,7 @@ mod tests {
             ("port: 9000\n", "unknown setting config.port"),
             ("host: 127.0.0.1\n", "unknown setting config.host"),
             ("auth-dir: /x\n", "unknown setting config.auth-dir"),
+            ("oauth: {auth-dir: /x}\n", "unknown setting config.oauth.auth-dir"),
             (
                 "remote-management: {allow-remote: true}\n",
                 "unknown setting config.remote-management",
@@ -982,7 +963,7 @@ mod tests {
         let keys = "api-keys: {codex: [{base-url: https://example.invalid, keys: [{api-key: test-key, disable-codex-cloaking: false}]}]}\n";
         let codex = "{disable-codex-cloaking: true, stream-bootstrap-buffering: true, stream-bootstrap-timeout: 10s, orphan-delegation-compatibility: true, model-level-cooling: true, response-steering: true";
         let headers = "{user-agent: client-agent, package-version: 1.2.3, runtime-version: v22.1.0, os: Linux, arch: arm64, timeout: '123', timezone: Asia/Shanghai, stabilize-device-profile: true}";
-        let oauth = "oauth: {auth-dir: client-auth, auth-auto-refresh-workers: 3, providers: {codex: {header-defaults: {user-agent: oauth-agent, beta-features: oauth-beta}}}}\n";
+        let oauth = "oauth: {auth-auto-refresh-workers: 3, providers: {codex: {header-defaults: {user-agent: oauth-agent, beta-features: oauth-beta}}}}\n";
         let raw = format!(
             "upstream:\n  codex: {codex}}}\n  claude:\n    model-level-cooling: true\n    disable-cloaking-model-list: true\n    disable-claude-cloak-mode: true\n    header-defaults: {headers}\n  xai: {{inject-x-search: true}}\n{oauth}{keys}"
         );
@@ -1012,14 +993,7 @@ mod tests {
     fn defaults_match_go_loader() {
         let cfg = Config::parse("").unwrap();
         assert_eq!((cfg.port, cfg.host.as_str()), (0, ""));
-        assert_eq!(cfg.auth_dir, home().join(".cli-proxy-api"));
-        assert_eq!(
-            Config::parse("oauth: {auth-dir: ''}\n").unwrap().auth_dir,
-            home().join(".cli-proxy-api")
-        );
-        assert_eq!(resolve_auth_dir("~"), home());
-        assert_eq!(resolve_auth_dir("~other/x"), home().join("other/x"));
-        assert_eq!(resolve_auth_dir("/abs"), PathBuf::from("/abs"));
+        assert_eq!(cfg.auth_dir, PathBuf::new());
     }
 
     /// Plain numbers that are no model name, alias or exclusion cost one step each: 16
@@ -1459,6 +1433,10 @@ oauth: {{excluded-models: {{c: [{numbers}]}}}}
             let cfg = Config::parse(case["yaml"].as_str().unwrap()).unwrap();
             for check in case["checks"].as_array().unwrap() {
                 let path = check["rust"].as_str().unwrap();
+                // The recording predates the removal of `oauth.auth-dir`.
+                if path == "oauth.auth-dir" {
+                    continue;
+                }
                 let mut node = &cfg.document;
                 for part in path.split('.') {
                     node = match part.parse::<usize>() {

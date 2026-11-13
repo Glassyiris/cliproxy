@@ -384,7 +384,7 @@ mod tests {
         host: cpa_plugin::Host,
     ) -> (Arc<Management>, Arc<crate::credential_store::CredentialDb>) {
         let store = Arc::new(crate::testing::config_store(&work.join("config.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(store.clone(), &work.join("legacy")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(store.clone()).unwrap();
         let mut cfg = store.load().unwrap().config;
         cfg.auth_dir = db.auth_dir();
         let rt = Arc::new(

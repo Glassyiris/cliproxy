@@ -82,7 +82,7 @@ case $MIX in
     IDLE=${IDLE:-300} ;;
   *) echo "MIX must be claude, field or cloak" >&2; exit 2 ;;
 esac
-mkdir -p "$OUT/bin" "$OUT/auth"
+mkdir -p "$OUT/bin"
 # A reused output directory must still import this run's regenerated config.
 DB_DIR=$(mktemp -d "$OUT/db.XXXXXX")
 [[ -x $OUT/bin/messages ]] || go build -o "$OUT/bin/messages" "$HERE/messages/main.go"
@@ -98,8 +98,6 @@ server:
 access:
   api-keys:
     - "$KEY"
-oauth:
-  auth-dir: "$OUT/auth"
 api-keys:
   claude:
     - name: bench

@@ -4,7 +4,7 @@ This guide covers routing across your own accounts and API keys, for use on your
 
 ## Add the accounts
 
-Sign in to each account once, from the dashboard (Connect account) or the command line. While the server runs, the command line goes through it: `cook-router --management-base-url http://127.0.0.1:8317 --claude-login` (or `--codex-login`), which reads the management key from `COOK_ROUTER_MANAGEMENT_KEY` or asks for it; with the server stopped, `cook-router --db /path/to/cook.db --claude-login` writes the server's database directly. Every sign-in becomes a credential in SQLite; `auth-dir` is a legacy import source, not a watched account directory.
+Sign in to each account once, from the dashboard (Connect account) or the command line. While the server runs, the command line goes through it: `cook-router --management-base-url http://127.0.0.1:8317 --claude-login` (or `--codex-login`), which reads the management key from `COOK_ROUTER_MANAGEMENT_KEY` or asks for it; with the server stopped, `cook-router --db /path/to/cook.db --claude-login` writes the server's database directly. Every sign-in becomes a credential in SQLite; no directory is watched for account files.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/credentials-dark.png">
@@ -95,7 +95,7 @@ Each row shows how much is used and when it resets. Codex accounts show their 5-
 
 ## Per-account proxies and request shaping
 
-Edit these credential metadata fields through the account's dashboard panel/credential management operations. The JSON below is the legacy credential import shape, not a file to edit after import:
+Edit these credential metadata fields through the account's dashboard panel/credential management operations. The JSON below shows such a field:
 
 ```json
 {
@@ -109,7 +109,7 @@ Claude's default `auto` shaping mode can rewrite system prompts for non-native c
 
 ## Codex over WebSocket
 
-Codex accounts can talk to OpenAI over a WebSocket, the transport the Codex CLI itself uses, instead of one HTTPS request per turn. Enable it per account with the credential metadata field (shown in its legacy import shape):
+Codex accounts can talk to OpenAI over a WebSocket, the transport the Codex CLI itself uses, instead of one HTTPS request per turn. Enable it per account with the credential metadata field:
 
 ```json
 {

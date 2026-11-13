@@ -3,6 +3,8 @@
 //! identical raw HTTP requests, compared on what the client gets and on the exact
 //! requests the plugins receive (frontend auth so far). Go's `X-CPA-*` header names in
 //! the recording are rewritten to `X-Cook-*`.
+//! The recording is untouched apart from that replay step: its `oauth.auth-dir` line is dropped and
+//! the recorded credentials are saved to the database the binary opens.
 
 // Native plugins load only on Unix (the host's `native` module).
 #![cfg(unix)]
@@ -191,7 +193,14 @@ impl Runner {
             runner.respond(respond);
         }
         let config = runner.work.join("config.yaml");
-        std::fs::write(&config, runner.placeholders(scenario["config"].as_str().unwrap())).unwrap();
+        // The recorded config names `oauth.auth-dir`, which no longer exists: replay drops
+        // that line and saves the recorded credentials to the database the binary opens.
+        std::fs::write(
+            &config,
+            cpa_server::testing::without_auth_dir(&runner.placeholders(scenario["config"].as_str().unwrap())),
+        )
+        .unwrap();
+        cpa_server::testing::seed_database(&runner.work.join("cook.db"), runner.dir("AUTHDIR"));
         let log = std::fs::File::create(runner.work.join("server.log")).unwrap();
         runner.child = Command::new(env!("CARGO_BIN_EXE_cook-router"))
             .arg("--config")

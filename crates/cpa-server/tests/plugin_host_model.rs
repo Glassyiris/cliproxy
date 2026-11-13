@@ -157,8 +157,7 @@ async fn callbacks_execute_pin_and_stream_without_recursing_into_the_caller() {
     // A mock HTTP proxy answers requests itself; it never forwards traffic.
     let proxy = serve(proxy_seen.clone()).await;
     let yaml = format!(
-        "oauth:\n  auth-dir: {}\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {url}/v1\n      models: [{{name: up-model, alias: fast}}]\n      keys: [{{api-key: first}}, {{api-key: second}}]\n",
-        auths.display()
+        "api-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {url}/v1\n      models: [{{name: up-model, alias: fast}}]\n      keys: [{{api-key: first}}, {{api-key: second}}]\n"
     );
     let cfg = Config::parse(&yaml).unwrap();
     let credentials = cpa_core::config::credentials::load(&cfg);
@@ -463,10 +462,7 @@ async fn callback_streams_preserve_executor_bytes_across_interceptor_unload() {
         } else {
             format!("    - base-url: {url}\n      models: [{{name: {model}}}]\n      keys: [{{api-key: fixture}}]\n")
         };
-        let yaml = format!(
-            "oauth:\n  auth-dir: {}\napi-keys:\n  {family}:\n{config}",
-            auths.display()
-        );
+        let yaml = format!("api-keys:\n  {family}:\n{config}");
         let cfg = Config::parse(&yaml).unwrap();
         let credentials = cpa_core::config::credentials::load(&cfg);
         assert_eq!(credentials.len(), 1, "{family}");
@@ -572,8 +568,7 @@ async fn nested_callbacks_inherit_pin_session_and_path_but_not_proxy() {
     let codex_seen = Arc::new(Mutex::new(Vec::new()));
     let codex = serve_codex(codex_seen.clone()).await;
     let yaml = format!(
-        "oauth:\n  auth-dir: {}\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {url}/v1\n      models: [{{name: up-model, alias: fast}}]\n      keys: [{{api-key: first}}, {{api-key: second}}]\n  codex:\n    - base-url: {codex}\n      models: [{{name: gpt-fixture}}]\n      keys: [{{api-key: ws-one, websockets: true}}, {{api-key: ws-two, websockets: true}}]\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n",
-        auths.display(),
+        "api-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {url}/v1\n      models: [{{name: up-model, alias: fast}}]\n      keys: [{{api-key: first}}, {{api-key: second}}]\n  codex:\n    - base-url: {codex}\n      models: [{{name: gpt-fixture}}]\n      keys: [{{api-key: ws-one, websockets: true}}, {{api-key: ws-two, websockets: true}}]\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n",
         plugins.display()
     );
     let mut yaml = yaml;
@@ -753,8 +748,7 @@ async fn nested_callbacks_record_the_parent_usage_identity() {
     let url = serve(seen.clone()).await;
     std::fs::copy(built.join("recorder.so"), plugins.join("nested.so")).unwrap();
     let yaml = format!(
-        "oauth:\n  auth-dir: {}\naccess:\n  api-keys: [k1]\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {url}/v1\n      models: [{{name: up-model, alias: fast}}]\n      keys: [{{api-key: first}}]\nobservability: {{usage: {{usage-statistics-enabled: true}}}}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    nested:\n      enabled: true\n      label: nested\n      record: {}\n      caps: request_interceptor,response_interceptor\n",
-        auths.display(),
+        "access:\n  api-keys: [k1]\napi-keys:\n  openai-compatibility:\n    - name: Acme\n      base-url: {url}/v1\n      models: [{{name: up-model, alias: fast}}]\n      keys: [{{api-key: first}}]\nobservability: {{usage: {{usage-statistics-enabled: true}}}}\nplugins:\n  enabled: true\n  dir: {}\n  configs:\n    nested:\n      enabled: true\n      label: nested\n      record: {}\n      caps: request_interceptor,response_interceptor\n",
         plugins.display(),
         records.display()
     );
@@ -900,8 +894,7 @@ async fn responses_bootstrap_flushes_a_pending_payload() {
                 std::fs::create_dir_all(d).unwrap();
             }
             let mut yaml = format!(
-                "oauth:\n  auth-dir: {}\napi-keys:\n  codex:\n    - base-url: {upstream}\n      models: [{{name: gpt-fixture}}]\n      keys: [{{api-key: sk-fake}}]\n",
-                auths.display()
+                "api-keys:\n  codex:\n    - base-url: {upstream}\n      models: [{{name: gpt-fixture}}]\n      keys: [{{api-key: sk-fake}}]\n"
             );
             if hooked {
                 std::fs::copy(built.join("recorder.so"), plugins.join("noop.so")).unwrap();

@@ -1,5 +1,4 @@
-//! Expected values come from Go (tests/reference/claude/main.go `login` section) or
-//! from Go's source rules for the legacy migration.
+//! Expected values come from Go (tests/reference/claude/main.go `login` section).
 
 use super::*;
 use axum::response::IntoResponse;
@@ -180,22 +179,19 @@ fn browser(port: u16, state: fn(&str) -> String) -> Interaction {
 }
 
 #[tokio::test]
-async fn browser_login_writes_go_file_and_migrates_the_legacy_one() {
+async fn browser_login_merges_the_existing_go_file_and_ignores_other_names() {
     let dir = temp_dir();
-    // Email-only legacy file of the same organization: merged, then removed. Another
-    // email's legacy file stays.
-    let legacy = dir.join("claude-a@example.invalid.json");
+    // The file of the same name is merged; an email-only file of the same account is
+    // neither read nor removed.
+    let existing = dir.join(credential_file_name("a@example.invalid", "org-1", "acct-1"));
     std::fs::write(
-        &legacy,
+        &existing,
         r#"{"type":"claude","email":"a@example.invalid","organization_uuid":"org-1","proxy_url":"socks5://keep:1","access_token":"old","note":"<kept>"}"#,
     )
     .unwrap();
-    let other = dir.join("claude-b@example.invalid.json");
-    std::fs::write(
-        &other,
-        r#"{"type":"claude","email":"b@example.invalid","organization_uuid":"org-1"}"#,
-    )
-    .unwrap();
+    let other = dir.join("claude-a@example.invalid.json");
+    let other_bytes = r#"{"type":"claude","email":"a@example.invalid","organization_uuid":"org-1","label":"other"}"#;
+    std::fs::write(&other, other_bytes).unwrap();
     let mock = oauth_mock().await;
     let (listener, port) = callback().await;
     let path = login_with(&dir, listener, mock, browser(port, state_of), None)
@@ -209,7 +205,7 @@ async fn browser_login_writes_go_file_and_migrates_the_legacy_one() {
     let value: Value = serde_json::from_slice(&written).unwrap();
     assert_eq!(
         value["access_token"], "sk-ant-oat-login-fake",
-        "token keys never come from the legacy file"
+        "token keys never come from the existing file"
     );
     assert_eq!(value["proxy_url"], "socks5://keep:1");
     assert_eq!(value["organization_uuid"], "org-1");
@@ -221,62 +217,8 @@ async fn browser_login_writes_go_file_and_migrates_the_legacy_one() {
     let mut sorted = keys.clone();
     sorted.sort();
     assert_eq!(keys, sorted);
-    assert!(!legacy.exists());
-    assert!(other.exists());
-    std::fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn legacy_matching_follows_go_identity_rules() {
-    let dir = temp_dir();
-    let target: BTreeMap<String, Value> = [
-        ("email", "a@example.invalid"),
-        ("organization_uuid", "org-1"),
-        ("account_uuid", "acct-1"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), json!(v)))
-    .collect();
-    let name = credential_file_name("a@example.invalid", "org-1", "acct-1");
-    // An organization target ignores an email-only file without that organization...
-    let email_only = dir.join("claude-a@example.invalid.json");
-    std::fs::write(&email_only, r#"{"type":"claude","account_uuid":"acct-1"}"#).unwrap();
-    assert_eq!(legacy_credential(&dir, &name, &target, None), None);
-    // ...but takes the account-hashed predecessor of the same account.
-    let predecessor = dir.join(credential_file_name("a@example.invalid", "", "acct-1"));
-    std::fs::write(&predecessor, r#"{"type":"claude","account_uuid":"ACCT-1"}"#).unwrap();
-    assert_eq!(legacy_credential(&dir, &name, &target, None), Some(predecessor.clone()));
-    std::fs::remove_file(&predecessor).unwrap();
-    // An account-only target takes the email-only file of the same account.
-    let account_target: BTreeMap<String, Value> = target
-        .iter()
-        .filter(|(k, _)| *k != "organization_uuid")
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    let account_name = credential_file_name("a@example.invalid", "", "acct-1");
-    assert_eq!(
-        legacy_credential(&dir, &account_name, &account_target, None),
-        Some(email_only)
-    );
-    // Non-Claude files never match.
-    std::fs::write(
-        dir.join("claude-a@example.invalid.json"),
-        r#"{"type":"codex","account_uuid":"acct-1"}"#,
-    )
-    .unwrap();
-    assert_eq!(legacy_credential(&dir, &account_name, &account_target, None), None);
-    // File names compare with Go's EqualFold, which folds non-ASCII letters too.
-    let greek_target: BTreeMap<String, Value> = [("email", "δ@example.invalid"), ("account_uuid", "acct-1")]
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), json!(v)))
-        .collect();
-    let greek_file = dir.join("claude-Δ@example.invalid.json");
-    std::fs::write(&greek_file, r#"{"type":"claude","account_uuid":"acct-1"}"#).unwrap();
-    let greek_name = credential_file_name("δ@example.invalid", "", "acct-1");
-    assert_eq!(
-        legacy_credential(&dir, &greek_name, &greek_target, None),
-        Some(greek_file)
-    );
+    assert!(value.get("label").is_none());
+    assert_eq!(std::fs::read_to_string(&other).unwrap(), other_bytes);
     std::fs::remove_dir_all(dir).unwrap();
 }
 

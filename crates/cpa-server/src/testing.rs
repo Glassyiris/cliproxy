@@ -47,21 +47,21 @@ pub fn working_directory(store: &crate::config_store::ConfigStore) -> Option<std
     store.working_directory().map(std::path::Path::to_owned)
 }
 
-/// The same fixture namespace, preserving the offline no-schema-migration contract.
-pub fn config_store_without_migration(path: &std::path::Path) -> anyhow::Result<crate::config_store::ConfigStore> {
+/// The same fixture namespace, opening only an existing database (offline reads).
+pub fn existing_config_store(path: &std::path::Path) -> anyhow::Result<crate::config_store::ConfigStore> {
     config_store_mode(path, false)
 }
 
-fn config_store_mode(path: &std::path::Path, migrate: bool) -> anyhow::Result<crate::config_store::ConfigStore> {
+fn config_store_mode(path: &std::path::Path, create: bool) -> anyhow::Result<crate::config_store::ConfigStore> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(std::path::Path::new("."));
-    if migrate {
+    if create {
         std::fs::create_dir_all(parent)?;
     }
     let root = std::fs::canonicalize(parent)?.join(".cook-router-test-storage");
-    crate::config_store::ConfigStore::open_in(path, migrate, root)
+    crate::config_store::ConfigStore::open_in(path, create, root)
 }
 
 /// Executes fixture SQL on a fresh copy of canonical state, then installs the
@@ -161,9 +161,9 @@ pub(crate) mod publication_effects {
     fn counter_is_target_scoped_and_counts_equal_byte_publications() {
         let root = std::env::temp_dir().join(format!("cpa-publication-counter-{}", uuid::Uuid::new_v4()));
         let stores = ["one.db", "two.db"].map(|name| Arc::new(super::config_store(&root.join(name)).unwrap()));
-        let backends = stores.each_ref().map(|store| {
-            crate::credential_store::CredentialDb::initialize(store.clone(), &root.join("legacy")).unwrap()
-        });
+        let backends = stores
+            .each_ref()
+            .map(|store| crate::credential_store::CredentialDb::initialize(store.clone()).unwrap());
         let path = backends[0].auth_dir().join("a.json");
         let bytes = br#"{"type":"claude","access_token":"private-test"}"#;
         backends[0].save(&path, bytes).unwrap();
@@ -208,19 +208,83 @@ pub fn block_checkpoint_install(store: &crate::config_store::ConfigStore) -> Blo
     BlockedCheckpoint { path, parked }
 }
 
+/// Saves every `.json` file under `dir` to `db` at the same relative name: the
+/// credentials a fixture staged on disk. The database is the only credential source, so
+/// a fixture saves its credentials after `initialize`, never before it.
+pub fn seed_credentials(db: &crate::credential_store::CredentialDb, dir: &std::path::Path) {
+    // The staged files are listed before the first save, and the database's own working
+    // directory is skipped: a fixture may stage them beside `config.db`, and a save
+    // materializes its working copy there, which a live walk would seed a second time.
+    fn walk(skip: &std::path::Path, dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries {
+            let path = entry.expect("test auth-dir entry").path();
+            if std::fs::canonicalize(&path).is_ok_and(|real| real == skip) {
+                continue;
+            }
+            if path.is_dir() {
+                walk(skip, &path, found);
+            } else if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("json")) {
+                found.push(path);
+            }
+        }
+    }
+    if dir.as_os_str().is_empty() {
+        return;
+    }
+    let skip = std::fs::canonicalize(db.auth_dir()).unwrap_or_else(|_| db.auth_dir());
+    let mut found = Vec::new();
+    walk(&skip, dir, &mut found);
+    for path in found {
+        let bytes = std::fs::read(&path).expect("test credential file");
+        db.save(&db.auth_dir().join(path.strip_prefix(dir).unwrap()), &bytes)
+            .expect("test credential seed");
+    }
+}
+
+/// Creates the database at `database` and saves every `.json` file under `dir` to it,
+/// for a test that starts the binary on that database afterwards.
+pub fn seed_database(database: &std::path::Path, dir: &std::path::Path) {
+    let store = Arc::new(config_store(database).expect("test database"));
+    let db = crate::credential_store::CredentialDb::initialize(store).expect("test credentials");
+    seed_credentials(&db, dir);
+}
+
+/// `yaml` without the `oauth.auth-dir` line of a Go recording: the setting is gone, so a
+/// recorded config can no longer be imported as it stands. An `oauth:` block left empty
+/// goes with it. The harness hands the directory to the fixture as `Config::auth_dir`
+/// and seeds it with [`seed_credentials`].
+pub fn without_auth_dir(yaml: &str) -> String {
+    let lines: Vec<&str> = yaml.split_inclusive('\n').collect();
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim_start().starts_with("auth-dir:") {
+            continue;
+        }
+        if line.trim_end() == "oauth:" {
+            let next = lines.iter().skip(i + 1).find(|l| !l.trim().is_empty());
+            let nested = next.is_some_and(|n| n.starts_with(' ') && !n.trim_start().starts_with("auth-dir:"));
+            if !nested {
+                continue;
+            }
+        }
+        out.push(line);
+    }
+    out.concat()
+}
+
 /// A local runtime with a private SQLite database whose executors cannot leave the
-/// machine. Credentials seeded in the private auth directory are imported once.
+/// machine. The `.json` files a test staged in `config.auth_dir` and the files of
+/// `credentials` are saved to the database first.
 pub fn runtime(mut config: Config, mut credentials: Vec<Credential>, executors: Executors) -> Runtime {
     let dir = std::env::temp_dir().join(format!("cpa-runtime-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&dir).expect("private runtime directory");
     let store = Arc::new(config_store(&dir.join("test.db")).expect("test database"));
     let original = config.auth_dir.clone();
-    let legacy = if original == Config::default().auth_dir {
-        dir.join("legacy")
-    } else {
-        original.clone()
-    };
-    let db = crate::credential_store::CredentialDb::initialize(store, &legacy).expect("test credentials");
+    let db = crate::credential_store::CredentialDb::initialize(store).expect("test credentials");
+    seed_credentials(&db, &original);
     for credential in &mut credentials {
         if let cpa_core::credential::Source::File(path) = &mut credential.source {
             let source = path.clone();
@@ -476,7 +540,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cpa-plain-runtime-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let store = Arc::new(config_store(&dir.join("test.db")).unwrap());
-        let db = crate::credential_store::CredentialDb::initialize(store, &dir.join("legacy")).unwrap();
+        let db = crate::credential_store::CredentialDb::initialize(store).unwrap();
         let plain = Runtime::new(Config::default(), Vec::new(), executors(), db);
         assert!(Arc::ptr_eq(&plain.for_executor(&c), &c));
         let test = runtime(Config::default(), Vec::new(), executors());

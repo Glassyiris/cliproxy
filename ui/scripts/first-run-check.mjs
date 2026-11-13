@@ -16,10 +16,11 @@
 // What the mock cannot do, so it is not walked: a provider sign-in (the account is uploaded through
 // the Management API instead) and a proxied request (the mock's accounts come with traffic), and the
 // mock's /v1/models always lists models, so the "no models yet" wording is not reached. The server's
-// own answer for a disabled management API is faked in the browser: the dashboard maps a 404.
+// own answer for a server without a management key is faked in the browser: a 403 that names
+// COOK_MANAGEMENT_PASSWORD.
 //
 // Usage: CHROME_PATH=... node scripts/first-run-check.mjs <page-url> <management-key> [capture-dir]
-import { assertPrivateAuthDir } from "./private-auth-dir.mjs";
+import { assertPrivateCredentialStore } from "./private-credential-store.mjs";
 import { chromium } from "playwright-core";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -42,10 +43,10 @@ async function api(method, path, body) {
   return { headers: r.headers, json: await r.json() };
 }
 
-// A real server signs in and stores accounts: its auth-dir must be private, not the ~/.cli-proxy-api
-// fallback. The mock keeps accounts in memory and says so in X-Cook-Version.
+// A real server signs in and stores accounts: its credential store must be private, not a real database.
+// The mock keeps accounts in memory and says so in X-Cook-Version.
 const probe = await api("GET", "admin/v1/effective/config");
-if (probe.headers.get("x-cook-version") !== "cook-router-mock") await assertPrivateAuthDir(root, secret);
+if (probe.headers.get("x-cook-version") !== "cook-router-mock") await assertPrivateCredentialStore(root, secret);
 const present = (await api("GET", "credentials")).json.files.length;
 assert.equal(present, 0, `not an empty server: it already has ${present} accounts (restart the mock with --accounts 0)`);
 
@@ -90,10 +91,16 @@ const startSteps = (page) => page.getByRole("main").getByRole("list", { name: "G
 const mask = (key) => `${key.slice(0, 3)}…${key.slice(-4)}`;
 
 try {
-  // 1. A server started without a management key: the dashboard maps its 404 to an explanation.
+  // 1. A server started without a management key: the dashboard explains its 403.
   {
     const page = await open(desktop, "light");
-    await page.route(/\/(?:v8\/management|admin\/v1)\//, (route) => route.fulfill({ status: 404, body: "" }));
+    await page.route(/\/(?:v8\/management|admin\/v1)\//, (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "management key not set: start the server with COOK_MANAGEMENT_PASSWORD" }),
+      }),
+    );
     await keyField(page).fill("anything");
     await connect(page).click();
     // Other alerts, an empty live region among them, may exist; this is the one with the text.

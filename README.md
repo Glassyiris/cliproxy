@@ -9,9 +9,8 @@ cook-router ships as the Docker image `ghcr.io/prep-cook/cook-router` (tags `<ve
 
 ```sh
 mkdir -m 700 -p data
-$EDITOR data/config.yaml        # first import only: server.host "", port 8317, access.api-keys, management.secret-key, management.allow-remote true
 sudo chown -R 10001:10001 data
-docker run -d --name cook-router -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" ghcr.io/prep-cook/cook-router:latest --db /data/cook.db --config /data/config.yaml
+docker run -d --name cook-router -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e COOK_MANAGEMENT_PASSWORD='REPLACE-WITH-A-STRONG-PASSWORD' ghcr.io/prep-cook/cook-router:latest
 ```
 
-Open <http://127.0.0.1:8317/management.html> and sign in with `management.secret-key`. See [docs/INSTALL.md](docs/INSTALL.md) for the config file, upgrades, backups and building from source.
+An empty volume starts with defaults on port 8317 and creates `/data/cook.db`. Open <http://127.0.0.1:8317/management.html> and sign in with the password you passed. Without `COOK_MANAGEMENT_PASSWORD` (or `management.secret-key` in an imported `data/config.yaml`), every management request answers 403 and the dashboard cannot sign in. See [docs/INSTALL.md](docs/INSTALL.md) for the config file, upgrades, backups and building from source.
