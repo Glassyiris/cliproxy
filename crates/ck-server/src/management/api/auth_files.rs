@@ -22,7 +22,7 @@ use ck_wire::json::GoValue;
 use serde_json::{Map, Value, json};
 
 use super::{Management, json as respond, multipart};
-use crate::runtime::{Commit, PatchError};
+use crate::runtime::state::{Commit, PatchError};
 use crate::{http::body_limit::FirstJson, store::config_store};
 
 /// `url.ParseQuery` pairs in order: names and values decoded, malformed pairs skipped.
@@ -399,9 +399,9 @@ fn cooldown_view(cd: &crate::scheduling::scheduler::CooldownState) -> Value {
     Value::Object(view)
 }
 
-pub(super) fn recent_requests(activity: &crate::runtime::CredentialActivity) -> Value {
+pub(super) fn recent_requests(activity: &crate::runtime::state::CredentialActivity) -> Value {
     use chrono::TimeZone;
-    let span = crate::runtime::RECENT_BUCKET_SECONDS;
+    let span = crate::runtime::state::RECENT_BUCKET_SECONDS;
     let now = chrono::Utc::now().timestamp() / span;
     Value::Array(
         (0..20)
@@ -2012,7 +2012,7 @@ pub(super) async fn with_codex_lock<T: Send + 'static>(
 /// credential lock, which `lock` holds or this takes without waiting
 /// ([`PatchError::LockBusy`] when another holder has it). Blocking.
 ///
-/// [`Provenance`]: crate::runtime::Provenance
+/// [`Provenance`]: crate::runtime::state::Provenance
 fn save_file_backed(
     state: &Management,
     target: &Credential,
@@ -3048,8 +3048,8 @@ mod tests {
         let mut patch = MetadataPatch::default();
         patch.set.insert("access_token".into(), "p2".into());
         patch.set.insert("refresh_token".into(), "r2".into());
-        let fence = crate::runtime::RefreshFence { registered };
-        let committed = crate::runtime::commit_refresh(store, "a.json", &current, fence, &patch).unwrap();
+        let fence = crate::runtime::state::RefreshFence { registered };
+        let committed = crate::runtime::state::commit_refresh(store, "a.json", &current, fence, &patch).unwrap();
         assert_eq!(committed.metadata["refresh_token"], "r2", "the refresh commits");
         let on_disk: Value = serde_json::from_slice(&std::fs::read(dir.join("a.json")).unwrap()).unwrap();
         assert_eq!(on_disk["refresh_token"], "r2");
@@ -3103,7 +3103,7 @@ mod tests {
         let lock = ck_exec::codex_siwc_bind::lock_file(&path).unwrap();
         let body = Bytes::from(r#"{"name":"codex.json","priority":7}"#);
         let save = tokio::spawn(fields(State(state.clone()), Ok(FirstJson(body))));
-        crate::runtime::tests::lock_waited(&path).await;
+        crate::runtime::state::tests::lock_waited(&path).await;
         assert!(state.disk.try_lock().is_ok(), "the waiting save does not hold disk");
         assert!(!save.is_finished(), "the save waits for the lock");
         // The other process's refresh, under its lock.
@@ -3140,7 +3140,7 @@ mod tests {
         let held = ck_exec::codex_siwc_bind::lock_file(&path).unwrap();
         let body = Bytes::from(r#"{"name":"codex.json","disabled":true}"#);
         let save = tokio::spawn(status(State(state.clone()), Ok(FirstJson(body))));
-        crate::runtime::tests::lock_waited(&path).await;
+        crate::runtime::state::tests::lock_waited(&path).await;
         state.rt.shutdown_codex_refreshes().await;
         let saved = tokio::time::timeout(std::time::Duration::from_secs(5), save)
             .await
@@ -3171,7 +3171,7 @@ mod tests {
             let state = state.clone();
             async move { store(&state, move |s, l| store_file(s, "up-codex.json", &data, true, l)).await }
         });
-        crate::runtime::tests::lock_waited(&path).await;
+        crate::runtime::state::tests::lock_waited(&path).await;
         assert!(state.disk.try_lock().is_ok(), "the waiting upload does not hold disk");
         assert!(!path.exists(), "the upload waits before writing its document");
         state

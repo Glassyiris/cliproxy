@@ -124,7 +124,7 @@ impl CredentialDb {
         current
             .documents
             .iter()
-            .map(|(name, doc)| Ok((self.path(name)?, Some(crate::runtime::sha256(&doc.bytes)))))
+            .map(|(name, doc)| Ok((self.path(name)?, Some(crate::runtime::state::sha256(&doc.bytes)))))
             .collect()
     }
 
@@ -163,7 +163,7 @@ impl CredentialDb {
                 let hash = current
                     .documents
                     .get(&self.name(path)?)
-                    .map(|doc| crate::runtime::sha256(&doc.bytes));
+                    .map(|doc| crate::runtime::state::sha256(&doc.bytes));
                 Ok((path.clone(), hash))
             })
             .collect::<anyhow::Result<std::collections::BTreeMap<_, _>>>()?;
@@ -346,7 +346,7 @@ impl CredentialCommand<'_> {
             self.grant
                 && self
                     .read(path)?
-                    .is_some_and(|bytes| crate::runtime::sha256(&bytes) == expected),
+                    .is_some_and(|bytes| crate::runtime::state::sha256(&bytes) == expected),
             "completed grant source changed"
         );
         self.preservation_source = Some(path.to_owned());

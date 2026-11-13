@@ -16,7 +16,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use ck_core::credential::Credential;
 
-use crate::runtime::{AcquireError, Runtime, Selection};
+use crate::runtime::state::{AcquireError, Runtime, Selection};
 
 pub fn routes() -> Router<Arc<Runtime>> {
     Router::new()
@@ -178,7 +178,7 @@ async fn alpha_search(
 /// One Alpha Search on `lease`'s credential.
 async fn search(
     rt: &Arc<Runtime>,
-    lease: crate::runtime::Lease,
+    lease: crate::runtime::state::Lease,
     body: &Bytes,
     headers: &HeaderMap,
     model: &str,

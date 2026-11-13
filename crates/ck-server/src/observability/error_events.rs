@@ -145,7 +145,7 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
-    use crate::runtime::Outcome;
+    use crate::runtime::state::Outcome;
     use crate::scheduling::scheduler::{Policy, Scheduler};
 
     /// Clock values as the golden writes them: `<time>` and whole seconds from now.

@@ -1091,7 +1091,7 @@ fn explicit_shutdown_drains_normalization_queued_behind_the_owner_before_cleanup
         receive(&observed);
         drop(
             f.rt.store()
-                .select(crate::runtime::Selection::new("codex", "probe"))
+                .select(crate::runtime::state::Selection::new("codex", "probe"))
                 .unwrap(),
         );
         let mut shutdown = Box::pin(f.rt.shutdown_codex_refreshes());

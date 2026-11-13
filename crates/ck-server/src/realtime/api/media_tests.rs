@@ -716,7 +716,7 @@ async fn proxied_credentials_relay_media_through_the_proxy() {
 #[tokio::test]
 async fn session_close_closes_unclaimed_tunnels() {
     let fixtures: serde_json::Value =
-        serde_json::from_str(include_str!("../../tests/fixtures/codex_live_tunnel_go.json")).unwrap();
+        serde_json::from_str(include_str!("../../../tests/fixtures/codex_live_tunnel_go.json")).unwrap();
     let case = fixtures["prepare"]
         .as_array()
         .unwrap()

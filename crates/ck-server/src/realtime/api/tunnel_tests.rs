@@ -13,7 +13,7 @@ use super::*;
 use crate::realtime::api::dialer::{Conn, build, proxy_scheme};
 
 fn golden() -> Value {
-    serde_json::from_str(include_str!("../../tests/fixtures/codex_live_tunnel_go.json")).unwrap()
+    serde_json::from_str(include_str!("../../../tests/fixtures/codex_live_tunnel_go.json")).unwrap()
 }
 
 fn unhex(text: &str) -> Vec<u8> {

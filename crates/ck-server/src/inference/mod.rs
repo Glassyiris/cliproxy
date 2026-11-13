@@ -1,3 +1,5 @@
+//! Inference endpoints, model discovery and upstream dispatch.
+
 pub mod aa;
 pub(crate) mod claude;
 pub(crate) mod codex_alpha;

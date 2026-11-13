@@ -551,7 +551,7 @@ fn commit(
             state.oauth.complete(sid);
             settled(state, sid);
         }
-        Err(crate::runtime::PatchError::LockBusy(path)) => {
+        Err(crate::runtime::state::PatchError::LockBusy(path)) => {
             state.oauth.release_siwc_commit(sid, flow);
             return Err(path);
         }
@@ -582,8 +582,8 @@ fn write_binding(
     flow: &Flow,
     tokens: &Tokens,
     lock: &mut CodexLock,
-) -> Result<(), crate::runtime::PatchError> {
-    use crate::runtime::PatchError;
+) -> Result<(), crate::runtime::state::PatchError> {
+    use crate::runtime::state::PatchError;
     let invalid = |message: &str| PatchError::Io(message.into());
     let backend = state.rt.store().credential_backend();
     for _ in 0..8 {
@@ -637,12 +637,12 @@ fn write_binding(
         command
             .as_mut()
             .unwrap()
-            .authorize_completed_source(path, crate::runtime::sha256(&bytes))
+            .authorize_completed_source(path, crate::runtime::state::sha256(&bytes))
             .map_err(|e| invalid(&e.to_string()))?;
         lock.hold(path)?;
         match super::auth_files::save_granted_bytes(state, &current, bytes, &mut command) {
             Ok(()) => return Ok(()),
-            Err(crate::runtime::PatchError::Stale { .. }) => continue,
+            Err(crate::runtime::state::PatchError::Stale { .. }) => continue,
             Err(e) => return Err(e),
         }
     }
@@ -1091,7 +1091,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(callback(&state, &req, None).unwrap().status(), StatusCode::OK);
-        crate::runtime::tests::lock_waited(&file).await;
+        crate::runtime::state::tests::lock_waited(&file).await;
         // The other process's refresh spends "r" and writes "r2" under the lock.
         let rotated = codex_file("old").replace(r#""refresh_token":"r""#, r#""refresh_token":"r2""#);
         state

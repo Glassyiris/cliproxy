@@ -18,7 +18,7 @@ use super::calls::Call;
 use super::{
     Live, Principal, header_session, live_error, panic_response, realtime_error, select_oauth, trace, with_trace,
 };
-use crate::runtime::Runtime;
+use crate::runtime::state::Runtime;
 
 pub(super) enum ReadError {
     TooLarge,
@@ -443,7 +443,7 @@ fn record_body(capture: &CaptureSink, data: &[u8], error: Option<&BodyError>) {
 /// finished (Go's deferred `CloseWithReason`, then the deferred selection `End`).
 struct Held {
     media: Option<Arc<dyn super::relay::MediaSession>>,
-    lease: Option<crate::runtime::Lease>,
+    lease: Option<crate::runtime::state::Lease>,
 }
 
 impl Drop for Held {

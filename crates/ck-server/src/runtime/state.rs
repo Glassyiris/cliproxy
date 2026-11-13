@@ -374,7 +374,7 @@ impl Runtime {
         let (enabled, strict) = signature_cache_config(&config);
         ck_translate::set_antigravity_signature_cache_config(enabled, strict);
         let dir = cooldown_dir(&config, &policy);
-        let ws_auth = crate::realtime::relay::ws_auth(&config);
+        let ws_auth = crate::realtime::aistudio_relay::ws_auth(&config);
         let config = Arc::new(config);
         // Commits are serialized, so the catalogs are configured in commit order; the
         // config lock itself is released first, as Go releases cfgMu before
@@ -398,7 +398,7 @@ impl Runtime {
         }
         // Go's websocket auth change handler: turning ws-auth on ends the relay sessions
         // that connected without a key.
-        if ws_auth && !crate::realtime::relay::ws_auth(&previous) {
+        if ws_auth && !crate::realtime::aistudio_relay::ws_auth(&previous) {
             self.executors.google.aistudio.relay.stop();
         }
         self.store.configure_cooldown_store(dir);

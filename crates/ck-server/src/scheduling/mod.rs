@@ -1,3 +1,5 @@
+//! Credential scheduling, provider policy and refresh coordination.
+
 mod affinity;
 pub(crate) mod classify;
 pub mod lcp;

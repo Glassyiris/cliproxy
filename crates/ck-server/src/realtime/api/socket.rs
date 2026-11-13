@@ -24,7 +24,7 @@ use wreq::ws::message as up;
 use super::calls::{Claim, ClaimGuard};
 use super::http::{HANDSHAKE_HEADERS, copy_headers, header_text};
 use super::{Live, Principal, header_session, live_error, realtime_error, select_oauth, trace, with_trace};
-use crate::runtime::Runtime;
+use crate::runtime::state::Runtime;
 
 /// Bound on the closing frames written after a relay ends.
 const CLOSE_WRITE: Duration = Duration::from_secs(1);

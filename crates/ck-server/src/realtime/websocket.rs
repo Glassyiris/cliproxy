@@ -56,7 +56,7 @@ use crate::realtime::websocket_requests::{
     set_str,
 };
 use crate::realtime::websocket_tools::{self as tools, Retained, TurnCache};
-use crate::runtime::Runtime;
+use crate::runtime::state::Runtime;
 use crate::scheduling::registry::provider_key;
 use crate::{inference::dispatch, scheduling::classify};
 

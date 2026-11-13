@@ -1,6 +1,6 @@
 # cooker dashboard
 
-The management dashboard for cooker, written in React 19 with the Astryx design system. It talks to cooker's management API under `/v8/management`, whose contract is the Rust router in `crates/ck-server/src/management/management.rs`. `dist/` is the build output, checked in: the Rust binary embeds it (`crates/ck-server/build.rs`) and serves it at `/management.html`. The dashboard ships only inside that binary.
+The management dashboard for cooker, written in React 19 with the Astryx design system. It talks to cooker's management API under `/v8/management`, whose contract is the Rust router in `crates/ck-server/src/management/api.rs`. `dist/` is the build output, checked in: the Rust binary embeds it (`crates/ck-server/build.rs`) and serves it at `/management.html`. The dashboard ships only inside that binary.
 
 Product rules are in [PRODUCT.md](PRODUCT.md) and the visual system in [DESIGN.md](DESIGN.md).
 
@@ -19,7 +19,7 @@ npm run check:api  # src/lib/api/routes.ts against the Rust management router
 
 `ui/dist` is not committed. The Rust binary embeds it at compile time, so run `npm run build` before `cargo build`; `docker buildx build` builds it in the dashboard stage.
 
-`npm run check:api` reads `fn router` in `crates/ck-server/src/management/management.rs` and fails (exit 1) when the registry names a route the server lacks, or when a `/v8/management` route has neither a registry entry nor a line with a reason in `tools/api-allowlist.json`. It exits 2 when the router uses a construct it cannot follow.
+`npm run check:api` reads `fn router` in `crates/ck-server/src/management/api.rs` and fails (exit 1) when the registry names a route the server lacks, or when a `/v8/management` route has neither a registry entry nor a line with a reason in `tools/api-allowlist.json`. It exits 2 when the router uses a construct it cannot follow.
 
 ## Structure
 

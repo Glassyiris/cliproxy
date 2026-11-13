@@ -162,7 +162,7 @@ impl Advertiser {
     /// Starts advertising for the subscribed configuration and each later
     /// publication, in order; `tls` says whether the listener serves TLS (Go passes
     /// `cfg.TLS.Enable`, which its listener honours).
-    pub fn spawn(mut published: ck_server::runtime::ConfigChanges, tls: bool) -> Self {
+    pub fn spawn(mut published: ck_server::runtime::state::ConfigChanges, tls: bool) -> Self {
         let (stop, mut stopped) = oneshot::channel();
         let task = tokio::spawn(async move {
             let mut state = State {

@@ -882,7 +882,7 @@ const server = http.createServer((req, res) => {
       if (req.method === "OPTIONS") return (status = 204), send(204, { ...headers, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "Access-Control-Allow-Headers": "*" }, "");
       const auth = req.headers.authorization || "";
       const given = /^bearer /i.test(auth) ? auth.slice(7) : "";
-      // The dashboard session, as the server does it (crates/ck-server/src/management/session.rs):
+      // The dashboard session, as the server does it (crates/ck-server/src/management/api/session.rs):
       // the key is exchanged for a random id in `cooker_session`; cookie requests need the
       // dashboard header; sign-out revokes the id on the server.
       const id = /(?:^|;\s*)cooker_session=([^;]+)/.exec(req.headers.cookie || "")?.[1];

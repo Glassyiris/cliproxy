@@ -534,7 +534,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_committed_token_clears_its_401_block_and_keeps_a_429() {
-        use crate::runtime::{Outcome, Selection};
+        use crate::runtime::state::{Outcome, Selection};
         use ck_core::exec::{ExecError, FailureScope};
         let (state, db, root) = state();
         let file = db.auth_dir().join("claude-a.json");

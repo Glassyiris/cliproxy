@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 
 use super::auth_files::{Query, fail, reply};
 use super::{Management, json as respond};
-use crate::{runtime::OAuthDelivery as Delivery, store::config_store};
+use crate::{runtime::state::OAuthDelivery as Delivery, store::config_store};
 
 const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
 /// Go `oauthCompletedSessionTTL`, for a binding failed by a file change. A completed
@@ -375,7 +375,7 @@ pub(super) fn install_callback_sink(state: &Arc<Management>) {
     let weak = Arc::downgrade(state);
     state
         .rt
-        .set_oauth_callback_sink(Some(Arc::new(move |cb: &crate::runtime::OAuthCallback| {
+        .set_oauth_callback_sink(Some(Arc::new(move |cb: &crate::runtime::state::OAuthCallback| {
             weak.upgrade().map_or(Delivery::NotPending, |m| {
                 m.oauth.deliver(cb.provider, &cb.state, &cb.code, &cb.error)
             })
@@ -2280,7 +2280,7 @@ mod tests {
             .rt
             .lease_credential(
                 "codex.json",
-                crate::runtime::Selection::new("codex", "gpt-5"),
+                crate::runtime::state::Selection::new("codex", "gpt-5"),
                 &cfg,
                 |credential| {
                     let mut local = credential.clone();

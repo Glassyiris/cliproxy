@@ -13,7 +13,7 @@ use ck_wire::gostr::GoStr;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::runtime::{Outcome, Selection};
+use crate::runtime::state::{Outcome, Selection};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Strategy {
@@ -1305,7 +1305,7 @@ impl Scheduler {
     pub(crate) fn tokens_rejected(&self, c: &Credential) -> bool {
         self.rejected
             .get(&c.id)
-            .is_some_and(|r| !crate::runtime::credentials_changed(r, c))
+            .is_some_and(|r| !crate::runtime::state::credentials_changed(r, c))
     }
 
     /// [`Self::record_picked`] for an attempt picked just now.

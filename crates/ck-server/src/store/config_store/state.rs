@@ -233,7 +233,7 @@ impl ConfigStore {
             .unwrap_or_else(PoisonError::into_inner);
         for (name, hash) in destinations {
             if let Some(document) = current.documents.get(name)
-                && crate::runtime::sha256(&document.bytes) == *hash
+                && crate::runtime::state::sha256(&document.bytes) == *hash
                 && !ck_core::config::credentials::scan_documents(
                     &ck_core::config::Config::default(),
                     vec![(std::path::PathBuf::from(name), document.bytes.as_ref().clone())],
@@ -458,7 +458,7 @@ impl ConfigStore {
                     .state
                     .documents
                     .get(name)
-                    .is_some_and(|document| crate::runtime::sha256(&document.bytes) == *hash)
+                    .is_some_and(|document| crate::runtime::state::sha256(&document.bytes) == *hash)
             });
         {
             let mut sources = self.grant_sources.write().unwrap_or_else(PoisonError::into_inner);

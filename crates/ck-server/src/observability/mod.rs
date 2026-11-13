@@ -1,4 +1,5 @@
-#[path = "observability.rs"]
+//! Request logging, usage accounting and profiling.
+
 pub mod api;
 pub(crate) mod error_events;
 pub mod logging;

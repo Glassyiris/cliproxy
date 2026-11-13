@@ -18,7 +18,7 @@ use futures_util::StreamExt;
 
 use crate::http::gojson;
 use crate::http::respond;
-use crate::runtime::{AcquireError, Completing, Lease, Outcome, Runtime, Selection};
+use crate::runtime::state::{AcquireError, Completing, Lease, Outcome, Runtime, Selection};
 use crate::scheduling::registry::{self, AliasResult, Registry};
 use crate::scheduling::scheduler::{Policy, canonical_model};
 use crate::scheduling::{classify, lcp};
@@ -1165,7 +1165,7 @@ async fn run_routed(
                 .await;
         }
         let wait = {
-            let admit = crate::runtime::admission(&registry, &aliases, &selection, &rt.executors);
+            let admit = crate::runtime::state::admission(&registry, &aliases, &selection, &rt.executors);
             rt.store().retry_wait(&selection, &policy, status, &attempted, &admit)
         };
         let Some(wait) = wait else {

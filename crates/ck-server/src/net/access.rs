@@ -14,7 +14,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use ck_core::exec::Caller;
 
-use crate::runtime::Runtime;
+use crate::runtime::state::Runtime;
 
 /// Go `AuthMiddleware` over the config access provider: open without client keys, else
 /// one of them must match. A matched caller carries the provider name Go records.

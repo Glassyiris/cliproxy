@@ -240,13 +240,13 @@ async fn a_dispatch_after_its_refresh_clears_a_cooldown_recorded_meanwhile() {
     })
     .await;
     // Meanwhile another request on the same credential and model records a 429.
-    let selection = ck_server::runtime::Selection::new("claude", MODEL);
+    let selection = ck_server::runtime::state::Selection::new("claude", MODEL);
     let mut refusal = ck_core::exec::ExecError::local(429, ck_core::exec::FailureScope::Model, "rate limited");
     refusal.retry_after = Some(Duration::from_secs(600));
     rt.store()
         .select(selection.clone())
         .expect("a credential")
-        .complete(ck_server::runtime::Outcome::Failure(refusal));
+        .complete(ck_server::runtime::state::Outcome::Failure(refusal));
     assert!(rt.store().select(selection.clone()).is_none(), "cooling");
 
     up.token.add_permits(1);

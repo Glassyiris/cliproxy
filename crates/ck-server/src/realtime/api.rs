@@ -30,7 +30,6 @@ mod dialer;
 mod http;
 #[cfg(feature = "media-relay")]
 mod media;
-#[path = "realtime/relay.rs"]
 mod relay;
 mod secrets;
 mod socket;
@@ -47,7 +46,7 @@ use axum::routing::{get, post};
 use ck_core::config::Config;
 use ck_core::credential::Credential;
 
-use crate::runtime::{AcquireError, Lease, Runtime, Selection};
+use crate::runtime::state::{AcquireError, Lease, Runtime, Selection};
 
 /// Realtime state shared by every route: remembered calls and ephemeral keys.
 pub(crate) struct Live {
