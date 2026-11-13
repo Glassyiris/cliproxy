@@ -1,3 +1,5 @@
+The owner ruling of 2026-11-13 removed the plugin feature. The plugin parts of tasks 1.2, 4.1, 4.2, 4.3, 5.3, 6.2 and 8.1 no longer apply; their checks record the tree before that removal.
+
 ## 1. Canonical state and the application boundary
 
 - [x] 1.1 Add private-fixture acceptance examples for memory-only queries, sole online ownership and commit/publication order; verify they fail for the current bypass/SQLite-read behavior before implementation, and record the existing `usage_record::tests::redirects_start_the_upload_measurements_over` and `watching::tests::incomplete_documents_keep_the_credential_until_valid_json` outcomes as an explicit baseline rather than hiding them.

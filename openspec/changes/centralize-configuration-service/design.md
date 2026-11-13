@@ -9,12 +9,12 @@ The source audit found four production SQL sink files, but several independent a
 | Existing entry family | Current persistence/publication seam | Migration target |
 |---|---|---|
 | Admin resource edits, import and restore | `Management::commit_with/commit_locked`, `config_store/commit.rs` | Public API adapter submitting a service command |
-| API-key toggles and plugin configuration | `Management::edit_document` | The same configuration command path |
+| API-key toggles | `Management::edit_document` | The same configuration command path |
 | Credential upload, edit, delete, OAuth and SIWC | Management adapters plus `CredentialDb`/runtime patch methods | Credential commands with existing admission checks |
-| Request/background/plugin refresh and normalization | `runtime.rs` save/patch/admission callbacks | Internal commands; preserve relevant registration/version fences |
+| Request/background refresh and normalization | `runtime.rs` save/patch/admission callbacks | Internal commands; preserve relevant registration/version fences |
 | Granted Codex token before admission | `refresh_codex_file` persists before `admit_codex_refresh` | Explicit grant-checkpoint versus admitted-runtime transitions |
 | Cooldown result/reset persistence | `cooldown_store::Writer` to `Backend::save` | Owned coalesced domain command, not a second persistence owner |
-| CLI import, provider login and plugin saves | `config_cli.rs`, `main::login_save`, `plugin_cli.rs` direct writes | Online API adapter or exclusively admitted offline service |
+| CLI import and provider login | `config_cli.rs`, `main::login_save` direct writes | Online API adapter or exclusively admitted offline service |
 | Bootstrap, migrations, encoding and backups | `config_store/db.rs`, `published.rs` | Private service persistence/lifecycle implementation |
 
 `Management::config_store()` and `CredentialStore::credential_backend()` currently expose writable backends. The pending candidate still contains hash polling and external-snapshot adoption; those are superseded, not retained requirements.
@@ -37,7 +37,7 @@ The source audit found four production SQL sink files, but several independent a
 
 ### 1. One in-process service, with adapters rather than competing writers
 
-Use the existing server process. External management interfaces and online CLI commands submit commands; internal refresh/plugin/cooldown code calls the same application boundary directly. Do not HTTP-loopback internal work.
+Use the existing server process. External management interfaces and online CLI commands submit commands; internal refresh/cooldown code calls the same application boundary directly. Do not HTTP-loopback internal work.
 
 Expose read-only views, command submission and callback registration. Move SQL helpers, writable backend handles and workspace mutation behind that boundary. Names and exact type layout can change. A private helper per table is fine; a caller choosing independently whether to persist, replace memory or notify is not.
 
@@ -49,7 +49,7 @@ Reuse/extract `Management::commit_with` semantics instead of building a second p
 
 ### 2. Complete canonical state, with derived and authorized runtime views
 
-The service owns lossless persistent state: resources and stable IDs/order, opaque plugin data, raw credential documents and metadata, configuration revisions/changes, and persisted cooldown state. The runtime `Config` is a derived view, not sufficient export input.
+The service owns lossless persistent state: resources and stable IDs/order, raw credential documents and metadata, configuration revisions/changes, and persisted cooldown state. The runtime `Config` is a derived view, not sufficient export input.
 
 Load supported durable state once during bootstrap. Serve resource/history/credential queries from memory and derive request configuration, policy and scheduling views from the accepted state. Use immutable snapshots and structural sharing where practical rather than cloning all historical data per request. Existing configuration revision semantics remain; notification versions identify the state supplied to a subscriber. Credential registration/resource versions remain the relevant admission fences.
 
@@ -85,7 +85,7 @@ replace current memory view --> dispatch ordered callbacks
 return committed result
 ```
 
-The memory read/write lock is held only to obtain/replace snapshot references, never for SQL, filesystem sync, callbacks or plugin parsing. The write gate orders commit and notification dispatch; callbacks are notification-only and cannot synchronously reenter that gate. They can schedule a later owned command. Read requests continue using the previous complete state while a candidate is persisted.
+The memory read/write lock is held only to obtain/replace snapshot references, never for SQL, filesystem sync or callbacks. The write gate orders commit and notification dispatch; callbacks are notification-only and cannot synchronously reenter that gate. They can schedule a later owned command. Read requests continue using the previous complete state while a candidate is persisted.
 
 Validation/dry-run/precondition failures do not mutate accepted state. A failure before installing a new checkpoint leaves the accepted state intact. A failure after checkpoint installation is different: the candidate can contain a non-repeatable token grant that must not be overwritten from the older accepted view.
 
@@ -95,9 +95,7 @@ Retain the complete latest checkpoint candidate as private recovery state of the
 
 Already-in-flight non-repeatable grant results are preserved when retainable, rather than discarded merely by this gate. Their required preservation is a narrow internal recovery operation: under the same owner, merge/reconcile canonical file-backed results against the **latest pending checkpoint**, persist the resulting checkpoint, and retain the existing relevant registration/admission fences. This does not admit an ordinary configuration command, declare the credential active, or emit a successful-change notification. No separate writer or hidden SQL cache is introduced.
 
-A plugin-virtual credential is one of potentially several credentials parsed from a shared plugin source document. Its returned refresh result is not that document and must never overwrite it. For an already-returned virtual grant while publication or a required projection remains pending, the user-selected rule is **retain in memory, then admit** (内存保留后准入): the same owner temporarily retains the result and its relevant registration/version/source fences as owned execution state. It does not activate the result or report ordinary save/configuration success while recovery is unresolved. After recovery, under the same admission context, it rechecks those fences and admits an applicable result once, without a second provider grant. A deleted, replaced, reimported or stale registration cannot receive the old result; discarding a stale result does not authorize reuse of a known-invalidated old token. New virtual grant starts remain paused during recovery.
-
-This is not a new durable per-virtual format, SQL row, shared-file rewrite or second writable canonical authority. Held virtual results have no process-exit survival guarantee and are not cold-restored. The configured SQLite file remains the complete backup of **supported persistent state**. Volatile held results, like active leases, are component-owned execution state, not an omitted persistent-state domain. Home's mutually exclusive remote authority is unrelated to plugin-virtual credentials.
+The configured SQLite file remains the complete backup of **supported persistent state**. Volatile held results, like active leases, are component-owned execution state, not an omitted persistent-state domain.
 
 #### User decision: completion-time storage/rendering failures
 
@@ -110,12 +108,6 @@ Known limitations (accepted, not full task completion):
 - Unrendered builtin results are owner-lifetime memory until complete bytes enter the retained checkpoint. Owner exit during a coincident local completion failure can lose that result and require re-login; no process-exit/power-loss promise is made for it.
 - Before a retryable failure's exact destination can be rendered, existing file-backed sources of its provider stay withheld until a later owner admission drains the queue. There is no timed background retry, and without later admission withholding can persist indefinitely. This does not permit terminal results to wedge writer admission.
 - Legacy builtin writer APIs expose strings. Known validation codes are terminal; opaque effect errors remain conservatively retryable. New validation codes must join that classification or migrate to a typed writer boundary.
-
-### Trusted plugin grant-result boundaries
-
-A successful **handled returned** `auth.refresh` response carrying actual credential data is a completed grant result, including opaque metadata/raw supported data. Do not infer completion from standardized token field names. Failed, unhandled, no-auth and progress-only responses are not completed grants.
-
-For in-RPC `host.auth.save`, the user-selected authority is **job-scope authorization** (任务作用域授权). A service-issued specific OAuth/refresh job scope identifies the plugin instance/version, operation/session, eligible managed destinations and relevant source/registration/account fences. New scopes pass recovery admission before upstream work. Already-started valid scopes may preserve eligible results against the latest pending state, but holding/preservation is not successful publication or runtime activation. Explicit cancellation/revocation, stale ownership, a wrong plugin/target and a closed job/session refuse this authority. Ordinary/manual/parse-only saves cannot inherit it. The scope is internal owned execution state, not a client-controlled save flag, ambient mutable bypass, new plugin wire/SDK marker or SQL authority. Existing authenticated callback correlation is reused; absent correlation never guesses an active job.
 
 Recovery publishes the latest pending state, then installs the appropriate accepted views and dispatches notifications before ordinary mutation admission resumes. The service can retain this state without an open SQLite connection. If publication remains unresolved at shutdown, retain the recovery workspace and report incomplete cleanup; deleting it is not a clean shutdown. Resume can recover an unacknowledged checkpoint only when its storage survives; tmpfs loss still has no such guarantee.
 
@@ -137,7 +129,7 @@ Acquire one per-database, process-safe ownership guard before inspecting or crea
 
 Online CLI calls use the existing authenticated management client or a shared extraction of it. Endpoint, credentials and TLS validation are explicit and preserve existing management access policy. Failed discovery, authentication or requests cannot authorize a local-write fallback. An offline command may instantiate the same application service only after obtaining the ownership guard. Read-only copies/exports are not competing mutations.
 
-The current multipart credential upload commits files individually and can return partial results (`management/auth_files.rs:1092–1130`). Keep that legacy behavior separate: introduce a typed authenticated atomic credential-batch operation for CLI batches, reusing existing validation, managed-path authorization and the service transaction. Stage provider/plugin outputs in a private CLI scratch area before submitting bytes; never write the running server's credential cache as a substitute for the API. The new adapter must not grant arbitrary host-filesystem write access. Route/payload names are implementation details, not the stable model.
+The current multipart credential upload commits files individually and can return partial results (`management/auth_files.rs:1092–1130`). Keep that legacy behavior separate: introduce a typed authenticated atomic credential-batch operation for CLI batches, reusing existing validation, managed-path authorization and the service transaction. Stage provider outputs in a private CLI scratch area before submitting bytes; never write the running server's credential cache as a substitute for the API. The new adapter must not grant arbitrary host-filesystem write access. Route/payload names are implementation details, not the stable model.
 
 Remove obsolete online multiwriter PID-reference/global-SQL-coordinator machinery after all writers have migrated; do not remove ownership exclusion itself. The service owns cleanup, not arbitrary adapters.
 
@@ -154,13 +146,13 @@ Document cold restoration: stop the owner, prevent an old checkpoint from resumi
 
 ### 7. Callback ownership and execution placement stay explicit
 
-Use service-owned function callbacks receiving an immutable authorized view, version and change category. Registration obtains an initial view and subscribes atomically with respect to publication; no change can fall between "read current" and "subscribe". A registration handle ties unsubscription to component lifetime. Invoke without holding the state or subscriber-list lock and preserve commit-order dispatch. Expensive plugin/catalog/reconfigure work is enqueued into the receiving component's owned scope, not executed under state locks.
+Use service-owned function callbacks receiving an immutable authorized view, version and change category. Registration obtains an initial view and subscribes atomically with respect to publication; no change can fall between "read current" and "subscribe". A registration handle ties unsubscription to component lifetime. Invoke without holding the state or subscriber-list lock and preserve commit-order dispatch. Expensive catalog/reconfigure work is enqueued into the receiving component's owned scope, not executed under state locks.
 
-Reuse existing runtime plugin/catalog/policy publication behavior and migrate callers, rather than adding parallel watch and callback authorities. A compatibility adapter can translate existing consumers temporarily, but all notifications originate at the service.
+Reuse existing runtime catalog/policy publication behavior and migrate callers, rather than adding parallel watch and callback authorities. A compatibility adapter can translate existing consumers temporarily, but all notifications originate at the service.
 
 Use asynchronous tasks for waits and bounded/owned blocking work for SQL encoding and filesystem work. Use child processes only for external-program or isolation needs. Isolated workers take serialized data/options/relevant versions and return results/errors; they do not capture a Runtime, query global config, infer CWD/env, or load live state. Side-effect adapters supply declared inputs. Admit results at the owner using relevant fences; never pass all credentials to every job.
 
-Use existing cancellation/task tracking and joins, not a new scheduler framework. Preserve the existing plugin blocking-call/callback constraints; shrinking a global thread pool indiscriminately can deadlock callbacks. Every task/thread/process has an owner that can stop admission and wait for it.
+Use existing cancellation/task tracking and joins, not a new scheduler framework. Every task/thread/process has an owner that can stop admission and wait for it.
 
 ## Risks / Trade-offs
 
@@ -176,7 +168,7 @@ Use existing cancellation/task tracking and joins, not a new scheduler framework
 
 1. Keep the accepted model document as the contract; add behavior examples before changing the existing publication boundary.
 2. Introduce service-owned canonical state, memory queries, private encoding/storage and ownership lifecycle while retaining supported schema/legacy import.
-3. Route Management, internal refresh/plugin/normalization/cooldown paths and startup through it; remove writable backend escape hatches.
+3. Route Management, internal refresh/normalization/cooldown paths and startup through it; remove writable backend escape hatches.
 4. Route online CLI mutations through management and admit offline mutations exclusively. Preserve raw documents, registration fences, config restore scope and startup-only setting reporting.
 5. Migrate subscribers to owned callbacks, then remove polling and external-snapshot adoption. Remove online multiwriter machinery only after this boundary is enforced.
 6. Run the final-tree regressions, platform checks and unchanged performance gates. Update operational docs and the PR's evidence without claiming unrun checks passed.

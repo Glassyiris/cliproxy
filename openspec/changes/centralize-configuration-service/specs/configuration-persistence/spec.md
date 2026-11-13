@@ -5,7 +5,7 @@ Persist complete service-owned state as portable standalone SQLite images while 
 ## ADDED Requirements
 
 ### Requirement: Fresh database images are built from complete state
-Normal export SHALL encode an immutable, complete persistent-state snapshot into a new standalone SQLite image without reading or copying an existing database as its source. The input SHALL retain all supported configuration resources, stable identifiers and ordering, opaque plugin data, raw credential documents, credential metadata, configuration revision/change history and persisted cooldown data. Runtime projections alone SHALL NOT be treated as a lossless export source.
+Normal export SHALL encode an immutable, complete persistent-state snapshot into a new standalone SQLite image without reading or copying an existing database as its source. The input SHALL retain all supported configuration resources, stable identifiers and ordering, raw credential documents, credential metadata, configuration revision/change history and persisted cooldown data. Runtime projections alone SHALL NOT be treated as a lossless export source.
 
 #### Scenario: State is round-tripped without an old database
 - **WHEN** complete state containing supported opaque data, credentials and history is encoded with no previous database available

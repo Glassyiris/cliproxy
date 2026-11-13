@@ -1,3 +1,5 @@
+The owner ruling of 2026-11-13 removed the plugin feature. The plugin evidence below records the tree before that removal; the plugin code and tests it names were deleted with the feature.
+
 # Phase 00 — behavior baseline (start of task 1.1 only)
 
 ## Scope and accepted example

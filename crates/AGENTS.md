@@ -12,7 +12,6 @@ Current crate responsibilities:
 - `crates/cpa-translate`: format translation between the Anthropic, OpenAI and Gemini APIs.
 - `crates/cpa-exec`: one module per upstream provider (wire format, auth headers, HTTP client profile).
 - `crates/cpa-server`: axum routes, client auth, credential selection, management API.
-- `crates/cpa-plugin`: the plugin host.
 - `crates/cook-router`: the binary.
 
 A workspace reorganization updates this list in the same PR.
@@ -48,8 +47,8 @@ A workspace reorganization updates this list in the same PR.
 - Define and test recovery from every lockout or ceiling. Admin recovery invalidates old credentials and opens the account only through its own recovery step.
 - Known and unknown accounts receive the same answers and do the same work.
 - Exchange the dashboard's management key for a server-issued, server-revocable HttpOnly, SameSite=Strict session cookie, with Secure over HTTPS. Revoke the session on sign-out. Require a same-origin check using Origin or Sec-Fetch-Site for cookie-authenticated unsafe methods. TUI/CLI keep Bearer authentication.
-- Mask ordinary management reads, revisions, effective config, credential-list API-key account values and per-key usage. Explicit secret exports, credential downloads, usage queue/RESP records and trusted plugin host callbacks retain their documented plaintext access.
-- Bind retained secrets to their destination; changing it requires plaintext re-entry. Plugin configs may retain `$secret` only as the whole opaque config; reject nested placeholders.
+- Mask ordinary management reads, revisions, effective config, credential-list API-key account values and per-key usage. Explicit secret exports, credential downloads and usage queue/RESP records retain their documented plaintext access.
+- Bind retained secrets to their destination; changing it requires plaintext re-entry.
 
 ### Money and state (if present)
 
@@ -59,7 +58,7 @@ Money clauses apply only where billing or a ledger exists.
 - Other operations a client, upstream or job can retry are idempotent; the rest remain concurrency-safe.
 - A ledger balances to every balance it feeds and supports replay/reconciliation. [rule: ledger]
 - Do not close accounts or records while money is in motion.
-- SQLite is the sole durable authority for configuration and OAuth credentials. YAML is an explicit first-import format, not a watched runtime file or an asynchronously mirrored backup. Config mutations use management resources and atomic revisions. Preserve versioned plugin raw data and OAuth-only scope on import; do not silently discard unsupported input. Credential state is separate from config revisions: restoring configuration must never resurrect a revoked token.
+- SQLite is the sole durable authority for configuration and OAuth credentials. YAML is an explicit first-import format, not a watched runtime file or an asynchronously mirrored backup. Config mutations use management resources and atomic revisions. Preserve OAuth-only scope on import; do not silently discard unsupported input. Credential state is separate from config revisions: restoring configuration must never resurrect a revoked token.
 - One running process owns a database and serves its state from memory; offline commands that write it are refused while it runs, and online changes go through the management API. The `--db` file is a standalone SQLite snapshot without WAL, SHM or journal companions, published atomically before a commit succeeds, so copying it while the server runs is a complete backup; `config backup` encodes the accepted state into a new file. Keep snapshots, temporary working databases and backups private; logical deletion is not a promise of physical erasure from disk. Preserve the invariants in `docs/STATE-AND-CONCURRENCY.md`.
 - Keep config commits and credential writes atomic against concurrent writers, runtime publication and token refresh. Serialize refresh-token rotation across processes sharing a database so a refresh token is never spent twice.
 - A request uses one snapshot even if configuration or credentials change during it.

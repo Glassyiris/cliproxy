@@ -5,7 +5,7 @@ Give every configuration and credential mutation one application-level owner tha
 ## ADDED Requirements
 
 ### Requirement: One mutation authority while the service runs
-The system SHALL admit every online persistent-state mutation through one owning application service. External clients, including CLI configuration imports and login persistence, SHALL use authenticated management interfaces; internal refresh, plugin and scheduler commands SHALL enter the same authority without requiring HTTP loopback. Callers SHALL NOT obtain a writable persistence backend that bypasses this authority.
+The system SHALL admit every online persistent-state mutation through one owning application service. External clients, including CLI configuration imports and login persistence, SHALL use authenticated management interfaces; internal refresh and scheduler commands SHALL enter the same authority without requiring HTTP loopback. Callers SHALL NOT obtain a writable persistence backend that bypasses this authority.
 
 #### Scenario: Online CLI changes configuration
 - **WHEN** a CLI imports configuration while the selected service is running
@@ -18,7 +18,7 @@ The system SHALL admit every online persistent-state mutation through one owning
 - **AND** it does not retry by writing the database locally
 
 #### Scenario: Internal refresh saves a token
-- **WHEN** a server-owned refresh or plugin operation needs to persist a credential change
+- **WHEN** a server-owned refresh operation needs to persist a credential change
 - **THEN** it submits an internal command to the owning service
 - **AND** it does not independently combine SQL writes with its own runtime publication sequence
 
@@ -70,9 +70,7 @@ A successful persistent mutation SHALL satisfy the durability contract before th
 - **AND** later retry and restart recovery follow the documented persistence contract
 
 ### Requirement: Unpublished checkpoints cannot be superseded from stale state
-After installing a checkpoint whose final publication fails, the service SHALL retain explicit pending recovery state and refuse ordinary mutation admission until that state has been durably published and reconciled. It SHALL NOT encode a later image from older accepted memory that discards required checkpoint data. Already-in-flight non-repeatable canonical file-backed grants SHALL be preserved when retainable by the same owner against the latest pending checkpoint while keeping runtime admission conditional. A result lost because local storage/rendering fails at completion MAY require re-login, but the service MUST NOT report success, overwrite already-durable data from stale memory, deadlock, resurrect deleted/revoked credentials, or permanently block unrelated writes; starting new grant work and dispatch using a known-invalidated affected credential SHALL be paused. For already-returned plugin-virtual grants, whose individual documents SHALL NOT overwrite their shared plugin source file, the same owner SHALL temporarily retain the result in memory without activation while recovery is unresolved. After recovery it SHALL recheck relevant registration/version/source fences under the same admission context before one-time activation, without consuming another provider grant. This volatile execution state SHALL NOT be represented as a durable per-virtual format or SQL record or promised to survive process exit.
-
-The service SHALL recognize a successful handled returned plugin `auth.refresh` response carrying actual credential data as a completed grant result, including opaque formats, without a standardized-token-field heuristic. Failed/unhandled/no-auth/progress-only responses SHALL NOT acquire that authority. In-RPC plugin host saves SHALL use a service-issued specific OAuth/refresh job scope, constrained by actual plugin/instance/version, operation/session, eligible managed destinations, lifetime and relevant source/account/registration/cancellation fences. New jobs SHALL pass recovery admission before upstream work; valid already-started scopes MAY preserve eligible results against the latest pending candidate without successful save acknowledgement or activation until publication resolves. No client save flag, ambient mutable bypass or new plugin wire/SDK marker SHALL confer that authority.
+After installing a checkpoint whose final publication fails, the service SHALL retain explicit pending recovery state and refuse ordinary mutation admission until that state has been durably published and reconciled. It SHALL NOT encode a later image from older accepted memory that discards required checkpoint data. Already-in-flight non-repeatable canonical file-backed grants SHALL be preserved when retainable by the same owner against the latest pending checkpoint while keeping runtime admission conditional. A result lost because local storage/rendering fails at completion MAY require re-login, but the service MUST NOT report success, overwrite already-durable data from stale memory, deadlock, resurrect deleted/revoked credentials, or permanently block unrelated writes; starting new grant work and dispatch using a known-invalidated affected credential SHALL be paused.
 
 #### Scenario: A completed builtin login is terminally rejected
 - **WHEN** local rendering rejects validation, its captured destination changed or was deleted, or its issued authorization is gone
@@ -83,20 +81,6 @@ The service SHALL recognize a successful handled returned plugin `auth.refresh` 
 - **WHEN** local storage/rendering fails at login or refresh completion before the result can be durably retained
 - **THEN** re-login may be necessary, without success acknowledgement, stale overwrite, deadlock, resurrection of deleted/revoked credentials or permanent blocking of unrelated writes
 - **AND** retryable held builtin results remain owner-lifetime memory and provider-wide pre-destination withholding lasts until a later owner admission drains their queue, without a timed retry or process-exit survival guarantee
-
-#### Scenario: An opaque host save is made inside an admitted job
-- **WHEN** an authorized plugin returns an opaque grant result through `host.auth.save` inside its still-valid admitted OAuth/refresh job
-- **THEN** the same owner preserves eligible file-backed result bytes against the latest pending state, or holds a virtual child result in owner memory without changing its shared source
-- **AND** it does not report successful save/publication or activate the result while recovery is unresolved
-
-#### Scenario: A manual or parse-only host save occurs during recovery
-- **WHEN** an ordinary/manual/parse-only callback attempts `host.auth.save` during unresolved recovery
-- **THEN** it cannot use grant preservation admission or inherit another job's authority
-
-#### Scenario: A callback scope is stale or targets another source
-- **WHEN** a callback's job/session closed or was cancelled/revoked, its plugin/instance/version no longer matches, or it names a wrong or replaced destination
-- **THEN** the service refuses that authority without resurrecting deleted credentials or overwriting another source
-- **AND** a post-job callback cannot inherit authority from a different active job
 
 #### Scenario: An unrelated mutation follows a failed token publication
 - **WHEN** a provider replaces token R0 with R1, R1 is checkpointed, final publication fails, and an unrelated configuration mutation is attempted
@@ -109,25 +93,13 @@ The service SHALL recognize a successful handled returned plugin `auth.refresh` 
 - **THEN** its required preservation is serialized by the same service against the latest pending state without erasing the first grant
 - **AND** checkpoint preservation alone does not claim successful configuration publication or bypass runtime admission
 
-#### Scenario: A virtual grant returns during pending recovery
-- **WHEN** a plugin-virtual refresh was already in flight and returns a result while publication or a required projection is pending
-- **THEN** the same owner retains that result and its relevant fences in memory without activation or ordinary save/configuration success
-- **AND** the published and shared plugin source bytes remain unchanged by that result, with no per-virtual SQL record
-- **AND** new virtual grant starts and dispatch using known-invalidated old tokens remain paused
-- **AND** recovery admits the result once only if its current registration/version/source fences still hold, without a second grant
-
-#### Scenario: A held virtual result becomes stale
-- **WHEN** a held virtual result's registration is deleted, replaced, reimported or otherwise invalidated before recovery admission
-- **THEN** the old result is not activated
-- **AND** disposal does not authorize reuse of a known-invalidated old token
-
 #### Scenario: Pending publication is retried
 - **WHEN** storage permits pending publication to complete
 - **THEN** the service publishes and reconciles the latest retained checkpoint before admitting ordinary mutations
 - **AND** an older accepted view never silently becomes the new persistence source
 
 ### Requirement: State domains retain their separate semantics
-The common writer SHALL preserve distinct configuration, credential and cooldown semantics. Configuration-history restore SHALL affect configuration resources only. Secret-bearing credential data SHALL be exposed only to authorized consumers. A token grant that must be persisted before admission SHALL remain distinguishable from a credential admitted to runtime use. Temporarily held plugin-virtual results SHALL remain owner-lifetime execution state, not a second independently writable canonical authority; the configured SQLite file SHALL remain the complete backup of supported persistent state.
+The common writer SHALL preserve distinct configuration, credential and cooldown semantics. Configuration-history restore SHALL affect configuration resources only. Secret-bearing credential data SHALL be exposed only to authorized consumers. A token grant that must be persisted before admission SHALL remain distinguishable from a credential admitted to runtime use. The configured SQLite file SHALL remain the complete backup of supported persistent state.
 
 #### Scenario: Configuration history is restored
 - **WHEN** an earlier configuration revision is restored
@@ -143,12 +115,6 @@ The common writer SHALL preserve distinct configuration, credential and cooldown
 - **WHEN** live scheduler feedback changes before its background checkpoint is persisted
 - **THEN** scheduling can use that volatile state while the canonical checkpoint still describes the last committed state
 - **AND** eventual checkpoint persistence uses the common commit authority without claiming an ordinary configuration change
-
-#### Scenario: A volatile virtual result is not a cold-restorable record
-- **WHEN** a process exits with a virtual result held only in memory and a new process opens the configured SQLite snapshot
-- **THEN** no survival or cold restoration of that volatile result is promised
-- **AND** all supported persistent state still comes from the complete single-file snapshot
-- **AND** this local plugin-virtual rule does not change Home's mutually exclusive remote authority
 
 #### Scenario: A persisted grant is not admitted
 - **WHEN** a granted token is durably recorded but its runtime registration precondition no longer holds

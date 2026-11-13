@@ -23,8 +23,8 @@ class SummaryTests(unittest.TestCase):
             Path(directory, "checklist.md").write_text(
                 '- [ ] **[M1] M1-0128** `GET /v1/models/*model` — model detail\n'
                 '- [ ] **[M5] M5-0304** `POST /v8/management/oauth/siwc/bind` — bind\n'
-                '- [ ] **[M6] M6-0249** RPC `host.routing.reset_cooldown`\n'
-                '- [ ] **[M6] M6-0250** Plugin data contract `ConfigField.Default`\n')
+                '- [ ] **[M6] M6-0060** LAN discovery mDNS/DNS-SD `_ai-gateway._tcp`\n'
+                '- [ ] **[M4] M4-0044** `oauth.auth-dir` (legacy `auth-dir`)\n')
             with patch.object(probe, "HERE", directory):
                 self.assertEqual(probe.routes(), [
                     ("M1-0128", "GET", "/v1/models/*model"),
@@ -38,20 +38,20 @@ class SummaryTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertEqual(audit.config_owner(key), owner)
 
-    def test_plugin_http_fixtures_count_as_route_tests_but_not_callback_arguments(self):
-        fixture = ('{"steps": [{"op": "http", "args": {"method": "DELETE", '
-                   '"path": "/v8/management/plugins/example/quota"}}, '
-                   '{"op": "respond", "args": {"method": "quota.reset"}}]}')
+    def test_quota_probe_http_steps_count_as_route_tests_but_not_other_step_arguments(self):
+        fixture = ('{"steps": [{"op": "http", "args": {"method": "POST", '
+                   '"path": "/v0/management/quota/fetch"}}, '
+                   '{"op": "upstream", "args": {"method": "quota.reset"}}]}')
         with patch.object(audit, "scan_files", return_value=iter([
-            ("crates/cpa-server/tests/fixtures/plugin_routes_go.json", fixture),
+            ("crates/cpa-server/tests/fixtures/quota_probe_go.json", fixture),
             ("crates/cpa-server/tests/fixtures/media_go.json",
              '{"scenarios": [{"method": "POST", "path": "/v1/videos/extensions"}]}'),
         ])):
             tests = audit.test_texts()
-        key = "DELETE /v8/management/plugins/:id/quota"
+        key = "POST /v0/management/quota/fetch"
         result = audit.judge_route({"text": f"`{key}`"}, {key: {"routed": True, "status": 400}}, tests)
         self.assertEqual(result[0], "covered")
-        for key in ("GET /v8/management/plugins/:id/quota", "DELETE /v8/management/plugins/:id/config"):
+        for key in ("GET /v0/management/quota/fetch", "POST /v0/management/reset-quota"):
             result = audit.judge_route({"text": f"`{key}`"}, {key: {"routed": True, "status": 400}}, tests)
             self.assertEqual(result[0], "partial")
         key = "POST /v1/videos/extensions"
@@ -60,16 +60,16 @@ class SummaryTests(unittest.TestCase):
         self.assertNotIn("quota.reset", "\n".join(tests.values()))
 
     def test_fixture_route_parameters_stop_at_query_quote_and_line_boundaries(self):
-        quota = "DELETE /v8/management/plugins/:id/quota"
+        hangup = "POST /v1/realtime/calls/:call_id/hangup"
         models = "GET /v1/models/*model"
         cases = [
-            (quota, 'DELETE "/v8/management/plugins/example/quota?next=/other"', "covered"),
-            (quota, 'DELETE "/v8/management/plugins/example?next=/quota"', "partial"),
+            (hangup, 'POST "/v1/realtime/calls/example/hangup?next=/other"', "covered"),
+            (hangup, 'POST "/v1/realtime/calls/example?next=/hangup"', "partial"),
             (models, 'GET "/v1/models/provider/model?next=/other"', "covered"),
             (models, 'GET "/v1/models/?next=/provider/model"', "partial"),
             (models, 'GET "/v1/models/provider" "unrelated"', "partial"),
-            (quota, 'DELETE "/v8/management/plugins/ex\rample/quota"', "partial"),
-            (quota, 'DELETE "/v8/management/plugins/ex\nample/quota"', "partial"),
+            (hangup, 'POST "/v1/realtime/calls/ex\rample/hangup"', "partial"),
+            (hangup, 'POST "/v1/realtime/calls/ex\nample/hangup"', "partial"),
             (models, 'GET "/v1/models/provider\rmodel"', "partial"),
             (models, 'GET "/v1/models/provider\nmodel"', "partial"),
         ]

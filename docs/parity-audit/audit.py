@@ -132,9 +132,6 @@ def owner_for(text):
         ("management", "manage"),
         ("internal/config", "manage"),
         ("internal/usage", "server"),
-        ("pluginabi", "plugins"),
-        ("pluginhost", "plugins"),
-        ("plugin", "plugins"),
         ("internal/tui", "tui"),
         ("managementasset", "dashboard"),
         ("discovery", "tui"),
@@ -199,8 +196,8 @@ def test_texts():
             steps = (s for sc in json.loads(text)["scenarios"] for s in sc.get("steps", []))
             out[rel] = "\n".join(f'{s["method"]} "/v0/management{s["path"]}"' for s in steps if "path" in s)
             continue
-        if rel.endswith("cpa-server/tests/fixtures/plugin_routes_go.json"):
-            # plugin_routes.rs replays every HTTP step, including v0/v8 aliases.
+        if rel.endswith("cpa-server/tests/fixtures/quota_probe_go.json"):
+            # quota_probe_go.rs replays every HTTP step.
             steps = json.loads(text)["steps"]
             out[rel] = "\n".join(f'{s["args"]["method"]} "{s["args"]["path"]}"'
                                   for s in steps if s["op"] == "http")
@@ -247,7 +244,7 @@ FAMILY_OWNER = {"claude": "claude", "codex": "codex", "gemini": "google", "inter
                 "meta": "device-providers", "kimi": "device-providers", "openai-compatibility": "openai-xai",
                 "aistudio": "google", "antigravity": "google", "vertex": "google", "xai": "openai-xai",
                 "devin": "device-providers"}
-SECTION_OWNER = [("management.", "manage"), ("config-version", "manage"), ("plugins.", "plugins"),
+SECTION_OWNER = [("management.", "manage"), ("config-version", "manage"),
                  ("server.discovery", "tui"),
                  ("client.codex", "codex"), ("multimedia.", "openai-xai")]
 CONFIG_ONLY = ("config/schema.rs", "config/document.rs", "config/validate.rs", "config/generate_schema.py")

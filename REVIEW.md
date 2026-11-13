@@ -80,8 +80,8 @@ Inspect the project contracts in this order; report findings by severity:
 - Apply root `AGENTS.md`: callers migrate in the same change (opening paragraph) and goldens follow "History"; Go parity is not a target.
 - Check passthrough bytes under backend APIs and modularity, secret boundaries under Security, and test isolation under Verification. A user's database is not the disposable real SQLite instance required for proof.
 - For Claude changes, inspect system blocks, tool order and definitions, message content, cache_control placement, headers and beta flags, field order and whitespace. Flag any byte change before the last cache breakpoint unless the PR description declares its effect on existing sessions' prompt caching. Flag keepalive or other extra inference requests.
-- For credential/config changes, inspect backend Security and Money and state: masking and documented plaintext surfaces, destination-bound retained secrets, opaque plugin placeholders, atomic publication, refresh rotation and one snapshot per request.
-- For lock, refresh, reload, plugin and Home changes, inspect lock order, locks held across await or blocking I/O, waits shutdown cannot cancel, and state read before a lock and used after it.
+- For credential/config changes, inspect backend Security and Money and state: masking and documented plaintext surfaces, destination-bound retained secrets, atomic publication, refresh rotation and one snapshot per request.
+- For lock, refresh, reload and Home changes, inspect lock order, locks held across await or blocking I/O, waits shutdown cannot cancel, and state read before a lock and used after it.
 - Inspect request preparation and YAML config loading for repeated rescans under backend Performance. Skip style nits covered by fmt and clippy.
 
 Locate findings at the recorded head SHA; cite the recorded base SHA for prior behaviour. Root Reporting's `origin/master` convention applies to PR and issue claims about existing master behaviour.

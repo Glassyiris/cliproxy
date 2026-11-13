@@ -8,7 +8,7 @@ Thanks for helping. Bug reports, fixes and new tests are all welcome.
 
 ## Building and testing
 
-You need Rust (stable), `cmake`, `clang` and `perl` for BoringSSL. Go 1.26 lets the plugin tests run instead of skipping; with `CPA_TEST_NO_SKIP=1`, as in CI, they fail instead.
+You need Rust (stable), `cmake`, `clang` and `perl` for BoringSSL.
 
 ```sh
 cargo fmt --all --check
