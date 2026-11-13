@@ -19,6 +19,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { t } from "../../lib/i18n.ts";
 import { useDialogParam } from "../pages/PageDialog.tsx";
 import { AppearancePanel } from "./AppearancePanel.tsx";
+import { PanelHeading } from "./PanelHeading.tsx";
 import { row } from "./SettingsRows.tsx";
 import { ShortcutsPanel } from "./ShortcutsPanel.tsx";
 import { layout } from "../../themes/site/layout.ts";
@@ -101,10 +102,6 @@ function CloseButton({ onClose }: { onClose: () => void }) {
   );
 }
 
-function PanelHeading({ panel }: { panel: PanelId }) {
-  return <Heading level={2}>{panelOf(panel).label()}</Heading>;
-}
-
 function SettingsSideNav({ titleId, active, onSelect }: Omit<ShellProps, "onClose">) {
   return (
     <SideNav
@@ -153,7 +150,7 @@ function ContentPane({ active, onClose }: Pick<ShellProps, "active" | "onClose">
       <VStack gap={4} xstyle={row.panel}>
         <HStack gap={2} vAlign="start">
           <StackItem size="fill">
-            <PanelHeading panel={active} />
+            <PanelHeading>{panelOf(active).label()}</PanelHeading>
           </StackItem>
           <VStack aria-hidden="true" width={layout.settingsDialog.closeColumn} />
         </HStack>
@@ -207,7 +204,7 @@ function NarrowShell({ titleId, active, onSelect, onClose }: ShellProps) {
       <Divider />
       <StackItem size="fill">
         <VStack gap={4} padding={4} isScrollable height="100%" xstyle={row.panel}>
-          <PanelHeading panel={active} />
+          <PanelHeading>{panelOf(active).label()}</PanelHeading>
           {panelOf(active).body()}
         </VStack>
       </StackItem>
