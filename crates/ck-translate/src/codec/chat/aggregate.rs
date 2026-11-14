@@ -106,6 +106,7 @@ fn merge_field(doc: &mut Document, parent: usize, incoming: usize) -> Result<()>
     }
     if (matches!(a, Value::Array) && matches!(b, Value::Array))
         || (matches!(a, Value::Base64Fragments) && matches!(b, Value::Base64Fragments))
+        || (matches!(a, Value::Utf8Media) && matches!(b, Value::Utf8Media))
     {
         while let Some(child) = doc.node(incoming)?.first {
             doc.detach(incoming, child)?;
@@ -125,15 +126,21 @@ fn merge_field(doc: &mut Document, parent: usize, incoming: usize) -> Result<()>
     ] {
         fragment |= doc.name_is(name, key)?;
     }
-    if fragment && matches!(a, Value::String(_) | Value::Text(_) | Value::Fragments) {
+    if fragment
+        && matches!(
+            a,
+            Value::String(_) | Value::Text(_) | Value::Fragments | Value::Utf8Media
+        )
+    {
         if matches!(b, Value::Null) {
             return Ok(());
         }
-        if !matches!(b, Value::String(_) | Value::Text(_)) {
+        if !matches!(b, Value::String(_) | Value::Text(_) | Value::Utf8Media) {
             return Err(Error::Schema);
         }
         if !matches!(a, Value::Fragments) {
-            let first = doc.add(None, a)?;
+            let first = doc.add(None, Value::Null)?;
+            doc.transplant(first, existing)?;
             doc.replace(existing, Value::Fragments)?;
             doc.append(existing, first)?;
         }

@@ -10,6 +10,9 @@ pub(super) struct Projection {
     choice: u64,
     next: u64,
     offset: u64,
+    live: bool,
+    reachable: bool,
+    ended: bool,
 }
 
 pub(super) fn id(doc: &Document, x: usize) -> Result<LocalId> {
@@ -28,7 +31,10 @@ pub(super) fn id(doc: &Document, x: usize) -> Result<LocalId> {
 
 impl Projection {
     pub(super) fn is_open(&self) -> bool {
-        self.document.is_some()
+        !self.ended
+    }
+    pub(super) fn reachable(&self) -> bool {
+        self.reachable
     }
     pub(super) fn start(owner: &mut Writer, mut doc: Document, x: usize) -> Result<Self> {
         let id = id(&doc, x)?;
@@ -48,18 +54,49 @@ impl Projection {
         } else {
             return Err(Error::Unsupported);
         };
-        let value = doc.required(attributes, "value")?;
+        let supplied_value = doc.member(attributes, "value")?;
+        let value = match supplied_value {
+            Some(value) => value,
+            None => doc.add(None, Value::Null)?,
+        };
         let scalar = doc
             .member(attributes, "scalar")?
             .map(|node| doc.node(node))
             .transpose()?
             .is_some_and(|node| matches!(node.value, Value::Bool(true)));
-        let data = if scalar {
-            value
+        let document_kind = doc.string_is(doc.required(doc.root(), "kind")?, "document")?;
+        if !scalar && field != "audio" && supplied_value.is_some() {
+            let (old, new, old_data, new_data, native_type) = if document_kind {
+                ("image_url", "file", "url", "file_data", "file")
+            } else {
+                ("file", "image_url", "file_data", "url", "image_url")
+            };
+            if let Some(carrier) = doc.remove(value, old)? {
+                doc.rename(carrier, new)?;
+                if let Some(data) = doc.member(carrier, old_data)? {
+                    doc.rename(data, new_data)?;
+                }
+                doc.append(value, carrier)?;
+                doc.set(value, "type", Value::Text(native_type))?;
+            }
+        }
+        let supplied_data = if supplied_value.is_none() {
+            None
+        } else if scalar {
+            Some(value)
         } else if field == "audio" {
-            doc.required(value, "data")?
+            doc.member(value, "data")?
+        } else if document_kind && let Some(file) = doc.member(value, "file")? {
+            doc.member(file, "file_data")?
+        } else if let Some(image) = doc.member(value, "image_url")? {
+            doc.member(image, "url")?
         } else {
-            doc.required(doc.required(value, "image_url")?, "url")?
+            None
+        };
+        let reachable = supplied_data.is_some();
+        let data = match supplied_data {
+            Some(data) => data,
+            None => doc.add(None, Value::Null)?,
         };
         if !matches!(doc.node(data)?.value, Value::Null) {
             return Err(Error::Schema);
@@ -67,7 +104,7 @@ impl Projection {
         let binary = if scalar {
             doc.replace(data, Value::Utf8Media)?;
             data
-        } else if field == "audio" {
+        } else if field == "audio" || (document_kind && doc.member(doc.root(), "mime")?.is_none()) {
             doc.replace(data, Value::Base64Fragments)?;
             data
         } else {
@@ -93,10 +130,13 @@ impl Projection {
             choice,
             next: 0,
             offset: 0,
+            live: field == "audio" || scalar,
+            reachable,
+            ended: false,
         })
     }
 
-    pub(super) fn data(&mut self, mut incoming: Document) -> Result<()> {
+    pub(super) fn data(&mut self, mut incoming: Document) -> Result<Option<(Document, usize, &'static str, u64)>> {
         let root = incoming.root();
         if incoming.unsigned(incoming.required(root, "index")?)? != self.next
             || incoming.unsigned(incoming.required(root, "offset")?)? != self.offset
@@ -112,30 +152,82 @@ impl Projection {
             count += bytes.len() as u64;
             Ok(())
         })?;
+        if self.ended {
+            return Err(Error::Closed);
+        }
+        self.next = self.next.checked_add(1).ok_or(Error::Limit)?;
+        self.offset = self.offset.checked_add(count).ok_or(Error::Limit)?;
+        if self.live {
+            if !self.reachable {
+                return Ok(None);
+            }
+            let value = incoming.add(
+                None,
+                if self.field == "audio" {
+                    Value::Object
+                } else {
+                    Value::Utf8Media
+                },
+            )?;
+            let data = if self.field == "audio" {
+                incoming.set(value, "data", Value::Base64Fragments)?
+            } else {
+                value
+            };
+            incoming.append(data, bytes)?;
+            return Ok(Some((incoming, value, self.field, self.choice)));
+        }
         let doc = self.document.as_mut().ok_or(Error::Closed)?;
         let base = doc.absorb(incoming)? - root;
         doc.append(self.data, base + bytes)?;
-        self.next = self.next.checked_add(1).ok_or(Error::Limit)?;
-        self.offset = self.offset.checked_add(count).ok_or(Error::Limit)?;
-        Ok(())
+        Ok(None)
     }
 
-    pub(super) fn transcript(&mut self, mut incoming: Document) -> Result<()> {
+    pub(super) fn transcript(
+        &mut self,
+        mut incoming: Document,
+    ) -> Result<Option<(Document, usize, &'static str, u64)>> {
         let root = incoming.root();
         let text = incoming.remove(root, "text")?.ok_or(Error::Schema)?;
+        if self.ended {
+            return Err(Error::Closed);
+        }
+        if self.live {
+            if !self.reachable {
+                return Ok(None);
+            }
+            let value = incoming.add(None, Value::Object)?;
+            incoming.rename(text, "transcript")?;
+            incoming.append(value, text)?;
+            return Ok(Some((incoming, value, self.field, self.choice)));
+        }
         let doc = self.document.as_mut().ok_or(Error::Closed)?;
         if doc.member(self.value, "transcript")?.is_some() {
             return Err(Error::Schema);
         }
         let text = doc.absorb(incoming)? - root + text;
         doc.rename(text, "transcript")?;
-        doc.append(self.value, text)
+        doc.append(self.value, text)?;
+        Ok(None)
     }
 
-    pub(super) fn attributes(&mut self, incoming: Document) -> Result<()> {
+    pub(super) fn attributes(
+        &mut self,
+        mut incoming: Document,
+    ) -> Result<Option<(Document, usize, &'static str, u64)>> {
+        if !self.reachable {
+            return Ok(None);
+        }
         let value = incoming.required(incoming.root(), "value")?;
         if !incoming.string_is(incoming.required(incoming.root(), "format")?, "json")? {
             return Err(Error::Schema);
+        }
+        if self.live {
+            if !self.reachable {
+                return Ok(None);
+            }
+            incoming.remove(value, "data")?;
+            return Ok(Some((incoming, value, self.field, self.choice)));
         }
         let doc = self.document.as_mut().ok_or(Error::Closed)?;
         let old_data = if self.field == "audio" {
@@ -158,21 +250,43 @@ impl Projection {
             self.data = data;
         }
         self.value = value;
-        Ok(())
+        Ok(None)
     }
 
-    pub(super) fn end(&mut self, incoming: &Document) -> Result<(Document, usize, &'static str, u64)> {
+    pub(super) fn end(&mut self, incoming: &Document) -> Result<Option<(Document, usize, &'static str, u64)>> {
         if incoming.unsigned(incoming.required(incoming.root(), "bytes")?)? != self.offset
             || !incoming.string_is(incoming.required(incoming.root(), "status")?, "completed")?
         {
             return Err(Error::Schema);
         }
-        Ok((
+        if self.ended {
+            return Err(Error::Closed);
+        }
+        self.ended = true;
+        if self.live || !self.reachable {
+            return Ok(None);
+        }
+        Ok(Some((
             self.document.take().ok_or(Error::Closed)?,
             self.value,
             self.field,
             self.choice,
-        ))
+        )))
+    }
+
+    pub(super) fn initial(&mut self) -> Result<Option<(Document, usize, &'static str, u64)>> {
+        if !self.live {
+            return Ok(None);
+        }
+        let mut doc = self.document.take().ok_or(Error::Closed)?;
+        if !self.reachable || self.field != "audio" {
+            return Ok(None);
+        }
+        doc.remove(self.value, "data")?;
+        if doc.node(self.value)?.first.is_none() {
+            return Ok(None);
+        }
+        Ok(Some((doc, self.value, self.field, self.choice)))
     }
 }
 
@@ -185,8 +299,9 @@ impl Reduction {
         field: &'static str,
         choice: u64,
     ) -> Result<Document> {
-        let parent = native.node(value)?.parent.ok_or(Error::Schema)?;
-        native.detach(parent, value)?;
+        if let Some(parent) = native.node(value)?.parent {
+            native.detach(parent, value)?;
+        }
         let native_root = native.root();
         let mut projection = mapped_document(owner, |e| {
             e.bytes(b"{")?;

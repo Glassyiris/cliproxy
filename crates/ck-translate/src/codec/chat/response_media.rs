@@ -1,6 +1,28 @@
 use super::*;
 use crate::codec::media::{Encoding, Media};
 
+pub(super) struct Audio {
+    publisher: media::Publisher,
+    metadata: Document,
+    scope: Scope,
+    transcript: bool,
+}
+
+impl Audio {
+    pub(super) fn finish(&mut self, emitter: &mut Emitter, owner: &mut Writer) -> Result<()> {
+        if self.transcript {
+            emitter.emit(
+                owner,
+                Kind::MediaTranscript,
+                self.scope,
+                |e| e.bytes(b",\"text\":\"\",\"final\":true"),
+                |_| Ok(()),
+            )?;
+        }
+        self.publisher.end(emitter, owner)
+    }
+}
+
 impl State {
     pub(super) fn media_value(
         &mut self,
@@ -13,109 +35,65 @@ impl State {
         if self.finish_published(owner, input, value)? {
             return Ok(true);
         }
-        let audio = field == "audio";
-        let native_data = if audio {
-            input.member(value, "data")?
-        } else if let Some(image) = input.member(value, "image_url")? {
-            input.member(image, "url")?
+        if field == "audio" {
+            self.audio_fragment(owner, input, value, scope)?;
+            return Ok(true);
+        }
+        let (carrier, data_key, kind) = if input.member(value, "file")?.is_some() {
+            ("file", "file_data", "document")
         } else {
-            None
+            ("image_url", "url", "image")
         };
-        let Some(native_data) = native_data else {
+        let Some(native) = input.member(value, carrier)? else {
+            return Ok(false);
+        };
+        let Some(native_data) = input.member(native, data_key)? else {
             return Ok(false);
         };
         let Value::String(text) = input.node(native_data)?.value else {
             return Err(Error::Schema);
         };
-        let (encoding, mime_lease) = if audio {
-            (Encoding::Base64, None)
-        } else {
-            let Some((encoding, mime)) = super::super::request_content::data_uri_metadata(input, owner, native_data)?
-            else {
-                return Ok(false);
-            };
-            (encoding, Some(mime))
-        };
-        let transcript = if audio {
-            match input.member(value, "transcript")? {
-                Some(text) if !matches!(input.node(text)?.value, Value::Null) => {
-                    super::super::request::require_string(input, text)?;
-                    Some(text)
-                }
-                _ => None,
-            }
-        } else {
-            None
+        let (encoding, mime_lease) = match super::super::request_content::data_uri_metadata(input, owner, native_data)?
+        {
+            Some((encoding, mime)) => (encoding, Some(mime)),
+            None if kind == "document" => (Encoding::Base64, None),
+            None => return Ok(false),
         };
         let mut attributes = mapped_document(owner, |e| {
             e.bytes(b"{\"field\":")?;
             e.string(field)?;
             e.bytes(b",\"value\":{")?;
-            if audio {
-                e.bytes(b"\"data\":null")?;
-                members(
-                    input,
-                    value,
-                    e,
-                    if transcript.is_some() {
-                        &["data", "transcript"]
-                    } else {
-                        &["data"]
-                    },
-                )?;
-            } else {
-                let image = input.required(value, "image_url")?;
-                e.bytes(b"\"image_url\":{\"url\":null")?;
-                members(input, image, e, &["url"])?;
-                e.bytes(b"}")?;
-                members(input, value, e, &["image_url"])?;
-            }
+            e.string(carrier)?;
+            e.bytes(b":{")?;
+            e.string(data_key)?;
+            e.bytes(b":null")?;
+            members(input, native, e, &[data_key])?;
+            e.bytes(b"}")?;
+            members(input, value, e, &[carrier])?;
             e.bytes(b"}}")
         })?;
-        let mime = if let Some(mime) = mime_lease {
-            Some(attributes.import_json(owner, mime)?)
-        } else if let Some(format) = input.member(value, "format")? {
-            if input.string_is(format, "wav")? {
-                Some(attributes.add(None, Value::Text("audio/wav"))?)
-            } else if input.string_is(format, "mp3")? {
-                Some(attributes.add(None, Value::Text("audio/mpeg"))?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let mime = mime_lease.map(|mime| attributes.import_json(owner, mime)).transpose()?;
         let media = Media {
             node: native_data,
             id: media::local_id(b'm', self.serial)?,
             data: Some(text),
             encoding,
-            kind: if audio { "audio" } else { "image" },
+            kind,
             mime: None,
         };
         self.serial = self.serial.checked_add(1).ok_or(Error::Limit)?;
-        let fragment = if audio {
-            let position = self
-                .choices
-                .iter()
-                .position(|choice| Some(choice.index) == scope.choice_index)
-                .ok_or(Error::Schema)?;
-            Some(&mut self.choices[position].audio)
-        } else {
-            None
-        };
         media::publish_with_attributes(
             input,
             media,
             &mut self.emitter,
             owner,
-            (scope, fragment),
+            (scope, None),
             Some(media::Attributes {
                 document: &attributes,
                 value: attributes.root(),
                 mime,
             }),
-            transcript,
+            None,
         )?;
         Ok(true)
     }
@@ -220,6 +198,155 @@ impl State {
             },
             |_| Ok(()),
         )?;
+        Ok(())
+    }
+}
+
+impl State {
+    fn audio_fragment(&mut self, owner: &mut Writer, input: &Document, value: usize, mut scope: Scope) -> Result<()> {
+        let position = self
+            .choices
+            .iter()
+            .position(|choice| Some(choice.index) == scope.choice_index)
+            .ok_or(Error::Schema)?;
+        let data = input.member(value, "data")?;
+        let transcript = input.member(value, "transcript")?;
+        if let Some(text) = transcript
+            && !matches!(input.node(text)?.value, Value::Null)
+        {
+            input.chars(text)?;
+        }
+        let data = data
+            .map(|node| match input.node(node)?.value {
+                Value::String(text) => Ok(text),
+                _ => Err(Error::Schema),
+            })
+            .transpose()?;
+        if let Some(audio) = &self.choices[position].audio_output {
+            for key in ["id", "format", "codec", "sample_rate", "channels"] {
+                if let Some(previous) = audio.metadata.member(audio.metadata.root(), key)?
+                    && let Some(incoming) = input.member(value, key)?
+                    && !snapshot::exact(&audio.metadata, previous, input, incoming, 0)?
+                {
+                    return Err(Error::Schema);
+                }
+            }
+        }
+        let metadata = mapped_document(owner, |e| {
+            e.bytes(b"{")?;
+            let mut first = true;
+            for field in input.children(value)? {
+                let name = input.node(field)?.name.ok_or(Error::Schema)?;
+                if input.name_is(name, "data")? || input.name_is(name, "transcript")? {
+                    continue;
+                }
+                if !first {
+                    e.bytes(b",")?;
+                }
+                first = false;
+                input.write_name(name, e)?;
+                e.bytes(b":")?;
+                input.write(field, e)?;
+            }
+            if let Some(audio) = &self.choices[position].audio_output {
+                for field in audio.metadata.children(audio.metadata.root())? {
+                    if snapshot::matching_member(input, value, &audio.metadata, field)?.is_some() {
+                        continue;
+                    }
+                    if !first {
+                        e.bytes(b",")?;
+                    }
+                    first = false;
+                    audio
+                        .metadata
+                        .write_name(audio.metadata.node(field)?.name.ok_or(Error::Schema)?, e)?;
+                    e.bytes(b":")?;
+                    audio.metadata.write(field, e)?;
+                }
+            }
+            e.bytes(b"}")
+        })?;
+        if self.choices[position].audio_output.is_none() {
+            scope.media_id = Some(media::local_id(b'm', self.serial)?);
+            self.serial = self.serial.checked_add(1).ok_or(Error::Limit)?;
+            let publisher = media::Publisher::start(&mut self.emitter, owner, scope, |e| {
+                e.bytes(b",\"kind\":\"audio\",\"encoding\":\"base64\",\"attributes\":{\"field\":\"audio\",\"value\":{\"data\":null")?;
+                members(&metadata, metadata.root(), e, &[])?;
+                e.bytes(b"}}")
+            })?;
+            self.choices[position].audio_output = Some(Audio {
+                publisher,
+                metadata,
+                scope,
+                transcript: false,
+            });
+        } else {
+            let audio = self.choices[position].audio_output.as_mut().ok_or(Error::Schema)?;
+            audio.metadata = metadata;
+            self.emitter.emit(
+                owner,
+                Kind::Chunk,
+                audio.scope,
+                |e| {
+                    base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
+                    e.bytes(b",\"choices\":[{\"index\":")?;
+                    e.unsigned(scope.choice_index.ok_or(Error::Schema)?)?;
+                    e.bytes(b",\"delta\":{\"audio\":{")?;
+                    let mut first = true;
+                    for field in input.children(value)? {
+                        let name = input.node(field)?.name.ok_or(Error::Schema)?;
+                        if input.name_is(name, "data")? || input.name_is(name, "transcript")? {
+                            continue;
+                        }
+                        if !first {
+                            e.bytes(b",")?;
+                        }
+                        first = false;
+                        input.write_name(name, e)?;
+                        e.bytes(b":")?;
+                        input.write(field, e)?;
+                    }
+                    e.bytes(b"}},\"finish_reason\":null}]")
+                },
+                |_| Ok(()),
+            )?;
+        }
+        let choice = &mut self.choices[position];
+        let audio = choice.audio_output.as_mut().ok_or(Error::Schema)?;
+        if let Some(data) = data {
+            audio
+                .publisher
+                .collect(&mut self.emitter, owner, |emit| choice.audio.push(input, data, emit))?;
+        }
+        if let Some(text) = transcript {
+            if matches!(input.node(text)?.value, Value::Null) {
+                self.emitter.emit(
+                    owner,
+                    Kind::Chunk,
+                    audio.scope,
+                    |e| {
+                        base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
+                        e.bytes(b",\"choices\":[{\"index\":")?;
+                        e.unsigned(scope.choice_index.ok_or(Error::Schema)?)?;
+                        e.bytes(b",\"delta\":{\"audio\":{\"transcript\":null}},\"finish_reason\":null}]")
+                    },
+                    |_| Ok(()),
+                )?;
+            } else {
+                audio.transcript = true;
+                self.emitter.emit(
+                    owner,
+                    Kind::MediaTranscript,
+                    audio.scope,
+                    |e| {
+                        e.bytes(b",\"text\":")?;
+                        input.write(text, e)?;
+                        e.bytes(b",\"final\":false")
+                    },
+                    |_| Ok(()),
+                )?;
+            }
+        }
         Ok(())
     }
 }

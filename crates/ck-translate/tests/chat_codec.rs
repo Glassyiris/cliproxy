@@ -1,5 +1,7 @@
 #[path = "semantic/incremental.rs"]
 mod incremental;
+#[path = "semantic/media_lifetime.rs"]
+mod media_lifetime;
 #[path = "semantic/request_controls.rs"]
 mod request_controls;
 #[path = "semantic/mod.rs"]

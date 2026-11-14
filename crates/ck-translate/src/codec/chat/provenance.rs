@@ -176,6 +176,7 @@ pub(super) fn restore(doc: &mut Document, x: usize) -> Result<bool> {
         let Value::String(text) = doc.node(pointer)?.value else {
             return Err(Error::Schema);
         };
+        let mut consumed = false;
         let parent = {
             let mut chars = doc.chars(pointer)?;
             if chars.next_scalar()? != Some('/') {
@@ -207,6 +208,8 @@ pub(super) fn restore(doc: &mut Document, x: usize) -> Result<bool> {
                             exists |= segment.matches(doc, name)?;
                         }
                     }
+                    consumed = exists
+                        && !(parent == doc.root() && segment.is("x_ck")? && doc.member(parent, "x_ck")? == Some(x));
                     break if exists { None } else { Some(parent) };
                 }
                 let child = if matches!(doc.node(parent)?.value, Value::Array) {
@@ -262,6 +265,10 @@ pub(super) fn restore(doc: &mut Document, x: usize) -> Result<bool> {
             let target = doc.add(Some(Name::Pointer(text)), Value::Null)?;
             doc.transplant(target, value)?;
             doc.append(parent, target)?;
+            consumed = true;
+        }
+        if consumed {
+            doc.detach(original, entry)?;
         }
     }
     Ok(restored)

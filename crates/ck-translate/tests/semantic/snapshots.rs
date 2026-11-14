@@ -215,3 +215,15 @@ fn snapshots_reader_rejects_a_foreign_store() {
     assert!(mapped.output(&mapped.writer).is_empty());
     assert!(foreign.output(&foreign.writer).is_empty());
 }
+
+#[test]
+fn snapshots_validate_retained_children_of_every_finishing_choice() {
+    reject(
+        json!({"choices":[{"index":0,"delta":{"content":"a"}},{"index":1,"delta":{"tool_calls":[{"index":0,"id":"t","function":{"name":"f","arguments":"{"}}]}}]}),
+        json!({"choices":[{"index":0,"message":{"content":"aSHOULD_NOT_ESCAPE"},"finish_reason":"stop"},{"index":1,"finish_reason":"tool_calls"}]}),
+    );
+    reject(
+        json!({"choices":[{"index":0,"delta":{"content":"a"}},{"index":1,"delta":{"audio":{"data":"AQ"}}}]}),
+        json!({"choices":[{"index":0,"message":{"content":"aSHOULD_NOT_ESCAPE"},"finish_reason":"stop"},{"index":1,"message":{},"finish_reason":"stop"}]}),
+    );
+}

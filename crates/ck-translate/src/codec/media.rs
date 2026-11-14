@@ -345,78 +345,30 @@ pub(crate) fn publish_with_attributes(
     transcript: Option<usize>,
 ) -> Result<()> {
     scope.media_id = Some(media.id);
-    emitter.emit(
-        owner,
-        Kind::MediaStart,
-        scope,
-        |e| {
-            e.bytes(b",\"kind\":")?;
-            e.string(media.kind)?;
-            e.bytes(b",\"encoding\":\"base64\"")?;
-            if let Some(attributes) = &attributes {
-                if let Some(mime) = attributes.mime {
-                    e.bytes(b",\"mime\":")?;
-                    attributes.document.write(mime, e)?;
-                }
-                e.bytes(b",\"attributes\":")?;
-                attributes.document.write(attributes.value, e)?;
-            } else if let Some(mime) = media.mime {
+    let mut publisher = Publisher::start(emitter, owner, scope, |e| {
+        e.bytes(b",\"kind\":")?;
+        e.string(media.kind)?;
+        e.bytes(b",\"encoding\":\"base64\"")?;
+        if let Some(attributes) = &attributes {
+            if let Some(mime) = attributes.mime {
                 e.bytes(b",\"mime\":")?;
-                doc.write(mime, e)?;
+                attributes.document.write(mime, e)?;
             }
-            Ok(())
-        },
-        |_| Ok(()),
-    )?;
-    let mut chunk = [0u8; 36_864];
-    let mut len = 0;
-    let mut index = 0;
-    let mut offset = 0;
-    let mut ceiling = emitter.data_capacity(scope, index, offset)?;
-    let mut flush = |chunk: &[u8]| -> Result<usize> {
-        use base64::Engine;
-        let mut encoded = [0u8; 49_152];
-        let count = base64::engine::general_purpose::STANDARD
-            .encode_slice(chunk, &mut encoded)
-            .map_err(|_| Error::Schema)?;
-        emitter.emit(
-            owner,
-            Kind::Data,
-            scope,
-            |e| {
-                e.bytes(b",\"index\":")?;
-                e.unsigned(index)?;
-                e.bytes(b",\"offset\":")?;
-                e.unsigned(offset)?;
-                e.bytes(b",\"bytes\":\"")?;
-                e.bytes(&encoded[..count])?;
-                e.bytes(b"\"")
-            },
-            |_| Ok(()),
-        )?;
-        index += 1;
-        offset += chunk.len() as u64;
-        emitter.data_capacity(scope, index, offset)
-    };
-    let mut collect = |bytes: &[u8]| {
-        for &byte in bytes {
-            chunk[len] = byte;
-            len += 1;
-            if len == ceiling {
-                ceiling = flush(&chunk[..len])?;
-                len = 0;
-            }
+            e.bytes(b",\"attributes\":")?;
+            attributes.document.write(attributes.value, e)?;
+        } else if let Some(mime) = media.mime {
+            e.bytes(b",\"mime\":")?;
+            doc.write(mime, e)?;
         }
         Ok(())
-    };
-    if let Some(fragment) = fragment {
-        fragment.push(doc, media.data.ok_or(Error::Position)?, &mut collect)?;
-    } else {
-        bytes(doc, media, &mut collect)?;
-    }
-    if len != 0 {
-        flush(&chunk[..len])?;
-    }
+    })?;
+    publisher.collect(emitter, owner, |collect| {
+        if let Some(fragment) = fragment {
+            fragment.push(doc, media.data.ok_or(Error::Position)?, collect)
+        } else {
+            bytes(doc, media, collect)
+        }
+    })?;
     if let Some(transcript) = transcript {
         emitter.emit(
             owner,
@@ -430,18 +382,7 @@ pub(crate) fn publish_with_attributes(
             |_| Ok(()),
         )?;
     }
-    emitter.emit(
-        owner,
-        Kind::MediaEnd,
-        scope,
-        |e| {
-            e.bytes(b",\"bytes\":")?;
-            e.unsigned(offset)?;
-            e.bytes(b",\"status\":\"completed\"")
-        },
-        |_| Ok(()),
-    )?;
-    Ok(())
+    publisher.end(emitter, owner)
 }
 
 pub fn write_reference(media: Media, e: &mut Encoder<'_, '_>) -> Result<()> {
@@ -601,6 +542,32 @@ impl Publisher {
         Ok(())
     }
 
+    pub(crate) fn collect(
+        &mut self,
+        emitter: &mut Emitter,
+        owner: &mut Writer,
+        decode: impl FnOnce(&mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()>,
+    ) -> Result<()> {
+        let mut chunk = [0; 36_864];
+        let mut len = 0;
+        let mut ceiling = emitter.data_capacity(self.scope, self.index, self.offset)?;
+        decode(&mut |bytes| {
+            for &byte in bytes {
+                chunk[len] = byte;
+                len += 1;
+                if len == ceiling {
+                    self.append(&chunk[..len], emitter, owner)?;
+                    len = 0;
+                    ceiling = emitter.data_capacity(self.scope, self.index, self.offset)?;
+                }
+            }
+            Ok(())
+        })?;
+        if len != 0 {
+            self.append(&chunk[..len], emitter, owner)?;
+        }
+        Ok(())
+    }
     pub(crate) fn end(&mut self, emitter: &mut Emitter, owner: &mut Writer) -> Result<()> {
         if self.ended {
             return Err(Error::Closed);
@@ -768,7 +735,7 @@ impl Base64Fragments {
         Ok(())
     }
 
-    fn push(&mut self, doc: &Document, text: Text, mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
+    pub(crate) fn push(&mut self, doc: &Document, text: Text, mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
         use base64::Engine;
         let mut decoded = Decoded::new(doc.source(text)?, text.span)?;
         let mut padded = false;
