@@ -310,3 +310,22 @@ fn registered_payloads_write_as_plain_base64_in_every_original_form() {
         assert_eq!(serde_json::from_slice::<Json>(&bytes(&lease)).unwrap(), json!(data));
     }
 }
+
+#[test]
+fn plain_base64_image_with_a_mime_reaches_chat_as_a_data_uri() {
+    let (mut mapped, mut doc, mut media) = rebuilt(&input());
+    let part = parts(&doc)[2];
+    register_payload(
+        &mut mapped,
+        &mut doc,
+        &mut media,
+        part,
+        "\"R0lG\"",
+        (Encoding::Base64, "image/gif"),
+    );
+    for upstream_stream in [false, true] {
+        let output = encode(&mut mapped, &doc, &media, upstream_stream);
+        let url = &output["messages"][0]["content"][2]["image_url"]["url"];
+        assert_eq!(url, "data:image/gif;base64,R0lG");
+    }
+}
