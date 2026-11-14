@@ -21,7 +21,7 @@ impl State {
         }
         self.replay(owner)?;
         self.validate_finishes(owner, doc, choices)?;
-        let changes = self.snapshot_changes(owner, doc, choices)?;
+        let (changes, _seen) = self.snapshot_changes(owner, doc, choices)?;
         for choice in doc.children(choices)? {
             if let Some(message) = doc.member(choice, "message")?
                 && let Some(audio) = doc.member(message, "audio")?
@@ -116,8 +116,14 @@ impl State {
     }
 
     /// Validates each snapshot message against the published prefix and records the edits that
-    /// reduce it to a suffix.
-    fn snapshot_changes(&mut self, owner: &mut Writer, doc: &Document, choices: usize) -> Result<Table<Change>> {
+    /// reduce it to a suffix. Also returns the table of seen choice indexes, which the caller
+    /// keeps, with its metadata quota, until the edits are applied.
+    fn snapshot_changes(
+        &mut self,
+        owner: &mut Writer,
+        doc: &Document,
+        choices: usize,
+    ) -> Result<(Table<Change>, Table<u64>)> {
         let prior = self.reduction.document.as_ref().ok_or(Error::Schema)?;
         let mut changes = Table::new(owner)?;
         let mut seen = Table::new(owner)?;
@@ -158,7 +164,7 @@ impl State {
             }
             reconcile_object(owner, prior, old, doc, message, &mut changes, Context::Message)?;
         }
-        Ok(changes)
+        Ok((changes, seen))
     }
 }
 
