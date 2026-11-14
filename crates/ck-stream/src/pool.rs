@@ -290,7 +290,8 @@ impl Pool {
         for _ in 0..workers {
             shards.push(Padded(Shard::new()));
         }
-        // Frames are distributed lazily; a worker steals resident frames before cold ones.
+        // Frames are distributed lazily; a worker steals resident frames from lists that look
+        // occupied before taking cold ones.
         shards[0].0.lock().frames.extend((0..initial).rev());
         Ok(Self {
             mapping,
