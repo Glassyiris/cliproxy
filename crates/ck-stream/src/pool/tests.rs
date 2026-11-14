@@ -192,7 +192,7 @@ fn cold_frames_prefault_only_the_pages_a_record_needs() {
     pool.decay().unwrap();
     pool.decay().unwrap();
     // Punching forgets the populated prefix, so reuse populates again.
-    assert_eq!(pool.ready[frame as usize].load(Ordering::Relaxed), 0);
+    assert_eq!(pool.states[frame as usize].ready.load(Ordering::Relaxed), 0);
 }
 
 #[test]
@@ -420,7 +420,7 @@ fn prefault_doubles_the_populated_prefix() {
     pool.decay().unwrap();
     let warm: Vec<_> = (0..WARM).map(|_| pool.allocate(FRAME_BYTES).unwrap()).collect();
     let frame = pool.allocate(100).unwrap();
-    let ready = || pool.ready[frame as usize].load(Ordering::Relaxed) as usize;
+    let ready = || pool.states[frame as usize].ready.load(Ordering::Relaxed) as usize;
     assert!(ready() <= pool.page);
     // Record by record, a frame fills in a few populate calls rather than one per page.
     let mut calls = 0;
@@ -444,7 +444,7 @@ fn isolated_tmpfs_prefault_ahead_falls_back_to_the_needed_page() {
     pool.decay().unwrap();
     let warm: Vec<_> = (0..WARM).map(|_| pool.allocate(FRAME_BYTES).unwrap()).collect();
     let frame = pool.allocate(4 * pool.page).unwrap();
-    let ready = pool.ready[frame as usize].load(Ordering::Relaxed) as usize;
+    let ready = pool.states[frame as usize].ready.load(Ordering::Relaxed) as usize;
     let filler_path = directory.0.join("filler");
     let filler = fill_available(&filler_path);
     // One free page: populating ahead is refused, the page the record needs is granted.
@@ -452,7 +452,7 @@ fn isolated_tmpfs_prefault_ahead_falls_back_to_the_needed_page() {
         .set_len(filler.metadata().unwrap().len() - pool.page as u64)
         .unwrap();
     pool.prefault(frame, ready + 1).unwrap();
-    let after = pool.ready[frame as usize].load(Ordering::Relaxed) as usize;
+    let after = pool.states[frame as usize].ready.load(Ordering::Relaxed) as usize;
     assert_eq!(after, ready + pool.page);
     assert_eq!(
         pool.prefault(frame, after + 1).unwrap_err().raw_os_error(),

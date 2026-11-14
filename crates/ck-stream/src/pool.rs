@@ -28,6 +28,17 @@ pub(crate) struct Header {
 #[repr(align(128))]
 struct Padded<T>(T);
 
+/// Per-frame counters, one cache line per frame. Leases on different threads update the
+/// counts of neighbouring frames; packed, every update moved a shared line between cores.
+#[repr(align(64))]
+struct FrameState {
+    /// References: the owner's plus one per reader lease. Zero means free.
+    refs: AtomicU32,
+    /// Bytes from the frame's start whose pages are populated, so writing them cannot
+    /// fault on tmpfs exhaustion. Only the frame's current owner changes it.
+    ready: AtomicU32,
+}
+
 struct FreeList {
     frames: Vec<u32>,
     // The bottom of a LIFO stack below this mark was never popped this interval.
@@ -150,6 +161,54 @@ impl Mapping {
     }
 }
 
+/// Per-frame states in private anonymous memory, which stays unbacked until a frame is
+/// first used; a heap allocation with this alignment would be written zero in full.
+struct FrameStates {
+    mapping: Mapping,
+    len: usize,
+}
+
+impl FrameStates {
+    /// States for `len` frames with the first `populated` marked wholly populated.
+    fn new(len: usize, populated: u32) -> io::Result<Self> {
+        let bytes = len.checked_mul(std::mem::size_of::<FrameState>()).ok_or_else(invalid)?;
+        // SAFETY: a fresh private anonymous mapping aliases nothing.
+        let base = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                bytes,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        if base == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        let states = Self {
+            mapping: Mapping {
+                base: NonNull::new(base.cast()).ok_or_else(invalid)?,
+                len: bytes,
+            },
+            len,
+        };
+        for state in &states[..populated as usize] {
+            state.ready.store(FRAME_BYTES as u32, Ordering::Relaxed);
+        }
+        Ok(states)
+    }
+}
+
+impl Deref for FrameStates {
+    type Target = [FrameState];
+    fn deref(&self) -> &[FrameState] {
+        // SAFETY: the page-aligned mapping holds `len` states for its whole life. Zero
+        // bytes are valid atomics, and all access goes through them.
+        unsafe { std::slice::from_raw_parts(self.mapping.base.as_ptr().cast(), self.len) }
+    }
+}
+
 impl Drop for Mapping {
     fn drop(&mut self) {
         // SAFETY: this object owns the sole mapping; Pool's last owner has ended.
@@ -168,11 +227,7 @@ pub(crate) struct Pool {
     reserve_frames: u32,
     slots: u32,
     free_slots: Mutex<Vec<u32>>,
-    /// References per frame: the owner's plus one per reader lease. Zero means free.
-    refs: Box<[AtomicU32]>,
-    /// Bytes from each frame's start whose pages are populated, so writing them cannot
-    /// fault on tmpfs exhaustion. Only the frame's current owner changes it.
-    ready: Box<[AtomicU32]>,
+    states: FrameStates,
     shards: Box<[Padded<Shard>]>,
     slow: Padded<Mutex<Slow>>,
     used: Padded<AtomicU32>,
@@ -192,22 +247,6 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 fn invalid() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, "invalid pool capacity or layout")
-}
-
-fn zeroed_counters(len: usize) -> Box<[AtomicU32]> {
-    // Zeroed allocation leaves untouched pages unbacked, so idle frames cost no memory.
-    let counters = Box::into_raw(vec![0u32; len].into_boxed_slice()) as *mut [AtomicU32];
-    // SAFETY: AtomicU32 has the same size, alignment and bit validity as u32.
-    unsafe { Box::from_raw(counters) }
-}
-
-/// Counters for `len` frames with the first `populated` marked wholly populated.
-fn populated_counters(len: usize, populated: u32) -> Box<[AtomicU32]> {
-    let counters = zeroed_counters(len);
-    for counter in &counters[..populated as usize] {
-        counter.store(FRAME_BYTES as u32, Ordering::Relaxed);
-    }
-    counters
 }
 
 fn round_up(value: usize, page: usize) -> io::Result<usize> {
@@ -262,8 +301,7 @@ impl Pool {
             reserve_frames,
             slots,
             free_slots: Mutex::new((0..slots).rev().collect()),
-            refs: zeroed_counters(frames as usize),
-            ready: populated_counters(frames as usize, initial),
+            states: FrameStates::new(frames as usize, initial)?,
             shards: shards.into_boxed_slice(),
             slow: Padded(Mutex::new(Slow {
                 backed: initial,
@@ -314,7 +352,7 @@ impl Pool {
             lock(&self.slow.0).cold.push(frame);
             return Err(error);
         }
-        self.refs[frame as usize].store(1, Ordering::Relaxed);
+        self.states[frame as usize].refs.store(1, Ordering::Relaxed);
         self.used.0.fetch_add(1, Ordering::Relaxed);
         Ok(frame)
     }
@@ -343,7 +381,9 @@ impl Pool {
         self.file.grow(old_end, new_end - old_end)?;
         os::populate(self.address(old_end), new_end - old_end)?;
         for frame in old..new {
-            self.ready[frame as usize].store(FRAME_BYTES as u32, Ordering::Relaxed);
+            self.states[frame as usize]
+                .ready
+                .store(FRAME_BYTES as u32, Ordering::Relaxed);
         }
         slow.backed = new;
         self.backed.0.store(new, Ordering::Release);
@@ -353,13 +393,13 @@ impl Pool {
 
     /// Whether the first `needed` bytes of a frame the caller owns are populated.
     pub(crate) fn is_ready(&self, frame: u32, needed: usize) -> bool {
-        needed <= self.ready[frame as usize].load(Ordering::Relaxed) as usize
+        needed <= self.states[frame as usize].ready.load(Ordering::Relaxed) as usize
     }
 
     /// Populate the pages under the first `needed` bytes of a frame the caller owns. Pages
     /// that are already populated cost nothing; a refusal (tmpfs full) leaves them unwritten.
     pub(crate) fn prefault(&self, frame: u32, needed: usize) -> io::Result<()> {
-        let ready = self.ready[frame as usize].load(Ordering::Relaxed) as usize;
+        let ready = self.states[frame as usize].ready.load(Ordering::Relaxed) as usize;
         if needed <= ready {
             return Ok(());
         }
@@ -380,23 +420,23 @@ impl Pool {
         let to = round_up(start + to, self.page)?;
         os::populate(self.address(from), to - from)?;
         let ready = (to - start).min(FRAME_BYTES) as u32;
-        self.ready[frame as usize].store(ready, Ordering::Relaxed);
+        self.states[frame as usize].ready.store(ready, Ordering::Relaxed);
         Ok(())
     }
 
     pub(crate) fn references(&self, frame: u32) -> u32 {
-        self.refs[frame as usize].load(Ordering::Relaxed)
+        self.states[frame as usize].refs.load(Ordering::Relaxed)
     }
 
     /// Whether another reference would overflow the frame's count.
     pub(crate) fn saturated(&self, frame: u32) -> bool {
-        self.refs[frame as usize].load(Ordering::Relaxed) == u32::MAX
+        self.states[frame as usize].refs.load(Ordering::Relaxed) == u32::MAX
     }
 
     /// Add a reference to an allocated frame. The caller holds a reference that cannot be
     /// released concurrently and has checked `saturated` since its last increment.
     pub(crate) fn retain(&self, frame: u32) {
-        self.refs[frame as usize].fetch_add(1, Ordering::Relaxed);
+        self.states[frame as usize].refs.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Drop one reference, which the caller holds and gives up exactly once. The last one
@@ -404,7 +444,7 @@ impl Pool {
     /// Returns whether the frame became free.
     pub(crate) fn release(&self, frame: u32) -> bool {
         assert!(frame < self.backed_frames());
-        let previous = self.refs[frame as usize].fetch_sub(1, Ordering::Release);
+        let previous = self.states[frame as usize].refs.fetch_sub(1, Ordering::Release);
         assert_ne!(previous, 0, "frame released without a reference");
         if previous != 1 {
             return false;
@@ -491,7 +531,7 @@ impl Pool {
             free.low_water = free.frames.len();
         }
         for &frame in candidates.iter() {
-            self.ready[frame as usize].store(0, Ordering::Relaxed);
+            self.states[frame as usize].ready.store(0, Ordering::Relaxed);
         }
         candidates.sort_unstable();
         // Publish cold ownership before any destructive syscall, even if a later
