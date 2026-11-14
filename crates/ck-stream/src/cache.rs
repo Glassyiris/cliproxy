@@ -127,16 +127,40 @@ impl Inner {
     pub(crate) fn evict_one(&self, exclude: u64) -> bool {
         let _retention = self.retention.retain();
         let mut cache = self.cache.lock().unwrap();
+        let mut stale = 0;
+        let pass = cache.streams.len() - usize::from(cache.streams.contains_key(&exclude));
         while let Some(key) = cache.order.iter().find(|(_, id)| *id != exclude).copied() {
             let stream = cache.streams[&key.1].clone();
             let mut state = stream.state.lock();
             cache.order.remove(&key);
-            // Queue timestamps are lower bounds. Refresh stale heads before choosing a victim.
+            // Queue timestamps are lower bounds. The fence stops new refreshes; a reader
+            // already past its flag check can refresh once. After one stale pass, scan
+            // real timestamps: each observed stream is then stable under the fence.
             if state.last_read != key.0 {
                 cache.order.insert((state.last_read, key.1));
-                continue;
+                stale += 1;
+                if stale < pass {
+                    continue;
+                }
+                drop(state);
+                break;
             }
             cache.streams.remove(&key.1);
+            if stream.invalidate_locked(&mut state) > 0 {
+                return true;
+            }
+        }
+        // Every fallback iteration removes a stream, even if leases pin all its frames.
+        while let Some(id) = cache
+            .streams
+            .iter()
+            .filter(|(id, _)| **id != exclude)
+            .min_by_key(|(id, stream)| (stream.state.lock().last_read, **id))
+            .map(|(id, _)| *id)
+        {
+            let stream = cache.streams.remove(&id).unwrap();
+            let mut state = stream.state.lock();
+            cache.order.retain(|(_, entry)| *entry != id);
             if stream.invalidate_locked(&mut state) > 0 {
                 return true;
             }
@@ -156,6 +180,10 @@ impl Inner {
                 let stream = cache.streams[&id].clone();
                 let mut state = stream.state.lock();
                 cache.order.remove(&(read, id));
+                // An outstanding wait is a read even without publication or another poll.
+                if state.readers > 0 {
+                    state.last_read = now;
+                }
                 if state.last_read != read {
                     cache.order.insert((state.last_read, id));
                     continue;

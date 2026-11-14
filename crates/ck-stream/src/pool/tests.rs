@@ -69,7 +69,7 @@ fn growth_reuse_and_exact_cap() {
     }
     assert_eq!(pool.used(), 0);
     assert_eq!(
-        pool.pool_header().backed_bytes.load(Ordering::Acquire) as usize,
+        fs::metadata(format!("/proc/self/fd/{}", pool.file.fd())).unwrap().len() as usize,
         round_up(pool.header_bytes + 45 * FRAME_BYTES, pool.page).unwrap()
     );
 }
@@ -87,7 +87,6 @@ fn slots_are_aligned_exclusive_and_reset() {
         let header = pool.header(slot);
         assert_eq!(header as *const Header as usize % 128, 0);
         header.committed.store(1234, Ordering::Release);
-        header.generation.store(9, Ordering::Release);
         slots.push(slot);
     }
     assert!(pool.claim_slot().is_none());
@@ -95,7 +94,6 @@ fn slots_are_aligned_exclusive_and_reset() {
     pool.release_slot(slot);
     assert_eq!(pool.claim_slot(), Some(slot));
     assert_eq!(pool.header(slot).committed.load(Ordering::Acquire), 0);
-    assert_eq!(pool.header(slot).generation.load(Ordering::Acquire), 0);
     for shard in &pool.shards {
         assert_eq!(shard as *const _ as usize % 128, 0);
     }
@@ -114,12 +112,13 @@ fn decay_preserves_a_leased_neighbor_and_prefaults_reuse() {
     let lease = Arc::clone(&pool);
     // SAFETY: lease keeps the pool alive and neighbor remains owned/immutable.
     let bytes = unsafe { lease.slice(neighbor, 0, FRAME_BYTES) };
+    let before = blocks(&pool.file);
     for &frame in &frames {
         if frame != neighbor {
             pool.release(frame);
         }
     }
-    let before = blocks(&pool.file);
+    assert_eq!(blocks(&pool.file), before, "release must not punch backing pages");
     pool.decay().unwrap();
     assert_eq!(
         blocks(&pool.file),
@@ -298,11 +297,14 @@ fn isolated_tmpfs_growth_and_cold_prefault_enospc() {
         Pool::open(&directory.0, 42, 1, 1, 42).err().unwrap().raw_os_error(),
         Some(libc::ENOSPC)
     );
-    let backed_bytes = pool.pool_header().backed_bytes.load(Ordering::Acquire);
+    let backed_bytes = fs::metadata(format!("/proc/self/fd/{}", pool.file.fd())).unwrap().len();
     assert_eq!(pool.allocate().unwrap_err().raw_os_error(), Some(libc::ENOSPC));
     assert_eq!(pool.used(), 21);
     assert_eq!(pool.backed_frames(), 21);
-    assert_eq!(pool.pool_header().backed_bytes.load(Ordering::Acquire), backed_bytes);
+    assert_eq!(
+        fs::metadata(format!("/proc/self/fd/{}", pool.file.fd())).unwrap().len(),
+        backed_bytes
+    );
     drop(filler);
     fs::remove_file(&filler_path).unwrap();
     frames.extend((21..42).map(|_| pool.allocate().unwrap()));

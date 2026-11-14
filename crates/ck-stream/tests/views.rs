@@ -196,6 +196,7 @@ fn invalidation_rejects_new_reads_including_empty_spans_but_preserves_borrows() 
     writer.append(b"/pathVALUE").unwrap();
     let mut reader = store.reader(writer.id(), 0).unwrap();
     let lease = lease(&mut reader);
+    drop(reader);
     let event = EventView::new(&lease, None, range(&lease, 0..10)).unwrap();
     let field = RequestFieldView::new(&lease, range(&lease, 0..5), range(&lease, 5..10)).unwrap();
     let end = lease.record().end;
@@ -222,6 +223,7 @@ fn invalidation_between_frame_visits_stops_before_the_next_chunk() {
     writer.append(&vec![b'x'; FRAME_BYTES + 1]).unwrap();
     let mut reader = store.reader(writer.id(), 0).unwrap();
     let lease = lease(&mut reader);
+    drop(reader);
     let span = ByteSpan::new(&lease, lease.record().start..lease.record().end).unwrap();
     let mut calls = 0;
     let result = span.visit(|chunk| {

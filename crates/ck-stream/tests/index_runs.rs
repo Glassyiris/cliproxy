@@ -1,5 +1,5 @@
 use ck_stream::{Config, Error, FRAME_BYTES, Lease, ManualClock, Read, Reader, Record, Store, Terminal, Writer};
-use std::{sync::Arc, task::Poll, time::Duration};
+use std::{sync::Arc, task::Poll};
 
 fn store(frames: usize, metadata: usize) -> (tempfile::TempDir, Store, Arc<ManualClock>) {
     let dir = tempfile::tempdir().unwrap();
@@ -212,7 +212,7 @@ fn variable_records_exhaust_metadata_visibly_and_keep_the_complete_prefix() {
 
 #[test]
 fn invalidation_hides_run_backlog_but_keeps_borrowed_bytes_pinned() {
-    let (_dir, store, clock) = store(8, 512);
+    let (_dir, store, _) = store(8, 512);
     let mut writer = store.create().unwrap();
     for _ in 0..100 {
         writer.append(b"retained").unwrap();
@@ -220,8 +220,7 @@ fn invalidation_hides_run_backlog_but_keeps_borrowed_bytes_pinned() {
     let mut reader = store.reader(writer.id(), 50).unwrap();
     let pinned = lease(&mut reader);
     let borrowed = pinned.chunk(pinned.record().start).unwrap();
-    clock.advance(Duration::from_secs(3601));
-    store.tick().unwrap();
+    writer.finish(Terminal::Gone);
     terminal(&mut reader, Terminal::Gone);
     assert_eq!(borrowed, b"retained");
     assert!(matches!(pinned.chunk(pinned.record().start), Err(Error::Gone)));

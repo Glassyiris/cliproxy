@@ -93,7 +93,7 @@ pub(crate) struct State {
     next_sequence: u64,
     end: u64,
     terminal: Option<Terminal>,
-    readers: usize,
+    pub(crate) readers: usize,
     scratch_frames: usize,
     external_metadata: usize,
     pub last_read: Duration,
@@ -109,6 +109,7 @@ pub(crate) struct Stream {
     pub state: Mutex<State>,
     invalidated: AtomicBool,
     notify: Notify,
+    stopped: Notify,
 }
 
 impl Stream {
@@ -127,6 +128,7 @@ impl Stream {
             retention,
             limits,
             notify: Notify::new(),
+            stopped: Notify::new(),
             invalidated: AtomicBool::new(false),
             state: Mutex::new(State {
                 frames: VecDeque::new(),
@@ -181,13 +183,6 @@ impl Stream {
             .header(self.slot)
             .committed
             .store(state.end, Ordering::Release);
-        self.advance_generation();
-    }
-
-    fn advance_generation(&self) {
-        // The stream metadata lock serializes every generation writer.
-        let generation = &self.pool.header(self.slot).generation;
-        generation.store(generation.load(Ordering::Relaxed).wrapping_add(1), Ordering::Release);
     }
 
     pub(crate) fn finish(&self, terminal: Terminal) {
@@ -198,10 +193,10 @@ impl Stream {
         let mut state = self.state.lock();
         if state.terminal.is_none() {
             state.terminal = Some(terminal);
-            self.advance_generation();
         }
         drop(state);
         self.notify.notify_waiters();
+        self.stopped.notify_waiters();
     }
 
     pub(crate) fn invalidate(&self) {
@@ -222,8 +217,8 @@ impl Stream {
             }
         }
         state.records.clear();
-        self.advance_generation();
         self.notify.notify_waiters();
+        self.stopped.notify_waiters();
         released
     }
 }
@@ -262,6 +257,24 @@ impl Writer {
                 .committed
                 .load(Ordering::Acquire),
         )
+    }
+
+    /// Wait for the producer to stop, including expiry, eviction, cancellation and shutdown.
+    /// The owned, cancellation-safe future does not borrow the writer and also resolves
+    /// immediately after a terminal has already been published, including normal completion.
+    pub fn cancelled(&self) -> impl Future<Output = Terminal> + Send + 'static {
+        let stream = self.stream.clone();
+        async move {
+            loop {
+                let notified = stream.stopped.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if let Some(terminal) = stream.state.lock().terminal {
+                    return terminal;
+                }
+                notified.await;
+            }
+        }
     }
 
     /// Reserve the whole record before writing. `aligned` excludes tail padding from the record.
@@ -550,26 +563,23 @@ pub struct Reader {
 
 impl Reader {
     pub(crate) fn new(stream: Arc<Stream>, after: u64) -> Result<Self, Error> {
-        {
-            let mut state = stream.state.lock();
+        let result = stream.retention.reading(&stream, |state| {
             if stream.invalidated.load(Ordering::Acquire) || after < state.base_sequence {
-                return Err(Error::Gone);
+                return (Err(Error::Gone), false);
             }
             if after > state.next_sequence {
-                return Err(Error::InvalidPosition);
+                return (Err(Error::InvalidPosition), false);
             }
-            if READER_BYTES
-                > stream
-                    .limits
-                    .max_metadata_bytes
-                    .saturating_sub(Stream::metadata(&state))
-            {
-                drop(state);
-                stream.finish(Terminal::StorageExhausted);
-                return Err(Error::StorageExhausted);
+            if READER_BYTES > stream.limits.max_metadata_bytes.saturating_sub(Stream::metadata(state)) {
+                return (Err(Error::StorageExhausted), false);
             }
             state.readers += 1;
+            (Ok(()), true)
+        });
+        if matches!(result, Err(Error::StorageExhausted)) {
+            stream.finish(Terminal::StorageExhausted);
         }
+        result?;
         Ok(Self {
             stream,
             next: after,
@@ -633,7 +643,7 @@ impl Reader {
                 self.terminal_seen = true;
                 return (Poll::Ready(Some(Read::Terminal(terminal))), false);
             }
-            (Poll::Pending, false)
+            (Poll::Pending, true)
         })
     }
 
@@ -664,7 +674,10 @@ impl Reader {
 
 impl Drop for Reader {
     fn drop(&mut self) {
-        self.stream.state.lock().readers -= 1;
+        self.stream.retention.reading(&self.stream, |state| {
+            state.readers -= 1;
+            ((), true)
+        });
     }
 }
 

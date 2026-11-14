@@ -22,12 +22,6 @@ thread_local! {
 #[repr(C, align(128))]
 pub(crate) struct Header {
     pub committed: AtomicU64,
-    pub generation: AtomicU64,
-}
-
-#[repr(C, align(128))]
-struct PoolHeader {
-    backed_bytes: AtomicU64,
 }
 
 #[repr(align(128))]
@@ -118,13 +112,7 @@ impl Pool {
             return Err(io::Error::last_os_error());
         }
         let page = page as usize;
-        let header_bytes = round_up(
-            (slots as usize)
-                .checked_add(1)
-                .and_then(|n| n.checked_mul(128))
-                .ok_or_else(invalid)?,
-            page,
-        )?;
+        let header_bytes = round_up((slots as usize).checked_mul(128).ok_or_else(invalid)?, page)?;
         let len = round_up(
             (frames as usize)
                 .checked_mul(FRAME_BYTES)
@@ -162,18 +150,14 @@ impl Pool {
         // SAFETY: fallocate/populate succeeded; the page-aligned header is private
         // during construction. Initialize atomic objects, not references to zero bytes.
         unsafe {
-            mapping.base.as_ptr().cast::<PoolHeader>().write(PoolHeader {
-                backed_bytes: AtomicU64::new(initial_bytes as u64),
-            });
             for slot in 0..slots {
                 mapping
                     .base
                     .as_ptr()
-                    .add((slot as usize + 1) * 128)
+                    .add(slot as usize * 128)
                     .cast::<Header>()
                     .write(Header {
                         committed: AtomicU64::new(0),
-                        generation: AtomicU64::new(0),
                     });
             }
         }
@@ -258,7 +242,6 @@ impl Pool {
                 self.file.grow(old_end, new_end - old_end)?;
                 os::populate(self.address(old_end), new_end - old_end)?;
                 slow.backed = new;
-                self.pool_header().backed_bytes.store(new_end as u64, Ordering::Release);
                 self.backed.0.store(new, Ordering::Release);
                 let mut free = lock(&self.shards[local].0);
                 free.frames.extend((old + 1..new).rev());
@@ -316,7 +299,6 @@ impl Pool {
         let slot = lock(&self.free_slots).pop()?;
         let header = self.header(slot);
         header.committed.store(0, Ordering::Relaxed);
-        header.generation.store(0, Ordering::Relaxed);
         Some(slot)
     }
 
@@ -330,12 +312,7 @@ impl Pool {
         assert!(slot < self.slots);
         // SAFETY: construction initialized each aligned slot; it remains mapped
         // for self's lifetime, and shared access touches atomic fields only.
-        unsafe { &*self.address((slot as usize + 1) * 128).cast::<Header>() }
-    }
-
-    fn pool_header(&self) -> &PoolHeader {
-        // SAFETY: construction initialized this aligned atomic header before sharing.
-        unsafe { &*self.mapping.base.as_ptr().cast::<PoolHeader>() }
+        unsafe { &*self.address(slot as usize * 128).cast::<Header>() }
     }
 
     /// Called once per externally scheduled second. Returns reclamation failures.

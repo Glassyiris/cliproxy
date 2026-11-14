@@ -91,7 +91,7 @@ fn disconnect_preserves_complete_prefix_and_terminal_for_resume() {
 }
 
 #[test]
-fn reads_refresh_ttl_but_writes_do_not_and_unread_streams_expire() {
+fn attached_readers_refresh_ttl_but_writes_do_not_and_disconnected_streams_expire() {
     let (_dir, store, clock) = store(8);
     let mut read_writer = store.create().unwrap();
     let mut unread = store.create().unwrap();
@@ -105,10 +105,24 @@ fn reads_refresh_ttl_but_writes_do_not_and_unread_streams_expire() {
     clock.advance(Duration::from_secs(2));
     store.tick().unwrap();
     assert!(matches!(store.reader(unread.id(), 0), Err(Error::Gone)));
-    assert!(store.reader(read_writer.id(), 0).is_ok());
+    clock.advance(Duration::from_secs(7200));
+    store.tick().unwrap();
+    assert!(matches!(reader.try_next(), Poll::Pending));
+    drop(reader);
     clock.advance(Duration::from_secs(3599));
     store.tick().unwrap();
-    terminal(&mut reader, Terminal::Gone);
+    // Attach itself restarts the expiry clock, even without acquiring a record.
+    let reader = store.reader(read_writer.id(), 1).unwrap();
+    drop(reader);
+    clock.advance(Duration::from_secs(2));
+    store.tick().unwrap();
+    let mut reader = store.reader(read_writer.id(), 1).unwrap();
+    clock.advance(Duration::from_secs(3599));
+    assert!(matches!(reader.try_next(), Poll::Pending));
+    drop(reader);
+    clock.advance(Duration::from_secs(3601));
+    store.tick().unwrap();
+    assert!(matches!(store.reader(read_writer.id(), 0), Err(Error::Gone)));
 }
 
 #[test]
