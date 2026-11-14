@@ -5,7 +5,6 @@ Usage: python3 -I bench/container-test.py EXTERNAL_ARTIFACT_DIRECTORY
 These tests are not evidence that a runtime image implements the pool.
 """
 
-import datetime
 import importlib.util
 import json
 import mmap
@@ -72,18 +71,17 @@ class FakeDocker:
                 container["running"] = False
         elif args[:2] == ("container", "stop"):
             container = self.containers[args[-1]]
-            now = datetime.datetime.now(datetime.timezone.utc)
-            if self.defect == "exit-before-stop" and container["name"] == "default":
-                # Exited 0 after the last inspect; stopping a stopped container succeeds.
-                container["finished"] = now - datetime.timedelta(milliseconds=5)
-            else:
-                container.update(stopped=True, finished=now)
-            container["running"] = False
+            # exit-before-stop: the server exited 0 after the last inspect, so the stop
+            # signal never reached it; stopping a stopped container still succeeds.
+            signalled = not (self.defect == "exit-before-stop" and container["name"] == "default")
+            container.update(running=False, stopped=True, signalled=signalled)
         elif args[0] == "logs":
             scenario = self.containers[args[-1]]["name"]
             output = {"missing-xdg": "XDG_RUNTIME_DIR missing: configure stream.pool_directory",
                       "unsafe-directory": "/run/cooker-unsafe must be private mode 0700",
                       "invalid-max-frames": "stream.max_frames exceeds pool_frames 128"}.get(scenario, "started")
+            if self.containers[args[-1]].get("signalled"):
+                output += "\n[info] " + gate.SIGNAL_LINE
         elif args[0] == "exec":
             if "sha256sum" in args:
                 output = "a" * 64 + "  /proc/1/exe\n"
@@ -114,13 +112,10 @@ class FakeDocker:
             return {"8317/tcp": [{"HostIp": "127.0.0.1", "HostPort": "12345"}]}
         if "{{json .State}}" in args:
             container = self.containers[args[-1]]
-            finished = container.get("finished")
             return {"Running": container["running"], "OOMKilled": False, "Pid": 1234,
-                    "FinishedAt": finished.strftime("%Y-%m-%dT%H:%M:%S.%f") + "123Z" if finished
-                    else "0001-01-01T00:00:00Z",
                     "ExitCode": 139 if container.get("crashed")
                     else 137 if self.defect == "forced-kill" and container.get("stopped")
-                    else 0 if container.get("stopped") or container["running"] or finished else 2}
+                    else 0 if container.get("stopped") or container["running"] else 2}
         raise AssertionError(args)
 
 
@@ -198,7 +193,8 @@ class DriverControls(unittest.TestCase):
         result, summary, fake, _ = self.run_control("exit-before-stop")
         self.assertEqual(result, 1)
         default = summary["scenarios"][0]
-        self.assertTrue(any(error.startswith("server exited before shutdown at ") for error in default["errors"]))
+        self.assertIn(f"server exited without logging {gate.SIGNAL_LINE!r}; it did not stop on the gate's SIGTERM",
+                      default["errors"])
         self.assertFalse(default["checks"]["clean_shutdown"])
         self.assertEqual(default["shutdown_state"]["ExitCode"], 0)
         self.assertTrue(all(row["passed"] for row in summary["scenarios"][1:]))

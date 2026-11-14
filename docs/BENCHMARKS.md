@@ -177,8 +177,9 @@ exactly that capacity rounded up to whole pages. Docker and `nsenter` commands
 have 35-second default deadlines. Early exit and timeout are failures, and a
 started server must still be running when the gate stops it: one that exits on
 its own after the health check fails with its exit code. Graceful SIGTERM
-shutdown also exits 0, so the gate records when it issued the stop and fails a
-container whose Docker `FinishedAt` precedes it. Cleanup
+shutdown also exits 0, so after `docker stop` the gate also requires the
+server's own `shutdown signal received: SIGTERM` log line; a server that exited
+0 before the signal arrived never logs it. Cleanup
 removes only resources created by that invocation.
 Docker's internal bridge blocks initial outbound traffic. Because rootless
 Docker 29 does not publish internal-bridge ports, the driver pauses its own
