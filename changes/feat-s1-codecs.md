@@ -22,3 +22,4 @@ Internal
 - Share request binding serialization, reconstruction and JSON pointer helpers across protocol codecs, including Anthropic block order and server-result shape bindings.
 - Normalize Chat response reasoning aliases at ingress: the first of `reasoning_content`, `reasoning` and `reasoning_details` with text becomes canonical reasoning in buffered, streaming and final-snapshot input, without resurrecting the consumed alias.
 - Keep the Chat snapshot choice-index table's metadata quota until suffix edits apply, so a storage limit fails at the same step as before the module split.
+- Deliver a Chat response image or file part whose embedded data a trusted edit replaced with a URL or file ID, instead of failing the stream or dropping the part.

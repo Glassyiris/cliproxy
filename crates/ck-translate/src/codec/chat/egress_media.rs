@@ -12,7 +12,49 @@ pub(super) struct Projection {
     offset: u64,
     live: bool,
     reachable: bool,
+    /// A trusted edit gave the part a URI or file source: it is delivered without the bytes.
+    external: bool,
     ended: bool,
+}
+
+/// Where a projected part's payload goes.
+enum Source {
+    /// The null member that receives the decoded bytes.
+    Bound(usize),
+    /// A non-null image URL or document `file_data`, or a document `file_id` without data.
+    External,
+    /// No carrier or data member: the part is unreachable.
+    Missing,
+}
+
+/// Classifies the payload member of a supplied attributes value after its carrier matches the
+/// media kind. Audio and scalar text accept only a null bound member.
+fn source(doc: &Document, value: usize, field: &str, scalar: bool, document_kind: bool) -> Result<Source> {
+    let (carrier, data) = if scalar {
+        (None, Some(value))
+    } else if field == "audio" {
+        (None, doc.member(value, "data")?)
+    } else if document_kind && let Some(file) = doc.member(value, "file")? {
+        (Some(file), doc.member(file, "file_data")?)
+    } else if let Some(image) = doc.member(value, "image_url")? {
+        (None, doc.member(image, "url")?)
+    } else {
+        return Ok(Source::Missing);
+    };
+    Ok(match data {
+        Some(data) if matches!(doc.node(data)?.value, Value::Null) => Source::Bound(data),
+        Some(_) if !scalar && field != "audio" => Source::External,
+        Some(_) => return Err(Error::Schema),
+        None if carrier
+            .map(|file| doc.member(file, "file_id"))
+            .transpose()?
+            .flatten()
+            .is_some() =>
+        {
+            Source::External
+        }
+        None => Source::Missing,
+    })
 }
 
 pub(super) fn id(doc: &Document, x: usize) -> Result<LocalId> {
@@ -122,6 +164,7 @@ impl Projection {
                 offset: 0,
                 live: true,
                 reachable: false,
+                external: false,
                 ended: false,
             });
         };
@@ -141,27 +184,15 @@ impl Projection {
         if !scalar && field != "audio" && supplied_value.is_some() {
             native_carrier(&mut doc, value, document_kind)?;
         }
-        let supplied_data = if supplied_value.is_none() {
-            None
-        } else if scalar {
-            Some(value)
-        } else if field == "audio" {
-            doc.member(value, "data")?
-        } else if document_kind && let Some(file) = doc.member(value, "file")? {
-            doc.member(file, "file_data")?
-        } else if let Some(image) = doc.member(value, "image_url")? {
-            doc.member(image, "url")?
-        } else {
-            None
+        let source = match supplied_value {
+            None => Source::Missing,
+            Some(value) => source(&doc, value, field, scalar, document_kind)?,
         };
-        let reachable = supplied_data.is_some();
-        let data = match supplied_data {
-            Some(data) => data,
-            None => doc.add(None, Value::Null)?,
+        let (reachable, external) = (matches!(source, Source::Bound(_)), matches!(source, Source::External));
+        let data = match source {
+            Source::Bound(data) => data,
+            Source::External | Source::Missing => doc.add(None, Value::Null)?,
         };
-        if !matches!(doc.node(data)?.value, Value::Null) {
-            return Err(Error::Schema);
-        }
         let binary = binary_node(owner, &mut doc, data, field, scalar, document_kind)?;
         Ok(Self {
             id,
@@ -174,6 +205,7 @@ impl Projection {
             offset: 0,
             live: field == "audio" || scalar,
             reachable,
+            external,
             ended: false,
         })
     }
@@ -305,7 +337,7 @@ impl Projection {
             return Err(Error::Closed);
         }
         self.ended = true;
-        if self.live || !self.reachable {
+        if self.live || !(self.reachable || self.external) {
             return Ok(None);
         }
         Ok(Some((

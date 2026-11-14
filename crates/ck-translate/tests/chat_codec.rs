@@ -16,6 +16,8 @@ mod incremental;
 mod media_deletion;
 #[path = "semantic/media_lifetime.rs"]
 mod media_lifetime;
+#[path = "semantic/media_source.rs"]
+mod media_source;
 #[path = "semantic/request_controls.rs"]
 mod request_controls;
 #[path = "semantic/mod.rs"]
