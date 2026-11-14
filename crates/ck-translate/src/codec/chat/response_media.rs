@@ -222,50 +222,7 @@ impl State {
                 _ => Err(Error::Schema),
             })
             .transpose()?;
-        if let Some(audio) = &self.choices[position].audio_output {
-            for key in ["id", "format", "codec", "sample_rate", "channels"] {
-                if let Some(previous) = audio.metadata.member(audio.metadata.root(), key)?
-                    && let Some(incoming) = input.member(value, key)?
-                    && !snapshot::exact(&audio.metadata, previous, input, incoming, 0)?
-                {
-                    return Err(Error::Schema);
-                }
-            }
-        }
-        let metadata = mapped_document(owner, |e| {
-            e.bytes(b"{")?;
-            let mut first = true;
-            for field in input.children(value)? {
-                let name = input.node(field)?.name.ok_or(Error::Schema)?;
-                if input.name_is(name, "data")? || input.name_is(name, "transcript")? {
-                    continue;
-                }
-                if !first {
-                    e.bytes(b",")?;
-                }
-                first = false;
-                input.write_name(name, e)?;
-                e.bytes(b":")?;
-                input.write(field, e)?;
-            }
-            if let Some(audio) = &self.choices[position].audio_output {
-                for field in audio.metadata.children(audio.metadata.root())? {
-                    if snapshot::matching_member(input, value, &audio.metadata, field)?.is_some() {
-                        continue;
-                    }
-                    if !first {
-                        e.bytes(b",")?;
-                    }
-                    first = false;
-                    audio
-                        .metadata
-                        .write_name(audio.metadata.node(field)?.name.ok_or(Error::Schema)?, e)?;
-                    e.bytes(b":")?;
-                    audio.metadata.write(field, e)?;
-                }
-            }
-            e.bytes(b"}")
-        })?;
+        let metadata = self.audio_metadata(owner, input, value, position)?;
         if self.choices[position].audio_output.is_none() {
             scope.media_id = Some(media::local_id(b'm', self.serial)?);
             self.serial = self.serial.checked_add(1).ok_or(Error::Limit)?;
@@ -319,33 +276,96 @@ impl State {
                 .collect(&mut self.emitter, owner, |emit| choice.audio.push(input, data, emit))?;
         }
         if let Some(text) = transcript {
-            if matches!(input.node(text)?.value, Value::Null) {
-                self.emitter.emit(
-                    owner,
-                    Kind::Chunk,
-                    audio.scope,
-                    |e| {
-                        base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
-                        e.bytes(b",\"choices\":[{\"index\":")?;
-                        e.unsigned(scope.choice_index.ok_or(Error::Schema)?)?;
-                        e.bytes(b",\"delta\":{\"audio\":{\"transcript\":null}},\"finish_reason\":null}]")
-                    },
-                    |_| Ok(()),
-                )?;
-            } else {
-                audio.transcript = true;
-                self.emitter.emit(
-                    owner,
-                    Kind::MediaTranscript,
-                    audio.scope,
-                    |e| {
-                        e.bytes(b",\"text\":")?;
-                        input.write(text, e)?;
-                        e.bytes(b",\"final\":false")
-                    },
-                    |_| Ok(()),
-                )?;
+            self.audio_transcript(owner, input, text, position, scope)?;
+        }
+        Ok(())
+    }
+
+    /// Checks that an audio delta keeps the identity members already published and returns its
+    /// members other than data and transcript, merged over the earlier metadata.
+    fn audio_metadata(&self, owner: &mut Writer, input: &Document, value: usize, position: usize) -> Result<Document> {
+        if let Some(audio) = &self.choices[position].audio_output {
+            for key in ["id", "format", "codec", "sample_rate", "channels"] {
+                if let Some(previous) = audio.metadata.member(audio.metadata.root(), key)?
+                    && let Some(incoming) = input.member(value, key)?
+                    && !snapshot::exact(&audio.metadata, previous, input, incoming, 0)?
+                {
+                    return Err(Error::Schema);
+                }
             }
+        }
+        mapped_document(owner, |e| {
+            e.bytes(b"{")?;
+            let mut first = true;
+            for field in input.children(value)? {
+                let name = input.node(field)?.name.ok_or(Error::Schema)?;
+                if input.name_is(name, "data")? || input.name_is(name, "transcript")? {
+                    continue;
+                }
+                if !first {
+                    e.bytes(b",")?;
+                }
+                first = false;
+                input.write_name(name, e)?;
+                e.bytes(b":")?;
+                input.write(field, e)?;
+            }
+            if let Some(audio) = &self.choices[position].audio_output {
+                for field in audio.metadata.children(audio.metadata.root())? {
+                    if snapshot::matching_member(input, value, &audio.metadata, field)?.is_some() {
+                        continue;
+                    }
+                    if !first {
+                        e.bytes(b",")?;
+                    }
+                    first = false;
+                    audio
+                        .metadata
+                        .write_name(audio.metadata.node(field)?.name.ok_or(Error::Schema)?, e)?;
+                    e.bytes(b":")?;
+                    audio.metadata.write(field, e)?;
+                }
+            }
+            e.bytes(b"}")
+        })
+    }
+
+    /// Publishes a transcript fragment, or a null transcript as a native chunk.
+    fn audio_transcript(
+        &mut self,
+        owner: &mut Writer,
+        input: &Document,
+        text: usize,
+        position: usize,
+        scope: Scope,
+    ) -> Result<()> {
+        let audio = self.choices[position].audio_output.as_mut().ok_or(Error::Schema)?;
+        if matches!(input.node(text)?.value, Value::Null) {
+            self.emitter.emit(
+                owner,
+                Kind::Chunk,
+                audio.scope,
+                |e| {
+                    base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
+                    e.bytes(b",\"choices\":[{\"index\":")?;
+                    e.unsigned(scope.choice_index.ok_or(Error::Schema)?)?;
+                    e.bytes(b",\"delta\":{\"audio\":{\"transcript\":null}},\"finish_reason\":null}]")
+                },
+                |_| Ok(()),
+            )?;
+        } else {
+            audio.transcript = true;
+            self.emitter.emit(
+                owner,
+                Kind::MediaTranscript,
+                audio.scope,
+                |e| {
+                    e.bytes(b",\"text\":")?;
+                    input.write(text, e)?;
+                    e.bytes(b",\"final\":false")
+                },
+                |_| Ok(()),
+            )?;
         }
         Ok(())
     }
