@@ -9,6 +9,9 @@ pub(crate) enum Stage {
     BeforeReplace,
     AfterReplace,
     RuntimeDerivedTail,
+    /// A credential batch has probed its document locks and still holds `disk` and the
+    /// store command; keyed by the auth directory.
+    CredentialBatchProbed,
 }
 
 type Effect = Box<dyn FnOnce() -> std::io::Result<()> + Send>;

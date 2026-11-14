@@ -4045,7 +4045,7 @@ type LockedFile = (std::fs::File, Map<String, Value>);
 /// Go `refreshLocked`'s read: the Codex credential file under its lock, which the
 /// returned file holds. A file that is gone, or that is not a non-empty JSON object,
 /// fails before anything refreshes. The wait for the lock gives up at `shutdown`.
-async fn read_locked_codex_file(
+pub(crate) async fn read_locked_codex_file(
     path: &Path,
     shutdown: &tokio_util::sync::CancellationToken,
     backend: Arc<crate::store::credential_store::CredentialDb>,
