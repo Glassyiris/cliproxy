@@ -176,7 +176,7 @@ impl Projection {
     }
 }
 
-impl Egress {
+impl Reduction {
     pub(super) fn native_field(
         &mut self,
         owner: &mut Writer,
@@ -207,25 +207,5 @@ impl Egress {
             projection.append(array, imported)?;
         }
         Ok(projection)
-    }
-
-    pub(super) fn project(
-        &mut self,
-        owner: &mut Writer,
-        projection: Document,
-        mut output: impl FnMut(ScratchLease) -> Result<()>,
-    ) -> Result<()> {
-        if self.mode == BodyMode::Streaming {
-            output(encode::scratch(owner, |e| {
-                e.bytes(b"data: ")?;
-                projection.write(projection.root(), e)?;
-                e.bytes(b"\n\n")
-            })?)?;
-        } else {
-            let aggregate = self.document.as_mut().ok_or(Error::Schema)?;
-            let incoming = aggregate.absorb(projection)?;
-            aggregate_chunk(aggregate, incoming)?;
-        }
-        Ok(())
     }
 }

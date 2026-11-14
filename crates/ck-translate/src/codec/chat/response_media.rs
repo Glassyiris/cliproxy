@@ -204,7 +204,7 @@ impl State {
 }
 
 impl State {
-    fn empty_array(&mut self, owner: &mut Writer, position: usize, name: &'static str) -> Result<()> {
+    pub(super) fn empty_array(&mut self, owner: &mut Writer, position: usize, name: &'static str) -> Result<()> {
         let scope = self.scope(position);
         self.emitter.emit(
             owner,

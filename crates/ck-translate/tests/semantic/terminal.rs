@@ -5,6 +5,7 @@ fn rejected(input: &[u8], mode: BodyMode, prior_done: bool) {
     let mut mapped = Mapped::new();
     let mut ingress = codec::chat::response::Ingress::new(
         &mut mapped.writer,
+        &mapped.store,
         identity(Direction::Response),
         Operation::Generate,
         mode,

@@ -53,7 +53,7 @@ impl Buffered {
         if let Some(index) = self.active {
             self.collect(owner, state, index)?;
         }
-        state.document(owner, &self.input.document, true, None)?;
+        state.document(owner, &mut self.input.document, true, None)?;
         state.done(owner)
     }
 
