@@ -65,8 +65,10 @@ pub(super) fn message(doc: &mut Document, owner: &mut Writer, message: usize, in
         while let Some(call) = next {
             next = doc.node(call)?.next;
             signatures(doc, owner, call, call, index, block)?;
-            if let Some(function) = doc.member(call, "function")? {
-                signatures(doc, owner, function, call, index, block)?;
+            for carrier in ["function", "custom"] {
+                if let Some(function) = doc.member(call, carrier)? {
+                    signatures(doc, owner, function, call, index, block)?;
+                }
             }
             block += 1;
         }

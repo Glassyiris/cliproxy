@@ -318,3 +318,51 @@ fn legacy_cache_pointer_and_custom_text_history_keep_native_spelling() {
         input["messages"]
     );
 }
+
+#[test]
+fn reviewed_custom_signatures_require_policy_and_keep_their_carrier() {
+    let input = json!({"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"custom","custom":{"name":"free","input":"hello","thought_signature":"sig"}}]}]});
+    let (mut mapped, mut doc) = canonical(&input, &Signed);
+    let media = Registry::new(&mut mapped.writer).unwrap();
+    assert!(matches!(
+        ChatCapability.validate(RequestView {
+            document: &doc,
+            media: &media,
+            operation: Operation::Generate,
+        }),
+        Err(codec::Error::Unsupported)
+    ));
+    assert_eq!(output(&mut mapped, &doc, &Signed)["messages"], input["messages"]);
+    let x = doc.required(doc.root(), "x_ck").unwrap();
+    let replay = doc.required(x, "replay").unwrap();
+    let entry = doc.children(replay).unwrap().next().unwrap();
+    doc.remove(entry, "signature").unwrap();
+    assert!(
+        output(&mut mapped, &doc, &Signed)["messages"][0]["tool_calls"][0]["custom"]
+            .get("thought_signature")
+            .is_none()
+    );
+}
+
+#[test]
+fn reviewed_opaque_cache_controls_preserve_mutations_and_deletions() {
+    let input = json!({"model":"m","messages":[{"role":"user","content":[{"type":"vendor_part","cache_control":{"type":"ephemeral","ttl":"1h"},"payload":1}]}]});
+    let (mut mapped, mut doc) = canonical(&input, &ChatCapability);
+    assert_eq!(
+        output(&mut mapped, &doc, &ChatCapability)["messages"],
+        input["messages"]
+    );
+    let x = doc.required(doc.root(), "x_ck").unwrap();
+    let cache = doc.required(x, "cache_control").unwrap();
+    let entry = doc.children(cache).unwrap().next().unwrap();
+    let value = doc.required(entry, "value").unwrap();
+    doc.set(value, "ttl", Value::Text("5m")).unwrap();
+    assert_eq!(
+        output(&mut mapped, &doc, &ChatCapability)["messages"][0]["content"][0]["cache_control"]["ttl"],
+        "5m"
+    );
+    doc.remove(entry, "value").unwrap();
+    let encoded = output(&mut mapped, &doc, &ChatCapability);
+    assert!(encoded["messages"][0]["content"][0].get("cache_control").is_none());
+    assert_eq!(encoded["messages"][0]["content"][0]["payload"], 1);
+}
