@@ -97,12 +97,28 @@ pub(crate) struct State {
     scratch_frames: usize,
     external_metadata: usize,
     pub last_read: Duration,
+    // Taken at invalidation, so an evicted stream frees its header before its last handle drops.
+    slot: Option<u32>,
+}
+
+impl State {
+    /// Frames that invalidation would return to the pool now: owned and unleased.
+    pub(crate) fn reclaimable(&self) -> usize {
+        self.frames
+            .iter()
+            .filter(|frame| frame.pool.is_some() && frame.leases == 0)
+            .count()
+    }
+
+    /// Header slots that invalidation would return now.
+    pub(crate) fn slot_count(&self) -> usize {
+        usize::from(self.slot.is_some())
+    }
 }
 
 #[repr(align(128))]
 pub(crate) struct Stream {
     pub id: u64,
-    slot: u32,
     pool: Arc<Pool>,
     retention: Arc<Retention>,
     limits: Limits,
@@ -123,7 +139,6 @@ impl Stream {
     ) -> Self {
         Self {
             id,
-            slot,
             pool,
             retention,
             limits,
@@ -142,6 +157,7 @@ impl Stream {
                 scratch_frames: 0,
                 external_metadata: 0,
                 last_read: now,
+                slot: Some(slot),
             }),
         }
     }
@@ -179,10 +195,10 @@ impl Stream {
         }
         state.next_sequence = index.next_sequence;
         state.end = index.start + index.len;
-        self.pool
-            .header(self.slot)
-            .committed
-            .store(state.end, Ordering::Release);
+        // Callers publish only after checking invalidation under this lock, so the slot is held.
+        if let Some(slot) = state.slot {
+            self.pool.header(slot).committed.store(state.end, Ordering::Release);
+        }
     }
 
     pub(crate) fn finish(&self, terminal: Terminal) {
@@ -197,15 +213,6 @@ impl Stream {
         drop(state);
         self.notify.notify_waiters();
         self.stopped.notify_waiters();
-    }
-
-    /// Frames that invalidation would return to the pool now: owned and unleased.
-    pub(crate) fn reclaimable(&self, state: &State) -> usize {
-        state
-            .frames
-            .iter()
-            .filter(|frame| frame.pool.is_some() && frame.leases == 0)
-            .count()
     }
 
     pub(crate) fn invalidate(&self) {
@@ -226,6 +233,9 @@ impl Stream {
             }
         }
         state.records.clear();
+        if let Some(slot) = state.slot.take() {
+            self.pool.release_slot(slot);
+        }
         self.notify.notify_waiters();
         self.stopped.notify_waiters();
         released
@@ -240,7 +250,9 @@ impl Drop for Stream {
                 self.pool.release(index);
             }
         }
-        self.pool.release_slot(self.slot);
+        if let Some(slot) = state.slot.take() {
+            self.pool.release_slot(slot);
+        }
     }
 }
 
@@ -257,15 +269,9 @@ impl Writer {
     pub fn id(&self) -> u64 {
         self.stream.id
     }
+    /// The published end. It stays valid after invalidation, when the header slot may be reused.
     pub fn committed(&self) -> Position {
-        Position::at(
-            self.id(),
-            self.stream
-                .pool
-                .header(self.stream.slot)
-                .committed
-                .load(Ordering::Acquire),
-        )
+        Position::at(self.id(), self.stream.state.lock().end)
     }
 
     /// Wait for the producer to stop, including expiry, eviction, cancellation and shutdown.
@@ -609,8 +615,10 @@ impl Reader {
                 return (Poll::Ready(Some(Read::Terminal(Terminal::Gone))), false);
             }
             // Cache only a prefix acquired from the mapped publication header under this lock.
-            if self.next >= self.available {
-                self.committed = stream.pool.header(stream.slot).committed.load(Ordering::Acquire);
+            if self.next >= self.available
+                && let Some(slot) = state.slot
+            {
+                self.committed = stream.pool.header(slot).committed.load(Ordering::Acquire);
                 self.available = state.next_sequence;
             }
             let index = state.records.partition_point(|run| run.next_sequence <= self.next);

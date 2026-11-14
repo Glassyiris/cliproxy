@@ -10,7 +10,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{Config, Error, Limits, Reader, Terminal, Writer, pool::Pool, publication::Stream};
+use crate::{
+    Config, Error, Limits, Reader, Terminal, Writer,
+    pool::Pool,
+    publication::{State, Stream},
+};
 
 /// Monotonic elapsed time. Implementations must never move backwards.
 pub trait Clock: Send + Sync + 'static {
@@ -125,17 +129,17 @@ impl Drop for RetentionGuard<'_> {
 }
 
 impl Inner {
-    /// Invalidate the least recently read streams that together return `frames` unleased
-    /// frames now. Streams that would return none stay cached; if every candidate together
-    /// cannot cover the request, nothing is invalidated and this returns false.
-    pub(crate) fn evict(&self, exclude: u64, frames: usize) -> bool {
+    /// Invalidate the least recently read streams whose `gain` (what invalidation returns now)
+    /// together covers `wanted`. Streams that would return nothing stay cached; if every
+    /// candidate together cannot cover the request, nothing is invalidated and this returns false.
+    fn evict(&self, exclude: Option<u64>, wanted: usize, gain: fn(&State) -> usize) -> bool {
         let _retention = self.retention.retain();
         let mut cache = self.cache.lock();
         let mut victims = Vec::new();
         let mut found = 0;
         let mut refreshed = HashSet::new();
         let mut cursor = None;
-        while found < frames {
+        while found < wanted {
             let next = match cursor {
                 None => cache.order.first(),
                 Some(key) => cache.order.range((Excluded(key), Unbounded)).next(),
@@ -144,7 +148,7 @@ impl Inner {
                 break;
             };
             cursor = Some(key);
-            if key.1 == exclude {
+            if Some(key.1) == exclude {
                 continue;
             }
             let stream = cache.streams[&key.1].clone();
@@ -158,13 +162,13 @@ impl Inner {
                 cache.order.insert(real);
                 continue;
             }
-            let reclaimable = stream.reclaimable(&state);
-            if reclaimable > 0 {
-                found += reclaimable;
+            let returned = gain(&state);
+            if returned > 0 {
+                found += returned;
                 victims.push(key);
             }
         }
-        if found < frames {
+        if found < wanted {
             return false;
         }
         for key in victims {
@@ -208,7 +212,7 @@ impl Inner {
             match self.pool.allocate() {
                 Ok(frame) => return Ok(frame),
                 Err(error) if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() => {
-                    if !self.evict(exclude, remaining) {
+                    if !self.evict(Some(exclude), remaining, State::reclaimable) {
                         return Err(Error::StorageExhausted);
                     }
                 }
@@ -298,12 +302,26 @@ impl Store {
 
     /// Admit one exclusive producer. The returned id is an internal generation, not an auth token.
     pub fn create(&self) -> Result<Writer, Error> {
+        // Header slots bound the mapping, not the cache: when none is free, evict the least
+        // recently read stream exactly as under frame pressure. Invalidation frees its slot.
+        let slot = loop {
+            if self.inner.closed.load(Ordering::Acquire) {
+                return Err(Error::Closed);
+            }
+            if let Some(slot) = self.inner.pool.claim_slot() {
+                break slot;
+            }
+            if !self.inner.evict(None, 1, State::slot_count) {
+                return Err(Error::StorageExhausted);
+            }
+        };
         let mut cache = self.inner.cache.lock();
-        if self.inner.closed.load(Ordering::Acquire) {
-            return Err(Error::Closed);
+        let id = if self.inner.closed.load(Ordering::Acquire) {
+            Err(Error::Closed)
+        } else {
+            checked_add(&NEXT_ID, 1).ok_or(Error::StorageExhausted)
         }
-        let id = checked_add(&NEXT_ID, 1).ok_or(Error::StorageExhausted)?;
-        let slot = self.inner.pool.claim_slot().ok_or(Error::StorageExhausted)?;
+        .inspect_err(|_| self.inner.pool.release_slot(slot))?;
         let now = self.inner.retention.clock.now();
         let stream = Arc::new(Stream::new(
             id,

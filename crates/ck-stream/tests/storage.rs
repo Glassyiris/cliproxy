@@ -242,6 +242,37 @@ fn pressure_fails_without_eviction_when_victims_cannot_cover_the_reservation() {
     assert_eq!(store.used_frames(), 4);
 }
 
+#[test]
+fn header_slot_exhaustion_evicts_the_least_recently_read_stream() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::new(dir.path().join("pool"));
+    config.pool_bytes = Some(64 * FRAME_BYTES);
+    config.max_event_bytes = FRAME_BYTES;
+    config.workers = 1;
+    assert_eq!(config.header_slots, 4096);
+    let clock = Arc::new(ManualClock::default());
+    let store = Store::with_clock(config, clock.clone()).unwrap();
+    let finished = || {
+        let mut writer = store.create().unwrap();
+        writer.finish(Terminal::Done);
+        writer.id()
+    };
+    let first = finished();
+    let mut second = store.create().unwrap();
+    let kept = second.append(b"kept").unwrap();
+    let mut second_reader = store.reader(second.id(), 0).unwrap();
+    let rest: Vec<_> = (2..4096).map(|_| finished()).collect();
+    clock.advance(Duration::from_secs(1));
+    drop(store.reader(first, 0).unwrap());
+    let mut admitted = store.create().unwrap();
+    admitted.append(b"reuses the freed header slot").unwrap();
+    terminal(&mut second_reader, Terminal::Gone);
+    assert_eq!(second.committed(), kept.end);
+    assert!(matches!(store.reader(second.id(), 0), Err(Error::Gone)));
+    assert!(store.reader(first, 0).is_ok());
+    assert!(store.reader(rest[0], 0).is_ok());
+}
+
 #[tokio::test]
 async fn notification_registration_cannot_lose_publication_or_cancellation() {
     let (_dir, store, _) = store(8);

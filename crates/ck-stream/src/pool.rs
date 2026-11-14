@@ -302,7 +302,8 @@ impl Pool {
         Some(slot)
     }
 
-    /// Caller returns a slot exactly once, only when its stream object is dropped.
+    /// Caller returns a slot exactly once, at invalidation or drop of its stream; the stream
+    /// never loads or stores that header afterwards.
     pub(crate) fn release_slot(&self, slot: u32) {
         assert!(slot < self.slots);
         lock(&self.free_slots).push(slot);
