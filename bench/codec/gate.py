@@ -69,6 +69,7 @@ def event_kinds(case):
     for line in case.get("lines", []):
         if line.startswith("event:"):
             kinds.add(line[6:].strip() or "unnamed")
+            continue
         payload = line[5:].strip() if line.startswith("data:") else line
         if payload == "[DONE]":
             kinds.add("[DONE]")
@@ -257,6 +258,11 @@ def run(old, new, out):
         executables = {"old": Path(old).resolve(strict=True), "new": Path(new).resolve(strict=True)}
         descriptions = {label: describe(path, out, label) for label, path in executables.items()}
         summary["harnesses"] = descriptions
+        if descriptions["old"]["executable_sha256"] == descriptions["new"]["executable_sha256"]:
+            raise ValueError("old/new executable sha256 is identical")
+        if all(descriptions["old"][field] == descriptions["new"][field]
+               for field in ("revision", "source_checksum")):
+            raise ValueError("old/new revision and source checksum are identical")
         if descriptions["old"]["revision"] != BASELINE_REVISION:
             raise ValueError(f"old source must be pinned to {BASELINE_REVISION}")
         if descriptions["old"]["config"] != descriptions["new"]["config"]:

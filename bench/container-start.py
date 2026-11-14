@@ -166,9 +166,13 @@ def check_pool(probe, directory, cap=None):
                 errors.append(f"mapped pool {fd} must be 0600 owned by 10001:10001")
             if int(size) <= 0:
                 errors.append("mapped pool is empty")
-            # pool_bytes counts frames; the implementation owns the header layout.
-            if cap is not None and int(size) >= 256 * 1024 * 1024:
-                errors.append("small capped pool mapping is not below 256 MiB")
+            if cap is not None and int(size) != cap:
+                errors.append(f"small capped pool mapping must equal pool_bytes {cap}; found {size}")
+            if cap is not None:
+                page = os.sysconf("SC_PAGE_SIZE")
+                expected_mapping = ((cap + page - 1) // page) * page
+                if sum(mapped) != expected_mapping:
+                    errors.append(f"small capped pool virtual mapping must cover exactly {expected_mapping} page-rounded bytes; found {sum(mapped)}")
     if len(fds) != 1:
         errors.append(f"expected one actual mapped pool inode under {directory}; found {len(fds)}")
     mounts = "\n".join(sections.get("MOUNTS", []))

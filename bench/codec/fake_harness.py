@@ -22,7 +22,7 @@ def main():
     mode = os.environ.get("CODEC_FAKE_MODE", "pass")
     if args.describe:
         print(json.dumps({"schema_version": 1, "revision": gate.BASELINE_REVISION,
-                          "source_checksum": "0" * 64, "compiler": "synthetic-selftest",
+                          "source_checksum": ("1" if label == "new" else "0") * 64, "compiler": "synthetic-selftest",
                           "target": "synthetic", "profile": "release", "features": [],
                           "build_flags": [], "config": {"synthetic": True},
                           "storage_directory": os.environ["CODEC_FAKE_STORAGE"]}))

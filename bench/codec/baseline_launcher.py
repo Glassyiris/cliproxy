@@ -12,6 +12,8 @@ import tempfile
 
 def worker(binary, args, env, index):
     group = Path(f"/sys/fs/cgroup/cooker-codec-{os.getuid()}-{os.getpid()}-{index}")
+    if group.exists():
+        raise RuntimeError(f"leftover baseline cgroup: {group}; inspect its cgroup.procs before removing it")
     subprocess.run(["sudo", "-n", "mkdir", str(group)], check=True)
     child = None
     read_fd, write_fd = os.pipe()

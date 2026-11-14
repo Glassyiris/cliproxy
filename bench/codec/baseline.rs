@@ -96,7 +96,7 @@ fn bytes(v: &Value, raw: bool) -> Vec<u8> {
 }
 fn kind(line: &str, selected: &str) -> bool {
     if let Some(name) = line.strip_prefix("event:") {
-        if name.trim() == selected || (name.trim().is_empty() && selected == "unnamed") { return true; }
+        return name.trim() == selected || (name.trim().is_empty() && selected == "unnamed");
     }
     let payload = line.strip_prefix("data:").map(str::trim).unwrap_or(line);
     if payload == "[DONE]" { return selected == "[DONE]"; }
@@ -104,6 +104,22 @@ fn kind(line: &str, selected: &str) -> bool {
         Ok(value) => value.get("type").or_else(|| value.get("object"))
             .and_then(Value::as_str).unwrap_or("json") == selected,
         Err(_) => selected == "framing-or-fragment",
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::kind;
+
+    #[test]
+    fn headers_are_not_payload_fragments() {
+        assert!(kind("event: message", "message"));
+        assert!(kind("event:", "unnamed"));
+        assert!(!kind("event: message", "framing-or-fragment"));
+        assert!(!kind("event:", "framing-or-fragment"));
+        assert!(kind("data: {", "framing-or-fragment"));
+        assert!(kind("data: [DONE]", "[DONE]"));
+        assert!(kind(r#"data: {"type":"message"}"#, "message"));
     }
 }
 struct Prepared {

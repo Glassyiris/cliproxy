@@ -2,9 +2,11 @@
 """Exercise a real gateway against loopback-only external workloads."""
 
 import argparse
+import base64
 import hashlib
 import http.client
 import http.server
+import importlib.util
 import itertools
 import json
 import os
@@ -20,10 +22,15 @@ import urllib.parse
 
 KEY = "sk-flow-local-client"
 OTHER_KEY = "sk-flow-other-client"
+MANAGEMENT_KEY = "sk-fake-flow-management"
 SIGNATURE = "opaque+/signature==do-not-change"
 ARGUMENTS = '{"path":"src/測試.rs","line":17}'
 MEDIA = bytes(range(256)) * 32768  # 8 MiB, including invalid textual UTF-8.
 TIMEOUT = 12
+
+_ws_spec = importlib.util.spec_from_file_location("flow_realtime", Path(__file__).with_name("realtime.py"))
+realtime = importlib.util.module_from_spec(_ws_spec)
+_ws_spec.loader.exec_module(realtime)
 
 
 def require(condition, message):
@@ -141,6 +148,9 @@ class Upstream(http.server.ThreadingHTTPServer):
         self.progress = []
         self.error = None
         self.sent = 0
+        self.sessions = 0
+        self.received = []
+        self.detached = threading.Event()
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -163,16 +173,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
             chunks.append(chunk)
 
 
+    def do_GET(self):
+        try:
+            self.local_target()
+            require(self.headers.get("X-Ck-Stream-Id") is None and self.headers.get("Last-Event-ID") is None,
+                    "gateway forwarded resume headers upstream")
+            require(self.path in ("/v1/realtime?model=gpt-realtime", "/v1/realtime/calls/flow-call"),
+                    "gateway changed the realtime upstream route")
+            self.server.requests.append({"path": self.path})
+            realtime.serve_upstream(self)
+        except (AssertionError, OSError, ValueError) as exc:
+            self.server.error = str(exc)
+            self.server.done.set()
+
+    def local_target(self):
+        # Explicit credential proxies also cover transports that ignore env proxies.
+        target = urllib.parse.urlsplit(self.path)
+        if target.netloc:
+            require(target.scheme in ("http", "ws") and target.hostname == "127.0.0.1"
+                    and target.port == self.server.server_port,
+                    "blocked non-loopback realtime proxy target")
+            self.path = urllib.parse.urlunsplit(("", "", target.path, target.query, ""))
+
+    def do_CONNECT(self):
+        # This fixture never tunnels TLS or forwards traffic to another server.
+        self.server.error = "blocked hard-coded TLS upstream; local provider base-url support is required"
+        self.server.done.set()
+        self.send_error(403, "loopback fixture refuses CONNECT")
+
     def do_POST(self):
         up = self.server
         self.connection.settimeout(TIMEOUT)
         try:
+            self.local_target()
             body = self.request_body()
             length = len(body)
             request = json.loads(body)
             # Never retain authentication or resume headers in benchmark artifacts.
             up.requests.append({"path": self.path, "body": request})
             up.progress.append({"time": time.monotonic(), "kind": "request", "bytes": length})
+            if up.scenario == "sideband-resume":
+                require(self.headers.get("X-Ck-Stream-Id") is None, "gateway forwarded session identity upstream")
+                require(request == {"sdp": "v=0\r\no=flow-offer\r\n", "session": {"model": "gpt-live-1-codex"}},
+                        "sideband bootstrap payload/model changed")
+                answer = b"v=0\r\no=flow-answer\r\n"
+                self.send_response(201)
+                self.send_header("Content-Type", "application/sdp")
+                self.send_header("Location", "/v1/realtime/calls/flow-call")
+                self.send_header("Content-Length", str(len(answer)))
+                self.end_headers()
+                self.wfile.write(answer)
+                self.wfile.flush()
+                return
             self.send_response(200)
             media = up.scenario in ("long-media", "media-resume")
             self.send_header("Content-Type", "audio/mpeg" if media else "text/event-stream")
@@ -211,8 +263,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             up.error = str(exc)
         finally:
             up.progress.append({"time": time.monotonic(), "kind": "end", "bytes": up.sent, "error": up.error})
-            up.done.set()
-
+            if up.scenario != "sideband-resume" or up.error:
+                up.done.set()
 
 def records(response):
     lines = []
@@ -363,6 +415,7 @@ server:
   port: {self.port}
 management:
   disable-control-panel: true
+  secret-key: {MANAGEMENT_KEY}
 access:
   api-keys: [{KEY}, {OTHER_KEY}]
 api-keys:
@@ -422,8 +475,21 @@ api-keys:
         if small_window:
             conn.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
         data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
-        conn.request(method, path, data, {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json",
-                                         "Accept-Encoding": "identity", **(headers or {})})
+        request_headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json",
+                           "Accept-Encoding": "identity"}
+        request_headers.update(dict(headers or ()))
+        conn.putrequest(method, path, skip_accept_encoding=True)
+        for name, value in request_headers.items():
+            if not headers or name.lower() != "x-ck-stream-id":
+                conn.putheader(name, value)
+        # A sequence preserves duplicate identity fields for rejection controls.
+        if headers:
+            for name, value in (headers.items() if isinstance(headers, dict) else headers):
+                if name.lower() == "x-ck-stream-id":
+                    conn.putheader(name, value)
+        if data is not None:
+            conn.putheader("Content-Length", str(len(data)))
+        conn.endheaders(data)
         self.request_number += 1
         try:
             response = conn.getresponse()
@@ -445,6 +511,23 @@ api-keys:
                     raise AssertionError("gateway did not stop within five seconds")
         finally:
             self.log.close()
+
+    def prepare_realtime(self):
+        # Native realtime selects OAuth credentials, not the configured API-key entry.
+        credential = {"type": "codex", "access_token": "fake-flow-oauth-token",
+                      "account_id": "fake-flow-account", "base_url":
+                      f"http://127.0.0.1:{self.up.server_port}/v1",
+                      "proxy_url": f"http://127.0.0.1:{self.up.server_port}"}
+        conn, response = self.request("POST", "/admin/v1/credentials/batch", {"documents": [{
+            "name": "flow-codex.json", "if_none_match": True,
+            "data": base64.b64encode(json.dumps(credential).encode()).decode()}]},
+            headers={"Authorization": f"Bearer {MANAGEMENT_KEY}"})
+        try:
+            require(response.status == 200, f"local fake OAuth setup returned HTTP {response.status}")
+            require(json.loads(response.read()).get("saved") == 1, "local fake OAuth credential was not saved")
+        finally:
+            response.close()
+            conn.close()
 
 
 def initial(gateway, scenario):
@@ -470,48 +553,149 @@ def resume(gateway, stream_id, after, key=KEY):
                            headers={"X-Ck-Stream-Id": stream_id, "Authorization": f"Bearer {key}"})
 
 
+def check_stream_headers(response, stream_id, after, content_type, initial=False):
+    require(response.getheader("X-Ck-Stream-Id") == stream_id and stream_id,
+            "stream identity response header changed or missing")
+    require(response.getheader("X-Ck-Stream-Cursor") == after,
+            f"stream did not acknowledge cursor {after}")
+    if not initial:
+        require(response.getheader("Cache-Control") == "no-store", "stream response is cacheable")
+    require(response.getheader("Content-Type") == content_type, "retained content type changed")
+    require(response.getheader("Content-Encoding", "identity") == "identity",
+            "stream entity bytes are not identity encoded")
+
+
+def check_invalid_attachments(gateway, stream_id, kind, end):
+    valid = f"v1.{kind}.0"
+    cases = [("/v1/streams", [("X-Ck-Stream-Id", stream_id)]),
+             (f"/v1/streams?after={valid}", []),
+             (f"/v1/streams?after={valid}&stream_id=not-a-stream-id", []),
+             (f"/v1/streams?after={valid}", [("X-Ck-Stream-Id", stream_id)] * 2)]
+    for bad in ("", "garbage", f"v1.{kind}.-1", f"v1.{kind}.1.0",
+                f"v1.{kind}.18446744073709551616", f"v1.{kind}.+1",
+                f"v1.{'b' if kind == 'e' else 'e'}.0", f"v1.{kind}.{end + 1}"):
+        cases.append(("/v1/streams?after=" + urllib.parse.quote(bad),
+                      [("X-Ck-Stream-Id", stream_id)]))
+    cases.append((f"/v1/streams?after={valid}",
+                  [("X-Ck-Stream-Id", stream_id), ("Last-Event-ID", f"v1.{kind}.1")]))
+    if kind == "b":
+        cases.append(("/v1/streams", [("X-Ck-Stream-Id", stream_id),
+                                       ("Last-Event-ID", valid)]))
+        cases.append((f"/v1/streams?after={valid}", [("X-Ck-Stream-Id", stream_id),
+                                                     ("Last-Event-ID", valid)]))
+    for path, headers in cases:
+        conn, failure = gateway.request("GET", path, headers=headers)
+        try:
+            require(failure.status == 400, f"invalid attachment {path} returned {failure.status}, expected 400")
+            failure.read()
+        finally:
+            failure.close()
+            conn.close()
+
+
 def check_resume(gateway, response, conn, live):
     up = gateway.up
     first = next(records(response))
     stream_id = response.getheader("X-Ck-Stream-Id")
     after = cursor(first)
     require(stream_id, "missing X-Ck-Stream-Id: resume is not implemented")
+    content_type = response.getheader("Content-Type")
+    require(content_type and content_type.startswith("text/event-stream"), "initial SSE content type missing or changed")
+    check_stream_headers(response, stream_id, "v1.e.0", content_type, initial=True)
     response.close()
     conn.close()
     if not live:
         up.release.set()
         wait_upstream(up)
     attach, suffix = resume(gateway, stream_id, after)
-    require(suffix.status == 200, f"resume returned HTTP {suffix.status}")
-    require(suffix.getheader("X-Ck-Stream-Cursor") == after, "resume did not acknowledge starting cursor")
-    require(suffix.getheader("X-Ck-Stream-Id") == stream_id, "resume identity response header changed")
-    require(suffix.getheader("Cache-Control") == "no-store", "resume response is cacheable")
-    up.release.set()
-    tail = list(records(suffix))
-    attach.close()
+    try:
+        require(suffix.status == 200, f"resume returned HTTP {suffix.status}")
+        check_stream_headers(suffix, stream_id, after, content_type)
+        up.release.set()
+        tail = list(records(suffix))
+    finally:
+        up.release.set()
+        suffix.close()
+        attach.close()
     wait_upstream(up)
     actual = [first, *tail]
     check_bulk(actual, 160)
     ordinals = [int(cursor(r).rsplit(".", 1)[1]) for r in actual]
     require(ordinals == list(range(1, len(actual) + 1)), "resume event cursors are not consecutive")
     end = cursor(actual[-1])
+    check_invalid_attachments(gateway, stream_id, "e", ordinals[-1])
+    for path in ("/v1/streams", "/v1/streams?after=" + urllib.parse.quote(after)):
+        attached, replay = gateway.request("GET", path, headers={"X-Ck-Stream-Id": stream_id,
+                                                                  "Last-Event-ID": after})
+        try:
+            require(replay.status == 200, "Last-Event-ID replacement/agreement rejected")
+            check_stream_headers(replay, stream_id, after, content_type)
+            require(list(records(replay)) == tail, "Last-Event-ID replay changed ordered suffix")
+        finally:
+            replay.close()
+            attached.close()
     again, replay = resume(gateway, stream_id, end)
-    require(replay.status == 200 and replay.read() == b"", "terminal cursor repeated output instead of EOF")
-    again.close()
+    try:
+        require(replay.status == 200 and replay.read() == b"", "terminal cursor repeated output instead of EOF")
+        check_stream_headers(replay, stream_id, end, content_type)
+    finally:
+        replay.close()
+        again.close()
     future, failure = resume(gateway, stream_id, f"v1.e.{ordinals[-1] + 1}")
-    require(failure.status == 400, "future cursor did not return 400")
-    failure.read()
-    future.close()
+    try:
+        require(failure.status == 400, "future cursor did not return 400")
+        failure.read()
+    finally:
+        failure.close()
+        future.close()
     foreign, failure = resume(gateway, stream_id, after, OTHER_KEY)
-    require(failure.status == 410, "foreign identity did not return 410")
-    failure.read()
-    foreign.close()
+    try:
+        require(failure.status == 410, "foreign identity did not return 410")
+        failure.read()
+    finally:
+        failure.close()
+        foreign.close()
+    for identity, key in ((stream_id, OTHER_KEY), ("unknown-flow-stream", KEY)):
+        absent, failure = resume(gateway, identity, "malformed", key)
+        try:
+            require(failure.status == 410, "authorization/identity lookup did not precede cursor validation")
+            failure.read()
+        finally:
+            failure.close()
+            absent.close()
     require(len(up.requests) == 1, "resume created a new upstream request")
     return {"resumed_events": len(tail), "cursor_end": end, "upstream_requests": len(up.requests)}
 
 
 def run_scenario(gateway, name):
     up = gateway.up
+    if name in ("realtime-resume", "sideband-resume"):
+        gateway.prepare_realtime()
+        path = "/v1/realtime?model=gpt-realtime"
+        if name == "sideband-resume":
+            conn, answer = gateway.request("POST", "/v1/realtime/calls", {
+                "sdp": "v=0\r\no=flow-offer\r\n", "session": {"model": "gpt-realtime"}})
+            try:
+                require(answer.status == 201,
+                        f"local sideband bootstrap returned HTTP {answer.status}; loopback realtime upstream reached={bool(up.requests)}")
+                require(answer.getheader("Content-Type") == "application/sdp", "sideband SDP content type changed")
+                require(answer.read() == b"v=0\r\no=flow-answer\r\n", "sideband SDP answer changed")
+                path = answer.getheader("Location")
+                require(path == "/v1/realtime/calls/flow-call", "sideband call Location changed")
+            finally:
+                answer.close()
+                conn.close()
+        def connect(path, headers):
+            try:
+                return realtime.WebSocket.connect(gateway.port, path, headers)
+            except (AssertionError, OSError) as exc:
+                raise AssertionError(f"{exc}; local realtime WS upstream reached={up.sessions > 0}; "
+                                     "native realtime and local provider base-url support are required") from exc
+        result = realtime.exercise_session(connect, up, path, KEY)
+        require(len(up.requests) == (2 if name == "sideband-resume" else 1),
+                "realtime resume created another bootstrap or upstream connection")
+        require(up.session_elapsed >= 2, "realtime producer was not sustained for two seconds")
+        return result
     conn, response = initial(gateway, name)
     try:
         if response.status != 200:
@@ -565,13 +749,22 @@ def run_scenario(gateway, name):
             if name == "media-resume":
                 stream_id = response.getheader("X-Ck-Stream-Id")
                 require(stream_id, "missing X-Ck-Stream-Id for byte resume")
+                content_type = response.getheader("Content-Type")
+                check_stream_headers(response, stream_id, "v1.b.0", content_type, initial=True)
                 response.close()
                 conn.close()
                 wait_upstream(up)
                 attach, suffix = resume(gateway, stream_id, f"v1.b.{len(prefix)}")
-                require(suffix.status == 200, f"media resume returned HTTP {suffix.status}")
-                body = prefix + suffix.read()
-                attach.close()
+                try:
+                    require(suffix.status == 200, f"media resume returned HTTP {suffix.status}")
+                    check_stream_headers(suffix, stream_id, f"v1.b.{len(prefix)}", content_type)
+                    remaining = suffix.read()
+                    require(remaining == MEDIA[len(prefix):], "media resume did not return exact byte suffix")
+                    body = prefix + remaining
+                finally:
+                    suffix.close()
+                    attach.close()
+                check_invalid_attachments(gateway, stream_id, "b", len(MEDIA))
                 require(len(up.requests) == 1, "media resume regenerated upstream output")
             else:
                 body = prefix + response.read()
@@ -589,7 +782,8 @@ def run_scenario(gateway, name):
 
 
 SCENARIOS = ("choices-logprobs-tools", "signatures-tools", "terminal-snapshots", "slow-downstream",
-             "live-resume", "completed-resume", "long-media", "media-resume", "stream-limit")
+             "live-resume", "completed-resume", "long-media", "media-resume", "stream-limit",
+             "realtime-resume", "sideband-resume")
 
 
 def main():
@@ -636,7 +830,11 @@ def main():
             up.server_close()
             thread.join(timeout=2)
             dump(directory / "upstream.json", {"requests": up.requests, "progress": up.progress,
-                                               "done": up.done.is_set(), "error": up.error})
+                                               "done": up.done.is_set(), "error": up.error,
+                                               "sessions": up.sessions, "request_units": [
+                                                   {"opcode": opcode, "bytes": len(data),
+                                                    "sha256": hashlib.sha256(data).hexdigest()}
+                                                   for opcode, data in up.received]})
         row["elapsed_s"] = time.monotonic() - start
         results.append(row)
         print(json.dumps(row), flush=True)

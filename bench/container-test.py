@@ -24,14 +24,16 @@ spec.loader.exec_module(gate)
 ARTIFACTS = None
 
 
-def probe(directory, mode="600", uid="10001", mapped=True, target=None, inode="55"):
+def probe(directory, mode="600", uid="10001", mapped=True, target=None, inode="55", size=6_400_000):
     target = target or directory + "/#55 (deleted)"
-    mapping = f"1000-2000 rw-s 00000000 00:2a {inode} {target}\n" if mapped else ""
+    page = os.sysconf("SC_PAGE_SIZE")
+    end = 0x1000 + ((size + page - 1) // page) * page
+    mapping = f"1000-{end:x} rw-s 00000000 00:2a {inode} {target}\n" if mapped else ""
     root = gate.RUNTIME if directory == gate.RUNTIME + "/cooker" else directory
     return ("IDENTITY\n10001\n10001\nSTATUS\nUid:\t10001\t10001\t10001\t10001\n"
             "Gid:\t10001\t10001\t10001\t10001\nDIRECTORY\n700 10001 10001 directory\n"
             f"DATA\n700 10001 10001 directory\nFDS\nFD\t/proc/1/fd/9\t{target}\n"
-            f"STAT 42 55 {mode} {uid} 10001 6400000 regular file\nMAPS\n{mapping}"
+            f"STAT 42 55 {mode} {uid} 10001 {size} regular file\nMAPS\n{mapping}"
             f"MOUNTS\n100 99 0:42 / {root} rw,nosuid,noexec - tmpfs tmpfs rw,size=524288k,uid=10001,gid=10001\n")
 
 
@@ -184,6 +186,23 @@ class DriverControls(unittest.TestCase):
         self.assertTrue(summary["scenarios"][0]["checks"]["clean_shutdown"])
 
 
+class DockerDeadlineControls(unittest.TestCase):
+    def test_default_deadline_rejects_a_stalled_docker_command(self):
+        out = Path(tempfile.mkdtemp(prefix="docker-deadline-", dir=ARTIFACTS))
+        docker = gate.Docker(out)
+        def stalled(command, **kwargs):
+            timeout = kwargs["timeout"]
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, 35)
+            raise subprocess.TimeoutExpired(command, timeout)
+        with patch.object(gate.subprocess, "run", side_effect=stalled):
+            with self.assertRaisesRegex(gate.GateError, "timed out"):
+                docker.run("info")
+            with self.assertRaisesRegex(gate.GateError, "timed out"):
+                docker.namespace(1234, "iptables", "-S", "OUTPUT")
+        self.assertIsNone(json.loads((out / "docker-0001.json").read_text())["exit_code"])
+
+
 class PoolControls(unittest.TestCase):
     directory = gate.RUNTIME + "/cooker"
 
@@ -214,6 +233,22 @@ class PoolControls(unittest.TestCase):
         errors, pools = gate.check_pool(probe(self.directory, mode="644", uid="0"), self.directory)
         self.assertTrue(pools)
         self.assertIn("0600 owned by 10001:10001", " ".join(errors))
+
+    def test_small_pool_requires_exact_configured_backing_size(self):
+        for size in (gate.POOL_BYTES, gate.POOL_BYTES - 50_000, gate.POOL_BYTES + 50_000):
+            with self.subTest(size=size):
+                errors, _ = gate.check_pool(probe(self.directory, size=size), self.directory, gate.POOL_BYTES)
+                self.assertEqual(not errors, size == gate.POOL_BYTES)
+                if size != gate.POOL_BYTES:
+                    self.assertIn("must equal pool_bytes", " ".join(errors))
+
+    def test_small_pool_rejects_partial_or_oversized_virtual_mapping(self):
+        text = probe(self.directory)
+        for end in (0x2000, 0x1000 + gate.POOL_BYTES + 2 * os.sysconf("SC_PAGE_SIZE")):
+            mapped = text.split("MAPS\n")[1].splitlines()[0]
+            wrong = mapped.replace(mapped.split()[0], f"1000-{end:x}", 1)
+            errors, _ = gate.check_pool(text.replace(mapped, wrong), self.directory, gate.POOL_BYTES)
+            self.assertIn("page-rounded bytes", " ".join(errors))
 
     def test_refusal_requires_actionable_error_not_crash(self):
         state = {"ExitCode": 2, "OOMKilled": False}

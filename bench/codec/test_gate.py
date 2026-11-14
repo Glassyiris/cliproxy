@@ -9,10 +9,12 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gate
+import baseline_launcher
 
 ARTIFACTS = Path(os.environ["CODEC_TEST_ARTIFACTS"]).resolve()
 
@@ -80,6 +82,22 @@ class Thresholds(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     gate.records(path, {"required"}, "sha", 1)
 
+    def test_stream_headers_are_not_framing_fragments(self):
+        case = {"path": "stream", "lines": ["event: message", 'data: {"type":"message"}']}
+        self.assertEqual(gate.event_kinds(case), ["message"])
+        case["lines"].extend(["event:", "data: {", "data: [DONE]"])
+        self.assertEqual(gate.event_kinds(case), ["[DONE]", "framing-or-fragment", "message", "unnamed"])
+
+    def test_leftover_cgroup_reports_exact_path_without_touching_members(self):
+        directory = ARTIFACTS / "leftover-cgroup"
+        directory.mkdir()
+        members = directory / "cgroup.procs"
+        members.write_text("12345\n")
+        with patch.object(baseline_launcher, "Path", return_value=directory):
+            with self.assertRaisesRegex(RuntimeError, f"leftover baseline cgroup: {directory}"):
+                baseline_launcher.worker("unused", [], {}, 0)
+        self.assertEqual(members.read_text(), "12345\n")
+
 
 class GateControls(unittest.TestCase):
     @classmethod
@@ -136,6 +154,29 @@ class GateControls(unittest.TestCase):
         out = ARTIFACTS / "absent"
         self.assertEqual(gate.run(str(ARTIFACTS / "absent-old-codec"), str(self.new), out), 2)
         self.assertIn("No such file", json.loads((out / "summary.json").read_text())["error"])
+
+    def test_identical_executable_is_error_even_at_another_path(self):
+        duplicate = ARTIFACTS / "duplicate-harness"
+        duplicate.write_bytes(self.old.read_bytes())
+        duplicate.chmod(0o700)
+        out = ARTIFACTS / "same-executable"
+        with patch.dict(os.environ, {"CODEC_FAKE_STORAGE": str(ARTIFACTS)}):
+            self.assertEqual(gate.run(str(self.old), str(duplicate), out), 2)
+        summary = json.loads((out / "summary.json").read_text())
+        self.assertIn("executable sha256 is identical", summary["error"])
+        self.assertEqual(summary["rounds"], [])
+
+    def test_identical_source_is_error_with_different_executables(self):
+        duplicate = ARTIFACTS / "same-source-harness"
+        duplicate.write_bytes(self.old.read_bytes() + b"\n# Different wrapper, same source.\n")
+        duplicate.chmod(0o700)
+        out = ARTIFACTS / "same-source"
+        with patch.dict(os.environ, {"CODEC_FAKE_STORAGE": str(ARTIFACTS)}):
+            self.assertEqual(gate.run(str(self.old), str(duplicate), out), 2)
+        summary = json.loads((out / "summary.json").read_text())
+        self.assertIn("revision and source checksum are identical", summary["error"])
+        self.assertNotEqual(*(summary["harnesses"][side]["executable_sha256"] for side in ("old", "new")))
+        self.assertEqual(summary["rounds"], [])
 
 
 if __name__ == "__main__":

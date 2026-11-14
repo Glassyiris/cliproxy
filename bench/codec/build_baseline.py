@@ -53,10 +53,13 @@ def main():
     toml += f'\n[patch.crates-io]\ngjson = {{ path = {json.dumps(str(source / "vendor/gjson"))} }}\n'
     toml += '\n[profile.release]\nlto = "thin"\ncodegen-units = 1\nstrip = true\n'
     (crate / "Cargo.toml").write_text(toml)
-    env = {**os.environ, "CARGO_BUILD_JOBS": "4", "CARGO_TARGET_DIR": "/scratch/ssd/bench-target"}
+    env = {**os.environ,
+           "BUILD_CPUS": os.environ.get("BUILD_CPUS") or "8-15,24-31",
+           "CARGO_BUILD_JOBS": os.environ.get("CARGO_BUILD_JOBS") or "4",
+           "CARGO_TARGET_DIR": os.environ.get("CARGO_TARGET_DIR") or "/scratch/ssd/bench-target"}
     def run(args, filename):
         with (out / filename).open("w") as log:
-            subprocess.run(["taskset", "-c", "8-15,24-31", *args], env=env,
+            subprocess.run(["taskset", "-c", env["BUILD_CPUS"], *args], env=env,
                            stdout=log, stderr=subprocess.STDOUT, check=True)
     start = datetime.datetime.now(datetime.timezone.utc).isoformat()
     # The copied lock needs only a new root entry/pruned workspace members. Offline
@@ -73,6 +76,7 @@ def main():
                    "instrumentation": "global-alloc+process-cpu+monotonic+smaps+private-cgroup-v2"},
         "backend_config": {"implementation": "pinned-pair-transforms", "pool": "absent"},
         "build_environment": {key: env.get(key) for key in (
+            "BUILD_CPUS", "CARGO_TARGET_DIR", "CARGO_BUILD_JOBS",
             "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "RUSTC", "RUSTC_WRAPPER",
             "CARGO_PROFILE_RELEASE_LTO", "CARGO_PROFILE_RELEASE_CODEGEN_UNITS",
             "CARGO_PROFILE_RELEASE_OPT_LEVEL", "CARGO_PROFILE_RELEASE_STRIP",
@@ -80,7 +84,8 @@ def main():
         "storage_directory": str(out), "harness_source_sha256": sha(HERE / "baseline.rs"),
         "baseline_lock_sha256": sha(out / "baseline-Cargo.lock"), "resolved_lock_sha256": sha(crate / "Cargo.lock"),
         "build_start": start, "build_end": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "build_affinity": "8-15,24-31", "build_jobs": 4, "binary_sha256": sha(out / "old-codec-harness")}
+        "build_affinity": env["BUILD_CPUS"], "build_jobs": int(env["CARGO_BUILD_JOBS"]),
+        "binary_sha256": sha(out / "old-codec-harness")}
     (out / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     wrapper = out / "baseline-harness"
     import shlex
