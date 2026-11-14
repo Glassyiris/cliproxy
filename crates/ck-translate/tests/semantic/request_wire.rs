@@ -361,3 +361,24 @@ fn invalid_suffix_cannot_complete_an_incrementally_published_request() {
         assert!(!events.contains("event: x_ck.done\n"));
     }
 }
+
+#[test]
+fn empty_tool_call_arguments_fail_with_one_client_error_terminal() {
+    let input = br#"{"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":""}}]}]}"#;
+    let mut mapped = Mapped::new();
+    let mut ingress = Ingress::new(
+        &mut mapped.writer,
+        &mapped.store,
+        identity(Direction::Request),
+        Operation::Generate,
+        4096,
+    )
+    .unwrap();
+    let advanced = ingress.advance(&mut mapped.writer, input);
+    let finished = advanced.and_then(|()| ingress.finish(&mut mapped.writer, &ChatCapability).map(drop));
+    let events = String::from_utf8(mapped.output(&mapped.writer)).unwrap();
+    assert!(finished.is_err());
+    assert_eq!(events.matches("event: x_ck.error\n").count(), 1, "{events}");
+    assert!(events.contains("\"client\""), "{events}");
+    assert!(!events.contains("event: x_ck.request.end\n"));
+}

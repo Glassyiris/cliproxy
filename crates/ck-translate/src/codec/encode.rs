@@ -248,6 +248,11 @@ pub fn scratch(
     };
     encode(&mut count)?;
     let length = count.length;
+    // Storage has no empty lease. Every caller encodes boundary input (an embedded JSON
+    // document, an SSE data field) or a body, so an empty encoding is invalid input.
+    if length == 0 {
+        return Err(Error::Schema);
+    }
     let mut reservation = output.begin_scratch(length)?;
     let mut encoder = Encoder {
         reservation: None,
