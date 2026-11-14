@@ -792,7 +792,7 @@ fn logrus_level(level: &Level) -> &'static str {
 
 /// The caller's source path relative to the crate's `src/` directory, so modules that
 /// share a file name stay distinguishable (`management/api.rs`, not `api.rs`). A path
-/// with no `src/` component is returned as given.
+/// with no `src/` component is kept whole. Backslashes become `/`.
 fn caller_path(file: &str) -> std::borrow::Cow<'_, str> {
     let start = [file.rfind("/src/"), file.rfind("\\src\\")]
         .into_iter()
