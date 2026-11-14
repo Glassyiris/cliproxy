@@ -13,7 +13,7 @@ mod string;
 
 #[path = "request_records.rs"]
 mod records;
-pub use records::read_document;
+pub use records::read_request;
 
 #[path = "request_write.rs"]
 mod write;

@@ -120,7 +120,7 @@ impl Capability for Signed {
     }
 }
 
-pub(super) fn canonical(input: &serde_json::Value, policy: &impl Capability) -> (Mapped, Document) {
+pub(super) fn canonical(input: &serde_json::Value, policy: &impl Capability) -> (Mapped, Document, Registry) {
     let mut mapped = Mapped::configured(std::sync::Arc::new(ck_stream::ManualClock::default()), 256);
     let mut ingress = Ingress::new(
         &mut mapped.writer,
@@ -136,8 +136,8 @@ pub(super) fn canonical(input: &serde_json::Value, policy: &impl Capability) -> 
     ingress.finish(&mut mapped.writer, policy).unwrap();
     drop(ingress);
     let mut reader = mapped.store.reader(mapped.writer.id(), 0).unwrap();
-    let document = codec::chat::request::read_document(&mut mapped.writer, &mut reader).unwrap();
-    (mapped, document)
+    let (document, media) = codec::chat::request::read_request(&mut mapped.writer, &mut reader).unwrap();
+    (mapped, document, media)
 }
 
 fn output(mapped: &mut Mapped, doc: &Document, policy: &impl Capability) -> serde_json::Value {
@@ -169,7 +169,7 @@ fn output(mapped: &mut Mapped, doc: &Document, policy: &impl Capability) -> serd
 #[test]
 fn exact_cache_breakpoints_round_trip_and_normalized_mutations_win() {
     let input = json!({"model":"m","messages":[{"role":"user","cache_control":{"type":"ephemeral","ttl":"1h"},"content":[{"type":"text","text":"a","cache_control":{"type":"ephemeral","ttl":"5m"}},{"type":"text","text":"b","cache_control":null}]}],"tools":[{"type":"function","cache_control":{"type":"ephemeral"},"function":{"name":"f","cache_control":{"type":"ephemeral","ttl":"1h"}}}]});
-    let (mut mapped, mut doc) = canonical(&input, &ChatCapability);
+    let (mut mapped, mut doc, _) = canonical(&input, &ChatCapability);
     let encoded = output(&mut mapped, &doc, &ChatCapability);
     assert_eq!(encoded["messages"], input["messages"]);
     assert_eq!(encoded["tools"], input["tools"]);
@@ -194,7 +194,7 @@ fn exact_cache_breakpoints_round_trip_and_normalized_mutations_win() {
 #[test]
 fn bound_signatures_require_explicit_policy_and_never_reassociate() {
     let input = json!({"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"a","type":"function","thoughtSignature":"one","function":{"name":"f"}},{"id":"b","type":"function","function":{"name":"g","extra_content":{"google":{"thought_signature":"two"}}}}]}]});
-    let (mut mapped, mut doc) = canonical(&input, &Signed);
+    let (mut mapped, mut doc, _) = canonical(&input, &Signed);
     assert_eq!(output(&mut mapped, &doc, &Signed)["messages"], input["messages"]);
     let media = Registry::new(&mut mapped.writer).unwrap();
     assert!(matches!(
@@ -220,7 +220,7 @@ fn bound_signatures_require_explicit_policy_and_never_reassociate() {
 fn recursive_unknowns_keep_stable_parents_and_literal_controls_stay_data() {
     let part = |s| json!({"type":"text","text":s,"a/b~c":{"x_ck":{"attempt":99},"signature":null}});
     let input = json!({"model":"m","messages":[{"role":"user","future":0,"content":[part("a"),part("b")]},{"role":"user","future":1,"content":[part("c")]}],"previous_response_id":"literal","vendor":{"top_k":7},"metadata":{"signature":"literal","encrypted_content":"literal"},"x_ck":{"session":{"previous_response_id":"forged"}},"tools":[{"type":"custom","future":[],"custom":{"name":"free","namespace":"ns","format":{"type":"grammar","grammar":{"syntax":"regex","definition":"a+","extra":null}},"extra":{"x_ck":true}}}]});
-    let (mut mapped, mut doc) = canonical(&input, &ChatCapability);
+    let (mut mapped, mut doc, _) = canonical(&input, &ChatCapability);
     let encoded = output(&mut mapped, &doc, &ChatCapability);
     for (key, value) in input.as_object().unwrap() {
         assert_eq!(&encoded[key], value, "{key}");
@@ -253,7 +253,7 @@ fn recursive_unknowns_keep_stable_parents_and_literal_controls_stay_data() {
 #[test]
 fn trusted_session_provider_and_server_controls_fail_generic_chat_fence() {
     for key in ["session", "provider_parameters", "tools"] {
-        let (mut mapped, mut doc) = canonical(&json!({"model":"m","messages":[]}), &ChatCapability);
+        let (mut mapped, mut doc, _) = canonical(&json!({"model":"m","messages":[]}), &ChatCapability);
         let x = doc.required(doc.root(), "x_ck").unwrap();
         let container = doc
             .set(x, key, if key == "tools" { Value::Array } else { Value::Object })
@@ -328,7 +328,7 @@ fn late_cache_policy_rejection_never_publishes_success() {
 fn legacy_cache_pointer_and_custom_text_history_keep_native_spelling() {
     let legacy =
         json!({"model":"m","messages":[],"functions":[{"name":"f","cache_control":{"type":"ephemeral","ttl":"1h"}}]});
-    let (mut mapped, doc) = canonical(&legacy, &ChatCapability);
+    let (mut mapped, doc, _) = canonical(&legacy, &ChatCapability);
     let x = doc.required(doc.root(), "x_ck").unwrap();
     let cache = doc.required(x, "cache_control").unwrap();
     let entry = doc.children(cache).unwrap().next().unwrap();
@@ -341,7 +341,7 @@ fn legacy_cache_pointer_and_custom_text_history_keep_native_spelling() {
         legacy["functions"]
     );
     let input = json!({"model":"m","messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"custom","custom":{"name":"free","namespace":"ns","input":"not JSON {", "extra":null}}]}]});
-    let (mut mapped, doc) = canonical(&input, &ChatCapability);
+    let (mut mapped, doc, _) = canonical(&input, &ChatCapability);
     assert_eq!(
         output(&mut mapped, &doc, &ChatCapability)["messages"],
         input["messages"]
@@ -351,7 +351,7 @@ fn legacy_cache_pointer_and_custom_text_history_keep_native_spelling() {
 #[test]
 fn reviewed_custom_signatures_require_policy_and_keep_their_carrier() {
     let input = json!({"model":"m","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"custom","custom":{"name":"free","input":"hello","thought_signature":"sig"}}]}]});
-    let (mut mapped, mut doc) = canonical(&input, &Signed);
+    let (mut mapped, mut doc, _) = canonical(&input, &Signed);
     let media = Registry::new(&mut mapped.writer).unwrap();
     assert!(matches!(
         ChatCapability.validate(RequestView {
@@ -376,7 +376,7 @@ fn reviewed_custom_signatures_require_policy_and_keep_their_carrier() {
 #[test]
 fn reviewed_opaque_cache_controls_preserve_mutations_and_deletions() {
     let input = json!({"model":"m","messages":[{"role":"user","content":[{"type":"vendor_part","cache_control":{"type":"ephemeral","ttl":"1h"},"payload":1}]}]});
-    let (mut mapped, mut doc) = canonical(&input, &ChatCapability);
+    let (mut mapped, mut doc, _) = canonical(&input, &ChatCapability);
     assert_eq!(
         output(&mut mapped, &doc, &ChatCapability)["messages"],
         input["messages"]

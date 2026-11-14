@@ -63,7 +63,7 @@ fn reconstruct(bind: impl Fn(&mut Document)) -> codec::Result<(Mapped, Document)
     emitter.request_end(&mut mapped.writer, &ready).unwrap();
     drop(doc);
     let mut reader = mapped.store.reader(mapped.writer.id(), 0).unwrap();
-    let restored = codec::chat::request::read_document(&mut mapped.writer, &mut reader)?;
+    let (restored, _) = codec::chat::request::read_request(&mut mapped.writer, &mut reader)?;
     Ok((mapped, restored))
 }
 

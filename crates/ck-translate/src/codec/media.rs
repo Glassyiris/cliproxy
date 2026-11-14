@@ -1,4 +1,5 @@
 mod decode;
+mod retained;
 
 pub use decode::bytes;
 pub(crate) use decode::{Base64Fragments, InputDecoder, decode_base64, write_base64_fragments};
@@ -92,15 +93,7 @@ impl Registry {
     ) -> Result<Media> {
         self.validate_document(doc)?;
         self.document = Some(doc.id());
-        if self.entries.len() == self.entries.capacity() {
-            let capacity = self.entries.capacity().max(4).checked_mul(2).ok_or(Error::Limit)?;
-            self.metadata.resize(capacity * std::mem::size_of::<Entry>())?;
-            self.entries
-                .try_reserve_exact(capacity - self.entries.len())
-                .map_err(|_| Error::Limit)?;
-            self.metadata
-                .resize(self.entries.capacity() * std::mem::size_of::<Entry>())?;
-        }
+        self.reserve()?;
         let id = local_id(b'm', self.entries.len() as u64)?;
         let media = Media {
             node,
@@ -125,6 +118,19 @@ impl Registry {
             active: true,
         });
         Ok(media)
+    }
+    /// Grows the entry table, charging its metadata quota, before one more entry is pushed.
+    fn reserve(&mut self) -> Result<()> {
+        if self.entries.len() == self.entries.capacity() {
+            let capacity = self.entries.capacity().max(4).checked_mul(2).ok_or(Error::Limit)?;
+            self.metadata.resize(capacity * std::mem::size_of::<Entry>())?;
+            self.entries
+                .try_reserve_exact(capacity - self.entries.len())
+                .map_err(|_| Error::Limit)?;
+            self.metadata
+                .resize(self.entries.capacity() * std::mem::size_of::<Entry>())?;
+        }
+        Ok(())
     }
     pub fn entries(&self) -> impl Iterator<Item = Media> + '_ {
         self.entries
@@ -226,7 +232,9 @@ impl Registry {
         Ok(kind)
     }
 
-    pub fn write_value(&self, doc: &Document, node: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
+    /// Writes a registered payload. A retained data URI takes its media type from `mime`, the
+    /// part's current MIME member; without one the media type is empty.
+    pub fn write_value(&self, doc: &Document, node: usize, mime: Option<usize>, e: &mut Encoder<'_, '_>) -> Result<()> {
         self.get(doc, node)?.ok_or(Error::Position)?;
         let entry = self
             .entries
@@ -245,8 +253,9 @@ impl Registry {
             e.bytes(b"\"")?;
             if matches!(entry.media.encoding, Encoding::DataUri { .. }) {
                 e.bytes(b"data:")?;
-                let mime = entry.media.mime.ok_or(Error::Schema)?;
-                doc.write_contents(mime, e)?;
+                if let Some(mime) = mime {
+                    doc.write_contents(mime, e)?;
+                }
                 e.bytes(b";base64,")?;
             }
             write_encoded_chunks(doc, chunks.iter().copied(), e)?;

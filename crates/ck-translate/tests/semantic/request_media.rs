@@ -173,7 +173,7 @@ fn request_collision_provenance_cannot_revive_mutated_or_deleted_mapped_fields()
         {"type":"image_url","source":"native-source","mime":false,"detail":"native-detail","image_url":{"url":"https://example.invalid/old","detail":"high","ref":"literal"}},
         {"type":"file","filename":"native-filename","file":{"file_id":"old-id","filename":"old.pdf","ref":"literal"}}
     ]}]});
-    let (mut mapped, mut doc) = super::request_controls::canonical(&input, &ChatCapability);
+    let (mut mapped, mut doc, _) = super::request_controls::canonical(&input, &ChatCapability);
     let media = Registry::new(&mut mapped.writer).unwrap();
     let messages = doc.required(doc.root(), "messages").unwrap();
     let message = doc.children(messages).unwrap().next().unwrap();
@@ -291,7 +291,7 @@ fn collision_mutation(replace: bool) {
     use serde_json::json;
     let part = |id: &str| json!({"type":"image_url","transcript":id,"source":id,"image_url":{"url":"https://example.invalid/a","ref":id}});
     let input = json!({"model":"m","messages":[{"role":"user","content":[part("a"),part("b")]},{"role":"user","content":[part("c"),part("d")]}]});
-    let (mut mapped, doc) = super::request_controls::canonical(&input, &ChatCapability);
+    let (mut mapped, doc, _) = super::request_controls::canonical(&input, &ChatCapability);
     let mut empty = Source::new(&mut mapped.writer).unwrap();
     empty.push_bytes(&mut mapped.writer, b"{}").unwrap();
     let mut imported = Document::parse(&mut mapped.writer, empty, 16384).unwrap();
@@ -345,7 +345,7 @@ fn collision_mutation(replace: bool) {
 #[test]
 fn trusted_ingress_source_kind_replacement_changes_native_carrier_in_both_modes() {
     use super::{ChatCapability, Egress, Operation, RequestEgress, bytes, codec};
-    use codec::{RequestFence, RequestView, document::Value, media::Registry};
+    use codec::{RequestFence, RequestView, document::Value};
     use serde_json::json;
     let input = json!({"model":"m","messages":[{"role":"user","content":[
         {"type":"image_url","image_url":{"url":"https://example.invalid/old","vendor":false}},
@@ -353,8 +353,7 @@ fn trusted_ingress_source_kind_replacement_changes_native_carrier_in_both_modes(
         {"type":"image_url","image_url":{"url":"data:image/png;base64,AQID"}},
         {"type":"file","file":{"file_data":"data:application/pdf;base64,BAUG","filename":"old-data.pdf"}}
     ]}]});
-    let (mut mapped, mut doc) = super::request_controls::canonical(&input, &ChatCapability);
-    let registry = Registry::new(&mut mapped.writer).unwrap();
+    let (mut mapped, mut doc, registry) = super::request_controls::canonical(&input, &ChatCapability);
     let messages = doc.required(doc.root(), "messages").unwrap();
     let message = doc.children(messages).unwrap().next().unwrap();
     let content = doc.required(message, "content").unwrap();

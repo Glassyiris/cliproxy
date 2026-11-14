@@ -24,3 +24,4 @@ Internal
 - Keep the Chat snapshot choice-index table's metadata quota until suffix edits apply, so a storage limit fails at the same step as before the module split.
 - Deliver a Chat response image or file part whose embedded data a trusted edit replaced with a URL or file ID, instead of failing the stream or dropping the part.
 - Fail streaming Chat egress at Done when a delivered choice never finished, instead of writing `[DONE]`; buffered egress already failed.
+- Rebuild Chat request records with their media registered (`read_request` replaces `read_document`), and write request data URIs with the part's current MIME.
