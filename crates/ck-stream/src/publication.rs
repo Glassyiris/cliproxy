@@ -143,20 +143,19 @@ impl Stream {
             + state.readers * READER_BYTES
     }
 
-    fn write_reserved(&self, state: &State, mut byte: u64, mut bytes: &[u8]) -> Result<(), Error> {
+    fn write_reserved(&self, state: &State, start: Position, mut bytes: &[u8]) -> Result<(), Error> {
+        let mut frame_index = (start.frame - state.base_frame) as usize;
+        let mut offset = start.offset as usize;
         while !bytes.is_empty() {
-            let frame_number = byte / FRAME_BYTES as u64;
-            let offset = byte as usize % FRAME_BYTES;
             let len = bytes.len().min(FRAME_BYTES - offset);
-            let frame = state.frames[(frame_number - state.base_frame) as usize]
-                .pool
-                .ok_or(Error::Gone)?;
+            let frame = state.frames[frame_index].pool.ok_or(Error::Gone)?;
             // SAFETY: the sole Writer reserved this frame; the locked state prevents invalidation,
             // and this span is strictly after the immutable published end and within the frame.
             unsafe {
                 self.pool.write(frame, offset, &bytes[..len]);
             }
-            byte += len as u64;
+            frame_index += 1;
+            offset = 0;
             bytes = &bytes[len..];
         }
         Ok(())
@@ -401,7 +400,7 @@ impl Writer {
 
     pub fn append(&mut self, bytes: &[u8]) -> Result<Record, Error> {
         let (record, index, old_count, mut state) = self.reserve(bytes.len(), false, 0, 0)?;
-        if let Err(error) = self.stream.write_reserved(&state, index.start, bytes) {
+        if let Err(error) = self.stream.write_reserved(&state, record.start, bytes) {
             drop(state);
             self.rollback(old_count);
             return Err(error);
@@ -490,7 +489,11 @@ impl Reservation<'_> {
         if state.terminal.is_some() {
             return Err(Error::Closed);
         }
-        stream.write_reserved(&state, self.index.start + self.written as u64, bytes)?;
+        stream.write_reserved(
+            &state,
+            Position::at(stream.id, self.index.start + self.written as u64),
+            bytes,
+        )?;
         self.written += bytes.len();
         Ok(())
     }
