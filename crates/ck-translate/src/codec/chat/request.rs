@@ -5,21 +5,30 @@ use crate::codec::{
     event::{Emitter, Identity, Kind, Scope},
     json::{self, Decoded},
     media::{self, Encoding, Registry},
-    source::Source,
 };
 use ck_stream::{ScratchLease, Writer};
 
 pub struct Ingress {
     owner: u64,
-    source: Option<Source>,
     scanner: Option<json::Scanner>,
-    document: Option<Document>,
+    document: Document,
+    started: bool,
+    last_field: Option<usize>,
+    messages: Option<PendingMessages>,
+    published_media: usize,
     media: Registry,
     emitter: Emitter,
     fence: RequestFence,
     operation: Operation,
     failed: bool,
     reader: ck_stream::Reader,
+}
+
+struct PendingMessages {
+    wire: usize,
+    node: usize,
+    last: Option<usize>,
+    index: u64,
 }
 
 impl Ingress {
@@ -33,11 +42,16 @@ impl Ingress {
         if operation != Operation::Generate {
             return Err(Error::Unsupported);
         }
+        let mut document = Document::streaming(owner)?;
+        initialize(&mut document)?;
         Ok(Self {
             owner: owner.id(),
-            source: Some(Source::new(owner)?),
             scanner: Some(json::Scanner::new(owner, max_bytes)?),
-            document: None,
+            document,
+            started: false,
+            last_field: None,
+            messages: None,
+            published_media: 0,
             media: Registry::new(owner)?,
             emitter: Emitter::new(identity),
             fence: RequestFence::default(),
@@ -47,31 +61,194 @@ impl Ingress {
         })
     }
 
-    fn prepare(&mut self, owner: &mut Writer) -> Result<()> {
-        let source = self.source.take().ok_or(Error::Closed)?;
-        let mut scanner = self.scanner.take().ok_or(Error::Closed)?;
-        scanner.finish(&source)?;
-        let mut doc = Document::from_scanned(owner, source, scanner)?;
-        let wire_x = doc.remove(doc.root(), "x_ck")?;
-        initialize(&mut doc)?;
-        let x = doc.required(doc.root(), "x_ck")?;
-        if let Some(wire_x) = wire_x {
-            let original = doc.required(x, "original")?;
-            original_field(&mut doc, original, "/x_ck", wire_x)?;
+    fn consume(&mut self, owner: &mut Writer) -> Result<()> {
+        let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
+        if scanner.nodes().is_empty() {
+            return Ok(());
         }
-        normalize_options(&mut doc)?;
-        let messages = doc.required(doc.root(), "messages")?;
-        require_array(&doc, messages)?;
-        let mut message = doc.node(messages)?.first;
-        let mut index = 0;
-        while let Some(current) = message {
-            message = doc.node(current)?.next;
-            normalize_message(&mut doc, current, index, &mut self.media, owner)?;
-            index += 1;
+        let root = scanner.pending_node(self.document.input(), 0)?;
+        if root.kind != json::Kind::Object {
+            return Err(Error::Schema);
         }
-        validate(&doc)?;
-        self.document = Some(doc);
+        if !self.started {
+            self.emitter.request_start(
+                owner,
+                RequestView {
+                    document: &self.document,
+                    media: &self.media,
+                    operation: self.operation,
+                },
+            )?;
+            let (kind, _) = codec::internal::next(owner, &mut self.reader)?;
+            if kind != Kind::RequestStart {
+                return Err(Error::Schema);
+            }
+            let root = self.document.root();
+            field(
+                &mut self.document,
+                &self.media,
+                root,
+                &[],
+                &mut self.emitter,
+                owner,
+                &mut self.reader,
+            )?;
+            self.started = true;
+        }
+        loop {
+            let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
+            let next = match self.last_field {
+                Some(last) => scanner.pending_node(self.document.input(), last)?.next,
+                None => root.first,
+            };
+            let Some(index) = next else { break };
+            let wire = scanner.pending_node(self.document.input(), index)?;
+            let key = wire.key.ok_or(Error::Schema)?;
+            if json::string_is(self.document.input(), key, "messages")? {
+                if wire.kind != json::Kind::Array {
+                    return Err(Error::Schema);
+                }
+                if self.messages.is_none() {
+                    let node = self.document.set(self.document.root(), "messages", Value::Array)?;
+                    field(
+                        &mut self.document,
+                        &self.media,
+                        node,
+                        &[Some(Component::Name(Name::Static("messages")))],
+                        &mut self.emitter,
+                        owner,
+                        &mut self.reader,
+                    )?;
+                    self.messages = Some(PendingMessages {
+                        wire: index,
+                        node,
+                        last: None,
+                        index: 0,
+                    });
+                }
+                self.consume_messages(owner)?;
+                let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
+                if scanner.completed_node(self.document.input(), index)?.is_none() {
+                    break;
+                }
+            } else {
+                if scanner.completed_node(self.document.input(), index)?.is_none() {
+                    break;
+                }
+                let node = self.document.import_completed(scanner, index)?;
+                let name = self.document.node(node)?.name.ok_or(Error::Schema)?;
+                if self.document.name_is(name, "x_ck")? {
+                    let x = self.document.required(self.document.root(), "x_ck")?;
+                    let original = self.document.required(x, "original")?;
+                    original_field(&mut self.document, original, "/x_ck", node)?;
+                } else {
+                    for existing in self.document.children(self.document.root())? {
+                        if self
+                            .document
+                            .names_equal(name, self.document.node(existing)?.name.ok_or(Error::Schema)?)?
+                        {
+                            return Err(Error::Schema);
+                        }
+                    }
+                    self.document.append(self.document.root(), node)?;
+                    normalize_options(&mut self.document)?;
+                    let published = if self.document.name_is(name, "functions")? {
+                        Some(self.document.required(self.document.root(), "tools")?)
+                    } else if self.document.name_is(name, "function_call")? {
+                        Some(self.document.required(self.document.root(), "tool_choice")?)
+                    } else if self.document.name_is(name, "reasoning")?
+                        || self.document.name_is(name, "reasoning_effort")?
+                    {
+                        None
+                    } else {
+                        Some(node)
+                    };
+                    if let Some(node) = published {
+                        let mut path = [None; 128];
+                        path[0] = Some(Component::Name(self.document.node(node)?.name.ok_or(Error::Schema)?));
+                        fields(
+                            &mut self.document,
+                            &self.media,
+                            node,
+                            (&mut path, 1),
+                            &mut self.emitter,
+                            owner,
+                            &mut self.reader,
+                        )?;
+                    }
+                }
+            }
+            self.last_field = Some(index);
+        }
         Ok(())
+    }
+
+    fn consume_messages(&mut self, owner: &mut Writer) -> Result<()> {
+        let pending = self.messages.as_mut().ok_or(Error::Schema)?;
+        let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
+        loop {
+            let next = match pending.last {
+                Some(last) => scanner.pending_node(self.document.input(), last)?.next,
+                None => scanner.pending_node(self.document.input(), pending.wire)?.first,
+            };
+            let Some(index) = next else { break };
+            if scanner.completed_node(self.document.input(), index)?.is_none() {
+                break;
+            }
+            let message = self.document.import_completed(scanner, index)?;
+            self.document.append(pending.node, message)?;
+            normalize_message(&mut self.document, message, pending.index, &mut self.media, owner)?;
+            let mut path = [None; 128];
+            path[0] = Some(Component::Name(Name::Static("messages")));
+            path[1] = Some(Component::Index(pending.index));
+            fields(
+                &mut self.document,
+                &self.media,
+                message,
+                (&mut path, 2),
+                &mut self.emitter,
+                owner,
+                &mut self.reader,
+            )?;
+            while self.published_media < self.media.len() {
+                let index = self.published_media;
+                media::publish(
+                    &self.document,
+                    self.media.at(index),
+                    &mut self.emitter,
+                    owner,
+                    Scope::default(),
+                )?;
+                self.media.retain(&mut self.document, index, owner, &mut self.reader)?;
+                self.published_media += 1;
+            }
+            pending.last = Some(index);
+            pending.index += 1;
+        }
+        Ok(())
+    }
+
+    fn prepare(&mut self, owner: &mut Writer) -> Result<()> {
+        self.scanner
+            .as_mut()
+            .ok_or(Error::Closed)?
+            .finish(self.document.input())?;
+        self.consume(owner)?;
+        validate(&self.document)?;
+        let x = self.document.required(self.document.root(), "x_ck")?;
+        let mut path = [None; 128];
+        path[0] = Some(Component::Name(Name::Static("x_ck")));
+        fields(
+            &mut self.document,
+            &self.media,
+            x,
+            (&mut path, 1),
+            &mut self.emitter,
+            owner,
+            &mut self.reader,
+        )?;
+        self.scanner = None;
+        self.document.retire_scratch()
     }
 }
 
@@ -84,9 +261,12 @@ impl codec::RequestIngress for Ingress {
             return Err(Error::Closed);
         }
         let result = (|| {
-            let source = self.source.as_mut().ok_or(Error::Closed)?;
-            source.push_bytes(owner, bytes)?;
-            self.scanner.as_mut().ok_or(Error::Closed)?.advance(source)
+            self.document.push_input(owner, bytes)?;
+            self.scanner
+                .as_mut()
+                .ok_or(Error::Closed)?
+                .advance(self.document.input())?;
+            self.consume(owner)
         })();
         if let Err(error) = result {
             self.failed = true;
@@ -109,33 +289,7 @@ impl codec::RequestIngress for Ingress {
             super::failure(&mut self.emitter, owner, "client")?;
             return Err(error);
         }
-        let doc = self.document.as_mut().ok_or(Error::Closed)?;
-        self.emitter.request_start(
-            owner,
-            RequestView {
-                document: doc,
-                media: &self.media,
-                operation: self.operation,
-            },
-        )?;
-        let (kind, _) = codec::internal::next(owner, &mut self.reader)?;
-        if kind != Kind::RequestStart {
-            return Err(Error::Schema);
-        }
-        fields(
-            doc,
-            &self.media,
-            doc.root(),
-            (&mut [None; 128], 0),
-            &mut self.emitter,
-            owner,
-            &mut self.reader,
-        )?;
-        for index in 0..self.media.len() {
-            media::publish(doc, self.media.at(index), &mut self.emitter, owner, Scope::default())?;
-            self.media.retain(doc, index, owner, &mut self.reader)?;
-        }
-        doc.retire_scratch()?;
+        let doc = &self.document;
         let view = RequestView {
             document: doc,
             media: &self.media,

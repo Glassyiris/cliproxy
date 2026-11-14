@@ -102,15 +102,36 @@ impl Scanner {
         self.finished
     }
 
+    /// Inspect scanned topology without treating an open container as a value.
+    /// The source must be the exact live prefix most recently scanned.
+    pub fn pending_node(&self, source: &Source, index: usize) -> Result<Node> {
+        self.validate_prefix(source)?;
+        self.nodes.get(index).copied().ok_or(Error::Position)
+    }
+
+    /// A completed subtree is readable before the enclosing document ends.
+    pub fn completed_node(&self, source: &Source, index: usize) -> Result<Option<Node>> {
+        let node = self.pending_node(source, index)?;
+        Ok((node.span.end != 0).then_some(node))
+    }
+
+    fn validate_prefix(&self, source: &Source) -> Result<()> {
+        source.check_live()?;
+        if self.failed {
+            return Err(Error::Closed);
+        }
+        if source.stream_id() != self.metadata.stream_id()
+            || self.source_id != Some(source.id())
+            || self.offset != source.len()
+        {
+            return Err(Error::Position);
+        }
+        Ok(())
+    }
+
     /// Reject pairing validated locations with another or subsequently extended source.
     pub fn validate_source(&self, source: &Source) -> Result<()> {
-        source.check_live()?;
-        if source.stream_id() != self.metadata.stream_id() {
-            return Err(Error::Position);
-        }
-        if self.source_id != Some(source.id()) || self.offset != source.len() {
-            return Err(Error::Position);
-        }
+        self.validate_prefix(source)?;
         if !self.finished {
             return Err(Error::Truncated);
         }

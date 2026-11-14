@@ -277,7 +277,10 @@ fn request_end_rejects_late_semantics_before_authorizing_egress() {
     ingress
         .advance(&mut mapped.writer, br#"{"model":"m","messages":[],"modalities":["#)
         .unwrap();
-    assert!(mapped.output(&mapped.writer).is_empty());
+    let prefix = mapped.output(&mapped.writer);
+    let prefix = std::str::from_utf8(&prefix).unwrap();
+    assert!(prefix.contains("event: x_ck.request.field\n"));
+    assert!(!prefix.contains("event: x_ck.request.end\n"));
     ingress.advance(&mut mapped.writer, br#""audio"]}"#).unwrap();
     assert!(matches!(
         ingress.finish(&mut mapped.writer, &TextDestination),
@@ -681,4 +684,54 @@ fn scanner_metadata_competes_with_other_permits_and_releases_on_drop() {
         Err(Error::Storage(ck_stream::Error::StorageExhausted))
     ));
     drop(permit);
+}
+
+#[test]
+fn incomplete_scanner_exposes_only_validated_subtrees_of_its_live_prefix() {
+    let mut mapped = Mapped::new();
+    let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
+    mapped.push(br#"{"first":{"text":"ready"},"later":["#).unwrap();
+    scanner.advance(&mapped.source).unwrap();
+    assert!(scanner.completed_node(&mapped.source, 0).unwrap().is_none());
+    let root = scanner.pending_node(&mapped.source, 0).unwrap();
+    let first = root.first.unwrap();
+    let value = scanner.completed_node(&mapped.source, first).unwrap().unwrap();
+    assert!(mapped.source.equals(value.span, br#"{"text":"ready"}"#).unwrap());
+    assert!(
+        scanner
+            .completed_node(&mapped.source, value.next.unwrap())
+            .unwrap()
+            .is_none()
+    );
+    let mut other = codec_source(&mut mapped.writer, br#"{"first":{"text":"ready"},"later":["#);
+    assert!(matches!(scanner.completed_node(&other, first), Err(Error::Position)));
+    other.push_bytes(&mut mapped.writer, b"]}").unwrap();
+    mapped.push(b"]}").unwrap();
+    assert!(matches!(
+        scanner.completed_node(&mapped.source, first),
+        Err(Error::Position)
+    ));
+    scanner.finish(&mapped.source).unwrap();
+    assert!(scanner.completed_node(&mapped.source, 0).unwrap().is_some());
+}
+
+fn codec_source(owner: &mut ck_stream::Writer, bytes: &[u8]) -> ck_translate::codec::source::Source {
+    let mut source = ck_translate::codec::source::Source::new(owner).unwrap();
+    source.push_bytes(owner, bytes).unwrap();
+    source
+}
+
+#[test]
+fn poisoned_scanner_cannot_publish_previously_completed_subtrees() {
+    let mut mapped = Mapped::new();
+    let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
+    mapped.push(br#"{"first":"ready","#).unwrap();
+    scanner.advance(&mapped.source).unwrap();
+    let first = scanner.pending_node(&mapped.source, 0).unwrap().first.unwrap();
+    mapped.push(br#""first":false}"#).unwrap();
+    assert!(matches!(scanner.advance(&mapped.source), Err(Error::DuplicateKey)));
+    assert!(matches!(
+        scanner.completed_node(&mapped.source, first),
+        Err(Error::Closed)
+    ));
 }
