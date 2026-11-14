@@ -240,3 +240,23 @@ fn attach_and_each_pending_wait_refresh_eviction_recency() {
         assert!(matches!(reader.try_next(), Poll::Pending));
     }
 }
+
+#[test]
+fn terminals_render_only_registered_codes_and_reasons() {
+    use Terminal::*;
+    let rendered: Vec<_> = [Done, Cancelled, Shutdown, UpstreamError, StorageExhausted, Gone]
+        .into_iter()
+        .map(|terminal| (terminal.error_code(), terminal.cancel_reason()))
+        .collect();
+    assert_eq!(
+        rendered,
+        [
+            (None, None),
+            (None, Some("client_cancel")),
+            (None, Some("shutdown")),
+            (None, None),
+            (Some("stream.storage_exhausted"), None),
+            (Some("stream.gone"), None),
+        ]
+    );
+}
