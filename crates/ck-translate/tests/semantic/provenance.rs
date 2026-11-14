@@ -1,4 +1,4 @@
-use super::{codec, response};
+use super::{codec, request, response};
 use serde_json::{Value, json};
 
 #[test]
@@ -203,5 +203,31 @@ fn heartbeat_streaming_tool_media_and_usage_projections_keep_provider_identity()
         assert_eq!(chunk["id"], "real-id");
         assert_eq!(chunk["model"], "real-model");
         assert_eq!(chunk["created"], 123);
+    }
+}
+
+#[test]
+fn request_unknown_root_and_tool_call_members_move_to_provenance() {
+    let input = br#"{"model":"m","vendor":{"a":1},"messages":[{"role":"assistant","tool_calls":[{"id":"c","type":"function","vend":2,"function":{"name":"f","arguments":"{}","fv":3}}]}]}"#;
+    let (output, events) = request(input);
+    let original: Value = serde_json::from_slice(input).unwrap();
+    assert_eq!(output["vendor"], original["vendor"]);
+    assert_eq!(output["messages"], original["messages"]);
+    for pointer in [
+        "/vendor",
+        "/messages/0/tool_calls/0/vend",
+        "/messages/0/tool_calls/0/function/fv",
+    ] {
+        assert!(
+            events.iter().all(|e| e["pointer"] != pointer),
+            "{pointer} stayed canonical"
+        );
+        assert!(
+            events.iter().any(|e| e["pointer"]
+                .as_str()
+                .is_some_and(|p| p.starts_with("/x_ck/original/") && p.ends_with("/pointer"))
+                && e["value"] == pointer),
+            "{pointer} not preserved"
+        );
     }
 }

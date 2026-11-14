@@ -43,6 +43,12 @@ fn unknown_content_kinds_and_refusals_keep_native_shapes() {
             .iter()
             .any(|e| e["pointer"] == "/messages/0/content/1/type" && e["value"] == "opaque")
     );
+    assert!(
+        events
+            .iter()
+            .any(|e| e["pointer"] == "/messages/0/content/0/text" && e["value"] == "no")
+    );
+    assert!(events.iter().all(|e| e["pointer"] != "/messages/0/content/0/refusal"));
 }
 
 #[test]
