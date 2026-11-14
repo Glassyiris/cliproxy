@@ -9,7 +9,6 @@ use std::{
 };
 
 use parking_lot::{Mutex, MutexGuard};
-use tokio::sync::Notify;
 
 use crate::{
     Error, FRAME_BYTES, Limits, Position, Record, Terminal,
@@ -18,7 +17,9 @@ use crate::{
 };
 
 mod scratch;
+mod wakeup;
 pub use scratch::{MetadataPermit, ScratchLease, ScratchReservation};
+use wakeup::Wakeup;
 
 pub(crate) const READER_BYTES: usize = std::mem::size_of::<Reader>();
 
@@ -118,8 +119,8 @@ pub(crate) struct Stream {
     last_read: AtomicU64,
     /// Frames the stream gave up while leases still pin them; they still count as live.
     detached: AtomicU64,
-    notify: Notify,
-    stopped: Notify,
+    notify: Wakeup,
+    stopped: Wakeup,
 }
 
 impl Stream {
@@ -136,8 +137,8 @@ impl Stream {
             pool,
             retention,
             limits,
-            notify: Notify::new(),
-            stopped: Notify::new(),
+            notify: Wakeup::new(),
+            stopped: Wakeup::new(),
             invalidated: AtomicBool::new(false),
             last_read: AtomicU64::new(nanos(now)),
             detached: AtomicU64::new(0),
@@ -260,12 +261,14 @@ impl Stream {
             return;
         }
         let mut state = self.state.lock();
-        if state.terminal.is_none() {
-            state.terminal = Some(terminal);
+        // Waiters registered after the first terminal see it when they recheck.
+        if state.terminal.is_some() {
+            return;
         }
+        state.terminal = Some(terminal);
         drop(state);
-        self.notify.notify_waiters();
-        self.stopped.notify_waiters();
+        self.notify.wake();
+        self.stopped.wake();
     }
 
     pub(crate) fn invalidate(&self) {
@@ -283,8 +286,8 @@ impl Stream {
         if let Some(slot) = state.slot.take() {
             self.pool.release_slot(slot);
         }
-        self.notify.notify_waiters();
-        self.stopped.notify_waiters();
+        self.notify.wake();
+        self.stopped.wake();
     }
 }
 
@@ -331,6 +334,7 @@ impl Writer {
                 let notified = stream.stopped.notified();
                 tokio::pin!(notified);
                 notified.as_mut().enable();
+                let _waiting = stream.stopped.waiting();
                 if let Some(terminal) = stream.state.lock().terminal {
                     return terminal;
                 }
@@ -483,7 +487,7 @@ impl Writer {
         }
         self.stream.publish(&mut state, index);
         drop(state);
-        self.stream.notify.notify_waiters();
+        self.stream.notify.wake();
         Ok(record)
     }
 
@@ -593,7 +597,7 @@ impl Reservation<'_> {
         stream.publish(&mut state, self.index);
         self.committed = true;
         drop(state);
-        stream.notify.notify_waiters();
+        stream.notify.wake();
         Ok(self.record)
     }
 }
@@ -712,6 +716,7 @@ impl Reader {
             let notified = stream.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
+            let _waiting = stream.notify.waiting();
             if let Poll::Ready(value) = self.try_next() {
                 return value;
             }

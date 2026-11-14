@@ -297,3 +297,44 @@ fn dropped_writer_ends_readers_with_producer_lost_not_client_cancel() {
         Poll::Ready(Some(Read::Terminal(Terminal::Cancelled)))
     ));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn waiting_readers_see_every_record_without_lost_wake_ups() {
+    let (_dir, store, _clock) = store(8);
+    for _ in 0..200 {
+        let mut writer = store.create().unwrap();
+        let tasks: Vec<_> = (0..3)
+            .map(|_| {
+                let mut reader = store.reader(writer.id(), 0).unwrap();
+                tokio::spawn(async move {
+                    let mut seen = 0;
+                    while let Some(read) = reader.next().await {
+                        match read {
+                            Read::Record(lease) => {
+                                lease.acknowledge();
+                                seen += 1;
+                            }
+                            Read::Terminal(terminal) => assert_eq!(terminal, Terminal::Done),
+                        }
+                    }
+                    seen
+                })
+            })
+            .collect();
+        // A plain thread publishes while the readers park and wake on runtime workers.
+        let producer = std::thread::spawn(move || {
+            for record in 0..50u8 {
+                writer.append(&[record; 16]).unwrap();
+                if record % 7 == 0 {
+                    std::thread::yield_now();
+                }
+            }
+            writer.finish(Terminal::Done);
+        });
+        for task in tasks {
+            let seen = tokio::time::timeout(Duration::from_secs(5), task).await;
+            assert_eq!(seen.expect("a reader missed a wake-up").unwrap(), 50);
+        }
+        producer.join().unwrap();
+    }
+}
