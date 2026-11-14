@@ -9,9 +9,10 @@ and under tests/ have the same caps.
 Items that were over a cap when the gate was adopted are listed in tools/rust-size-ratchet.txt
 with their size then, one per line: `file <path> <lines>` or `fn <path>::<name> <lines>`. A
 function name is qualified by its enclosing modules, traits, impls (`Type`, or `<Type as Trait>`
-for a trait impl) and fns, with `#2`, `#3` ... for later functions of the same name in the same
-file. A listed item may shrink but not grow, and the entry must follow it down in the same
-change: the gate fails on an item over its cap that is not listed, an item larger than its
+for a trait impl), fns and `macro_rules!` definitions (`name!`), with `#2`, `#3` ... for later
+functions of the same name in the same file; a fn named by a macro metavariable keeps it
+(`make!::$name`). A listed item may shrink but not grow, and the entry must follow it down in
+the same change: the gate fails on an item over its cap that is not listed, an item larger than its
 entry, an item smaller than its entry (it prints the replacement line), an item back within
 its cap that is still listed, and an entry naming nothing. `--update` lowers and removes
 entries to match the tree; it never adds or raises one, so a new entry is a hand edit that
@@ -156,85 +157,111 @@ def tokens(text):
     return out
 
 
-def _header_end(toks, i):
-    """Index of the `{` or `;` that ends an item header starting at i."""
-    depth = 0
-    for j in range(i, len(toks)):
-        kind, value, _ = toks[j]
+CLOSERS = {")": "(", "]": "[", "}": "{"}
+
+
+def _walk(toks):
+    """Yield (index, token, depth), depth being the nesting before the token.
+
+    A `<` may be a comparison or shift instead of a generic. Such a `<` or `>` sits inside the
+    `[...]`, `{...}` or `(...)` of a const expression, so a `>` closes only a `<` on top of the
+    stack and a closing bracket also closes every `<` opened after its own opener.
+    """
+    stack = []
+    for j, token in enumerate(toks):
+        yield j, token, len(stack)
+        kind, value, _ = token
         if kind != "punct":
             continue
-        if value in ("(", "[", "<"):
-            depth += 1
-        elif value in (")", "]", ">"):
-            depth = max(depth - 1, 0)
-        elif value in ("{", ";") and depth == 0:
-            return j
+        if value in ("(", "[", "{", "<"):
+            stack.append(value)
+        elif value == ">" and stack and stack[-1] == "<":
+            stack.pop()
+        elif value in CLOSERS:
+            while stack and stack.pop() != CLOSERS[value]:
+                pass
+
+
+def _header_end(toks, i):
+    """Index of the token that ends an item header starting at i: `{` opens a body, `;` ends a
+    declaration, and a closing delimiter ends the code around a header with no body (a macro
+    matcher such as `fn $name:ident` or a transcriber such as `fn $name() $body`)."""
+    for j, (kind, value, _), depth in _walk(toks[i:]):
+        if depth == 0 and kind == "punct" and value in ("{", ";", "}", ")", "]"):
+            return i + j
     raise CannotRun(f"line {toks[i - 1][2]}: item header never ends")
 
 
 def _type_name(part):
     """The last identifier outside brackets in a type, or the type's text."""
-    depth, name = 0, None
-    for kind, value, _ in part:
-        if value in ("(", "[", "<"):
-            depth += 1
-        elif value in (")", "]", ">"):
-            depth -= 1
-        elif kind == "ident" and depth == 0 and value not in NOT_A_NAME:
+    name = None
+    for _, (kind, value, _), depth in _walk(part):
+        if kind == "ident" and depth == 0 and value not in NOT_A_NAME:
             name = value
     return name or "".join(value for _, value, _ in part) or "_"
 
 
 def _impl_name(header):
     """`Type` for an inherent impl, `<Type as Trait>` for a trait impl."""
-    i, depth = 0, 0
     if header and header[0][1] == "<":
-        for i, (_, value, _) in enumerate(header):
-            depth += {"<": 1, ">": -1}.get(value, 0)
-            if depth == 0:
-                break
-        i += 1
-    header, depth = header[i:], 0
-    for j, (kind, value, _) in enumerate(header):
-        if value in ("(", "[", "<"):
-            depth += 1
-        elif value in (")", "]", ">"):
-            depth -= 1
-        elif depth == 0 and kind == "ident" and value == "where":
+        header = next((header[j:] for j, _, depth in _walk(header) if j and not depth), [])
+    for j, (kind, value, _), depth in _walk(header):
+        if depth == 0 and kind == "ident" and value == "where":
             header = header[:j]
             break
-    depth = 0
-    for j, (kind, value, _) in enumerate(header):
-        if value in ("(", "[", "<"):
-            depth += 1
-        elif value in (")", "]", ">"):
-            depth -= 1
-        elif depth == 0 and value == "for" and (j + 1 == len(header) or header[j + 1][1] != "<"):
+    for j, (_, value, _), depth in _walk(header):
+        if depth == 0 and value == "for" and (j + 1 == len(header) or header[j + 1][1] != "<"):
             return f"<{_type_name(header[j + 1:])} as {_type_name(header[:j])}>"
     return _type_name(header)
 
 
+def _fn_name(toks, i):
+    """(name, index after it) for the fn keyword at i; a macro metavariable (`$name`) or
+    quote interpolation (`#name`) keeps its sigil. None when no name follows (a fn type)."""
+    rest = toks[i + 1:i + 3]
+    if rest[:1] and rest[0][0] == "ident":
+        return rest[0][1], i + 2
+    if len(rest) == 2 and rest[0][1] in ("$", "#") and rest[1][0] == "ident":
+        return rest[0][1] + rest[1][1], i + 3
+    return None, i + 1
+
+
 def functions(text):
-    """Return (qualified name, first line, last line) for every fn with a body."""
+    """Return (qualified name, first line, last line) for every fn with a body.
+
+    The scopes in a name are modules, traits, impls, fns and `macro_rules! name { ... }`
+    definitions (as `name!`)."""
     toks, found, stack, i = tokens(text), [], [], 0
     while i < len(toks):
         kind, value, line = toks[i]
-        following = toks[i + 1] if i + 1 < len(toks) else ("", "", 0)
-        if kind == "ident" and value in ("fn", "trait") and following[0] == "ident":
-            end = _header_end(toks, i + 2)
-            if toks[end][1] == "{":
-                stack.append((following[1], line if value == "fn" else None))
-            i = end + 1
-            continue
-        if kind == "ident" and value == "mod" and following[0] == "ident" and toks[i + 2][1:2] == ("{",):
-            stack.append((following[1], None))
+        ahead = [(k, v) for k, v, _ in toks[i + 1:i + 4]]
+        if kind == "ident" and value in ("fn", "trait"):
+            if value == "fn":
+                name, after = _fn_name(toks, i)
+            else:
+                name, after = (ahead[0][1], i + 2) if ahead[:1] and ahead[0][0] == "ident" else (None, i + 1)
+            if name is not None:
+                end = _header_end(toks, after)
+                if toks[end][1] == "{":
+                    stack.append((name, line if value == "fn" else None))
+                    end += 1
+                i = end
+                continue
+        elif kind == "ident" and value == "mod" and len(ahead) > 1 and ahead[0][0] == "ident" and ahead[1] == ("punct", "{"):
+            stack.append((ahead[0][1], None))
             i += 3
             continue
-        if kind == "ident" and value == "impl":
+        elif (kind == "ident" and value == "macro_rules" and len(ahead) > 2 and ahead[0] == ("punct", "!")
+              and ahead[1][0] == "ident" and ahead[2] == ("punct", "{")):
+            stack.append((ahead[1][1] + "!", None))
+            i += 4
+            continue
+        elif kind == "ident" and value == "impl":
             end = _header_end(toks, i + 1)
             if toks[end][1] == "{":
                 stack.append((_impl_name(toks[i + 1:end]), None))
-            i = end + 1
+                end += 1
+            i = end
             continue
         if value == "{" and kind == "punct":
             stack.append((None, None))

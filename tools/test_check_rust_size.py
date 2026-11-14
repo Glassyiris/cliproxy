@@ -103,6 +103,55 @@ extern "C" {
         text = "fn f<const N: usize>(a: [u8; N]) -> [u8; 4]\nwhere\n    [u8; N]: Sized,\n{\n    [0; 4]\n}\n"
         self.assertEqual(spans(text), {"f": 6})
 
+    def test_comparisons_and_shifts_in_const_expressions_are_not_generics(self):
+        text = '''struct S<const N: usize = { 1 >> 0 }, const M: bool = { 1 < 2 }>;
+fn short(_: [u8; { if 1 < 2 { 1 } else { 0 } }]) {}
+fn shift(_: [u8; 1 >> 0], _: [Vec<u8>; 2 << 1]) -> Option<Vec<Vec<u8>>>
+{
+    None
+}
+fn arg(_: Foo<{ 1 < 2 }>, _: Foo<{ 4 >> 1 }>) {}
+impl<const N: usize> Tr for Foo<{ N >> 1 }> where [(); N < 3]: Sized {
+    fn x() {}
+}
+'''
+        self.assertEqual(spans(text), {"short": 1, "shift": 4, "arg": 1, "<Foo as Tr>::x": 1})
+
+    def test_macro_generated_functions_are_measured(self):
+        text = '''macro_rules! make {
+    ($name:ident) => {
+        fn $name() {
+            let _ = 1;
+        }
+    };
+    (fn $name:ident $body:block) => { fn $name() $body };
+    ($name:ident, $t:ty) => { fn $name() -> $t { <$t>::default() } };
+}
+make!(long);
+fn after() {}
+'''
+        self.assertEqual(sorted(size.functions(text)), [
+            ("after", 11, 11), ("make!::$name", 3, 5), ("make!::$name", 8, 8)])
+        self.write_tree("macro_rules! make { ($name:ident) => { " + body(81).replace("fn name", "fn $name")
+                        + "}; }\nmake!(long);\n")
+        code, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("fn a.rs::make!::$name: 81 lines, over the 80-line cap", err)
+
+    def write_tree(self, text):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        (self.root / "tools").mkdir()
+        (self.root / size.RATCHET).write_text("")
+        (self.root / "a.rs").write_text(text)
+
+    def gate(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = size.main(["--root", str(self.root)])
+        return code, err.getvalue()
+
     def test_unclosed_input_cannot_run(self):
         for text in ("fn f() {\n", "fn f() {}\n}\n", 'fn f() { "open }\n', "fn f() { /* open }\n",
                      'fn f() { r#"open }\n'):
