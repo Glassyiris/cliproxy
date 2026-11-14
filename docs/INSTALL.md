@@ -13,6 +13,7 @@ docker run -d --name cooker -p 127.0.0.1:8317:8317 -v "$PWD/data:/data" -e CK_MA
 ```
 
 To build the image yourself, run `docker build -t cooker .` in a checkout and use `cooker` as the image name. The build compiles BoringSSL and needs about 2 GB of memory; on a small machine add `--build-arg BUILD_JOBS=1`.
+Optionally add `--build-arg CK_COMMIT="$(git rev-parse HEAD)" --build-arg CK_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"` to the build command to embed the commit and build date.
 
 On a fresh volume the first start creates `/data/cooker.db` from `/data/config.yaml` when that file exists, and otherwise from the defaults with `server.port: 8317`. Later starts use `/data/cooker.db`, not changes to the YAML. To set client keys before the first start, put a file like this in `data/`:
 

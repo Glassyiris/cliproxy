@@ -20,6 +20,8 @@ CI runs every check as a stage of the [`Dockerfile`](Dockerfile), and the same c
 
 Tests use local mock upstreams only. Never point a test at a real provider or use a real account or key, and run the tests with external network access blocked if you can; CI runs them in a network namespace with only a loopback interface. The BoringSSL build and the release link use a lot of memory, so on a small machine set `CARGO_BUILD_JOBS=2`.
 
+Image builds accept `--build-arg CK_COMMIT=<commit-sha>` and `--build-arg CK_BUILD_DATE=<ISO-8601-UTC-date>` for the startup log and management `X-Ck-Commit` and `X-Ck-Build-Date` headers. CI and release builds use the checked-out commit's SHA and committer time in UTC, so rebuilding a commit keeps its build date. Local `cargo build` needs neither variable; without them it reports `none` and `unknown`.
+
 ### Performance budgets
 
 CI holds the binary to the numbers in [`bench/budgets.txt`](bench/budgets.txt), and it counts events and bytes, never elapsed time:
