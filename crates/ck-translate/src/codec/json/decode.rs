@@ -212,36 +212,7 @@ impl StringDecoder {
                     _ => return Err(Error::Json),
                 }));
             }
-            2 | 5 => {
-                let digit = match byte {
-                    b'0'..=b'9' => byte - b'0',
-                    b'a'..=b'f' => byte - b'a' + 10,
-                    b'A'..=b'F' => byte - b'A' + 10,
-                    _ => return Err(Error::Json),
-                };
-                self.code = self.code * 16 + u32::from(digit);
-                self.digits += 1;
-                if self.digits == 4 {
-                    let code = self.code;
-                    if self.state == 5 {
-                        if !(0xdc00..=0xdfff).contains(&code) {
-                            return Err(Error::Json);
-                        }
-                        self.state = 0;
-                        return Ok(Some(
-                            char::from_u32(0x10000 + ((self.high - 0xd800) << 10) + code - 0xdc00)
-                                .ok_or(Error::Json)?,
-                        ));
-                    }
-                    if (0xd800..=0xdbff).contains(&code) {
-                        self.high = code;
-                        self.state = 3;
-                    } else {
-                        self.state = 0;
-                        return Ok(Some(char::from_u32(code).ok_or(Error::Json)?));
-                    }
-                }
-            }
+            2 | 5 => return self.unicode_digit(byte),
             3 => {
                 if byte != b'\\' {
                     return Err(Error::Json);
@@ -257,6 +228,38 @@ impl StringDecoder {
                 self.digits = 0;
             }
             _ => return Err(Error::Json),
+        }
+        Ok(None)
+    }
+
+    /// One hex digit of a `\u` escape; state 5 reads the low half of a surrogate pair.
+    fn unicode_digit(&mut self, byte: u8) -> Result<Option<char>> {
+        let digit = match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => return Err(Error::Json),
+        };
+        self.code = self.code * 16 + u32::from(digit);
+        self.digits += 1;
+        if self.digits == 4 {
+            let code = self.code;
+            if self.state == 5 {
+                if !(0xdc00..=0xdfff).contains(&code) {
+                    return Err(Error::Json);
+                }
+                self.state = 0;
+                return Ok(Some(
+                    char::from_u32(0x10000 + ((self.high - 0xd800) << 10) + code - 0xdc00).ok_or(Error::Json)?,
+                ));
+            }
+            if (0xd800..=0xdbff).contains(&code) {
+                self.high = code;
+                self.state = 3;
+            } else {
+                self.state = 0;
+                return Ok(Some(char::from_u32(code).ok_or(Error::Json)?));
+            }
         }
         Ok(None)
     }
