@@ -186,7 +186,7 @@ impl Stream {
 
     /// Reference every frame of a published record for a new lease, or name the terminal
     /// that ends the reader instead.
-    fn pin(&self, state: &State, record: Record) -> Result<Pinned, Terminal> {
+    fn pin(&self, state: &mut State, record: Record) -> Result<Pinned, Terminal> {
         let first = (record.start.frame - state.base_frame) as usize;
         let last = (last_frame(record) - state.base_frame) as usize;
         if first == last {
@@ -205,10 +205,16 @@ impl Stream {
                 Some(_) => {}
             }
         }
+        // The lease's frame list outlives its reader, so it is charged until the lease frees it.
+        let bytes = (last - first + 1) * std::mem::size_of::<u32>();
+        if bytes > self.limits.max_metadata_bytes.saturating_sub(Self::metadata(state)) {
+            return Err(Terminal::StorageExhausted);
+        }
         // The stream's own references keep every frame allocated while these are added.
-        let frames = frames.flatten();
-        frames.clone().for_each(|index| self.pool.retain(index));
-        Ok(Pinned::Many(frames.collect()))
+        let frames: Box<[u32]> = frames.flatten().collect();
+        frames.iter().for_each(|&index| self.pool.retain(index));
+        state.external_metadata += bytes;
+        Ok(Pinned::Many(frames))
     }
 
     /// Give up the stream's reference to a frame; leases keep it pinned until they end.

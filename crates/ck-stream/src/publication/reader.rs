@@ -225,5 +225,11 @@ impl Drop for Lease {
                 self.stream.detached.fetch_sub(1, Ordering::AcqRel);
             }
         }
+        // Single-frame leases, the common case, own no list and take no lock.
+        if let Pinned::Many(frames) = &mut self.pinned {
+            let bytes = std::mem::size_of_val::<[u32]>(frames);
+            drop(std::mem::take(frames));
+            self.stream.state.lock().external_metadata -= bytes;
+        }
     }
 }
