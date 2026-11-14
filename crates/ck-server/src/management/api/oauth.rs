@@ -779,17 +779,23 @@ async fn save_if_pending<T: Clone + Send + Sync + 'static>(
                 backend.admit_work()
             };
             anyhow::ensure!(!rejected.load(std::sync::atomic::Ordering::SeqCst), LoginRejected);
-            let paths = backend
-                .documents()?
-                .into_iter()
-                .map(|(path, _)| path)
-                .collect::<Vec<_>>();
-            let _locks = paths
-                .iter()
-                .map(|path| ck_exec::codex_siwc_bind::lock_file(path).map_err(anyhow::Error::msg))
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            let _disk = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
-            backend.repair_cache()?;
+            // Bounded like the credential batch: a lock that keeps changing hands fails.
+            let mut repaired = false;
+            for _ in 0..16 {
+                let busy = {
+                    let _disk = worker.disk.lock().unwrap_or_else(PoisonError::into_inner);
+                    backend.repair_cache()?
+                };
+                let Some(busy) = busy else {
+                    repaired = true;
+                    break;
+                };
+                // A refresh holds this document: wait for it alone, off `disk` and the
+                // store, so it can commit, then repair again.
+                let lock = ck_exec::codex_siwc_bind::lock_file(&busy).map_err(anyhow::Error::msg)?;
+                ck_exec::codex_siwc_bind::unlock(&lock).map_err(anyhow::Error::msg)?;
+            }
+            anyhow::ensure!(repaired, "the credential lock kept changing hands");
             admission?;
             worker.credential_changes.notify_one();
             Ok::<_, anyhow::Error>(())
@@ -2506,6 +2512,136 @@ mod tests {
         }
         drop((state, db, database));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Cache repair rewrites every document, so a login save waits while a refresh holds
+    /// any document's lock, not only its destination's.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn login_save_waits_for_a_lock_on_an_unrelated_document() {
+        let (root, state, db) = sqlite_state("unrelated-lock");
+        let other = db.auth_dir().join("other.json");
+        let before = br#"{"type":"claude","access_token":"unrelated-fixture"}"#;
+        db.save(&other, before).unwrap();
+        let document = ck_exec::codex_siwc_bind::lock_file(&other).unwrap();
+        state.oauth.register("unrelated-lock", "vertex");
+        let saving = tokio::spawn({
+            let state = state.clone();
+            async move {
+                save_if_pending(
+                    &state,
+                    "unrelated-lock",
+                    "vertex",
+                    (),
+                    |dir, (), save| {
+                        let path = dir.join("vertex.json");
+                        save_login(Some(&save), std::slice::from_ref(&path), || {
+                            std::fs::write(&path, br#"{"type":"vertex","prefix":"saved"}"#)
+                                .map_err(|error| error.to_string())?;
+                            Ok(path.clone())
+                        })
+                    },
+                    "save failed",
+                )
+                .await
+            }
+        });
+        // Long enough for a save that ignored the lock to finish; a correct save stays
+        // blocked whatever the timing.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !saving.is_finished(),
+            "the login save repaired the cache under a held lock"
+        );
+        drop(document);
+        let outcome = tokio::time::timeout(Duration::from_secs(10), saving)
+            .await
+            .expect("the login save waits for the released lock")
+            .unwrap();
+        assert!(matches!(outcome, Outcome::Saved));
+        let saved = br#"{"type":"vertex","prefix":"saved"}"#;
+        assert_eq!(db.read(&db.auth_dir().join("vertex.json")).unwrap().unwrap(), saved);
+        assert_eq!(std::fs::read(&other).unwrap(), before);
+        drop(state);
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Marks the re-executed test process that runs under a lowered descriptor limit.
+    #[cfg(unix)]
+    const LOW_NOFILE_CHILD: &str = "CK_OAUTH_LOW_NOFILE_CHILD";
+
+    /// A login save must not hold a descriptor per stored document: the child lowers only
+    /// its own soft `RLIMIT_NOFILE` before any runtime exists, so the parent and other
+    /// tests keep theirs.
+    #[cfg(unix)]
+    #[test]
+    fn login_save_beside_2000_documents_fits_a_1024_descriptor_limit() {
+        const NAME: &str =
+            "management::api::oauth::tests::login_save_beside_2000_documents_fits_a_1024_descriptor_limit";
+        if std::env::var_os(LOW_NOFILE_CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+                .env(LOW_NOFILE_CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "low-descriptor child failed ({}):\n--- stdout\n{stdout}\n--- stderr\n{stderr}",
+                output.status
+            );
+            return;
+        }
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: getrlimit and setrlimit only read and write the given struct.
+        assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) }, 0);
+        assert!(limit.rlim_max >= 1024, "hard descriptor limit below 1024");
+        limit.rlim_cur = 1024;
+        assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) }, 0);
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let (root, state, db) = sqlite_state("low-nofile");
+                let documents: Vec<_> = (0..2000)
+                    .map(|i| {
+                        let data = format!(r#"{{"type":"claude","access_token":"low-nofile-fixture-{i:04}"}}"#);
+                        (db.auth_dir().join(format!("low-nofile-{i:04}.json")), data.into_bytes())
+                    })
+                    .collect();
+                db.command().unwrap().save_documents(&documents).unwrap();
+                state.oauth.register("low-nofile", "vertex");
+                let outcome = save_if_pending(
+                    &state,
+                    "low-nofile",
+                    "vertex",
+                    (),
+                    |dir, (), save| {
+                        let path = dir.join("vertex.json");
+                        save_login(Some(&save), std::slice::from_ref(&path), || {
+                            std::fs::write(&path, br#"{"type":"vertex","prefix":"saved"}"#)
+                                .map_err(|error| error.to_string())?;
+                            Ok(path.clone())
+                        })
+                    },
+                    "save failed",
+                )
+                .await;
+                assert!(matches!(outcome, Outcome::Saved));
+                let path = db.auth_dir().join("vertex.json");
+                let saved = br#"{"type":"vertex","prefix":"saved"}"#;
+                assert_eq!(db.read(&path).unwrap().unwrap(), saved);
+                assert_eq!(std::fs::read(&path).unwrap(), saved);
+                assert_eq!(db.documents().unwrap().len(), 2001);
+                drop(state);
+                drop(db);
+                std::fs::remove_dir_all(root).unwrap();
+            });
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
