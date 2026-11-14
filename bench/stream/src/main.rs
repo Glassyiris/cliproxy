@@ -1,16 +1,20 @@
+mod backend;
 mod heap;
+mod payload;
 #[cfg(test)]
 mod tests;
 
 use anyhow::{Context, Result, bail, ensure};
-use ck_stream::{Config, FRAME_BYTES, ManualClock, Read, Store, Terminal};
+use backend::Backend;
+use ck_stream::{FRAME_BYTES, Read, Terminal};
+use payload::{Check, pattern};
 use serde_json::{Value, json};
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
     process::Command,
-    sync::{Arc, LazyLock},
+    sync::Arc,
     task::Poll,
     time::{Duration, Instant},
 };
@@ -18,184 +22,9 @@ use std::{
 const MIB: usize = 1024 * 1024;
 const WORKERS: usize = 8;
 
-enum Backend {
-    Pool(Store, Arc<ManualClock>),
-    Heap(heap::Store),
-}
-enum Writer {
-    Pool(ck_stream::Writer),
-    Heap(heap::Writer),
-}
-enum Reader {
-    Pool(ck_stream::Reader),
-    Heap(heap::Reader),
-}
-enum Lease {
-    Pool(ck_stream::Lease),
-    Heap(heap::Lease),
-}
-
-impl Backend {
-    fn open(kind: &str, directory: &Path, reserve_bytes: Option<usize>) -> Result<Self> {
-        match kind {
-            "pool" => {
-                let clock = Arc::new(ManualClock::default());
-                let mut config = Config::new(directory.to_path_buf());
-                config.workers = WORKERS;
-                config.startup_reserve_bytes = reserve_bytes;
-                Ok(Self::Pool(Store::with_clock(config, clock.clone())?, clock))
-            }
-            "heap" => Ok(Self::Heap(heap::Store::default())),
-            _ => bail!("unknown backend {kind}"),
-        }
-    }
-    fn create(&self) -> Result<Writer> {
-        Ok(match self {
-            Self::Pool(store, _) => Writer::Pool(store.create()?),
-            Self::Heap(store) => Writer::Heap(store.create()),
-        })
-    }
-    fn reader(&self, id: u64) -> Result<Reader> {
-        Ok(match self {
-            Self::Pool(store, _) => Reader::Pool(store.reader(id, 0)?),
-            Self::Heap(store) => Reader::Heap(store.reader(id)?),
-        })
-    }
-    fn expire(&self) -> Result<()> {
-        match self {
-            Self::Pool(store, clock) => {
-                clock.advance(Duration::from_secs(3601));
-                store.tick()?;
-            }
-            Self::Heap(store) => store.expire(),
-        }
-        Ok(())
-    }
-    fn tick(&self) -> Result<()> {
-        if let Self::Pool(store, _) = self {
-            store.tick()?;
-            if let Some(error) = store.take_reclaim_error() {
-                return Err(error.into());
-            }
-        }
-        Ok(())
-    }
-    fn counters(&self) -> Value {
-        match self {
-            Self::Pool(store, _) => {
-                json!({"used_frames":store.used_frames(),"backed_frames":store.backed_frames(),"pool_frames":store.limits().pool_frames,"startup_reserve_frames":store.limits().startup_reserve_frames,"max_frames":store.limits().max_frames,"max_metadata_bytes":store.limits().max_metadata_bytes})
-            }
-            Self::Heap(_) => json!({}),
-        }
-    }
-}
-impl Writer {
-    fn id(&self) -> u64 {
-        match self {
-            Self::Pool(w) => w.id(),
-            Self::Heap(w) => w.id(),
-        }
-    }
-    fn append(&mut self, bytes: &[u8], aligned: bool) -> Result<()> {
-        match self {
-            Self::Pool(w) if aligned => {
-                let mut reservation = w.begin_record(bytes.len(), true, 0, 0)?;
-                reservation.write(bytes)?;
-                reservation.commit()?;
-            }
-            Self::Pool(w) => {
-                w.append(bytes)?;
-            }
-            Self::Heap(w) => w.append(bytes, aligned)?,
-        }
-        Ok(())
-    }
-    fn finish(&mut self) {
-        match self {
-            Self::Pool(w) => w.finish(Terminal::Done),
-            Self::Heap(w) => w.finish(),
-        }
-    }
-}
-impl Reader {
-    fn try_next(&mut self) -> Result<Poll<Option<Lease>>> {
-        match self {
-            Self::Heap(r) => Ok(r.try_next().map(|v| v.map(Lease::Heap))),
-            Self::Pool(r) => match r.try_next() {
-                Poll::Pending => Ok(Poll::Pending),
-                Poll::Ready(Some(Read::Record(lease))) => Ok(Poll::Ready(Some(Lease::Pool(lease)))),
-                Poll::Ready(Some(Read::Terminal(Terminal::Done))) => Ok(Poll::Ready(None)),
-                Poll::Ready(Some(Read::Terminal(other))) => bail!("reader terminal {other:?}"),
-                Poll::Ready(None) => Ok(Poll::Ready(None)),
-            },
-        }
-    }
-    async fn next(&mut self) -> Result<Option<Lease>> {
-        match self {
-            Self::Heap(r) => Ok(r.next().await.map(Lease::Heap)),
-            Self::Pool(r) => match r.next().await {
-                Some(Read::Record(lease)) => Ok(Some(Lease::Pool(lease))),
-                Some(Read::Terminal(Terminal::Done)) | None => Ok(None),
-                Some(Read::Terminal(other)) => bail!("reader terminal {other:?}"),
-            },
-        }
-    }
-}
-impl Lease {
-    fn visit(&self, visitor: impl FnMut(&[u8])) -> Result<()> {
-        match self {
-            Self::Pool(lease) => lease.visit(visitor)?,
-            Self::Heap(lease) => lease.visit(visitor),
-        }
-        Ok(())
-    }
-    fn acknowledge(self) {
-        if let Self::Pool(lease) = self {
-            lease.acknowledge();
-        }
-    }
-}
 fn percentile(values: &mut [u64], p: f64) -> u64 {
     values.sort_unstable();
     values[((values.len() - 1) as f64 * p).round() as usize]
-}
-
-/// Payload byte `i` of stream `id` is `(i + 97 × id) mod 251`. The period is
-/// prime and coprime to the frame size, so a stale, shifted or cross-stream
-/// frame fails the comparison that a constant byte would pass.
-const PERIOD: usize = 251;
-static PATTERN: LazyLock<Vec<u8>> = LazyLock::new(|| (0..PERIOD + FRAME_BYTES).map(|i| (i % PERIOD) as u8).collect());
-fn pattern(id: u64, offset: usize, len: usize) -> &'static [u8] {
-    let phase = (offset + (id % PERIOD as u64) as usize * 97) % PERIOD;
-    &PATTERN[phase..phase + len]
-}
-/// Compares every visited byte with the expected pattern at its logical offset.
-struct Check {
-    id: u64,
-    offset: usize,
-    ok: bool,
-}
-impl Check {
-    fn new(id: u64) -> Self {
-        Self {
-            id,
-            offset: 0,
-            ok: true,
-        }
-    }
-    fn visit(&mut self, bytes: &[u8]) {
-        self.ok &= bytes == pattern(self.id, self.offset, bytes.len());
-        self.offset += bytes.len();
-    }
-    fn finish(&self, expected: usize) -> Result<()> {
-        ensure!(
-            self.ok && self.offset == expected,
-            "payload mismatch: {} of {expected} bytes, pattern intact: {}",
-            self.offset,
-            self.ok
-        );
-        Ok(())
-    }
 }
 
 async fn stream(
