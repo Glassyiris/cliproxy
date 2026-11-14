@@ -85,10 +85,16 @@ reads one SSE record, stops reading, and requires the upstream to finish an
 80 MiB response during the stall. It rejects a workload that fits the host's
 TCP-buffer bound; delaying the upstream does not count as throttling downstream.
 After the stall, every content byte and the single usage snapshot must survive.
-The capacity case sends more than 256 MiB and requires a visible
+The capacity case sends about 288 MB and requires a visible
 `stream.storage_exhausted` error, no successful terminal, no upstream retry and a
-surviving gateway. Raw media records first-delivery delay; an external HTTP clock
-does not directly prove the internal 100 ms collection bound.
+surviving gateway. The content before the error must be a gap-free prefix of
+whole records, and the error must arrive at the 5,368-frame limit: the record
+count must fit 268,400,000 stored bytes at 40,966 to 41,990 bytes per record
+(content plus at most 1 KiB of stored framing), give or take one frame. Within
+3 s of the error the upstream write must fail with a broken pipe or reset before
+the whole body is sent; an upstream that completes normally fails the case. Raw
+media records first-delivery delay; an external
+HTTP clock does not directly prove the internal 100 ms collection bound.
 
 Live and completed SSE resume use only the `X-Ck-Stream-Id` header and positional
 `v1.e.*` cursors. They check content without gaps/repeats, consecutive cursors,

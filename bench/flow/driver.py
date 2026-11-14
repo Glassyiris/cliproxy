@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import errno
 import hashlib
 import http.client
 import http.server
@@ -27,6 +28,12 @@ SIGNATURE = "opaque+/signature==do-not-change"
 ARGUMENTS = '{"path":"src/測試.rs","line":17}'
 MEDIA = bytes(range(256)) * 32768  # 8 MiB, including invalid textual UTF-8.
 TIMEOUT = 12
+# §6.4 per-stream limit: the 5,369th 50,000-byte frame fails.
+STREAM_LIMIT_BYTES = 5368 * 50000
+BULK_CONTENT = 40966  # f"{i:05d}:" plus 40,960 bytes per bulk record
+# Stored framing allowed per bulk record when locating the storage error
+# (2.5% of BULK_CONTENT); the error must arrive within one frame of the limit.
+STREAM_LIMIT_FRAMING = 1024
 
 _ws_spec = importlib.util.spec_from_file_location("flow_realtime", Path(__file__).with_name("realtime.py"))
 realtime = importlib.util.module_from_spec(_ws_spec)
@@ -147,6 +154,7 @@ class Upstream(http.server.ThreadingHTTPServer):
         self.requests = []
         self.progress = []
         self.error = None
+        self.errno = None
         self.sent = 0
         self.sessions = 0
         self.received = []
@@ -261,8 +269,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.flush()
         except (OSError, AssertionError, ValueError) as exc:
             up.error = str(exc)
+            up.errno = getattr(exc, "errno", None)
         finally:
-            up.progress.append({"time": time.monotonic(), "kind": "end", "bytes": up.sent, "error": up.error})
+            up.progress.append({"time": time.monotonic(), "kind": "end", "bytes": up.sent, "error": up.error,
+                                "errno": up.errno})
             if up.scenario != "sideband-resume" or up.error:
                 up.done.set()
 
@@ -667,6 +677,50 @@ def check_resume(gateway, response, conn, live):
     return {"resumed_events": len(tail), "cursor_end": end, "upstream_requests": len(up.requests)}
 
 
+def check_stream_limit(gateway, response):
+    """The storage error must arrive at the per-stream limit and cancel the upstream."""
+    up = gateway.up
+    exhausted, successful, delivered = False, False, 0
+    content, length = hashlib.sha256(), 0
+    for record in records(response):
+        delivered += len(record)
+        value = payload(record)
+        if value and isinstance(value.get("error"), dict):
+            require(value["error"].get("code") == "stream.storage_exhausted", "wrong per-stream limit error")
+            exhausted = True
+        elif value and value.get("type") == "error":
+            require(value.get("code") == "stream.storage_exhausted", "wrong stream limit error")
+            exhausted = True
+        else:
+            require(not exhausted, "output continued after exhaustion error")
+            for choice in (value or {}).get("choices", []):
+                piece = (choice.get("delta", {}).get("content") or "").encode()
+                content.update(piece)
+                length += len(piece)
+        successful |= b"data: [DONE]" in record
+    require(exhausted and not successful, "stream exceeded 256 MiB without a visible storage error")
+    count, partial = divmod(length, BULK_CONTENT)
+    expected = hashlib.sha256()
+    for i in range(count):
+        expected.update(f"{i:05d}:".encode() + b"x" * 40960)
+    require(not partial and content.digest() == expected.digest(),
+            "content before the storage error is not a gap-free prefix of whole records")
+    # Stored bytes per record lie in [BULK_CONTENT, BULK_CONTENT + STREAM_LIMIT_FRAMING]; the
+    # refused record must be the first that no longer fits, give or take one frame.
+    low = (STREAM_LIMIT_BYTES - 50000) // (BULK_CONTENT + STREAM_LIMIT_FRAMING) - 1
+    high = STREAM_LIMIT_BYTES // BULK_CONTENT
+    require(low <= count <= high,
+            f"storage error after {count} records ({length} content bytes), outside {low}..{high} for the 256 MiB limit")
+    require(up.done.wait(3), "upstream still running 3 s after the storage error")
+    total = sum(len(record) for record in bulk_records(7000))
+    require(up.errno in (errno.EPIPE, errno.ECONNRESET) and up.sent < total,
+            f"upstream was not cancelled: error {up.error!r}, sent {up.sent} of {total} bytes")
+    require(len(up.requests) == 1, "storage exhaustion retried another upstream")
+    gateway.await_ready()
+    return {"delivered_bytes": delivered, "content_records": count, "upstream_bytes": up.sent,
+            "upstream_total_bytes": total, "terminal": "stream.storage_exhausted"}
+
+
 def run_scenario(gateway, name):
     up = gateway.up
     if name in ("realtime-resume", "sideband-resume"):
@@ -721,26 +775,7 @@ def run_scenario(gateway, name):
             return {"stall_s": elapsed, "upstream_bytes_during_stall": up.sent - sent_before,
                     "client_bytes_before_stall": read_bytes, "socket_buffer_bound_bytes": sum(limits) * 2}
         if name == "stream-limit":
-            exhausted, successful, delivered = False, False, 0
-            for record in records(response):
-                delivered += len(record)
-                value = payload(record)
-                if value and isinstance(value.get("error"), dict):
-                    require(value["error"].get("code") == "stream.storage_exhausted",
-                            "wrong per-stream limit error")
-                    exhausted = True
-                elif value and value.get("type") == "error":
-                    require(value.get("code") == "stream.storage_exhausted", "wrong stream limit error")
-                    exhausted = True
-                else:
-                    require(not exhausted, "output continued after exhaustion error")
-                successful |= b"data: [DONE]" in record
-            require(exhausted and not successful, "stream exceeded 256 MiB without a visible storage error")
-            require(up.done.wait(3), "exhaustion did not cancel upstream collection")
-            require(len(up.requests) == 1, "storage exhaustion retried another upstream")
-            gateway.await_ready()
-            return {"delivered_bytes": delivered, "upstream_bytes": up.sent,
-                    "terminal": "stream.storage_exhausted"}
+            return check_stream_limit(gateway, response)
         if name in ("long-media", "media-resume"):
             require(response.getheader("Content-Type", "").startswith("audio/mpeg"), "media MIME changed")
             prefix = response.read(65536)

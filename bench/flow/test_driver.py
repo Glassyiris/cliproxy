@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import re
 import queue
+import socket
 import struct
 import threading
 import time
@@ -405,7 +406,7 @@ class WebSocketFramingChecks(unittest.TestCase):
                 left, right = Pipe(), Pipe()
                 left.other, right.other = right, left
                 server = SimpleNamespace(server_port=1777, scenario="sideband-resume", requests=[], progress=[],
-                                         error=None, done=threading.Event(), sent=0)
+                                         error=None, errno=None, done=threading.Event(), sent=0)
                 request = target if target.startswith("CONNECT ") else "POST " + target
                 right.sendall((request + " HTTP/1.1\r\nHost: 127.0.0.1:1777\r\nConnection: close\r\n"
                                + f"Content-Length: {len(body)}\r\n\r\n").encode() + body)
@@ -525,6 +526,90 @@ class FlowChecks(unittest.TestCase):
             list(driver.records(io.BytesIO(b'id: v1.e.1\ndata: {"x":1}\n')))
         with self.assertRaisesRegex(AssertionError, "cursor"):
             driver.cursor(b'data: {"x":1}\n\n')
+
+
+STORAGE_ERROR = driver.event({"error": {"code": "stream.storage_exhausted", "message": "limit"}})
+
+
+class QueuedResponse:
+    status = 200
+
+    def __init__(self, items):
+        self.items, self.buffer = items, b""
+
+    def readline(self):
+        while b"\n" not in self.buffer:
+            item = self.items.get(timeout=30)
+            if item is None:
+                line, self.buffer = self.buffer, b""
+                return line
+            self.buffer += item
+        line, self.buffer = self.buffer.split(b"\n", 1)
+        return line + b"\n"
+
+
+class LimitGateway:
+    """Relays `cutoff` upstream records, then the storage error; optionally cancels upstream."""
+
+    def __init__(self, up, cutoff, cancel):
+        self.up, self.cutoff, self.cancel = up, cutoff, cancel
+
+    def await_ready(self):
+        pass
+
+    def response(self):
+        items = queue.Queue()
+
+        def pump():
+            conn = http.client.HTTPConnection("127.0.0.1", self.up.server_port, timeout=30)
+            conn.request("POST", "/v1/chat/completions", json.dumps({"model": "flow-chat"}))
+            upstream, count, record = conn.getresponse(), 0, b""
+            while line := upstream.readline():
+                record += line
+                if line != b"\n":
+                    continue
+                if count < self.cutoff:
+                    items.put(record)
+                count, record = count + 1, b""
+                if count == self.cutoff:
+                    items.put(STORAGE_ERROR)
+                    items.put(None)
+                    if self.cancel:
+                        conn.sock.shutdown(socket.SHUT_RDWR)
+                        conn.close()
+                        return
+        threading.Thread(target=pump, daemon=True).start()
+        return QueuedResponse(items)
+
+
+class StreamLimitChecks(unittest.TestCase):
+    LIMIT = 120 * 50000  # 140..146 bulk records with the driver's framing bound
+
+    def attempt(self, cutoff, cancel):
+        up = driver.Upstream("stream-limit", None)
+        thread = threading.Thread(target=up.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with mock.patch.object(driver, "STREAM_LIMIT_BYTES", self.LIMIT), \
+                    mock.patch.object(driver.time, "sleep", lambda _: None):
+                gateway = LimitGateway(up, cutoff, cancel)
+                return driver.check_stream_limit(gateway, gateway.response())
+        finally:
+            up.shutdown()
+            up.server_close()
+
+    def test_cancelled_error_at_the_limit_passes(self):
+        result = self.attempt(143, cancel=True)
+        self.assertEqual(result["content_records"], 143)
+        self.assertLess(result["upstream_bytes"], result["upstream_total_bytes"])
+
+    def test_completed_upstream_is_rejected(self):
+        with self.assertRaisesRegex(AssertionError, "upstream"):
+            self.attempt(143, cancel=False)
+
+    def test_early_storage_error_is_rejected(self):
+        with self.assertRaisesRegex(AssertionError, "outside"):
+            self.attempt(10, cancel=True)
 
 
 if __name__ == "__main__":
