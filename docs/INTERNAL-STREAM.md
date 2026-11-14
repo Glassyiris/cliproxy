@@ -2,7 +2,7 @@
 
 ## 1. Purpose and scope
 
-Define the sole internal representation for cooker inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search and AI Studio relay inference traffic. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion; authentication and transport remain boundary responsibilities, while SDP, session commands and media content are inside. Current route evidence: `crates/ck-server/src/lib.rs:81-146`, `crates/ck-server/src/realtime/api.rs:85-112`, `crates/ck-server/src/inference/codex_alpha.rs:22-25`, `crates/ck-server/src/realtime/aistudio_relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/ck-server/src/realtime/api.rs:12`. This is a normative target, not a claim of implementation; current-code citations refer to `prep-cook/cooker` master `17608e94`.
+Define the sole internal representation for cooker inference: a Chat Completions-based, versioned SSE grammar covering requests, streamed and buffered responses, count_tokens, compact, legacy completions, Responses HTTP/WebSocket, Anthropic Messages, Gemini generation/Interactions, images, speech, video, realtime/Live, Codex alpha search and AI Studio relay inference traffic. All client and upstream boundaries decode/encode, including same-protocol traffic; no raw-byte bypass exists. Only management/dashboard, health/root, model discovery, OAuth callbacks, authentication/ephemeral-key issuance, transport handshakes and already-unimplemented operations are outside inference conversion; authentication and transport remain boundary responsibilities, while SDP, session commands and media content are inside. Current route evidence: `crates/ck-server/src/lib.rs:42-107`, `crates/ck-server/src/realtime/api.rs:79-106`, `crates/ck-server/src/inference/codex_alpha.rs:21-24`, `crates/ck-server/src/realtime/aistudio_relay.rs:49-59`; current transcription/translation/SIP stubs: `crates/ck-server/src/realtime/api.rs:12`. This is a normative target, not a claim of implementation; current-code citations refer to `prep-cook/cooker` master `b518060e`.
 
 ## 2. Decisions
 
@@ -534,10 +534,10 @@ These are source-verified transformations at the cited baseline, not claims that
 | L15 | Emulated xAI image completed events omit created and revised_prompt even though extraction retains both and buffered output includes them. | `crates/ck-server/src/inference/images.rs:378-393,437-481` | New |
 | L16 | Speech's xAI request builder reconstructs language/output_format/speed/text/voice_id only; supplied instructions are not forwarded. | `crates/ck-server/src/inference/speech.rs:184-233` | New |
 | L17 | Video status projection collapses expired/cancelled/canceled into failed without retaining the native status in the constructed response. | `crates/ck-server/src/inference/videos.rs:441-449,463-483,555-597` | New |
-| L18 | Realtime declares live usage logging unported; the S0 usage path must not inherit that omission. | `crates/ck-server/src/realtime/api.rs:24-26` | New |
+| L18 | Realtime declares live usage logging unported; the S0 usage path must not inherit that omission. | `crates/ck-server/src/realtime/api.rs:21-23` | New |
 
 Existing direct Claude→Responses carriage of redacted thinking must survive even though the Chat projection loses it (`crates/ck-translate/src/claude_responses_response.rs:167-175`).
-Current compact rejects stream=true (`crates/ck-server/src/inference/openai.rs:1064-1079`); S0 retains that operation contract, not a raw-body shortcut.
+Current compact rejects stream=true (`crates/ck-server/src/inference/openai.rs:1065-1080`); S0 retains that operation contract, not a raw-body shortcut.
 
 ## 6. Storage
 
@@ -673,8 +673,8 @@ Keep request-direction and scratch ranges only while an egress snapshot or reade
 Where a final response requires old content, do not evict it silently to meet a limit; fail visibly under the same queue rule.
 A destination that only accepts whole tool JSON may delay tool serialization at egress by reading mapped fragments; internal argument delivery remains incremental.
 SSE, JSON array streams, raw media HTTP bodies, WS JSON/binary messages and WebRTC packets are egress encodings, not alternate internal pipelines.
-Today `crates/ck-server/src/inference/dispatch.rs:2653-2675` bootstraps `Done::Stream` on the first nonempty upstream chunk and concatenates non-streaming output in `BytesMut`; bootstrap is not transport commitment.
-Configured nonstream/media keepalives can commit headers/body before an inference event (`crates/ck-server/src/inference/dispatch.rs:583-632`).
+Today `crates/ck-server/src/inference/dispatch.rs:1655-1677` bootstraps `Done::Stream` on the first nonempty upstream chunk and concatenates non-streaming output in `BytesMut`; bootstrap is not transport commitment.
+Configured nonstream/media keepalives can commit headers/body before an inference event (`crates/ck-server/src/inference/dispatch.rs:539-588`).
 The new single commit point is egress scheduling the first client-deliverable bytes after encoding; suppressed metadata cannot commit, and pre-delivery keepalives/success headers are forbidden (§3.6).
 Today's framer has a 16 MiB per-event default and a BytesMut buffer (`crates/ck-translate/src/sse.rs:9-13,28-34`); that number is evidence, not an adopted S0 stream/pool limit.
 
@@ -691,7 +691,7 @@ For each changed fixture, record fixture ID, affected route/direction/mode, old 
 Do not bless rewritten expected bytes wholesale. Keep exact-byte checks only where bytes remain contractual, such as decoded media and opaque signature content.
 Replace obsolete pair-registry/wiring assertions; same-protocol re-encoding is not a reason to retain legacy translators.
 The ledger MUST explicitly replace invalid-UTF-8 passthrough and single-buffered-tool-chunk expectations (`crates/ck-translate/tests/golden.rs:550-583,588-612`).
-Cover every registered client/upstream combination and applicable request/stream/buffered/count mode; current inventory is `crates/ck-translate/src/lib.rs:303-335`. Add native same-protocol, compact, all media and duplex routes.
+Cover every registered client/upstream combination and applicable request/stream/buffered/count mode; current inventory is `crates/ck-translate/src/lib.rs:283-314`. Add native same-protocol, compact, all media and duplex routes.
 
 | Assertion group | Required semantic proof |
 | --- | --- |
