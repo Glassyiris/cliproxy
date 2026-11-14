@@ -310,97 +310,109 @@ pub(super) fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_,
         return e.bytes(b"}");
     }
     if doc.string_is(kind, "image")? {
-        let source = doc.required(part, "source")?;
-        e.bytes(b"{\"type\":\"image_url\",\"image_url\":{\"url\":")?;
-        let source_kind = doc.required(source, "kind")?;
-        if doc.string_is(source_kind, "data")? {
-            view.media.write_value(doc, doc.required(source, "ref")?, e)?;
-        } else if doc.string_is(source_kind, "uri")? {
-            doc.write(doc.required(source, "uri")?, e)?;
-        } else {
-            return Err(Error::Unsupported);
-        }
-        if let Some(detail) = doc.member(part, "detail")? {
-            e.bytes(b",\"detail\":")?;
-            doc.write(detail, e)?;
-        }
-        super::response::members(doc, source, e, &["kind", "uri", "ref"])?;
-        super::provenance::request_members(
-            doc,
-            part,
-            Some("image_url"),
-            &["url", "detail"],
-            &["kind", "uri", "ref"],
-            e,
-        )?;
-        e.bytes(b"}")?;
-        super::request_controls::members(doc, part, &mut false, e)?;
-        super::response::members(doc, part, e, &["type", "source", "detail", "mime"])?;
-        super::provenance::request_members(
-            doc,
-            part,
-            None,
-            &["type", "image_url"],
-            &["type", "source", "detail", "mime"],
-            e,
-        )?;
-        e.bytes(b"}")
-    } else if doc.string_is(kind, "audio")? || doc.string_is(kind, "document")? {
-        let audio = doc.string_is(kind, "audio")?;
-        let source = doc.required(part, "source")?;
-        e.bytes(if audio {
-            b"{\"type\":\"input_audio\",\"input_audio\":{"
-        } else {
-            b"{\"type\":\"file\",\"file\":{"
-        })?;
-        let source_kind = doc.required(source, "kind")?;
-        if doc.string_is(source_kind, "data")? {
-            let reference = doc.required(source, "ref")?;
-            e.string(if audio { "data" } else { "file_data" })?;
-            e.bytes(b":")?;
-            view.media.write_value(doc, reference, e)?;
-        } else if !audio && doc.string_is(source_kind, "file")? {
-            e.bytes(b"\"file_id\":")?;
-            doc.write(doc.required(source, "file_id")?, e)?;
-        } else {
-            return Err(Error::Unsupported);
-        }
-        if let Some(format) = doc.member(source, "format")? {
-            e.bytes(b",\"format\":")?;
-            doc.write(format, e)?;
-        }
-        if let Some(filename) = doc.member(part, "filename")? {
-            e.bytes(b",\"filename\":")?;
-            doc.write(filename, e)?;
-        }
-        super::response::members(doc, source, e, &["kind", "ref", "file_id", "format"])?;
-        super::provenance::request_members(
-            doc,
-            part,
-            Some(if audio { "input_audio" } else { "file" }),
-            if audio {
-                &["data", "format"]
-            } else {
-                &["file_data", "file_id", "filename"]
-            },
-            &["kind", "ref", "file_id"],
-            e,
-        )?;
-        e.bytes(b"}")?;
-        super::request_controls::members(doc, part, &mut false, e)?;
-        super::response::members(doc, part, e, &["type", "source", "filename", "mime"])?;
-        super::provenance::request_members(
-            doc,
-            part,
-            None,
-            &["type", "input_audio", "file"],
-            &["type", "source", "filename", "mime"],
-            e,
-        )?;
-        e.bytes(b"}")
+        write_image(view, part, e)
+    } else if doc.string_is(kind, "audio")? {
+        write_source_part(view, part, true, e)
+    } else if doc.string_is(kind, "document")? {
+        write_source_part(view, part, false, e)
     } else {
         super::request_controls::write(doc, part, e)
     }
+}
+
+fn write_image(view: RequestView<'_>, part: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
+    let doc = view.document;
+    let source = doc.required(part, "source")?;
+    e.bytes(b"{\"type\":\"image_url\",\"image_url\":{\"url\":")?;
+    let source_kind = doc.required(source, "kind")?;
+    if doc.string_is(source_kind, "data")? {
+        view.media.write_value(doc, doc.required(source, "ref")?, e)?;
+    } else if doc.string_is(source_kind, "uri")? {
+        doc.write(doc.required(source, "uri")?, e)?;
+    } else {
+        return Err(Error::Unsupported);
+    }
+    if let Some(detail) = doc.member(part, "detail")? {
+        e.bytes(b",\"detail\":")?;
+        doc.write(detail, e)?;
+    }
+    super::response::members(doc, source, e, &["kind", "uri", "ref"])?;
+    super::provenance::request_members(
+        doc,
+        part,
+        Some("image_url"),
+        &["url", "detail"],
+        &["kind", "uri", "ref"],
+        e,
+    )?;
+    e.bytes(b"}")?;
+    super::request_controls::members(doc, part, &mut false, e)?;
+    super::response::members(doc, part, e, &["type", "source", "detail", "mime"])?;
+    super::provenance::request_members(
+        doc,
+        part,
+        None,
+        &["type", "image_url"],
+        &["type", "source", "detail", "mime"],
+        e,
+    )?;
+    e.bytes(b"}")
+}
+
+/// Writes an audio part as `input_audio`, or a document part as `file`.
+fn write_source_part(view: RequestView<'_>, part: usize, audio: bool, e: &mut Encoder<'_, '_>) -> Result<()> {
+    let doc = view.document;
+    let source = doc.required(part, "source")?;
+    e.bytes(if audio {
+        b"{\"type\":\"input_audio\",\"input_audio\":{"
+    } else {
+        b"{\"type\":\"file\",\"file\":{"
+    })?;
+    let source_kind = doc.required(source, "kind")?;
+    if doc.string_is(source_kind, "data")? {
+        let reference = doc.required(source, "ref")?;
+        e.string(if audio { "data" } else { "file_data" })?;
+        e.bytes(b":")?;
+        view.media.write_value(doc, reference, e)?;
+    } else if !audio && doc.string_is(source_kind, "file")? {
+        e.bytes(b"\"file_id\":")?;
+        doc.write(doc.required(source, "file_id")?, e)?;
+    } else {
+        return Err(Error::Unsupported);
+    }
+    if let Some(format) = doc.member(source, "format")? {
+        e.bytes(b",\"format\":")?;
+        doc.write(format, e)?;
+    }
+    if let Some(filename) = doc.member(part, "filename")? {
+        e.bytes(b",\"filename\":")?;
+        doc.write(filename, e)?;
+    }
+    super::response::members(doc, source, e, &["kind", "ref", "file_id", "format"])?;
+    super::provenance::request_members(
+        doc,
+        part,
+        Some(if audio { "input_audio" } else { "file" }),
+        if audio {
+            &["data", "format"]
+        } else {
+            &["file_data", "file_id", "filename"]
+        },
+        &["kind", "ref", "file_id"],
+        e,
+    )?;
+    e.bytes(b"}")?;
+    super::request_controls::members(doc, part, &mut false, e)?;
+    super::response::members(doc, part, e, &["type", "source", "filename", "mime"])?;
+    super::provenance::request_members(
+        doc,
+        part,
+        None,
+        &["type", "input_audio", "file"],
+        &["type", "source", "filename", "mime"],
+        e,
+    )?;
+    e.bytes(b"}")
 }
 
 pub(super) fn data_uri(
