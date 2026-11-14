@@ -17,6 +17,9 @@ use crate::{
     pool::Pool,
 };
 
+mod scratch;
+pub use scratch::{MetadataPermit, ScratchLease, ScratchReservation};
+
 pub(crate) const READER_BYTES: usize = std::mem::size_of::<Reader>();
 
 pub(crate) struct Frame {
@@ -91,6 +94,8 @@ pub(crate) struct State {
     end: u64,
     terminal: Option<Terminal>,
     readers: usize,
+    scratch_frames: usize,
+    external_metadata: usize,
     pub last_read: Duration,
 }
 
@@ -132,6 +137,8 @@ impl Stream {
                 end: 0,
                 terminal: None,
                 readers: 0,
+                scratch_frames: 0,
+                external_metadata: 0,
                 last_read: now,
             }),
         }
@@ -141,6 +148,7 @@ impl Stream {
         state.frames.capacity() * std::mem::size_of::<Frame>()
             + state.records.capacity() * std::mem::size_of::<Index>()
             + state.readers * READER_BYTES
+            + state.external_metadata
     }
 
     fn write_reserved(&self, state: &State, start: Position, mut bytes: &[u8]) -> Result<(), Error> {
@@ -324,7 +332,7 @@ impl Writer {
         let old_count = state.frames.len();
         let extra = needed.saturating_sub(old_count);
         if extra > 0
-            && state.frames.iter().filter(|frame| frame.pool.is_some()).count() + extra
+            && state.frames.iter().filter(|frame| frame.pool.is_some()).count() + state.scratch_frames + extra
                 > self.inner.limits.max_frames as usize
         {
             return Err(Error::StorageExhausted);
@@ -347,7 +355,7 @@ impl Writer {
         };
         let extends = state.records.back().is_some_and(|last| last.extends(&index));
         let records = state.records.len() + usize::from(!extends);
-        let reader_bytes = state.readers * READER_BYTES;
+        let reader_bytes = state.readers * READER_BYTES + state.external_metadata;
         let frame_budget = self
             .inner
             .limits
@@ -415,8 +423,8 @@ impl Writer {
         self.stream.finish(terminal);
     }
 
-    /// Release a non-resumable request/scratch prefix. Response records must never use this API.
-    /// Frame numbers and record sequence numbers are never recycled.
+    /// Release a non-resumable canonical prefix. Response records must never use this API.
+    /// Independent scratch leases release on drop. Frame and record numbers are never recycled.
     pub fn release_before(&mut self, position: Position) -> Result<(), Error> {
         let end = position.byte(self.id())?;
         let mut state = self.stream.state.lock();
@@ -550,7 +558,14 @@ impl Reader {
             if after > state.next_sequence {
                 return Err(Error::InvalidPosition);
             }
-            if Stream::metadata(&state) + READER_BYTES > stream.limits.max_metadata_bytes {
+            if READER_BYTES
+                > stream
+                    .limits
+                    .max_metadata_bytes
+                    .saturating_sub(Stream::metadata(&state))
+            {
+                drop(state);
+                stream.finish(Terminal::StorageExhausted);
                 return Err(Error::StorageExhausted);
             }
             state.readers += 1;

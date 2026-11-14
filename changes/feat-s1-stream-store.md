@@ -6,3 +6,4 @@ Internal
 - Avoid redundant atomic read-modify-write during locked publication and notification registration for ready records, including immediately after a wakeup.
 - Use an adaptive per-stream metadata mutex to reduce contention without changing publication or retention ordering.
 - Reuse reserved frame coordinates during payload writes instead of recomputing byte-to-frame division for each span; keep checked frame lookup and copy bounds.
+- Add independently releasable unpublished scratch leases and external metadata permits sharing canonical frame and metadata quotas. Scratch stays invisible to readers and pins borrowed bytes through invalidation; reader admission failures now publish the same storage-exhausted terminal as allocation failures.
