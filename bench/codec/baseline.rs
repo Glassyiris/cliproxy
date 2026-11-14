@@ -305,6 +305,8 @@ fn measure(row: &Value, manifest: &Value, cg: &Path) -> Result<(Value, Value)> {
     if cases.is_empty() { return Err("empty workload".into()); }
     let warmup = manifest["warmup_iterations"].as_u64().ok_or("missing warmup iterations")?;
     let iterations = manifest["measured_iterations"].as_u64().filter(|n| *n > 0).ok_or("invalid measured iterations")?;
+    // Process baseline before any codec work: RSS/PSS exclude harness startup and inputs.
+    let start_os = smaps()?;
     let mut output_capacity = 0;
     for case in &cases {
         let mut observed = 0;
@@ -351,7 +353,8 @@ fn measure(row: &Value, manifest: &Value, cg: &Path) -> Result<(Value, Value)> {
         ("cpu_ns_per_completion", stats.completion_cpu as f64 / stats.completions as f64),
         ("throughput", stats.events as f64 * 1e9 / stats.wall.max(1) as f64),
         ("heap_peak", peak_heap as f64), ("heap_retained", after_heap.saturating_sub(before_heap) as f64),
-        ("rss", rss.max(after_os["Rss"]) as f64), ("pss", pss.max(after_os["Pss"]) as f64),
+        ("rss", rss.max(after_os["Rss"]).saturating_sub(start_os["Rss"]) as f64),
+        ("pss", pss.max(after_os["Pss"]).saturating_sub(start_os["Pss"]) as f64),
         ("output_chunks", stats.output_chunks as f64), ("no_output_completions", stats.no_output as f64),
         ("rss_anon", after_os["Anonymous"] as f64), ("rss_shmem", after_os["Pss_Shmem"] as f64),
         ("mapped_resident", (after_os["Pss_File"] + after_os["Pss_Shmem"]) as f64),
@@ -375,7 +378,7 @@ fn measure(row: &Value, manifest: &Value, cg: &Path) -> Result<(Value, Value)> {
         "output_chunks": stats.output_chunks, "consumed_bytes": stats.consumed_bytes,
         "cpu_ns": stats.event_cpu, "allocations": stats.allocations, "allocated_bytes": stats.allocated,
         "encoded_bytes": stats.encoded, "decoded_bytes": stats.decoded, "wall_ns": stats.wall,
-        "heap_before": before_heap, "heap_after": after_heap, "smaps_before": before_os,
+        "heap_before": before_heap, "heap_after": after_heap, "smaps_start": start_os, "smaps_before": before_os,
         "smaps_after": after_os, "private_cgroup": cg, "charge_before": before_charge,
         "charge_after": charge, "charge_peak": charge_peak,
         "no_output_completions": stats.no_output, "cpu_clock_overhead_ns": CLOCK_OVERHEAD.load(Relaxed)});
