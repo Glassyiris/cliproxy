@@ -89,6 +89,7 @@ The manifest specifies every required metric and unit:
 - Throughput in events/s; first-deliverable, inter-event and completion latency p50/p95/p99 in ns.
 - Heap peak/retained, RSS, PSS, anonymous/shmem/mapped residency, metadata, tmpfs/cgroup/total charge in B.
 - Reserved/used pool frames and minor/major page faults.
+- Output chunks and completions without deliverable output, as totals over the round's measured operations.
 
 Measure memory with equivalent retention, after operation completion and release of its leases/cache references, as well as peak residency. Do not compare new retained-cache lifetime with old disconnect cleanup. Use isolated processes/cgroups or explicit baselines so unrelated host charges do not become workload charges. `total_charged` must account for anonymous memory, mapped/tmpfs residency and OS page cache without double counting shared pages; keep its component measurements. Zero is permitted only when measured or structurally absent (for example, old pool frames); unavailable PSS/cgroup/allocator instrumentation is an error.
 
@@ -98,7 +99,7 @@ If that exact cgroup already exists, the launcher exits 2 and reports its absolu
 
 RSS/PSS report the maximum observed setup/post-operation/post-release smaps sample, not a continuously sampled RSS peak. Anonymous, shmem and mapped components use `Anonymous`, `Pss_Shmem` and `Pss_File + Pss_Shmem`; the latter two are proportional-residency diagnostics. Page faults come from `getrusage`. The old backend has no pool, pool metadata or tmpfs stream files, so those structurally absent diagnostics are zero. Its heap peak/retained values subtract pre-workload input/instrumentation allocation; process/cgroup totals do not subtract startup costs.
 
-Latency samples use monotonic clocks at output-batch availability and operation completion. Chunks returned together have zero inter-output delay. Operations producing no deliverable output record a structural zero for first-deliverable latency and increment `no_output_completions` in detailed evidence. A workload with no output pairs has structural zero inter-event percentiles. These are absent output observations, not invented delivery timestamps or unavailable instrumentation.
+Latency samples use monotonic clocks at output-batch availability and operation completion. Chunks returned together have zero inter-output delay. Operations producing no deliverable output record a structural zero for first-deliverable latency and increment the `no_output_completions` metric. A workload with no output pairs has structural zero inter-event percentiles. These are absent output observations, not invented delivery timestamps or unavailable instrumentation.
 
 
 ## Apply median thresholds
@@ -108,8 +109,9 @@ Compare each workload and metric independently using the median of its three old
 - CPU, allocations and all latency percentiles: `new * 100 <= old * 105`.
 - Throughput: `new * 100 >= old * 95`.
 - Memory/resource metrics (`allocated_bytes_per_event`, `heap_peak`, `heap_retained`, `rss`, `pss`, `cgroup_charge`, `total_charged`): `new <= old`, without a noise allowance.
+- Output presence: `encoded_bytes_per_event` and `output_chunks` fail when old is above zero and new is zero, and `no_output_completions` must satisfy `new <= old`. A harness that emits nothing has structural zero latencies, so without these rules it would pass every latency metric. They check presence, not equal output; semantic equivalence stays with the semantic suites.
 - An old zero requires a new zero for lower-is-better metrics; positive throughput from an old zero remains an improvement.
-- Encoded/decoded bytes, anonymous/shmem/mapped splits, metadata, tmpfs components, pool frames and page faults are report-only diagnostics. Backend components are not comparable aggregates: old zero mmap frames cannot gate a new shared pool. Their cost still contributes to the strictly gated process/cgroup totals. This reporting classification does not waive aggregate resource regressions or change G-storage. Semantic byte preservation is checked separately, not inferred from equal lengths.
+- Decoded bytes, anonymous/shmem/mapped splits, metadata, tmpfs components, pool frames and page faults are report-only diagnostics. Backend components are not comparable aggregates: old zero mmap frames cannot gate a new shared pool. Their cost still contributes to the strictly gated process/cgroup totals. This reporting classification does not waive aggregate resource regressions or change G-storage. Semantic byte preservation is checked separately, not inferred from equal lengths.
 
 The exact boundary passes; a value beyond it fails. Decimal arithmetic avoids float rounding at 5%. These rules are the INTERNAL-STREAM §9.2 "Codec and pipeline tolerances" table, which records the owner's 2026-11-14 option-B ruling: at most 5% for codec/pipeline cost and latency, 0% for memory and storage, with allocated bytes/event in the memory class. They do not relax the independent G-storage rules.
 
@@ -143,4 +145,4 @@ CODEC_TEST_ARTIFACTS="$ARTIFACTS/selftest" \
 shellcheck bench/codec-gate.sh bench/codec/build-baseline.sh
 ```
 
-The controls exercise the actual shell entrypoint and complete required matrix: exact-boundary pass with outliers, CPU/throughput/memory regression, missing output, absent old executable, identical executable content, identical source identity and a new harness at the baseline revision. Focused checks cover stream-kind selection, leftover-cgroup diagnostics, each metric's direction, 0% memory/storage limits including allocated bytes, zero-old values, invalid numbers, missing metrics, wrong units, wrong manifest/round and duplicate/unknown workload IDs. `fake_harness.py` is a synthetic control only, not a production or baseline harness.
+The controls exercise the actual shell entrypoint and complete required matrix: exact-boundary pass with outliers, CPU/throughput/memory regression, a new harness that emits no output, missing output, absent old executable, identical executable content, identical source identity and a new harness at the baseline revision. Focused checks cover stream-kind selection, leftover-cgroup diagnostics, each metric's direction, 0% memory/storage limits including allocated bytes, zero-old values, invalid numbers, missing metrics, wrong units, wrong manifest/round and duplicate/unknown workload IDs. `fake_harness.py` is a synthetic control only, not a production or baseline harness.

@@ -26,6 +26,11 @@ class Thresholds(unittest.TestCase):
                 if direction == "report":
                     self.assertTrue(gate.acceptable(Decimal(0), Decimal(1000), direction, tolerance))
                     continue
+                if direction == "present":
+                    self.assertFalse(gate.acceptable(Decimal(100), Decimal(0), direction, tolerance))
+                    for old, new in ((100, 1), (100, 1000), (0, 0), (0, 5)):
+                        self.assertTrue(gate.acceptable(Decimal(old), Decimal(new), direction, tolerance))
+                    continue
                 boundary = Decimal(95 if direction == "higher" else 100 + tolerance)
                 self.assertTrue(gate.acceptable(Decimal(100), boundary, direction, tolerance))
                 outside = boundary + Decimal("-0.000001" if direction == "higher" else "0.000001")
@@ -151,6 +156,11 @@ class GateControls(unittest.TestCase):
         summary, _ = self.control("regress", 1)
         failed = {row["metric"] for row in summary["comparisons"] if not row["pass"]}
         self.assertEqual(failed, {"cpu_ns_per_event", "throughput", "heap_retained"})
+
+    def test_silent_new_harness_fails(self):
+        summary, _ = self.control("silent", 1)
+        failed = {row["metric"] for row in summary["comparisons"] if not row["pass"]}
+        self.assertEqual(failed, {"encoded_bytes_per_event", "output_chunks", "no_output_completions"})
 
     def test_new_harness_at_baseline_revision_is_error(self):
         summary, _ = self.control("baseline-revision", 2)

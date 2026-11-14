@@ -17,13 +17,14 @@ import sys
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 BASELINE_REVISION = "b518060ea1e43ef4b266591986ca92321e6289b5"
-# unit, direction, allowed regression percent; None means report only.
+# unit, direction, allowed regression percent; None means not a percentage rule.
+# "present" fails only when old output was nonzero and new output is zero.
 METRICS = {
     "cpu_ns_per_event": ("ns/event", "lower", 5),
     "allocations_per_event": ("allocations/event", "lower", 5),
     # INTERNAL-STREAM.md §9.2 tolerances: allocated bytes are memory, 0%.
     "allocated_bytes_per_event": ("B/event", "lower", 0),
-    "encoded_bytes_per_event": ("B/event", "report", None),
+    "encoded_bytes_per_event": ("B/event", "present", None),
     "decoded_bytes_per_event": ("B/event", "report", None),
     "cpu_ns_per_completion": ("ns/completion", "lower", 5),
     "throughput": ("events/s", "higher", 5),
@@ -36,6 +37,8 @@ METRICS = {
         "rss_anon", "rss_shmem", "mapped_resident", "metadata", "tmpfs_charge")},
     **{kind: ("frames", "report", None) for kind in ("pool_reserved", "pool_used")},
     **{kind: ("faults", "report", None) for kind in ("minor_faults", "major_faults")},
+    "output_chunks": ("chunks", "present", None),
+    "no_output_completions": ("completions", "lower", 0),
 }
 
 
@@ -227,6 +230,8 @@ def records(path, required, checksum, round_number):
 def acceptable(old, new, direction, tolerance):
     if direction == "report":
         return True
+    if direction == "present":
+        return not (old > 0 and new == 0)
     old, new = Fraction(old), Fraction(new)
     if direction == "higher":
         return new * 100 >= old * (100 - tolerance)

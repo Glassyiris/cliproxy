@@ -63,9 +63,11 @@ CPU, allocations and latency may rise by at most 5%; throughput may fall by at
 most 5%. Allocated bytes/event, heap, RSS/PSS and charged-resource totals allow
 no regression. Backend-specific splits are diagnostics; mapped/tmpfs costs still
 contribute to the charged totals. A zero old cost requires a zero new cost;
-throughput retains its higher-is-better rule. Encoded/decoded byte counts are
-diagnostics, not byte-exact goldens; decoded media and opaque signatures remain
-exact. The storage gate's separate seven/101-run rules are unchanged.
+throughput retains its higher-is-better rule. Encoded bytes and output chunks are
+not byte-exact goldens, but a new harness must produce output wherever the old
+one did, and its completions without output may not increase. Decoded media and
+opaque signatures remain exact. The storage gate's separate seven/101-run rules
+are unchanged.
 
 ### Flow semantics and backpressure
 

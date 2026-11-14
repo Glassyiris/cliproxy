@@ -344,6 +344,7 @@ fn measure(row: &Value, manifest: &Value, cg: &Path) -> Result<(Value, Value)> {
         ("throughput", stats.events as f64 * 1e9 / stats.wall.max(1) as f64),
         ("heap_peak", peak_heap as f64), ("heap_retained", after_heap.saturating_sub(before_heap) as f64),
         ("rss", rss.max(after_os["Rss"]) as f64), ("pss", pss.max(after_os["Pss"]) as f64),
+        ("output_chunks", stats.output_chunks as f64), ("no_output_completions", stats.no_output as f64),
         ("rss_anon", after_os["Anonymous"] as f64), ("rss_shmem", after_os["Pss_Shmem"] as f64),
         ("mapped_resident", (after_os["Pss_File"] + after_os["Pss_Shmem"]) as f64),
         // The old pair backend has no pool, stream metadata store or tmpfs files.
