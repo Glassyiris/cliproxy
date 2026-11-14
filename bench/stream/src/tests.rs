@@ -42,3 +42,54 @@ fn heap_delivers_every_record_byte_exactly() {
     assert_eq!(lengths, sizes);
     check.finish(written).unwrap();
 }
+
+#[test]
+fn heap_readers_follow_concurrent_publication_and_frame_growth() {
+    let store = heap::Store::default();
+    let mut writer = store.create();
+    let id = writer.id();
+    let readers: Vec<_> = (0..4).map(|_| store.reader(id).unwrap()).collect();
+    // Aligned records add a frame each; packed ones cross frame boundaries and change runs.
+    let sizes: Vec<usize> = (0..3000)
+        .map(|i| match i % 7 {
+            0 => 49152,
+            1 => 1,
+            n => 64 * n + 13,
+        })
+        .collect();
+    let total: usize = sizes.iter().sum();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = readers
+            .into_iter()
+            .map(|mut reader| {
+                scope.spawn(move || {
+                    let mut check = Check::new(id);
+                    let mut lengths = Vec::new();
+                    loop {
+                        match reader.try_next() {
+                            Poll::Ready(Some(lease)) => {
+                                let before = check.offset;
+                                lease.visit(|bytes| check.visit(bytes));
+                                lengths.push(check.offset - before);
+                            }
+                            Poll::Ready(None) => break,
+                            Poll::Pending => std::thread::yield_now(),
+                        }
+                    }
+                    (check, lengths)
+                })
+            })
+            .collect();
+        let mut written = 0;
+        for &size in &sizes {
+            writer.append(pattern(id, written, size), size == 49152).unwrap();
+            written += size;
+        }
+        writer.finish();
+        for handle in handles {
+            let (check, lengths) = handle.join().unwrap();
+            assert_eq!(lengths, sizes);
+            check.finish(total).unwrap();
+        }
+    });
+}
