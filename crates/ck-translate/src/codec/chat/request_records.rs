@@ -16,6 +16,7 @@ struct Payload {
     encoding: Encoding,
     chunks: Option<Table<Text>>,
     next: u64,
+    offset: u64,
     ended: bool,
 }
 
@@ -47,15 +48,29 @@ pub fn read_request(owner: &mut Writer, reader: &mut Reader) -> Result<(Document
                     return Err(Error::Schema);
                 }
                 if kind == Kind::MediaEnd {
+                    // Only a completed payload whose data records add up to its count is trusted.
+                    if event.unsigned(event.required(root, "bytes")?)? != open.offset
+                        || !event.string_is(event.required(root, "status")?, "completed")?
+                    {
+                        return Err(Error::Schema);
+                    }
                     open.ended = true;
                     continue;
                 }
-                if event.unsigned(event.required(root, "index")?)? != open.next {
+                if event.unsigned(event.required(root, "index")?)? != open.next
+                    || event.unsigned(event.required(root, "offset")?)? != open.offset
+                {
                     return Err(Error::Schema);
                 }
                 let Value::String(text) = event.node(event.required(root, "bytes")?)?.value else {
                     return Err(Error::Schema);
                 };
+                let mut decoded = 0u64;
+                media::decode_base64(&event, text, |bytes| {
+                    decoded += bytes.len() as u64;
+                    Ok(())
+                })?;
+                open.offset = open.offset.checked_add(decoded).ok_or(Error::Limit)?;
                 let text = doc.retain_text(event, text)?;
                 open.chunks.as_mut().ok_or(Error::Schema)?.push(text)?;
                 open.next += 1;
@@ -163,6 +178,7 @@ fn start(owner: &mut Writer, event: &Document) -> Result<Payload> {
         encoding,
         chunks: Some(Table::new(owner)?),
         next: 0,
+        offset: 0,
         ended: false,
     })
 }

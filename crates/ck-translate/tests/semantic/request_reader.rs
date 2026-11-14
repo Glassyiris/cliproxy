@@ -183,3 +183,67 @@ fn plain_base64_file_data_carries_a_supplied_mime() {
         assert_eq!(content[5]["input_audio"]["data"], "DQ4P");
     }
 }
+
+/// Republishes the canonical records of `input` with `transform` applied, then rebuilds them.
+fn rebuilt_with(input: &Json, transform: impl Fn(codec::event::Kind, &mut Document)) -> codec::Result<()> {
+    use codec::RequestIngress;
+    use std::task::Poll;
+    let mut mapped = Mapped::configured(std::sync::Arc::new(ck_stream::ManualClock::default()), 256);
+    let mut ingress = super::Ingress::new(
+        &mut mapped.writer,
+        &mapped.store,
+        super::identity(codec::event::Direction::Request),
+        Operation::Generate,
+        1024 * 1024,
+    )
+    .unwrap();
+    ingress
+        .advance(&mut mapped.writer, input.to_string().as_bytes())
+        .unwrap();
+    ingress.finish(&mut mapped.writer, &ChatCapability).unwrap();
+    drop(ingress);
+    let mut reader = mapped.store.reader(mapped.writer.id(), 0).unwrap();
+    let mut target = mapped.store.create().unwrap();
+    while let Poll::Ready(Some(ck_stream::Read::Record(lease))) = reader.try_next() {
+        let record = lease.record();
+        let (kind, mut doc) = codec::internal::decode(&mut mapped.writer, lease).unwrap();
+        transform(kind, &mut doc);
+        codec::encode::publish(&mut target, record.kind, 0, |e| {
+            if let Some(name) = kind.name() {
+                e.bytes(b"event: ")?;
+                e.bytes(name.as_bytes())?;
+                e.bytes(b"\n")?;
+            }
+            e.bytes(b"id: ")?;
+            doc.write(doc.required(doc.required(doc.root(), "x_ck")?, "seq")?, e)?;
+            e.bytes(b"\ndata: ")?;
+            doc.write(doc.root(), e)?;
+            e.bytes(b"\n\n")
+        })
+        .unwrap();
+    }
+    let mut reader = mapped.store.reader(target.id(), 0).unwrap();
+    codec::chat::request::read_request(&mut target, &mut reader).map(drop)
+}
+
+#[test]
+fn rebuilt_request_rejects_media_end_that_does_not_complete_its_data() {
+    let input = json!({"model":"m","messages":[{"role":"user","content":[
+        {"type":"image_url","image_url":{"url":"data:image/png;base64,AQID"}}]}]});
+    rebuilt_with(&input, |_, _| ()).unwrap();
+    for (bytes, status) in [(999, "completed"), (3, "incomplete"), (999, "incomplete")] {
+        let result = rebuilt_with(&input, |kind, doc| {
+            if kind == codec::event::Kind::MediaEnd {
+                doc.set(doc.root(), "bytes", Value::Unsigned(bytes)).unwrap();
+                doc.set(doc.root(), "status", Value::Text(status)).unwrap();
+            }
+        });
+        assert!(result.is_err(), "{bytes}/{status}");
+    }
+    let result = rebuilt_with(&input, |kind, doc| {
+        if kind == codec::event::Kind::Data {
+            doc.set(doc.root(), "offset", Value::Unsigned(1)).unwrap();
+        }
+    });
+    assert!(result.is_err(), "data offset");
+}
