@@ -308,9 +308,20 @@ impl Pool {
             return Ok(());
         }
         assert!(frame < self.backed_frames() && needed <= FRAME_BYTES);
+        // A frame written in small records grows its prefix by doubling, so filling it costs
+        // a few calls rather than one per page. Near exhaustion only `needed` must succeed.
+        let ahead = needed.max(ready * 2).min(FRAME_BYTES);
+        if ahead > needed && self.populate(frame, ready, ahead).is_ok() {
+            return Ok(());
+        }
+        self.populate(frame, ready, needed)
+    }
+
+    /// Populate a frame's bytes from `ready` up to `to` and record the new prefix.
+    fn populate(&self, frame: u32, ready: usize, to: usize) -> io::Result<()> {
         let start = self.frame_start(frame);
         let from = (start + ready) / self.page * self.page;
-        let to = round_up(start + needed, self.page)?;
+        let to = round_up(start + to, self.page)?;
         os::populate(self.address(from), to - from)?;
         let ready = (to - start).min(FRAME_BYTES) as u32;
         self.ready[frame as usize].store(ready, Ordering::Relaxed);
