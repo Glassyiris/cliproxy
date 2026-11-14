@@ -48,6 +48,25 @@ fn incomplete_record_is_invisible_and_abandoned_frames_are_reusable() {
 }
 
 #[test]
+fn incomplete_commit_keeps_the_reservation_writable() {
+    let (_dir, store, _) = store(4);
+    let mut writer = store.create().unwrap();
+    let mut reader = store.reader(writer.id(), 0).unwrap();
+    let mut record = writer.begin_record(12, false, 0, 0).unwrap();
+    record.write(b"data: ").unwrap();
+    assert!(matches!(record.commit(), Err(Error::IncompleteRecord)));
+    record.write(b"done\n\n").unwrap();
+    let committed = record.commit().unwrap();
+    assert!(matches!(record.commit(), Err(Error::Closed)));
+    assert!(matches!(record.write(b""), Err(Error::Closed)));
+    drop(record);
+    let read = lease(&mut reader);
+    assert_eq!(read.record(), committed);
+    assert_eq!(read.chunk(committed.start).unwrap(), b"data: done\n\n");
+    assert!(matches!(reader.try_next(), Poll::Pending));
+}
+
+#[test]
 fn cross_frame_record_and_aligned_padding_are_not_mixed() {
     let (_dir, store, _) = store(8);
     let mut writer = store.create().unwrap();
@@ -56,9 +75,11 @@ fn cross_frame_record_and_aligned_padding_are_not_mixed() {
     record.write(b"abc").unwrap();
     record.write(b"defghi").unwrap();
     record.commit().unwrap();
-    let mut aligned = writer.begin_record(4, true, 5, 8).unwrap();
-    aligned.write(b"last").unwrap();
-    let aligned = aligned.commit().unwrap();
+    drop(record);
+    let mut reservation = writer.begin_record(4, true, 5, 8).unwrap();
+    reservation.write(b"last").unwrap();
+    let aligned = reservation.commit().unwrap();
+    drop(reservation);
     assert_eq!(aligned.start.offset, 0);
     let mut reader = store.reader(writer.id(), 1).unwrap();
     let read = lease(&mut reader);

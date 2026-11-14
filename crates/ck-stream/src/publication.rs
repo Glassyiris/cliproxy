@@ -503,6 +503,7 @@ impl Drop for Writer {
 }
 
 /// An unpublished reservation; drop rolls back its newly allocated frames.
+/// After a successful commit, further writes and commits return `Closed`.
 pub struct Reservation<'a> {
     writer: &'a mut Writer,
     record: Record,
@@ -514,6 +515,9 @@ pub struct Reservation<'a> {
 
 impl Reservation<'_> {
     pub fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        if self.committed {
+            return Err(Error::Closed);
+        }
         if bytes.len() > self.record.len() as usize - self.written {
             return Err(Error::InvalidPosition);
         }
@@ -534,7 +538,11 @@ impl Reservation<'_> {
         Ok(())
     }
 
-    pub fn commit(mut self) -> Result<Record, Error> {
+    /// `IncompleteRecord` leaves the reservation open, so the caller can finish writing it.
+    pub fn commit(&mut self) -> Result<Record, Error> {
+        if self.committed {
+            return Err(Error::Closed);
+        }
         if self.written != self.record.len() as usize {
             return Err(Error::IncompleteRecord);
         }
