@@ -103,7 +103,7 @@ def evaluate(row, runs, expected):
         if row == "totalcap":
             metrics = samples["pool"][0]["metrics"]
             counts = metrics["stream_frames"]
-            if len(counts) != 17 or counts[:16] != [5368]*16 or not 0 <= counts[16] <= 11 or not metrics["survived"] or len(metrics["errors"]) != 17:
+            if len(counts) != 17 or counts != [5368]*16+[11] or not metrics["survived"] or len(metrics["errors"]) != 17:
                 fail("invalid total-cap evidence")
             result["metrics"] = metrics
         if row == "enospc":
@@ -148,6 +148,14 @@ def provenance(root, tmpfs, binary):
                       "cgroup and tmpfs measurements are shared-host charges and may include neighbours."]}
 
 
+def check_out(root, out):
+    """Refuse repository paths and old evidence; the wrapper may already have written build.log."""
+    if out == root or root in out.parents:
+        raise ValueError("OUT must be outside the repository")
+    if out.exists() and any(path.name != "build.log" for path in out.iterdir()):
+        raise ValueError("OUT must be empty; raw evidence is never overwritten")
+
+
 def self_test():
     row = "throughput-4-64-1"
     good = [{"backend": k, "status": "ok", "warmup": True, "metrics": {"mb_s": v, "minor_faults": 0}}
@@ -168,6 +176,28 @@ def self_test():
               for k, values in (("heap", [50, 100, 110, 120]), ("pool", [80]*4)) for v in values]
     strict = evaluate(row, spread, 4)
     assert "pool median below heap P25" in strict["failures"]
+    cap = {"stream_frames": [5368]*16+[11], "survived": True, "errors": ["cap"]*17}
+    assert evaluate("totalcap", [{"backend": "pool", "status": "ok", "metrics": cap}], 1)["status"] == "pass"
+    for short in (0, 10):
+        leaked = dict(cap, stream_frames=[5368]*16+[short])
+        assert evaluate("totalcap", [{"backend": "pool", "status": "ok", "metrics": leaked}], 1)["status"] == "fail"
+    root = Path(__file__).resolve().parents[2]
+    for bad_out in (root, root/"bench/out"):
+        try:
+            check_out(root, bad_out)
+            raise AssertionError("repository OUT accepted")
+        except ValueError:
+            pass
+    with tempfile.TemporaryDirectory() as directory:
+        out = Path(directory)
+        (out/"build.log").write_text("")
+        check_out(root, out)
+        (out/"raw.jsonl").write_text("")
+        try:
+            check_out(root, out)
+            raise AssertionError("nonempty OUT accepted")
+        except ValueError:
+            pass
     print("gate self-test: planted regressions, failed runs and missing evidence rejected")
 
 
@@ -186,6 +216,10 @@ def main():
         parser.error("TMPFS OUT --binary BINARY are required")
     tmpfs, out, binary = Path(args.tmpfs).resolve(), Path(args.out).resolve(), Path(args.binary).resolve()
     root = Path(__file__).resolve().parents[2]
+    try:
+        check_out(root, out)
+    except ValueError as error:
+        parser.error(str(error))
     out.mkdir(parents=True, exist_ok=True)
     info = provenance(root, tmpfs, binary)
     (out/"provenance.json").write_text(json.dumps(info, indent=2)+"\n")

@@ -507,8 +507,9 @@ fn totalcap(backend: &Backend) -> Result<Value> {
             "unexpected cap error {error}"
         );
         terminal_error(&mut reader)?;
+        // 85,899 − 16 × 5,368 = 11: stream 17 takes exactly the remaining frames.
         ensure!(
-            if stream < 16 { count == 5368 } else { count <= 11 },
+            count == if stream < 16 { 5368 } else { 11 },
             "stream {} stopped at {count} frames",
             stream + 1
         );
