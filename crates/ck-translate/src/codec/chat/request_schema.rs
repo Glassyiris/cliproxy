@@ -9,6 +9,15 @@ pub(super) fn validate(doc: &Document, media: &Registry) -> Result<()> {
     media.validate_document(doc)?;
     media.validate_registrations(doc)?;
     let root = doc.root();
+    options(doc, root)?;
+    optional(doc, root, "tools", tools)?;
+    optional(doc, root, "tool_choice", tool_choice)?;
+    optional(doc, root, "prediction", prediction)?;
+    messages(doc, media, root)?;
+    x_ck(doc, root)
+}
+
+fn options(doc: &Document, root: usize) -> Result<()> {
     for key in ["temperature", "top_p", "presence_penalty", "frequency_penalty"] {
         optional(doc, root, key, number)?;
     }
@@ -58,77 +67,84 @@ pub(super) fn validate(doc: &Document, media: &Registry) -> Result<()> {
         require_string(doc, doc.required(node, "format")?)
     })?;
     optional(doc, root, "response_format", response_format)?;
-    optional(doc, root, "tools", |doc, tools| {
-        array(doc, tools)?;
-        for tool in doc.children(tools)? {
-            let kind = doc.required(tool, "type")?;
-            require_string(doc, kind)?;
-            if !doc.string_is(kind, "function")? && !doc.string_is(kind, "custom")? {
-                continue;
-            }
-            let custom = doc.string_is(kind, "custom")?;
-            let declaration = doc.required(tool, if custom { "custom" } else { "function" })?;
-            object(doc, declaration)?;
-            require_string(doc, doc.required(declaration, "name")?)?;
-            optional(doc, declaration, "description", require_string)?;
-            if custom {
-                optional(doc, declaration, "format", |doc, format| {
-                    object(doc, format)?;
-                    let kind = doc.required(format, "type")?;
-                    enumeration(doc, kind, &["text", "grammar"])?;
-                    if doc.string_is(kind, "grammar")? {
-                        let grammar = doc.required(format, "grammar")?;
-                        object(doc, grammar)?;
-                        enumeration(doc, doc.required(grammar, "syntax")?, &["lark", "regex"])?;
-                        require_string(doc, doc.required(grammar, "definition")?)?;
-                    }
-                    Ok(())
-                })?;
-            } else {
-                optional(doc, declaration, "parameters", schema)?;
-                optional(doc, declaration, "strict", boolean)?;
-            }
+    Ok(())
+}
+
+fn tools(doc: &Document, tools: usize) -> Result<()> {
+    array(doc, tools)?;
+    for tool in doc.children(tools)? {
+        let kind = doc.required(tool, "type")?;
+        require_string(doc, kind)?;
+        if !doc.string_is(kind, "function")? && !doc.string_is(kind, "custom")? {
+            continue;
+        }
+        let custom = doc.string_is(kind, "custom")?;
+        let declaration = doc.required(tool, if custom { "custom" } else { "function" })?;
+        object(doc, declaration)?;
+        require_string(doc, doc.required(declaration, "name")?)?;
+        optional(doc, declaration, "description", require_string)?;
+        if custom {
+            optional(doc, declaration, "format", |doc, format| {
+                object(doc, format)?;
+                let kind = doc.required(format, "type")?;
+                enumeration(doc, kind, &["text", "grammar"])?;
+                if doc.string_is(kind, "grammar")? {
+                    let grammar = doc.required(format, "grammar")?;
+                    object(doc, grammar)?;
+                    enumeration(doc, doc.required(grammar, "syntax")?, &["lark", "regex"])?;
+                    require_string(doc, doc.required(grammar, "definition")?)?;
+                }
+                Ok(())
+            })?;
+        } else {
+            optional(doc, declaration, "parameters", schema)?;
+            optional(doc, declaration, "strict", boolean)?;
+        }
+    }
+    Ok(())
+}
+
+fn tool_choice(doc: &Document, choice: usize) -> Result<()> {
+    if !matches!(doc.node(choice)?.value, Value::Object) {
+        return enumeration(doc, choice, &["auto", "none", "required"]);
+    }
+    let kind = doc.required(choice, "type")?;
+    enumeration(doc, kind, &["function", "custom"])?;
+    let name = if doc.string_is(kind, "custom")? {
+        "custom"
+    } else {
+        "function"
+    };
+    let chosen = doc.required(doc.required(choice, name)?, "name")?;
+    require_string(doc, chosen)?;
+    let tools = doc.required(doc.root(), "tools")?;
+    array(doc, tools)?;
+    for tool in doc.children(tools)? {
+        if doc.equal_strings(kind, doc.required(tool, "type")?)?
+            && doc.equal_strings(chosen, doc.required(doc.required(tool, name)?, "name")?)?
+        {
+            return Ok(());
+        }
+    }
+    Err(Error::Schema)
+}
+
+fn prediction(doc: &Document, prediction: usize) -> Result<()> {
+    object(doc, prediction)?;
+    enumeration(doc, doc.required(prediction, "type")?, &["content"])?;
+    let content = doc.required(prediction, "content")?;
+    if matches!(doc.node(content)?.value, Value::Array) {
+        for part in doc.children(content)? {
+            enumeration(doc, doc.required(part, "type")?, &["text"])?;
+            require_string(doc, doc.required(part, "text")?)?;
         }
         Ok(())
-    })?;
-    optional(doc, root, "tool_choice", |doc, choice| {
-        if !matches!(doc.node(choice)?.value, Value::Object) {
-            return enumeration(doc, choice, &["auto", "none", "required"]);
-        }
-        let kind = doc.required(choice, "type")?;
-        enumeration(doc, kind, &["function", "custom"])?;
-        let name = if doc.string_is(kind, "custom")? {
-            "custom"
-        } else {
-            "function"
-        };
-        let chosen = doc.required(doc.required(choice, name)?, "name")?;
-        require_string(doc, chosen)?;
-        let tools = doc.required(root, "tools")?;
-        array(doc, tools)?;
-        for tool in doc.children(tools)? {
-            if doc.equal_strings(kind, doc.required(tool, "type")?)?
-                && doc.equal_strings(chosen, doc.required(doc.required(tool, name)?, "name")?)?
-            {
-                return Ok(());
-            }
-        }
-        Err(Error::Schema)
-    })?;
-    optional(doc, root, "prediction", |doc, prediction| {
-        object(doc, prediction)?;
-        enumeration(doc, doc.required(prediction, "type")?, &["content"])?;
-        let content = doc.required(prediction, "content")?;
-        if matches!(doc.node(content)?.value, Value::Array) {
-            for part in doc.children(content)? {
-                enumeration(doc, doc.required(part, "type")?, &["text"])?;
-                require_string(doc, doc.required(part, "text")?)?;
-            }
-            Ok(())
-        } else {
-            require_string(doc, content)
-        }
-    })?;
+    } else {
+        require_string(doc, content)
+    }
+}
+
+fn messages(doc: &Document, media: &Registry, root: usize) -> Result<()> {
     for message in doc.children(doc.required(root, "messages")?)? {
         if let Some(calls) = doc.member(message, "tool_calls")? {
             for call in doc.children(calls)? {
@@ -145,6 +161,10 @@ pub(super) fn validate(doc: &Document, media: &Registry) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+fn x_ck(doc: &Document, root: usize) -> Result<()> {
     let x = doc.required(root, "x_ck")?;
     optional(doc, x, "thinking", |doc, thinking| {
         object(doc, thinking)?;
