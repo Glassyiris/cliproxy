@@ -419,3 +419,79 @@ fn invalid_record_parameters_do_not_terminate_a_valid_prefix() {
     assert_eq!(read.chunk(read.record().start).unwrap(), b"prefix");
     terminal(&mut reader, Terminal::Done);
 }
+
+/// Fill the private tmpfs holding `directory`; the tmpfs tests below need it as `TMPDIR`.
+/// Run them inside `unshare -rm` with a private 8 MiB tmpfs mounted there.
+fn fill(directory: &std::path::Path) -> std::fs::File {
+    use std::io::Write;
+    let mut filler = std::fs::File::create(directory.join("filler")).unwrap();
+    for size in [65_536, 4096] {
+        while filler.write_all(&vec![0; size]).is_ok() {}
+    }
+    filler
+}
+
+#[test]
+#[ignore = "requires a disposable private 8 MiB tmpfs supplied as TMPDIR"]
+fn tmpfs_enospc_evicts_once_then_reports_the_os_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::new(dir.path().join("pool"));
+    config.pool_bytes = Some(80 * FRAME_BYTES);
+    config.max_event_bytes = FRAME_BYTES;
+    config.workers = 1;
+    let store = Store::open(config).unwrap();
+    let mut old = store.create().unwrap();
+    for _ in 0..21 {
+        old.append(&[3; FRAME_BYTES]).unwrap();
+    }
+    old.finish(Terminal::Done);
+    let old = old.id();
+    let _filler = fill(dir.path());
+    let mut new = store.create().unwrap();
+    new.append(&[1; 10]).unwrap();
+    assert!(matches!(store.reader(old, 0), Err(Error::Gone)));
+    assert_eq!(store.used_frames(), 1);
+    let mut last = store.create().unwrap();
+    for _ in 0..21 {
+        last.append(&[4; FRAME_BYTES]).unwrap();
+    }
+    assert!(matches!(store.reader(new.id(), 0), Err(Error::Gone)));
+    let error = last.append(&[5; FRAME_BYTES]).unwrap_err();
+    assert!(matches!(error, Error::Io(ref error) if error.raw_os_error() == Some(libc::ENOSPC)));
+    assert_eq!(store.used_frames(), 21);
+}
+
+#[test]
+#[ignore = "requires a disposable private 8 MiB tmpfs supplied as TMPDIR"]
+fn tmpfs_cold_prefault_failure_evicts_once_then_reports_the_os_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::new(dir.path().join("pool"));
+    config.pool_bytes = Some(80 * FRAME_BYTES);
+    config.max_event_bytes = FRAME_BYTES;
+    config.workers = 1;
+    let clock = Arc::new(ManualClock::default());
+    let store = Store::with_clock(config, clock.clone()).unwrap();
+    let mut old = store.create().unwrap();
+    for _ in 0..4 {
+        old.append(&[3; FRAME_BYTES]).unwrap();
+    }
+    let mut expired = store.create().unwrap();
+    for _ in 0..30 {
+        expired.append(&[4; FRAME_BYTES]).unwrap();
+    }
+    clock.advance(Duration::from_secs(3601));
+    drop(store.reader(old.id(), 0).unwrap());
+    // Expiry frees 30 frames; the second decay punches all but the eight warm ones.
+    for _ in 0..3 {
+        store.tick().unwrap();
+    }
+    assert!(matches!(store.reader(expired.id(), 0), Err(Error::Gone)));
+    let _filler = fill(dir.path());
+    let mut new = store.create().unwrap();
+    for _ in 0..12 {
+        new.append(&[5; FRAME_BYTES]).unwrap();
+    }
+    assert!(matches!(store.reader(old.id(), 0), Err(Error::Gone)));
+    let error = new.append(&[6; FRAME_BYTES]).unwrap_err();
+    assert!(matches!(error, Error::Io(ref error) if error.raw_os_error() == Some(libc::EFAULT)));
+}

@@ -208,6 +208,7 @@ impl Inner {
 
     /// Allocate one of the `remaining` frames a pending reservation still needs.
     pub(crate) fn allocate(&self, exclude: u64, remaining: usize) -> Result<u32, Error> {
+        let mut evicted_for_tmpfs = false;
         loop {
             match self.pool.allocate() {
                 Ok(frame) => return Ok(frame),
@@ -215,6 +216,15 @@ impl Inner {
                     if !self.evict(Some(exclude), remaining, State::reclaimable) {
                         return Err(Error::StorageExhausted);
                     }
+                }
+                // tmpfs refused growth (ENOSPC) or a cold prefault (EFAULT). Evicted frames are
+                // already backed, so retry once; a second refusal keeps the OS cause (G7).
+                Err(error)
+                    if !evicted_for_tmpfs
+                        && matches!(error.raw_os_error(), Some(libc::ENOSPC | libc::EFAULT))
+                        && self.evict(Some(exclude), remaining, State::reclaimable) =>
+                {
+                    evicted_for_tmpfs = true;
                 }
                 Err(error) => return Err(Error::Io(error)),
             }
