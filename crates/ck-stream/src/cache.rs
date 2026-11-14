@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     io,
     ops::Bound::{Excluded, Unbounded},
+    panic::AssertUnwindSafe,
     sync::{
         Arc, Condvar, Mutex, RwLock, RwLockWriteGuard, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -61,6 +62,22 @@ fn checked_add(counter: &AtomicU64, increment: u64) -> Option<u64> {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Maintenance failures since the store opened. The crate has no logger: the runtime reads
+/// these counters and the first unread error (`Store::take_reclaim_error`) and logs them.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MaintenanceFailures {
+    /// Ticks whose expiry or decay returned an I/O error.
+    pub errors: u64,
+    /// Ticks that panicked. The maintenance thread contains each panic and keeps running.
+    pub panics: u64,
+}
+
+#[derive(Default)]
+struct Maintenance {
+    failures: MaintenanceFailures,
+    first_error: Option<io::Error>,
+}
+
 #[derive(Default)]
 pub(crate) struct Cache {
     streams: HashMap<u64, Arc<Stream>>,
@@ -74,7 +91,7 @@ pub(crate) struct Inner {
     cache: parking_lot::Mutex<Cache>,
     retention: Arc<Retention>,
     closed: AtomicBool,
-    reclaim_error: Mutex<Option<io::Error>>,
+    maintenance: parking_lot::Mutex<Maintenance>,
 }
 
 pub(crate) struct Retention {
@@ -207,6 +224,16 @@ impl Inner {
     }
 
     /// Allocate one of the `remaining` frames a pending reservation still needs.
+    fn record_failure(&self, error: io::Error, panicked: bool) {
+        let mut maintenance = self.maintenance.lock();
+        if panicked {
+            maintenance.failures.panics += 1;
+        } else {
+            maintenance.failures.errors += 1;
+        }
+        maintenance.first_error.get_or_insert(error);
+    }
+
     pub(crate) fn allocate(&self, exclude: u64, remaining: usize) -> Result<u32, Error> {
         let mut evicted_for_tmpfs = false;
         loop {
@@ -264,7 +291,7 @@ impl Store {
                 active: AtomicBool::new(false),
             }),
             closed: AtomicBool::new(false),
-            reclaim_error: Mutex::new(None),
+            maintenance: parking_lot::Mutex::new(Maintenance::default()),
         });
         let stop = Arc::new((Mutex::new(false), Condvar::new()));
         let weak: Weak<Inner> = Arc::downgrade(&inner);
@@ -285,8 +312,12 @@ impl Store {
                     let Some(inner) = weak.upgrade() else {
                         break;
                     };
-                    if let Err(error) = inner.tick() {
-                        *inner.reclaim_error.lock().unwrap() = Some(error);
+                    // Contain a panicking tick so expiry and decay keep running; the
+                    // failure counters and first error make it visible to the runtime.
+                    match std::panic::catch_unwind(AssertUnwindSafe(|| inner.tick())) {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => inner.record_failure(error, false),
+                        Err(_) => inner.record_failure(io::Error::other("stream maintenance tick panicked"), true),
                     }
                 }
             })?;
@@ -357,8 +388,13 @@ impl Store {
         self.inner.tick()
     }
 
+    /// The first maintenance failure since the last call; later failures only count.
     pub fn take_reclaim_error(&self) -> Option<io::Error> {
-        self.inner.reclaim_error.lock().unwrap().take()
+        self.inner.maintenance.lock().first_error.take()
+    }
+
+    pub fn maintenance_failures(&self) -> MaintenanceFailures {
+        self.inner.maintenance.lock().failures
     }
 
     /// Stop admission, publish cancellation, join maintenance, then release cache retention.
@@ -387,8 +423,63 @@ impl Store {
 
 impl Drop for Store {
     fn drop(&mut self) {
-        if let Err(error) = self.shutdown() {
-            eprintln!("stream maintenance failed: {error}");
+        // A dropped store has nowhere to report; callers that need the error call shutdown first.
+        let _ = self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::FRAME_BYTES;
+
+    fn store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::new(dir.path().join("pool"));
+        config.pool_bytes = Some(4 * FRAME_BYTES);
+        config.max_event_bytes = FRAME_BYTES;
+        config.header_slots = 4;
+        config.workers = 1;
+        let store = Store::open(config).unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn maintenance_contains_panicking_ticks_and_keeps_running() {
+        let (_dir, mut store) = store();
+        let retention = store.inner.retention.clone();
+        // A panic under the fence poisons it, so every later tick panics in `retain`.
+        let poisoner = retention.clone();
+        std::thread::spawn(move || {
+            let _fence = poisoner.fence.write().unwrap();
+            panic!("poison the retention fence");
+        })
+        .join()
+        .unwrap_err();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while store.maintenance_failures().panics < 2 {
+            assert!(Instant::now() < deadline, "maintenance stopped after a panic");
+            std::thread::sleep(Duration::from_millis(50));
         }
+        retention.fence.clear_poison();
+        assert_eq!(store.maintenance_failures().errors, 0);
+        let error = store.shutdown().unwrap_err();
+        assert_eq!(error.to_string(), "stream maintenance tick panicked");
+    }
+
+    #[test]
+    fn maintenance_keeps_the_first_error_and_counts_later_ones() {
+        let (_dir, store) = store();
+        store.inner.record_failure(io::Error::other("first"), false);
+        store.inner.record_failure(io::Error::other("second"), false);
+        store.inner.record_failure(io::Error::other("third"), true);
+        assert_eq!(
+            store.maintenance_failures(),
+            MaintenanceFailures { errors: 2, panics: 1 }
+        );
+        assert_eq!(store.take_reclaim_error().unwrap().to_string(), "first");
+        assert!(store.take_reclaim_error().is_none());
+        store.inner.record_failure(io::Error::other("fourth"), false);
+        assert_eq!(store.take_reclaim_error().unwrap().to_string(), "fourth");
     }
 }
