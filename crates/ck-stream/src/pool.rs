@@ -321,9 +321,15 @@ impl Pool {
         let mut slow = lock(&self.slow.0);
         let Slow { cold, candidates, .. } = &mut *slow;
         candidates.clear();
+        // The warm budget is pool-wide: frames freed on one thread stay warm for any thread,
+        // which steals resident frames before taking cold ones.
+        let mut warm = WARM * self.shards.len();
         for shard in &self.shards {
             let mut free = lock(&shard.0);
-            let count = free.low_water.min(free.frames.len()).saturating_sub(WARM);
+            let idle = free.low_water.min(free.frames.len());
+            let kept = idle.min(warm);
+            warm -= kept;
+            let count = idle - kept;
             // The startup prefix stays backed even while free; punch only the excess.
             candidates.extend(free.frames.extract_if(..count, |frame| *frame >= self.reserve_frames));
             free.low_water = free.frames.len();

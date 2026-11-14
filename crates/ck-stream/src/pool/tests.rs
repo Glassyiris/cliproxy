@@ -150,6 +150,21 @@ fn decay_preserves_a_leased_neighbor_and_prefaults_reuse() {
 }
 
 #[test]
+fn the_warm_budget_is_pool_wide() {
+    let directory = Directory::new();
+    let pool = Pool::open(&directory.0, 42, 1, 2, 0).unwrap();
+    let frames: Vec<_> = (0..2 * WARM + 4).map(|_| pool.allocate().unwrap()).collect();
+    // One thread frees every frame, so one free list holds almost all of them.
+    for frame in frames {
+        pool.release(frame);
+    }
+    pool.decay().unwrap();
+    pool.decay().unwrap();
+    let kept: usize = pool.shards.iter().map(|shard| lock(&shard.0).frames.len()).sum();
+    assert_eq!(kept, 2 * WARM);
+}
+
+#[test]
 fn reused_lifo_frames_wait_a_whole_interval() {
     let directory = Directory::new();
     let pool = Pool::open(&directory.0, 21, 1, 1, 0).unwrap();
