@@ -162,7 +162,9 @@ It also exercises missing XDG, unsafe-directory refusal, explicit-directory
 startup without XDG, and capped-pool configuration. The capped pool's backing
 inode size must equal `stream.pool_bytes`, and its virtual mapping must cover
 exactly that capacity rounded up to whole pages. Docker and `nsenter` commands
-have 35-second default deadlines. Early exit and timeout are failures. Cleanup
+have 35-second default deadlines. Early exit and timeout are failures, and a
+started server must still be running when the gate stops it: one that exits on
+its own after the health check fails with its exit code. Cleanup
 removes only resources created by that invocation.
 Docker's internal bridge blocks initial outbound traffic. Because rootless
 Docker 29 does not publish internal-bridge ports, the driver pauses its own

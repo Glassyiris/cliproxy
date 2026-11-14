@@ -443,7 +443,8 @@ class Gate:
             row["errors"].append(str(exc))
         finally:
             try:
-                if self.state(container)["Running"]:
+                state = self.state(container)
+                if state["Running"]:
                     self.docker.run("container", "stop", "--time", "10", container, timeout=15)
                     state = self.state(container)
                     row["shutdown_state"] = state
@@ -451,6 +452,11 @@ class Gate:
                         not state["Running"] and state["ExitCode"] == 0 and not state.get("OOMKilled"))
                     if state["Running"] or state["ExitCode"] != 0 or state.get("OOMKilled"):
                         row["errors"].append("shutdown was not clean (exit 0 without OOM/forced kill required)")
+                elif not negative:
+                    # A server must still be running when the gate stops it; exiting on its own is a crash.
+                    row["shutdown_state"] = state
+                    row["checks"]["clean_shutdown"] = False
+                    row["errors"].append(f"server exited before shutdown, ExitCode {state['ExitCode']}")
             except (GateError, KeyError, ValueError, IndexError) as exc:
                 row["errors"].append(f"shutdown: {exc}")
             try:

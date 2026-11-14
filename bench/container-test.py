@@ -80,6 +80,9 @@ class FakeDocker:
         elif args[0] == "exec":
             if "sha256sum" in args:
                 output = "a" * 64 + "  /proc/1/exe\n"
+                container = self.containers[args[3]]
+                if self.defect == "crash" and container["name"] == "default":
+                    container.update(running=False, crashed=True)
             else:
                 directory = args[-1]
                 scenario = self.containers[args[3]]["name"]
@@ -105,7 +108,8 @@ class FakeDocker:
         if "{{json .State}}" in args:
             container = self.containers[args[-1]]
             return {"Running": container["running"], "OOMKilled": False, "Pid": 1234,
-                    "ExitCode": 137 if self.defect == "forced-kill" and container.get("stopped")
+                    "ExitCode": 139 if container.get("crashed")
+                    else 137 if self.defect == "forced-kill" and container.get("stopped")
                     else 0 if container.get("stopped") or container["running"] else 2}
         raise AssertionError(args)
 
@@ -171,6 +175,14 @@ class DriverControls(unittest.TestCase):
         result, summary, _, _ = self.run_control("forced-kill")
         self.assertEqual(result, 1)
         self.assertFalse(summary["scenarios"][0]["checks"]["clean_shutdown"])
+
+    def test_server_exit_after_health_fails(self):
+        result, summary, fake, _ = self.run_control("crash")
+        self.assertEqual(result, 1)
+        default = summary["scenarios"][0]
+        self.assertIn("server exited before shutdown, ExitCode 139", default["errors"])
+        self.assertFalse(default["checks"]["clean_shutdown"])
+        self.assertEqual(fake.scenarios, list(gate.SCENARIOS))
 
     def test_interruption_stops_new_scenarios_and_cleans_own_resources(self):
         out = Path(tempfile.mkdtemp(prefix="interrupt-", dir=ARTIFACTS))
