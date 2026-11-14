@@ -33,13 +33,33 @@ impl State {
             };
             (encoding, Some(mime))
         };
+        let transcript = if audio {
+            match input.member(value, "transcript")? {
+                Some(text) if !matches!(input.node(text)?.value, Value::Null) => {
+                    super::super::request::require_string(input, text)?;
+                    Some(text)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         let mut attributes = mapped_document(owner, |e| {
             e.bytes(b"{\"field\":")?;
             e.string(field)?;
             e.bytes(b",\"value\":{")?;
             if audio {
                 e.bytes(b"\"data\":null")?;
-                members(input, value, e, &["data", "transcript"])?;
+                members(
+                    input,
+                    value,
+                    e,
+                    if transcript.is_some() {
+                        &["data", "transcript"]
+                    } else {
+                        &["data"]
+                    },
+                )?;
             } else {
                 let image = input.required(value, "image_url")?;
                 e.bytes(b"\"image_url\":{\"url\":null")?;
@@ -71,8 +91,13 @@ impl State {
             mime: None,
         };
         self.serial = self.serial.checked_add(1).ok_or(Error::Limit)?;
-        let transcript = if audio {
-            input.member(value, "transcript")?
+        let fragment = if audio {
+            let position = self
+                .choices
+                .iter()
+                .position(|choice| Some(choice.index) == scope.choice_index)
+                .ok_or(Error::Schema)?;
+            Some(&mut self.choices[position].audio)
         } else {
             None
         };
@@ -81,7 +106,7 @@ impl State {
             media,
             &mut self.emitter,
             owner,
-            scope,
+            (scope, fragment),
             Some(media::Attributes {
                 document: &attributes,
                 value: attributes.root(),

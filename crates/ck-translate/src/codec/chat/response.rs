@@ -129,6 +129,7 @@ struct Choice {
     item: LocalId,
     blocks: [bool; 3],
     next_block: u64,
+    audio: media::Base64Fragments,
     tools: Table<Tool>,
     usage: Accounting,
     finished: bool,
@@ -438,6 +439,7 @@ impl State {
             item,
             blocks: [false; 3],
             next_block: 3,
+            audio: media::Base64Fragments::default(),
             tools: Table::new(owner)?,
             usage: Accounting::default(),
             finished: false,
@@ -783,6 +785,9 @@ impl State {
         Ok(())
     }
     fn finish_choice(&mut self, owner: &mut Writer, doc: &Document, finish: usize, position: usize) -> Result<()> {
+        if !self.choices[position].audio.complete() {
+            return Err(Error::Truncated);
+        }
         let scope = self.scope(position);
         let incomplete = doc.string_is(finish, "length")? || doc.string_is(finish, "content_filter")?;
         // Validate every tool before publishing any successful close for this choice.

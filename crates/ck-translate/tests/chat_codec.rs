@@ -1,3 +1,5 @@
+#[path = "semantic/request_controls.rs"]
+mod request_controls;
 #[path = "semantic/mod.rs"]
 mod semantic;
 
@@ -368,6 +370,19 @@ fn media_registration_rejects_replacement_and_another_document() {
             .is_err()
     );
     doc.replace(reference, Value::Text("replacement")).unwrap();
+    assert!(
+        RequestFence::default()
+            .end(
+                RequestView {
+                    document: &doc,
+                    media: &media,
+                    operation: Operation::Generate,
+                },
+                &ChatCapability,
+            )
+            .is_err()
+    );
+    doc.remove(message, "content").unwrap();
     let ready = RequestFence::default()
         .end(
             RequestView {
@@ -378,14 +393,14 @@ fn media_registration_rejects_replacement_and_another_document() {
             &ChatCapability,
         )
         .unwrap();
-    assert!(
-        Egress {
-            destination: "chat",
-            upstream_stream: false
-        }
-        .encode(&ready, &mut mapped.writer)
-        .is_err()
-    );
+    let output = Egress {
+        destination: "chat",
+        upstream_stream: false,
+    }
+    .encode(&ready, &mut mapped.writer)
+    .unwrap();
+    let output: serde_json::Value = serde_json::from_slice(&bytes(&output)).unwrap();
+    assert!(output["messages"][0].get("content").is_none());
 }
 
 #[test]

@@ -236,6 +236,7 @@ impl Ingress {
             .finish(self.document.input())?;
         self.consume(owner)?;
         validate(&self.document)?;
+        super::request_schema::validate(&self.document, &self.media)?;
         let x = self.document.required(self.document.root(), "x_ck")?;
         let mut path = [None; 128];
         path[0] = Some(Component::Name(Name::Static("x_ck")));
@@ -336,7 +337,8 @@ impl Capability for ChatCapability {
         if view.operation != Operation::Generate {
             return Err(Error::Unsupported);
         }
-        validate(view.document)
+        validate(view.document)?;
+        super::request_schema::validate(view.document, view.media)
     }
 }
 
