@@ -40,7 +40,7 @@ fn blocks(file: &os::Backing) -> u64 {
 #[test]
 fn growth_reuse_and_exact_cap() {
     let directory = Directory::new();
-    let pool = Pool::open(&directory.0, 45, 3, 2).unwrap();
+    let pool = Pool::open(&directory.0, 45, 3, 2, 0).unwrap();
     assert_eq!(pool.capacity(), 45);
     assert_eq!(pool.backed_frames(), 21);
     let mut allocated = Vec::new();
@@ -77,7 +77,7 @@ fn growth_reuse_and_exact_cap() {
 #[test]
 fn slots_are_aligned_exclusive_and_reset() {
     let directory = Directory::new();
-    let pool = Pool::open(&directory.0, 4, 40, 1).unwrap();
+    let pool = Pool::open(&directory.0, 4, 40, 1, 0).unwrap();
     assert_eq!(std::mem::align_of::<Pool>(), 128);
     assert_eq!(std::mem::size_of::<Header>(), 128);
     let mut slots = Vec::new();
@@ -104,7 +104,7 @@ fn slots_are_aligned_exclusive_and_reset() {
 #[test]
 fn decay_preserves_a_leased_neighbor_and_prefaults_reuse() {
     let directory = Directory::new();
-    let pool = Arc::new(Pool::open(&directory.0, 64, 2, 1).unwrap());
+    let pool = Arc::new(Pool::open(&directory.0, 64, 2, 1, 0).unwrap());
     let frames: Vec<_> = (0..64).map(|_| pool.allocate().unwrap()).collect();
     let neighbor = frames[16];
     // SAFETY: this test exclusively owns the allocated neighbor before publication.
@@ -153,7 +153,7 @@ fn decay_preserves_a_leased_neighbor_and_prefaults_reuse() {
 #[test]
 fn reused_lifo_frames_wait_a_whole_interval() {
     let directory = Directory::new();
-    let pool = Pool::open(&directory.0, 21, 1, 1).unwrap();
+    let pool = Pool::open(&directory.0, 21, 1, 1, 0).unwrap();
     pool.decay().unwrap();
     let frame = pool.allocate().unwrap();
     pool.release(frame);
@@ -167,7 +167,7 @@ fn reused_lifo_frames_wait_a_whole_interval() {
 #[test]
 fn resident_stealing_precedes_cold_prefault() {
     let directory = Directory::new();
-    let pool = Pool::open(&directory.0, 21, 1, 2).unwrap();
+    let pool = Pool::open(&directory.0, 21, 1, 2, 0).unwrap();
     pool.decay().unwrap();
     pool.decay().unwrap();
     let cold = lock(&pool.slow.0).cold.len();
@@ -186,7 +186,7 @@ fn resident_stealing_precedes_cold_prefault() {
 fn private_modes_creation_and_symlink_rejection() {
     let directory = Directory::new();
     let child = directory.0.join("private");
-    let pool = Pool::open(&child, 1, 1, 1).unwrap();
+    let pool = Pool::open(&child, 1, 1, 1, 0).unwrap();
     assert_eq!(fs::metadata(&child).unwrap().permissions().mode() & 0o7777, 0o700);
     assert_eq!(os::file_mode(&pool.file), 0o600);
     assert_eq!(fs::read_dir(&child).unwrap().count(), 0);
@@ -195,22 +195,23 @@ fn private_modes_creation_and_symlink_rejection() {
     assert_eq!(fs::read_dir(&child).unwrap().count(), 0);
     let link = directory.0.join("link");
     symlink(&child, &link).unwrap();
-    assert!(Pool::open(&link, 1, 1, 1).is_err());
-    assert!(Pool::open(&link.join("nested"), 1, 1, 1).is_err());
+    assert!(Pool::open(&link, 1, 1, 1, 0).is_err());
+    assert!(Pool::open(&link.join("nested"), 1, 1, 1, 0).is_err());
     fs::set_permissions(&child, fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(
-        Pool::open(&child, 1, 1, 1).err().unwrap().kind(),
+        Pool::open(&child, 1, 1, 1, 0).err().unwrap().kind(),
         io::ErrorKind::PermissionDenied
     );
-    assert!(Pool::open(&directory.0, 0, 1, 1).is_err());
-    assert!(Pool::open(&directory.0, 1, 0, 1).is_err());
-    assert!(Pool::open(&directory.0, 1, 1, 0).is_err());
+    assert!(Pool::open(&directory.0, 0, 1, 1, 0).is_err());
+    assert!(Pool::open(&directory.0, 1, 0, 1, 0).is_err());
+    assert!(Pool::open(&directory.0, 1, 1, 0, 0).is_err());
+    assert!(Pool::open(&directory.0, 1, 1, 1, 2).is_err());
 }
 
 #[test]
 fn concurrent_allocations_and_decay_do_not_alias() {
     let directory = Directory::new();
-    let pool = Arc::new(Pool::open(&directory.0, 168, 16, 8).unwrap());
+    let pool = Arc::new(Pool::open(&directory.0, 168, 16, 8, 0).unwrap());
     std::thread::scope(|scope| {
         for worker in 0..8 {
             let pool = &pool;
@@ -250,7 +251,7 @@ fn concurrent_allocations_and_decay_do_not_alias() {
 #[should_panic]
 fn rejects_out_of_bounds_span() {
     let directory = Directory::new();
-    let pool = Pool::open(&directory.0, 1, 1, 1).unwrap();
+    let pool = Pool::open(&directory.0, 1, 1, 1, 0).unwrap();
     let frame = pool.allocate().unwrap();
     // SAFETY: ownership is valid; this deliberately invalid bound must panic before
     // any pointer access, exercising the documented bounds assertion.
@@ -289,10 +290,14 @@ fn fill_available(path: &Path) -> File {
 #[ignore = "requires a disposable private 4 MiB tmpfs supplied as TMPDIR"]
 fn isolated_tmpfs_growth_and_cold_prefault_enospc() {
     let directory = Directory::new();
-    let pool = Pool::open(&directory.0, 42, 1, 1).unwrap();
+    let pool = Pool::open(&directory.0, 42, 1, 1, 0).unwrap();
     let mut frames: Vec<_> = (0..21).map(|_| pool.allocate().unwrap()).collect();
     let filler_path = directory.0.join("filler");
     let filler = fill_available(&filler_path);
+    assert_eq!(
+        Pool::open(&directory.0, 42, 1, 1, 42).err().unwrap().raw_os_error(),
+        Some(libc::ENOSPC)
+    );
     let backed_bytes = pool.pool_header().backed_bytes.load(Ordering::Acquire);
     assert_eq!(pool.allocate().unwrap_err().raw_os_error(), Some(libc::ENOSPC));
     assert_eq!(pool.used(), 21);
@@ -331,4 +336,35 @@ fn isolated_tmpfs_growth_and_cold_prefault_enospc() {
         pool.release(frame);
     }
     assert_eq!(pool.used(), 0);
+}
+
+#[test]
+fn startup_reserve_survives_decay_while_excess_is_reclaimed() {
+    let directory = Directory::new();
+    let reserve = 25;
+    let pool = Pool::open(&directory.0, 64, 1, 1, reserve).unwrap();
+    let reserved_bytes = round_up(pool.header_bytes + reserve as usize * FRAME_BYTES, pool.page).unwrap();
+    assert!(blocks(&pool.file) * 512 >= reserved_bytes as u64);
+    let frames: Vec<_> = (0..64).map(|_| pool.allocate().unwrap()).collect();
+    for &frame in &frames {
+        // SAFETY: this test owns every frame exclusively and initializes its whole payload.
+        unsafe { pool.write(frame, 0, &[0x5a; FRAME_BYTES]) };
+    }
+    for frame in frames {
+        pool.release(frame);
+    }
+    let before = blocks(&pool.file);
+    pool.decay().unwrap();
+    assert_eq!(blocks(&pool.file), before);
+    pool.decay().unwrap();
+    pool.decay().unwrap();
+    assert!(blocks(&pool.file) * 512 >= reserved_bytes as u64);
+    assert!(blocks(&pool.file) < before);
+    for _ in 0..64 {
+        let frame = pool.allocate().unwrap();
+        if frame < reserve {
+            // SAFETY: reallocation exclusively owns initialized bytes; a punch would have zeroed them.
+            assert_eq!(unsafe { pool.slice(frame, 0, FRAME_BYTES) }, &[0x5a; FRAME_BYTES]);
+        }
+    }
 }

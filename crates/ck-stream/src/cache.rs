@@ -202,6 +202,7 @@ impl Store {
             limits.pool_frames,
             config.header_slots,
             config.workers,
+            limits.startup_reserve_frames,
         )?);
         let inner = Arc::new(Inner {
             pool,

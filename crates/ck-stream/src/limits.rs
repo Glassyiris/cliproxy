@@ -14,6 +14,8 @@ const HEAP_HEADROOM: usize = 64 * 1024 * 1024;
 pub struct Config {
     pub directory: PathBuf,
     pub pool_bytes: Option<usize>,
+    /// Persistent warm backing, rounded up to frames. None or zero disables the reserve.
+    pub startup_reserve_bytes: Option<usize>,
     pub max_frames: Option<u32>,
     pub max_event_bytes: usize,
     pub max_metadata_bytes: usize,
@@ -27,6 +29,7 @@ impl Config {
         Self {
             directory,
             pool_bytes: None,
+            startup_reserve_bytes: None,
             max_frames: None,
             max_event_bytes: 1024 * 1024,
             max_metadata_bytes: 1024 * 1024,
@@ -82,6 +85,12 @@ impl Config {
             .min(fs_cap)
             .min(cgroup.unwrap_or(usize::MAX));
         let pool_frames = u32::try_from(bytes / FRAME_BYTES).map_err(|_| invalid("pool capacity overflow"))?;
+        let capacity_bytes = pool_frames as usize * FRAME_BYTES;
+        let reserve_bytes = self.startup_reserve_bytes.unwrap_or_default();
+        if reserve_bytes > capacity_bytes {
+            return Err(invalid("startup_reserve_bytes exceeds the resolved pool capacity"));
+        }
+        let startup_reserve_frames = reserve_bytes.div_ceil(FRAME_BYTES) as u32;
         let max_frames = self.max_frames.unwrap_or(MAX_STREAM_FRAMES.min(pool_frames));
         if !(4..=MAX_STREAM_FRAMES).contains(&max_frames) || max_frames > pool_frames {
             return Err(invalid("max_frames must be between 4 and min(5368, pool_frames)"));
@@ -104,6 +113,7 @@ impl Config {
         }
         Ok(Limits {
             pool_frames,
+            startup_reserve_frames,
             max_frames,
             max_event_bytes: self.max_event_bytes,
             max_metadata_bytes: self.max_metadata_bytes,
@@ -115,6 +125,7 @@ impl Config {
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub pool_frames: u32,
+    pub startup_reserve_frames: u32,
     pub max_frames: u32,
     pub max_event_bytes: usize,
     pub max_metadata_bytes: usize,
@@ -167,5 +178,13 @@ mod tests {
         config.max_frames = None;
         assert_eq!(config.resolve_caps(500_000, Some(300_000)).unwrap().max_frames, 6);
         assert!(config.resolve_caps(150_000, None).is_err());
+        config.startup_reserve_bytes = Some(500_000);
+        assert_eq!(config.resolve_caps(500_000, None).unwrap().startup_reserve_frames, 10);
+        config.startup_reserve_bytes = Some(500_001);
+        assert!(config.resolve_caps(500_000, None).is_err());
+        config.startup_reserve_bytes = Some(50_001);
+        assert_eq!(config.resolve_caps(500_000, None).unwrap().startup_reserve_frames, 2);
+        config.startup_reserve_bytes = Some(0);
+        assert_eq!(config.resolve_caps(500_000, None).unwrap().startup_reserve_frames, 0);
     }
 }

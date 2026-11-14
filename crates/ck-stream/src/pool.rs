@@ -73,6 +73,7 @@ pub(crate) struct Pool {
     header_bytes: usize,
     page: usize,
     capacity: u32,
+    reserve_frames: u32,
     slots: u32,
     free_slots: Mutex<Vec<u32>>,
     shards: Box<[Padded<Mutex<FreeList>>]>,
@@ -101,8 +102,14 @@ fn round_up(value: usize, page: usize) -> io::Result<usize> {
 }
 
 impl Pool {
-    pub(crate) fn open(directory: &Path, frames: u32, slots: u32, workers: usize) -> io::Result<Self> {
-        if frames == 0 || slots == 0 || workers == 0 {
+    pub(crate) fn open(
+        directory: &Path,
+        frames: u32,
+        slots: u32,
+        workers: usize,
+        reserve_frames: u32,
+    ) -> io::Result<Self> {
+        if frames == 0 || slots == 0 || workers == 0 || reserve_frames > frames {
             return Err(invalid());
         }
         // SAFETY: sysconf has no pointer arguments or process-state mutation.
@@ -129,7 +136,7 @@ impl Pool {
             return Err(invalid());
         }
         let file = os::Backing::open(directory)?;
-        let initial = frames.min(EXTENT);
+        let initial = frames.min(EXTENT).max(reserve_frames);
         let initial_bytes = round_up(header_bytes + initial as usize * FRAME_BYTES, page)?;
         file.grow(0, initial_bytes)?;
         // SAFETY: fd owns a writable regular file. The entire VA range is reserved
@@ -185,6 +192,7 @@ impl Pool {
             header_bytes,
             page,
             capacity: frames,
+            reserve_frames,
             slots,
             free_slots: Mutex::new((0..slots).rev().collect()),
             shards: shards.into_boxed_slice(),
@@ -338,7 +346,8 @@ impl Pool {
         for shard in &self.shards {
             let mut free = lock(&shard.0);
             let count = free.low_water.min(free.frames.len()).saturating_sub(WARM);
-            candidates.extend(free.frames.drain(..count));
+            // The startup prefix stays backed even while free; punch only the excess.
+            candidates.extend(free.frames.extract_if(..count, |frame| *frame >= self.reserve_frames));
             free.low_water = free.frames.len();
         }
         candidates.sort_unstable();

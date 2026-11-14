@@ -39,6 +39,14 @@ The total-cap row acquires an active lease after every frame append and retains 
 
 The production default metadata limit remains 1 MiB. Consecutive records with identical length, stride, type and correlation share a bounded run index; heterogeneous records still consume individual entries. The heap comparator retains individual coordinate/type/correlation entries. Both backends retain identical 50,000-byte payload frames and complete-record semantics. If either workload fails, the benchmark records the byte offset and counters, returns nonzero and still attempts subsequent rows. It never raises `max_metadata_bytes`, releases response prefixes or substitutes another pool to make a row run.
 
+## Startup reserve diagnostics
+
+The release driver accepts `ck-stream-bench pool|heap ROW DIRECTORY [RESERVE_BYTES [IDLE_SECONDS]]`. The optional byte value configures the production store's deploy-only startup reserve; the heap comparator ignores it. Omitting it uses the production default. No frame, stream or metadata quota is raised.
+
+With an explicit reserve, the driver records pool-open time and pre-open, initial-idle and post-expiry/decay RSS, anonymous/shmem and tmpfs/cgroup snapshots. It runs the first burst, expires retained streams, releases their frames through normal ownership and samples decay. With a positive idle interval it then repeats the same workload on the same pool; `metrics` describes that post-decay burst and `startup.first_burst` preserves the cold result. Use two idle seconds to cover a full eligibility interval. Whole-process timing and peak RSS belong in the parent runner and include diagnostic sampling and any idle wait; they are not startup-only measurements.
+
+These diagnostics do not move the ordinary memory row's pre-open baseline or change any gate threshold. A persistent reserve is charged to RSS and tmpfs, including when idle.
+
 ## Narrow verification
 
 ```sh

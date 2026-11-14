@@ -7,3 +7,4 @@ Internal
 - Use an adaptive per-stream metadata mutex to reduce contention without changing publication or retention ordering.
 - Reuse reserved frame coordinates during payload writes instead of recomputing byte-to-frame division for each span; keep checked frame lookup and copy bounds.
 - Add independently releasable unpublished scratch leases and external metadata permits sharing canonical frame and metadata quotas. Scratch stays invisible to readers and pins borrowed bytes through invalidation; reader admission failures now publish the same storage-exhausted terminal as allocation failures.
+- Add a startup-validated, deploy-only warm reserve within the pool cap. Preback it at pool open and preserve it during idle decay; reclaim excess frames under the existing interval and per-shard rules.

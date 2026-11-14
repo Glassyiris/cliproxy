@@ -34,12 +34,13 @@ enum Lease {
 }
 
 impl Backend {
-    fn open(kind: &str, directory: &Path) -> Result<Self> {
+    fn open(kind: &str, directory: &Path, reserve_bytes: Option<usize>) -> Result<Self> {
         match kind {
             "pool" => {
                 let clock = Arc::new(ManualClock::default());
                 let mut config = Config::new(directory.to_path_buf());
                 config.workers = WORKERS;
+                config.startup_reserve_bytes = reserve_bytes;
                 Ok(Self::Pool(Store::with_clock(config, clock.clone())?, clock))
             }
             "heap" => Ok(Self::Heap(heap::Store::default())),
@@ -80,7 +81,7 @@ impl Backend {
     fn counters(&self) -> Value {
         match self {
             Self::Pool(store, _) => {
-                json!({"used_frames":store.used_frames(),"backed_frames":store.backed_frames(),"pool_frames":store.limits().pool_frames,"max_frames":store.limits().max_frames,"max_metadata_bytes":store.limits().max_metadata_bytes})
+                json!({"used_frames":store.used_frames(),"backed_frames":store.backed_frames(),"pool_frames":store.limits().pool_frames,"startup_reserve_frames":store.limits().startup_reserve_frames,"max_frames":store.limits().max_frames,"max_metadata_bytes":store.limits().max_metadata_bytes})
             }
             Self::Heap(_) => json!({}),
         }
@@ -524,13 +525,46 @@ fn enospc(backend: &Backend, directory: &Path) -> Result<Value> {
     Ok(result)
 }
 
-async fn run(kind: &str, row: &str, directory: &Path) -> Result<Value> {
+async fn run(
+    kind: &str,
+    row: &str,
+    directory: &Path,
+    reserve_bytes: Option<usize>,
+    idle_seconds: u64,
+) -> Result<Value> {
     let baseline = if row.starts_with("memory-") {
         Some(snapshot(directory)?)
     } else {
         None
     };
-    let backend = Arc::new(Backend::open(kind, directory).context("open backend")?);
+    let before_open = reserve_bytes.map(|_| snapshot(directory)).transpose()?;
+    let open_start = Instant::now();
+    let backend = Arc::new(Backend::open(kind, directory, reserve_bytes).context("open backend")?);
+    let open_ns = open_start.elapsed().as_nanos() as u64;
+    let idle = reserve_bytes.map(|_| snapshot(directory)).transpose()?;
+    let mut value = workload(backend.clone(), row, directory, baseline.clone()).await?;
+    let startup = if let Some(before_open) = before_open {
+        let first_burst = value.clone();
+        backend.expire()?;
+        backend.tick()?;
+        for _ in 0..idle_seconds {
+            tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_secs(1))).await?;
+            backend.tick()?;
+        }
+        let after_decay = snapshot(directory)?;
+        if idle_seconds > 0 {
+            value = workload(backend.clone(), row, directory, baseline).await?;
+        }
+        Some(
+            json!({"open_ns":open_ns,"before_open":before_open,"idle":idle,"after_decay":after_decay,"idle_seconds":idle_seconds,"first_burst":first_burst}),
+        )
+    } else {
+        None
+    };
+    Ok(json!({"status":"ok","backend":kind,"row":row,"metrics":value,"counters":backend.counters(),"startup":startup}))
+}
+
+async fn workload(backend: Arc<Backend>, row: &str, directory: &Path, baseline: Option<Value>) -> Result<Value> {
     let fields: Vec<&str> = row.split('-').collect();
     let value = match fields.as_slice() {
         ["small", tasks] => small(backend.clone(), tasks.parse()?, 20000).await?,
@@ -560,19 +594,32 @@ async fn run(kind: &str, row: &str, directory: &Path) -> Result<Value> {
         ["enospc"] => enospc(&backend, directory)?,
         _ => bail!("unknown workload {row}"),
     };
-    Ok(json!({"status":"ok","backend":kind,"row":row,"metrics":value,"counters":backend.counters()}))
+    Ok(value)
 }
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 4 {
-        eprintln!("usage: ck-stream-bench pool|heap ROW DIRECTORY");
+    if !(4..=6).contains(&args.len()) {
+        eprintln!("usage: ck-stream-bench pool|heap ROW DIRECTORY [RESERVE_BYTES [IDLE_SECONDS]]");
         std::process::exit(2);
     }
+    let reserve_bytes = args.get(4).map(|value| value.parse::<usize>()).transpose();
+    let idle_seconds = args.get(5).map(|value| value.parse::<u64>()).transpose();
+    let (Ok(reserve_bytes), Ok(idle_seconds)) = (reserve_bytes, idle_seconds) else {
+        eprintln!("reserve bytes and idle seconds must be unsigned integers");
+        std::process::exit(2);
+    };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(WORKERS)
         .build()
         .expect("eight-worker runtime");
-    match runtime.block_on(run(&args[1], &args[2], Path::new(&args[3]))) {
+    match runtime.block_on(run(
+        &args[1],
+        &args[2],
+        Path::new(&args[3]),
+        reserve_bytes,
+        idle_seconds.unwrap_or(0),
+    )) {
         Ok(value) => println!("{value}"),
         Err(error) => {
             println!(
