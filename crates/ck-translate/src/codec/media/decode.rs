@@ -238,6 +238,8 @@ impl Base64Fragments {
     pub(crate) fn push(&mut self, doc: &Document, text: Text, mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
         use base64::Engine;
         let mut decoded = Decoded::new(doc.source(text)?, text.span)?;
+        // Each Chat audio delta is its own base64 string: padding may end a fragment and the
+        // next fragment starts fresh, so `padded` is per fragment, unlike InputDecoder's.
         let mut padded = false;
         while let Some(c) = decoded.next_scalar()? {
             if padded || !c.is_ascii() {
