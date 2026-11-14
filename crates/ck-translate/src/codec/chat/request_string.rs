@@ -82,7 +82,8 @@ impl Ingress {
             .as_ref()
             .ok_or(Error::Closed)?
             .pending_node(self.document.input(), wire_index)?;
-        if self.string.is_none() {
+        let opened = self.string.is_none();
+        if opened {
             let Some(pending) = self.open_string(owner, wire_index, wire, parent, path, publish)? else {
                 return Ok((None, false));
             };
@@ -93,12 +94,16 @@ impl Ingress {
         }
         self.append_string(owner, wire)?;
         let pending = self.string.as_mut().ok_or(Error::Schema)?;
-        let scanner = self.scanner.as_mut().ok_or(Error::Closed)?;
-        self.document.rebind_keys(scanner)?;
-        let floor = self
-            .document
-            .raw_floor(self.document.root(), scanner.raw_floor().min(pending.offset))?;
-        self.document.release_input_before(floor)?;
+        // Keys and topology stay fixed while one string streams, and the string node's own span
+        // bounds the floor, so the whole-document floor is computed once per string.
+        if opened {
+            let scanner = self.scanner.as_mut().ok_or(Error::Closed)?;
+            self.document.rebind_keys(scanner)?;
+            let floor = self
+                .document
+                .raw_floor(self.document.root(), scanner.raw_floor().min(pending.offset))?;
+            self.document.release_input_before(floor)?;
+        }
         self.document.release_input_range(codec::source::Span {
             start: wire.span.start + 1,
             end: pending.offset,

@@ -57,6 +57,10 @@ pub struct Node {
     origins: Option<usize>,
     last_origin: Option<usize>,
     published: bool,
+    /// For an array: one more than the index of a published child whose preceding siblings
+    /// are all published, or 0. A u32 keeps the node size unchanged; a larger index is not
+    /// recorded and publication rescans from the first child.
+    published_through: u32,
     input_key: Option<Span>,
 }
 
@@ -66,6 +70,8 @@ pub struct Document {
     sources: Vec<Source>,
     nodes: Vec<Node>,
     metadata: MetadataPermit,
+    /// Charges transient indexes that read-only validation builds; see [`Self::with_table`].
+    scratch: std::sync::Mutex<Option<MetadataPermit>>,
     root: usize,
 }
 
@@ -86,6 +92,7 @@ impl Document {
             sources: Vec::new(),
             nodes: Vec::new(),
             metadata: owner.reserve_metadata(0)?,
+            scratch: std::sync::Mutex::new(Some(owner.reserve_metadata(0)?)),
             root: 0,
         };
         doc.import(source, &scanner)?;
@@ -97,12 +104,29 @@ impl Document {
             sources: Vec::new(),
             nodes: Vec::new(),
             metadata: owner.reserve_metadata(0)?,
+            scratch: std::sync::Mutex::new(Some(owner.reserve_metadata(0)?)),
             root: 0,
         };
         doc.reserve(1, 1)?;
         doc.sources.push(Source::new(owner)?);
         doc.add(None, Value::Object)?;
         Ok(doc)
+    }
+
+    /// Lends `f` an empty table charged to this document's writer quota; the charge ends when
+    /// `f` returns. Tables do not nest.
+    pub(crate) fn with_table<T, R>(&self, f: impl FnOnce(&mut super::table::Table<T>) -> Result<R>) -> Result<R> {
+        let permit = self
+            .scratch
+            .lock()
+            .map_err(|_| Error::Closed)?
+            .take()
+            .ok_or(Error::Closed)?;
+        let mut table = super::table::Table::with_permit(permit);
+        let result = f(&mut table);
+        let permit = table.into_permit()?;
+        *self.scratch.lock().map_err(|_| Error::Closed)? = Some(permit);
+        result
     }
 
     pub(crate) fn input(&self) -> &Source {
@@ -206,6 +230,7 @@ impl Document {
                 origins: None,
                 last_origin: None,
                 published: false,
+                published_through: 0,
                 input_key: if part == 0 { n.key } else { None },
             });
         }
@@ -254,6 +279,10 @@ impl Document {
             node.origin_next = node.origin_next.map(|i| i + base);
             node.origins = node.origins.map(|i| i + base);
             node.last_origin = node.last_origin.map(|i| i + base);
+            node.published_through = match node.published_through {
+                0 => 0,
+                i => u32::try_from(i as usize + base).unwrap_or(0),
+            };
             self.nodes.push(node);
         }
         self.sources.append(&mut other.sources);
@@ -300,6 +329,19 @@ impl Document {
     }
     pub(crate) fn mark_published(&mut self, index: usize) {
         self.nodes[index].published = true;
+    }
+    /// The first child of array `parent` that may be unpublished: the child after the last one
+    /// recorded by [`Self::mark_published_through`] while it is still attached and published.
+    pub(crate) fn unpublished_from(&self, parent: usize) -> Result<Option<usize>> {
+        let node = self.node(parent)?;
+        Ok(match (node.published_through as usize).checked_sub(1) {
+            Some(child) if self.node(child)?.parent == Some(parent) && self.published(child)? => self.node(child)?.next,
+            _ => node.first,
+        })
+    }
+    /// Records that `child` and every sibling before it are published.
+    pub(crate) fn mark_published_through(&mut self, parent: usize, child: usize) {
+        self.nodes[parent].published_through = u32::try_from(child + 1).unwrap_or(0);
     }
 
     pub(crate) fn release_input_before(&mut self, offset: u64) -> Result<()> {

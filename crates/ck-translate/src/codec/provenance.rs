@@ -169,15 +169,29 @@ pub fn write_segment(mut name: Segment<'_>, e: &mut Encoder<'_, '_>) -> Result<(
 
 /// The node a pointer names; the empty pointer is the root.
 pub fn resolve(doc: &Document, pointer: usize) -> Result<usize> {
-    resolve_to(doc, pointer, false)
+    resolve_to(doc, pointer, false, &mut |_, _| Ok(None))
 }
 
 /// The container that holds the node a pointer names.
 pub fn resolve_parent(doc: &Document, pointer: usize) -> Result<usize> {
-    resolve_to(doc, pointer, true)
+    resolve_to(doc, pointer, true, &mut |_, _| Ok(None))
 }
 
-fn resolve_to(doc: &Document, pointer: usize, parent_only: bool) -> Result<usize> {
+/// Like [`resolve_parent`]; `element(array, index)` may name an array element without a walk.
+pub(crate) fn resolve_parent_indexed(
+    doc: &Document,
+    pointer: usize,
+    element: &mut dyn FnMut(usize, usize) -> Result<Option<usize>>,
+) -> Result<usize> {
+    resolve_to(doc, pointer, true, element)
+}
+
+fn resolve_to(
+    doc: &Document,
+    pointer: usize,
+    parent_only: bool,
+    element: &mut dyn FnMut(usize, usize) -> Result<Option<usize>>,
+) -> Result<usize> {
     let mut chars = doc.chars(pointer)?;
     match chars.next_scalar()? {
         None => return Ok(doc.root()),
@@ -201,7 +215,13 @@ fn resolve_to(doc: &Document, pointer: usize, parent_only: bool) -> Result<usize
                 }
                 found.ok_or(Error::Schema)?
             }
-            Value::Array => doc.children(parent)?.nth(name.index()?).ok_or(Error::Schema)?,
+            Value::Array => {
+                let index = name.index()?;
+                match element(parent, index)? {
+                    Some(child) => child,
+                    None => doc.children(parent)?.nth(index).ok_or(Error::Schema)?,
+                }
+            }
             _ => return Err(Error::Schema),
         };
         if last {

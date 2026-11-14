@@ -7,7 +7,7 @@ use crate::codec::{
 
 pub(super) fn validate(doc: &Document, media: &Registry) -> Result<()> {
     media.validate_document(doc)?;
-    media.validate_registrations(doc)?;
+    media.validate_registrations(doc, 0)?;
     let root = doc.root();
     options(doc, root)?;
     optional(doc, root, "tools", tools)?;

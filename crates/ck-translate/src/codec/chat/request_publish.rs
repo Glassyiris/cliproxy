@@ -45,13 +45,15 @@ pub(super) fn field(
     if let Some(parent) = doc.node(node)?.parent {
         field(doc, media, parent, &[], emitter, owner, reader)?;
         if matches!(doc.node(parent)?.value, Value::Array) {
-            let mut prior = doc.node(parent)?.first;
+            // Published children form a prefix; resume after it instead of rescanning.
+            let mut prior = doc.unpublished_from(parent)?;
             while let Some(sibling) = prior {
                 if sibling == node {
                     break;
                 }
                 prior = doc.node(sibling)?.next;
                 field(doc, media, sibling, &[], emitter, owner, reader)?;
+                doc.mark_published_through(parent, sibling);
             }
         }
     }
@@ -84,6 +86,12 @@ pub(super) fn field(
     }
     doc.bind_field(node, event)?;
     doc.mark_published(node);
+    if let Some(parent) = doc.node(node)?.parent
+        && matches!(doc.node(parent)?.value, Value::Array)
+        && doc.unpublished_from(parent)? == Some(node)
+    {
+        doc.mark_published_through(parent, node);
+    }
     Ok(registered.is_some())
 }
 

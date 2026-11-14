@@ -43,6 +43,8 @@ pub struct Ingress {
     string: Option<PendingString>,
     trees: codec::table::Table<Option<PendingTree>>,
     published_media: usize,
+    /// Registry entries before this index belong to finished messages and keep their lineage.
+    relocated_media: usize,
     media: Registry,
     emitter: Emitter,
     fence: RequestFence,
@@ -104,6 +106,7 @@ impl Ingress {
             string: None,
             trees: codec::table::Table::new(owner)?,
             published_media: 0,
+            relocated_media: 0,
             media: Registry::new(owner)?,
             emitter: Emitter::new(identity),
             fence: RequestFence::default(),

@@ -124,9 +124,11 @@ impl Ingress {
         path: &mut [Option<Component>; 128],
     ) -> Result<()> {
         let current = self.current_message.take().ok_or(Error::Schema)?;
-        self.media.validate_registrations(&self.document)?;
+        self.media
+            .validate_registrations(&self.document, self.relocated_media)?;
         normalize_message(&mut self.document, current.node, message_index, &mut self.media, owner)?;
-        self.media.relocate_ingress(&self.document)?;
+        self.media.relocate_ingress(&self.document, self.relocated_media)?;
+        self.relocated_media = self.media.len();
         fields(
             &mut self.document,
             &self.media,
@@ -160,7 +162,49 @@ pub(super) fn validate(doc: &Document) -> Result<()> {
     require_string(doc, doc.required(root, "model")?)?;
     let messages = doc.required(root, "messages")?;
     require_array(doc, messages)?;
-    for message in doc.children(messages)? {
+    doc.with_table(|calls| validate_messages(doc, messages, calls))
+}
+
+/// Tool call IDs by hash, then message ordinal, then node: one sorted index replaces a history
+/// rescan for every tool result.
+type CallIndex = crate::codec::table::Table<(u64, u64, usize)>;
+use std::collections::hash_map::RandomState;
+
+fn index_calls(doc: &Document, messages: usize, calls: &mut CallIndex, hasher: &RandomState) -> Result<()> {
+    for (ordinal, message) in doc.children(messages)?.enumerate() {
+        if let Some(list) = doc.member(message, "tool_calls")?
+            && matches!(doc.node(list)?.value, Value::Array)
+        {
+            for call in doc.children(list)? {
+                if let Some(id) = doc.member(call, "id")? {
+                    calls.push((string_hash(doc, id, hasher)?, ordinal as u64, id))?;
+                }
+            }
+        }
+    }
+    calls.sort_unstable();
+    Ok(())
+}
+
+/// Whether a tool call in a message before `ordinal` has the ID `result`.
+fn prior_call(doc: &Document, calls: &CallIndex, hasher: &RandomState, result: usize, ordinal: u64) -> Result<bool> {
+    let hash = string_hash(doc, result, hasher)?;
+    let first = calls.partition_point(|&(h, _, _)| h < hash);
+    for &(_, _, id) in calls[first..]
+        .iter()
+        .take_while(|&&(h, call_ordinal, _)| h == hash && call_ordinal < ordinal)
+    {
+        if doc.equal_strings(result, id)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn validate_messages(doc: &Document, messages: usize, calls: &mut CallIndex) -> Result<()> {
+    let hasher = RandomState::new();
+    index_calls(doc, messages, calls, &hasher)?;
+    for (ordinal, message) in doc.children(messages)?.enumerate() {
         let role = doc.required(message, "role")?;
         let mut accepted = false;
         for value in ["system", "developer", "user", "assistant", "tool", "function"] {
@@ -214,25 +258,22 @@ pub(super) fn validate(doc: &Document) -> Result<()> {
         }
         if doc.string_is(role, "tool")? {
             let result_id = doc.required(message, "tool_call_id")?;
-            let mut found = false;
-            for prior in doc.children(messages)? {
-                if prior == message {
-                    break;
-                }
-                if let Some(calls) = doc.member(prior, "tool_calls")? {
-                    for call in doc.children(calls)? {
-                        if doc.equal_strings(result_id, doc.required(call, "id")?)? {
-                            found = true;
-                        }
-                    }
-                }
-            }
-            if !found {
+            if !prior_call(doc, calls, &hasher, result_id, ordinal as u64)? {
                 return Err(Error::Schema);
             }
         }
     }
     Ok(())
+}
+
+fn string_hash(doc: &Document, node: usize, state: &impl std::hash::BuildHasher) -> Result<u64> {
+    use std::hash::Hasher;
+    let mut hasher = state.build_hasher();
+    let mut chars = doc.chars(node)?;
+    while let Some(c) = chars.next_scalar()? {
+        hasher.write_u32(c as u32);
+    }
+    Ok(hasher.finish())
 }
 
 fn normalize_message(

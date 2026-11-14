@@ -8,10 +8,20 @@ pub(crate) struct Table<T> {
 }
 impl<T> Table<T> {
     pub fn new(owner: &mut Writer) -> Result<Self> {
-        Ok(Self {
+        Ok(Self::with_permit(owner.reserve_metadata(0)?))
+    }
+    /// An empty table charged to an existing permit.
+    pub fn with_permit(permit: MetadataPermit) -> Self {
+        Self {
             values: Vec::new(),
-            permit: owner.reserve_metadata(0)?,
-        })
+            permit,
+        }
+    }
+    /// Frees the values and returns the permit with its charge released.
+    pub fn into_permit(mut self) -> Result<MetadataPermit> {
+        self.values = Vec::new();
+        self.permit.resize(0)?;
+        Ok(self.permit)
     }
     pub fn push(&mut self, value: T) -> Result<usize> {
         self.permit.check_live()?;

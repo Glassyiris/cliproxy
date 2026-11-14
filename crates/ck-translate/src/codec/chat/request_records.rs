@@ -7,7 +7,8 @@ use crate::codec::{
     provenance,
     table::Table,
 };
-use ck_stream::{Reader, Writer};
+use ck_stream::{MetadataPermit, Reader, Writer};
+use std::collections::HashMap;
 
 /// One media payload's records, from its start to its end.
 struct Payload {
@@ -27,13 +28,17 @@ pub fn read_request(owner: &mut Writer, reader: &mut Reader) -> Result<(Document
     let mut doc = Document::streaming(owner)?;
     let mut payloads: Table<Payload> = Table::new(owner)?;
     let mut references: Table<(LocalId, usize)> = Table::new(owner)?;
+    let mut counts = Counts {
+        children: HashMap::new(),
+        permit: owner.reserve_metadata(0)?,
+    };
     let mut started = false;
     loop {
         let (kind, event) = internal::next(owner, reader)?;
         match kind {
             Kind::RequestStart if !started => started = true,
             Kind::RequestField if started => {
-                let node = field(&mut doc, event)?;
+                let node = field(&mut doc, &mut counts, event)?;
                 if let Some(id) = reference(&doc, node)? {
                     references.push((id, node))?;
                 }
@@ -77,7 +82,7 @@ pub fn read_request(owner: &mut Writer, reader: &mut Reader) -> Result<(Document
             }
             Kind::RequestEnd if started => {
                 provenance::restore_bindings(&mut doc)?;
-                let media = register(owner, &mut doc, &mut payloads, &references)?;
+                let media = register(owner, &mut doc, &mut payloads, &mut references)?;
                 return Ok((doc, media));
             }
             _ => return Err(Error::Schema),
@@ -85,24 +90,63 @@ pub fn read_request(owner: &mut Writer, reader: &mut Reader) -> Result<(Document
     }
 }
 
+/// Child count and last child of the arrays that fields fill. Fields arrive in order, so the
+/// array element a field appends or descends into is nearly always the last one.
+struct Counts {
+    children: HashMap<usize, (usize, Option<usize>)>,
+    permit: MetadataPermit,
+}
+
+impl Counts {
+    fn get(&mut self, doc: &Document, array: usize) -> Result<&mut (usize, Option<usize>)> {
+        if !self.children.contains_key(&array) {
+            if self.children.len() == self.children.capacity() {
+                self.children
+                    .try_reserve(self.children.capacity().max(4))
+                    .map_err(|_| Error::Limit)?;
+                // A hash table slot holds the key, the value and one control byte.
+                let slot = std::mem::size_of::<(usize, (usize, Option<usize>))>() + 1;
+                self.permit
+                    .resize(self.children.capacity().checked_mul(slot).ok_or(Error::Limit)?)?;
+            }
+            let (mut count, mut last) = (0, None);
+            for child in doc.children(array)? {
+                count += 1;
+                last = Some(child);
+            }
+            self.children.insert(array, (count, last));
+        }
+        self.children.get_mut(&array).ok_or(Error::Schema)
+    }
+}
+
 /// Places one request field at its pointer and returns the node that holds its value.
-fn field(doc: &mut Document, event: Document) -> Result<usize> {
+fn field(doc: &mut Document, counts: &mut Counts, event: Document) -> Result<usize> {
     let root = doc.absorb(event)?;
     let pointer = doc.required(root, "pointer")?;
     let value = doc.required(root, "value")?;
     if doc.string_is(pointer, "")? {
         doc.transplant(doc.root(), value)?;
+        counts.children.remove(&doc.root());
         return Ok(doc.root());
     }
-    let parent = provenance::resolve_parent(doc, pointer)?;
+    let parent = provenance::resolve_parent_indexed(doc, pointer, &mut |array, index| {
+        let (count, last) = *counts.get(doc, array)?;
+        Ok(last.filter(|_| index + 1 == count))
+    })?;
     let name = provenance::leaf(doc, pointer)?;
     let target = if matches!(doc.node(parent)?.value, Value::Array) {
         let index = name.index()?;
-        let count = doc.children(parent)?.count();
+        let (count, _) = *counts.get(doc, parent)?;
         if index > count {
             return Err(Error::Schema);
         }
-        doc.children(parent)?.nth(index)
+        // Fields arrive in order, so a new element is the common case; replacing one walks.
+        if index == count {
+            None
+        } else {
+            doc.children(parent)?.nth(index)
+        }
     } else {
         let mut target = None;
         for child in doc.children(parent)? {
@@ -115,6 +159,7 @@ fn field(doc: &mut Document, event: Document) -> Result<usize> {
     };
     if let Some(target) = target {
         doc.transplant(target, value)?;
+        counts.children.remove(&target);
         return Ok(target);
     }
     let Value::String(pointer) = doc.node(pointer)?.value else {
@@ -131,6 +176,10 @@ fn field(doc: &mut Document, event: Document) -> Result<usize> {
     )?;
     doc.transplant(node, value)?;
     doc.append(parent, node)?;
+    if let Some((count, last)) = counts.children.get_mut(&parent) {
+        *count += 1;
+        *last = Some(node);
+    }
     Ok(node)
 }
 
@@ -188,24 +237,24 @@ fn register(
     owner: &mut Writer,
     doc: &mut Document,
     payloads: &mut Table<Payload>,
-    references: &Table<(LocalId, usize)>,
+    references: &mut Table<(LocalId, usize)>,
 ) -> Result<Registry> {
     let mut registry = Registry::new(owner)?;
-    if references
-        .iter()
-        .any(|(id, _)| !payloads.iter().any(|payload| payload.id == *id))
-    {
-        return Err(Error::Schema);
-    }
+    // Sorted references let each payload find its reference without a cross scan.
+    references.sort_unstable_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+    let mut matched = 0;
     for payload in payloads.iter_mut() {
         if !payload.ended {
             return Err(Error::Schema);
         }
-        let mut nodes = references.iter().filter(|(id, _)| *id == payload.id);
+        let id = payload.id.as_str();
+        let first = references.partition_point(|(other, _)| other.as_str() < id);
+        let mut nodes = references[first..].iter().take_while(|(other, _)| other.as_str() == id);
         let node = nodes.next().map(|(_, node)| *node);
         if nodes.next().is_some() {
             return Err(Error::Schema);
         }
+        matched += usize::from(node.is_some());
         // A later field may have replaced the reference; then the payload is unreachable.
         let node = match node {
             Some(node) if reference(doc, node)? == Some(payload.id) => {
@@ -219,6 +268,10 @@ fn register(
         };
         let chunks = payload.chunks.take().ok_or(Error::Schema)?;
         registry.adopt(doc, node, (payload.id, payload.kind, payload.encoding), chunks)?;
+    }
+    // Every reference names a payload.
+    if matched != references.len() {
+        return Err(Error::Schema);
     }
     Ok(registry)
 }

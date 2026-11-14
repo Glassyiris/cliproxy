@@ -114,6 +114,7 @@ impl Document {
             origins: None,
             last_origin: None,
             published: false,
+            published_through: 0,
             input_key: match name {
                 Some(Name::Mapped(Text { source: 0, span })) => Some(span),
                 _ => None,
@@ -158,6 +159,9 @@ impl Document {
                 }
                 self.nodes[i].parent = None;
                 self.nodes[i].revision = self.nodes[i].revision.checked_add(1).ok_or(Error::Limit)?;
+                if self.nodes[parent].published_through as usize == i + 1 {
+                    self.nodes[parent].published_through = previous.map_or(0, |p| u32::try_from(p + 1).unwrap_or(0));
+                }
                 return Ok(());
             }
             previous = Some(i);

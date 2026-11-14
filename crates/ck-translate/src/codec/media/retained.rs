@@ -54,6 +54,7 @@ impl Registry {
             chunks: Some(chunks),
             active: true,
         });
+        self.active.insert(node, self.entries.len() - 1);
         Ok(())
     }
 }

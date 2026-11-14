@@ -40,6 +40,8 @@ struct Entry {
 
 pub struct Registry {
     entries: Vec<Entry>,
+    /// The active entry registered at each node.
+    active: std::collections::HashMap<usize, usize>,
     metadata: MetadataPermit,
     document: Option<u64>,
 }
@@ -48,6 +50,7 @@ impl Registry {
     pub fn new(owner: &mut Writer) -> Result<Self> {
         Ok(Self {
             entries: Vec::new(),
+            active: std::collections::HashMap::new(),
             metadata: owner.reserve_metadata(0)?,
             document: None,
         })
@@ -62,11 +65,7 @@ impl Registry {
     }
     pub fn get(&self, doc: &Document, node: usize) -> Result<Option<Media>> {
         self.validate_document(doc)?;
-        let Some(entry) = self
-            .entries
-            .iter()
-            .find(|entry| entry.active && entry.media.node == node)
-        else {
+        let Some(entry) = self.active.get(&node).map(|&index| &self.entries[index]) else {
             return Ok(None);
         };
         if lineage(doc, node)? != entry.lineage {
@@ -117,18 +116,31 @@ impl Registry {
             chunks: None,
             active: true,
         });
+        self.active.insert(node, self.entries.len() - 1);
         Ok(media)
     }
-    /// Grows the entry table, charging its metadata quota, before one more entry is pushed.
+    /// Grows the entry table and node index, charging their metadata quota, before one more
+    /// entry is pushed.
     fn reserve(&mut self) -> Result<()> {
+        // A hash table slot holds the pair and one control byte.
+        let slot = std::mem::size_of::<(usize, usize)>() + 1;
         if self.entries.len() == self.entries.capacity() {
             let capacity = self.entries.capacity().max(4).checked_mul(2).ok_or(Error::Limit)?;
-            self.metadata.resize(capacity * std::mem::size_of::<Entry>())?;
+            let charge = |entries: usize| {
+                entries
+                    .checked_mul(std::mem::size_of::<Entry>())
+                    .and_then(|bytes| bytes.checked_add(entries.checked_mul(2)?.checked_mul(slot)?))
+                    .ok_or(Error::Limit)
+            };
+            self.metadata.resize(charge(capacity)?)?;
             self.entries
                 .try_reserve_exact(capacity - self.entries.len())
                 .map_err(|_| Error::Limit)?;
+            self.active
+                .try_reserve(capacity.saturating_sub(self.active.len()))
+                .map_err(|_| Error::Limit)?;
             self.metadata
-                .resize(self.entries.capacity() * std::mem::size_of::<Entry>())?;
+                .resize(charge(self.entries.capacity().max(self.active.capacity() / 2))?)?;
         }
         Ok(())
     }
@@ -145,8 +157,12 @@ impl Registry {
         self.entries[index].media
     }
 
-    pub(crate) fn validate_registrations(&self, doc: &Document) -> Result<()> {
-        for media in self.entries() {
+    pub(crate) fn validate_registrations(&self, doc: &Document, from: usize) -> Result<()> {
+        for media in self.entries[from.min(self.entries.len())..]
+            .iter()
+            .filter(|entry| entry.active)
+            .map(|entry| entry.media)
+        {
             if lineage(doc, media.node)?
                 .iter()
                 .flatten()
@@ -159,9 +175,10 @@ impl Registry {
     }
 
     /// Only ingress normalization may relocate bindings; ordinary get never refreshes lineage.
-    pub(crate) fn relocate_ingress(&mut self, doc: &Document) -> Result<()> {
+    /// Entries before `from` belong to earlier messages, which normalization leaves untouched.
+    pub(crate) fn relocate_ingress(&mut self, doc: &Document, from: usize) -> Result<()> {
         self.validate_document(doc)?;
-        for entry in &mut self.entries {
+        for (index, entry) in self.entries.iter_mut().enumerate().skip(from) {
             if !entry.active {
                 continue;
             }
@@ -169,6 +186,9 @@ impl Registry {
                 && !matches!(doc.node(entry.media.node)?.value, Value::Utf8Media)
             {
                 entry.active = false;
+                if self.active.get(&entry.media.node) == Some(&index) {
+                    self.active.remove(&entry.media.node);
+                }
             } else {
                 entry.lineage = lineage(doc, entry.media.node)?;
             }
@@ -177,12 +197,8 @@ impl Registry {
     }
 
     pub(crate) fn update_mime(&mut self, node: usize, mime: Option<usize>) {
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|entry| entry.active && entry.media.node == node)
-        {
-            entry.media.mime = mime;
+        if let Some(&index) = self.active.get(&node) {
+            self.entries[index].media.mime = mime;
         }
     }
 
@@ -244,11 +260,7 @@ impl Registry {
         e: &mut Encoder<'_, '_>,
     ) -> Result<()> {
         let media = self.get(doc, node)?.ok_or(Error::Position)?;
-        let entry = self
-            .entries
-            .iter()
-            .find(|entry| entry.media.node == node)
-            .ok_or(Error::Position)?;
+        let entry = &self.entries[*self.active.get(&node).ok_or(Error::Position)?];
         if matches!(media.encoding, Encoding::Utf8) {
             let Some(chunks) = &entry.chunks else {
                 let text = media.data.ok_or(Error::Position)?;

@@ -61,6 +61,6 @@ fn snapshot_index_table_quota_lasts_until_suffix_edits_apply() {
         Some((step, codec::Error::Storage(ck_stream::Error::StorageExhausted))) => Some((step, result.1)),
         _ => None,
     };
-    assert_eq!(exhausted(&snapshot_under_budget(450_816)), Some((1, 71)));
-    assert_eq!(exhausted(&snapshot_under_budget(450_824)), Some((2, 88)));
+    assert_eq!(exhausted(&snapshot_under_budget(452_352)), Some((1, 71)));
+    assert_eq!(exhausted(&snapshot_under_budget(452_360)), Some((2, 88)));
 }
