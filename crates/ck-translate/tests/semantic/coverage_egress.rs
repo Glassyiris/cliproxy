@@ -159,11 +159,11 @@ fn duplicated_media_start_is_rejected() {
 }
 
 #[test]
-fn buffered_done_requires_every_choice_finished() {
-    {
+fn done_requires_every_choice_finished_in_both_modes() {
+    for mode in [BodyMode::Streaming, BodyMode::Buffered] {
         let (output, result) = transformed(
             VENDOR,
-            BodyMode::Buffered,
+            mode,
             |_| {},
             |kind, doc| {
                 if kind == Kind::Chunk
@@ -177,8 +177,14 @@ fn buffered_done_requires_every_choice_finished() {
                 1
             },
         );
-        assert!(matches!(result, Err(Error::Truncated)), "{result:?}");
-        assert!(output.is_empty());
+        assert!(matches!(result, Err(Error::Truncated)), "{mode:?}: {result:?}");
+        let text = String::from_utf8(output).unwrap();
+        if mode == BodyMode::Buffered {
+            assert!(text.is_empty(), "{text}");
+        } else {
+            // The streamed prefix may remain; no successful end follows it.
+            assert!(text.contains("\"content\":\"a\"") && !text.contains("[DONE]"), "{text}");
+        }
     }
 }
 

@@ -5,6 +5,7 @@ use crate::codec::{
     encode::{self, Encoder},
     event::{Identity, Kind},
     internal,
+    table::Table,
 };
 use ck_stream::{Lease, ScratchLease, Writer};
 
@@ -23,6 +24,8 @@ pub struct Egress {
     terminal: bool,
     failed: bool,
     reduction: Reduction,
+    /// Streamed choice indexes and whether each delivered its finish.
+    finishes: Table<(u64, bool)>,
     include_usage: bool,
     diagnostic: fn(Diagnostic),
 }
@@ -46,6 +49,7 @@ impl Egress {
             terminal: false,
             failed: false,
             reduction: Reduction::new(owner)?,
+            finishes: Table::new(owner)?,
             include_usage,
             diagnostic,
         })
@@ -137,7 +141,10 @@ impl Egress {
         if let Some(projection) = projection {
             if self.mode == BodyMode::Buffered {
                 self.reduction.fold(projection)?;
-            } else if deliverable {
+                return Ok(());
+            }
+            track_finishes(&mut self.finishes, &projection)?;
+            if deliverable {
                 output(encode::scratch(owner, |e| {
                     if kind == Kind::Chunk {
                         source_fields(&projection, x, e)?;
@@ -209,6 +216,9 @@ impl Egress {
     /// Ends the stream, or writes the aggregate once every buffered choice has finished.
     fn deliver_done(&mut self, owner: &mut Writer, output: &mut impl FnMut(ScratchLease) -> Result<()>) -> Result<()> {
         if self.reduction.has_open_media() {
+            return Err(Error::Truncated);
+        }
+        if self.finishes.iter().any(|(_, finished)| !finished) {
             return Err(Error::Truncated);
         }
         self.terminal = true;
@@ -359,4 +369,26 @@ fn chunk_deliverable(doc: &Document) -> Result<bool> {
         return Ok(doc.node(fields)?.first.is_some());
     }
     Ok(false)
+}
+
+/// Records each choice of a streamed projection and whether it carries a finish, so that Done
+/// requires every streamed choice to have finished, as the buffered aggregate does.
+fn track_finishes(finishes: &mut Table<(u64, bool)>, projection: &Document) -> Result<()> {
+    let Some(choices) = projection.member(projection.root(), "choices")? else {
+        return Ok(());
+    };
+    for choice in projection.children(choices)? {
+        let index = projection.unsigned(projection.required(choice, "index")?)?;
+        let finished = match projection.member(choice, "finish_reason")? {
+            Some(finish) => !matches!(projection.node(finish)?.value, Value::Null),
+            None => false,
+        };
+        match finishes.iter_mut().find(|(seen, _)| *seen == index) {
+            Some((_, done)) => *done |= finished,
+            None => {
+                finishes.push((index, finished))?;
+            }
+        }
+    }
+    Ok(())
 }
