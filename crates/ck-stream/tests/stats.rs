@@ -1,5 +1,9 @@
 use ck_stream::{Config, Error, FRAME_BYTES, ManualClock, Store, Terminal};
-use std::{sync::Arc, task::Poll, time::Duration};
+use std::{
+    sync::{Arc, atomic::Ordering},
+    task::Poll,
+    time::Duration,
+};
 
 fn store(frames: usize, slots: u32) -> (tempfile::TempDir, Store, Arc<ManualClock>) {
     let dir = tempfile::tempdir().unwrap();
@@ -131,4 +135,144 @@ fn failure_charge_excludes_frames_a_failed_reservation_rolled_back() {
         (stats.allocation_failures, stats.evictions, stats.used_frames),
         (1, 0, 2)
     );
+}
+
+fn take(reader: &mut ck_stream::Reader) -> ck_stream::Lease {
+    match reader.try_next() {
+        Poll::Ready(Some(ck_stream::Read::Record(lease))) => lease,
+        _ => panic!("expected record"),
+    }
+}
+
+#[test]
+fn leased_frames_count_each_pinned_frame_once_until_its_last_lease_drops() {
+    let (_dir, store, _) = store(8, 32);
+    let mut writer = store.create().unwrap();
+    let first = writer.append(&[1; FRAME_BYTES]).unwrap();
+    writer.append(&[2; FRAME_BYTES / 2]).unwrap();
+    // Spans the second and third frames.
+    writer.append(&[3; FRAME_BYTES]).unwrap();
+    let mut reader = store.reader(writer.id(), 0).unwrap();
+    let (first_lease, second_lease, spanning) = (take(&mut reader), take(&mut reader), take(&mut reader));
+    let shared = take(&mut store.reader(writer.id(), 1).unwrap());
+    assert_eq!(store.stats().leased_frames, 3);
+    // A released prefix frame stays pinned by its lease.
+    writer.release_before(first.end).unwrap();
+    assert_eq!(store.stats().leased_frames, 3);
+    drop(spanning);
+    assert_eq!(store.stats().leased_frames, 2);
+    drop(first_lease);
+    assert_eq!(store.stats().leased_frames, 1);
+    second_lease.acknowledge();
+    assert_eq!(store.stats().leased_frames, 1);
+    drop(shared);
+    assert_eq!(store.stats().leased_frames, 0);
+}
+
+#[test]
+fn leased_frames_of_evicted_expired_and_invalidated_streams_still_count() {
+    let (_dir, store, clock) = store(4, 32);
+    let mut evicted = store.create().unwrap();
+    evicted.append(&[1; FRAME_BYTES]).unwrap();
+    evicted.append(&[1; FRAME_BYTES]).unwrap();
+    let mut evicted_reader = store.reader(evicted.id(), 0).unwrap();
+    let evicted_lease = take(&mut evicted_reader);
+    drop(evicted_reader);
+    let mut gone = store.create().unwrap();
+    gone.append(b"gone").unwrap();
+    let gone_lease = take(&mut store.reader(gone.id(), 0).unwrap());
+    gone.finish(Terminal::Gone);
+    assert_eq!(store.stats().leased_frames, 2);
+    // Eviction takes the unleased frame and leaves the leased one pinned.
+    clock.advance(Duration::from_secs(1));
+    let mut allocating = store.create().unwrap();
+    allocating.append(&[2; 2 * FRAME_BYTES]).unwrap();
+    assert_eq!(store.stats().evictions, 1);
+    assert!(matches!(store.reader(evicted.id(), 0), Err(Error::Gone)));
+    assert_eq!(store.stats().leased_frames, 2);
+    // Expiry removes the invalidated stream from the cache; its leased frame still counts.
+    clock.advance(Duration::from_secs(3601));
+    store.tick().unwrap();
+    let stats = store.stats();
+    assert_eq!((stats.cached_streams, stats.leased_frames), (0, 2));
+    drop(evicted_lease);
+    assert_eq!(store.stats().leased_frames, 1);
+    drop(gone_lease);
+    assert_eq!(store.stats().leased_frames, 0);
+}
+
+#[test]
+fn leased_frames_survive_shutdown() {
+    let (_dir, mut store, _) = store(8, 32);
+    let mut writer = store.create().unwrap();
+    writer.append(b"record").unwrap();
+    let lease = take(&mut store.reader(writer.id(), 0).unwrap());
+    store.shutdown().unwrap();
+    assert_eq!(store.stats().leased_frames, 1);
+    drop(lease);
+    assert_eq!(store.stats().leased_frames, 0);
+}
+
+#[test]
+fn concurrent_reads_eviction_and_snapshots_neither_deadlock_nor_leak_leases() {
+    let (_dir, store, _) = store(8, 4);
+    let store = Arc::new(store);
+    let latest = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let taken = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (finished, joined) = std::sync::mpsc::channel();
+    let spawn = |work: Box<dyn FnOnce() + Send>| {
+        let finished = finished.clone();
+        std::thread::spawn(move || {
+            work();
+            finished.send(()).unwrap();
+        })
+    };
+    let (writer_store, writer_latest, writer_done) = (store.clone(), latest.clone(), done.clone());
+    spawn(Box::new(move || {
+        for _ in 0..2000 {
+            // Slot and frame pressure evict streams that readers may be leasing.
+            let Ok(mut writer) = writer_store.create() else {
+                continue;
+            };
+            writer_latest.store(writer.id(), Ordering::Release);
+            for _ in 0..4 {
+                if writer.append(&[5; FRAME_BYTES / 2]).is_err() {
+                    break;
+                }
+            }
+            writer.finish(Terminal::Done);
+        }
+        writer_done.store(true, Ordering::Release);
+    }));
+    for _ in 0..3 {
+        let (store, latest, done, taken) = (store.clone(), latest.clone(), done.clone(), taken.clone());
+        spawn(Box::new(move || {
+            while !done.load(Ordering::Acquire) {
+                let Ok(mut reader) = store.reader(latest.load(Ordering::Acquire), 0) else {
+                    continue;
+                };
+                let mut held = Vec::new();
+                while let Poll::Ready(Some(ck_stream::Read::Record(lease))) = reader.try_next() {
+                    held.push(lease);
+                }
+                taken.fetch_add(held.len() as u64, Ordering::Relaxed);
+                held.into_iter().step_by(2).for_each(ck_stream::Lease::acknowledge);
+            }
+        }));
+    }
+    let (snapshots, snapshot_done) = (store.clone(), done.clone());
+    spawn(Box::new(move || {
+        while !snapshot_done.load(Ordering::Acquire) {
+            snapshots.stats();
+        }
+    }));
+    for _ in 0..5 {
+        joined
+            .recv_timeout(Duration::from_secs(60))
+            .expect("a thread deadlocked");
+    }
+    let stats = store.stats();
+    assert!(stats.evictions > 0 && taken.load(Ordering::Relaxed) > 0);
+    assert_eq!(stats.leased_frames, 0);
 }

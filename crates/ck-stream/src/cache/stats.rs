@@ -1,5 +1,8 @@
 use std::{
-    sync::atomic::{AtomicU32, AtomicU64, Ordering},
+    sync::{
+        Weak,
+        atomic::{AtomicU32, AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -28,6 +31,10 @@ pub struct StoreStats {
     /// Frames charged to the most recent stream that ended with `StorageExhausted`. Concurrent
     /// failures race; `Writer::storage_failure_frames` has each stream's own value.
     pub last_storage_exhausted_frames: Option<u32>,
+    /// Frames that reader leases keep pinned, including on streams that left the cache. Zero
+    /// exactly when no reader lease is outstanding; a lease spanning several frames counts
+    /// each, and leases sharing a frame count it once.
+    pub leased_frames: u64,
     pub maintenance: MaintenanceFailures,
 }
 
@@ -66,15 +73,21 @@ impl Store {
         let inner = &self.inner;
         let now = inner.retention.now();
         let mut oldest: Option<Duration> = None;
-        let cache = inner.cache.lock();
+        let mut leased_frames = 0;
+        let mut cache = inner.cache.lock();
         // Lock order: cache, then each stream's state, as eviction and expiry take them.
         for stream in cache.streams.values() {
             let state = stream.state.lock();
+            leased_frames += stream.leased_frames(&state);
             if stream.is_invalidated() {
                 continue;
             }
             let read = if state.readers > 0 { now } else { stream.last_read() };
             oldest = Some(oldest.map_or(read, |oldest| oldest.min(read)));
+        }
+        cache.orphans.retain(|orphan| orphan.strong_count() > 0);
+        for orphan in cache.orphans.iter().filter_map(Weak::upgrade) {
+            leased_frames += orphan.leased_frames(&orphan.state.lock());
         }
         let (cached_streams, evictions, expiries) = (cache.streams.len(), cache.evictions, cache.expiries);
         drop(cache);
@@ -92,6 +105,7 @@ impl Store {
             expiries,
             allocation_failures: failures.count.load(Ordering::Relaxed),
             last_storage_exhausted_frames: (last_frames != u32::MAX).then_some(last_frames),
+            leased_frames,
             maintenance: self.maintenance_failures(),
         }
     }

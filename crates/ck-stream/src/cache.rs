@@ -112,6 +112,18 @@ pub(crate) struct Cache {
     order: BTreeSet<(Duration, u64)>,
     evictions: u64,
     expiries: u64,
+    /// Streams that left the cache; their readers may still hold leases.
+    orphans: Vec<Weak<Stream>>,
+}
+
+impl Cache {
+    fn retire(&mut self, stream: &Arc<Stream>) {
+        // Pruning only when full keeps this amortized O(1) and at most twice the live orphans.
+        if self.orphans.len() == self.orphans.capacity() {
+            self.orphans.retain(|orphan| orphan.strong_count() > 0);
+        }
+        self.orphans.push(Arc::downgrade(stream));
+    }
 }
 
 #[repr(align(128))]
@@ -244,6 +256,7 @@ impl Inner {
             let stream = cache.streams.remove(&key.1).unwrap();
             cache.order.remove(&key);
             stream.invalidate_locked(&mut stream.state.lock());
+            cache.retire(&stream);
         }
         true
     }
@@ -272,6 +285,7 @@ impl Inner {
                 cache.streams.remove(&id);
                 cache.expiries += 1;
                 stream.invalidate_locked(&mut state);
+                cache.retire(&stream);
             }
         }
         #[cfg(test)]
@@ -478,11 +492,11 @@ impl Store {
         {
             let _retention = self.inner.retention.retain();
             let mut cache = self.inner.cache.lock();
-            for stream in cache.streams.values() {
-                stream.finish(Terminal::Shutdown);
-            }
             cache.order.clear();
-            cache.streams.clear();
+            for stream in std::mem::take(&mut cache.streams).into_values() {
+                stream.finish(Terminal::Shutdown);
+                cache.retire(&stream);
+            }
         }
         *self.stop.0.lock().unwrap() = true;
         self.stop.1.notify_all();

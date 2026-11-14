@@ -165,6 +165,19 @@ impl Stream {
         self.invalidated.load(Ordering::Acquire)
     }
 
+    /// Frames reader leases keep pinned: owned ones with another reference, and detached ones
+    /// only leases still hold. Every record spans a frame, so this is zero exactly when no lease
+    /// on the stream is outstanding. Counted here rather than per lease: an atomic update on
+    /// every lease drop cost 5% of small-request throughput.
+    pub(crate) fn leased_frames(&self, state: &State) -> u64 {
+        let owned = state
+            .frames
+            .iter()
+            .filter(|frame| frame.pool.is_some_and(|index| self.pool.references(index) > 1))
+            .count();
+        owned as u64 + self.detached.load(Ordering::Acquire)
+    }
+
     pub(crate) fn last_read(&self) -> Duration {
         Duration::from_millis(self.last_read.load(Ordering::Relaxed))
     }

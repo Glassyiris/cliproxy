@@ -165,3 +165,23 @@ fn refused_admission_counts_as_an_allocation_failure() {
     );
     store.inner.pool.release_slot(slot);
 }
+
+#[test]
+fn retired_streams_are_pruned_once_their_handles_drop() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::new(dir.path().join("pool"));
+    config.pool_bytes = Some(4 * FRAME_BYTES);
+    config.max_event_bytes = FRAME_BYTES;
+    config.header_slots = 1;
+    config.workers = 1;
+    let store = Store::open(config).unwrap();
+    let mut previous = store.create().unwrap();
+    for _ in 0..64 {
+        // Admission evicts the previous stream while its writer still holds it.
+        let next = store.create().unwrap();
+        drop(std::mem::replace(&mut previous, next));
+    }
+    // Checked before `stats`, which prunes too.
+    assert!(store.inner.cache.lock().orphans.len() <= 4);
+    assert_eq!(store.stats().evictions, 64);
+}
