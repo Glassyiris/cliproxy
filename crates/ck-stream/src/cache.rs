@@ -114,13 +114,18 @@ pub(crate) struct Cache {
     expiries: u64,
     /// Streams that left the cache; their readers may still hold leases.
     orphans: Vec<Weak<Stream>>,
+    /// `orphans` length that triggers the next prune: twice the entries the last prune kept.
+    prune_at: usize,
 }
 
 impl Cache {
+    /// Each prune scans at most twice the entries the previous one kept, and as many
+    /// retirements pass in between, so retirement is amortized O(1). The length stays below
+    /// twice the entries alive at the last prune plus one; capacity keeps its historical peak.
     fn retire(&mut self, stream: &Arc<Stream>) {
-        // Pruning only when full keeps this amortized O(1) and at most twice the live orphans.
-        if self.orphans.len() == self.orphans.capacity() {
+        if self.orphans.len() >= self.prune_at {
             self.orphans.retain(|orphan| orphan.strong_count() > 0);
+            self.prune_at = 2 * self.orphans.len();
         }
         self.orphans.push(Arc::downgrade(stream));
     }

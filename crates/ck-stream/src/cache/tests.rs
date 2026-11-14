@@ -185,3 +185,40 @@ fn retired_streams_are_pruned_once_their_handles_drop() {
     assert!(store.inner.cache.lock().orphans.len() <= 4);
     assert_eq!(store.stats().evictions, 64);
 }
+
+#[test]
+fn orphan_pruning_stays_amortized_when_one_orphan_dies_per_retirement() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::new(dir.path().join("pool"));
+    config.pool_bytes = Some(4 * FRAME_BYTES);
+    config.max_event_bytes = FRAME_BYTES;
+    config.header_slots = 1;
+    config.workers = 1;
+    let store = Store::open(config).unwrap();
+    let orphans = || store.inner.cache.lock().orphans.len();
+    let (mut retirements, mut scanned) = (0, 0);
+    let mut admit = || {
+        let before = orphans();
+        let writer = store.create().unwrap();
+        // Each admission retires one stream; a list no longer than before means it pruned.
+        if orphans() <= before {
+            scanned += before;
+        }
+        retirements += 1;
+        writer
+    };
+    // 4,095 retired streams stay referenced, filling a 4,096-entry list but one; from then
+    // on each retired stream dies before the next retirement.
+    let live: Vec<Writer> = (0..4095).map(|_| admit()).collect();
+    let mut previous = admit();
+    for _ in 0..1000 {
+        let next = admit();
+        drop(std::mem::replace(&mut previous, next));
+    }
+    drop(admit);
+    assert!(
+        scanned <= 4 * retirements,
+        "{scanned} orphan checks for {retirements} retirements"
+    );
+    drop(live);
+}
