@@ -211,6 +211,10 @@ pub(super) fn normalize_part(
         doc.detach(part, child)?;
         doc.append(native, child)?;
     }
+    while let Some(entry) = doc.origins(part)?.next() {
+        let (_, carrier) = doc.origin(entry)?.ok_or(Error::Schema)?;
+        doc.bind_origin(entry, native, carrier)?;
+    }
     doc.set(part, "type", Value::Text("opaque"))?;
     doc.set(part, "protocol", Value::Text("chat"))?;
     doc.append(part, native)
@@ -219,7 +223,7 @@ pub(super) fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_,
     let doc = view.document;
     let kind = doc.required(part, "type")?;
     if doc.string_is(kind, "opaque")? {
-        return doc.write(doc.required(part, "value")?, e);
+        return super::request_controls::write(doc, doc.required(part, "value")?, e);
     }
     if doc.string_is(kind, "refusal")? {
         e.bytes(b"{\"type\":\"refusal\",\"refusal\":")?;
