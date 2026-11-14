@@ -29,6 +29,76 @@ pub(super) fn id(doc: &Document, x: usize) -> Result<LocalId> {
     LocalId::new(std::str::from_utf8(&bytes[..len]).map_err(|_| Error::Schema)?)
 }
 
+/// Maps the attributes field name onto the native message member it fills.
+fn media_field(doc: &Document, name: usize) -> Result<&'static str> {
+    Ok(if doc.string_is(name, "audio")? {
+        "audio"
+    } else if doc.string_is(name, "images")? {
+        "images"
+    } else if doc.string_is(name, "content")? {
+        "content"
+    } else if doc.string_is(name, "refusal")? {
+        "refusal"
+    } else if doc.string_is(name, "reasoning_content")? {
+        "reasoning_content"
+    } else {
+        return Err(Error::Unsupported);
+    })
+}
+
+/// Moves a part's carrier to the native member for its media kind (file for a document,
+/// image_url otherwise) and sets the part type to match.
+fn native_carrier(doc: &mut Document, value: usize, document_kind: bool) -> Result<()> {
+    let (old, new, old_data, new_data, native_type) = if document_kind {
+        ("image_url", "file", "url", "file_data", "file")
+    } else {
+        ("file", "image_url", "file_data", "url", "image_url")
+    };
+    if let Some(carrier) = doc.remove(value, old)? {
+        doc.rename(carrier, new)?;
+        if let Some(data) = doc.member(carrier, old_data)? {
+            doc.rename(data, new_data)?;
+        }
+        doc.append(value, carrier)?;
+        doc.set(value, "type", Value::Text(native_type))?;
+    }
+    Ok(())
+}
+
+/// Prepares the node that receives decoded media bytes: the data node itself for text, audio
+/// and documents without a MIME type, otherwise a base64 child after a `data:` URL prefix.
+fn binary_node(
+    owner: &mut Writer,
+    doc: &mut Document,
+    data: usize,
+    field: &'static str,
+    scalar: bool,
+    document_kind: bool,
+) -> Result<usize> {
+    Ok(if scalar {
+        doc.replace(data, Value::Utf8Media)?;
+        data
+    } else if field == "audio" || (document_kind && doc.member(doc.root(), "mime")?.is_none()) {
+        doc.replace(data, Value::Base64Fragments)?;
+        data
+    } else {
+        let mime = doc.member(doc.root(), "mime")?;
+        let prefix = encode::scratch(owner, |e| {
+            e.bytes(b"\"data:")?;
+            if let Some(mime) = mime {
+                doc.write_contents(mime, e)?;
+            }
+            e.bytes(b";base64,\"")
+        })?;
+        let prefix = doc.import_json(owner, prefix)?;
+        doc.replace(data, Value::Fragments)?;
+        doc.append(data, prefix)?;
+        let binary = doc.add(None, Value::Base64Fragments)?;
+        doc.append(data, binary)?;
+        binary
+    })
+}
+
 impl Projection {
     pub(super) fn is_open(&self) -> bool {
         !self.ended
@@ -56,19 +126,7 @@ impl Projection {
             });
         };
         let name = doc.required(attributes, "field")?;
-        let field = if doc.string_is(name, "audio")? {
-            "audio"
-        } else if doc.string_is(name, "images")? {
-            "images"
-        } else if doc.string_is(name, "content")? {
-            "content"
-        } else if doc.string_is(name, "refusal")? {
-            "refusal"
-        } else if doc.string_is(name, "reasoning_content")? {
-            "reasoning_content"
-        } else {
-            return Err(Error::Unsupported);
-        };
+        let field = media_field(&doc, name)?;
         let supplied_value = doc.member(attributes, "value")?;
         let value = match supplied_value {
             Some(value) => value,
@@ -81,19 +139,7 @@ impl Projection {
             .is_some_and(|node| matches!(node.value, Value::Bool(true)));
         let document_kind = doc.string_is(doc.required(doc.root(), "kind")?, "document")?;
         if !scalar && field != "audio" && supplied_value.is_some() {
-            let (old, new, old_data, new_data, native_type) = if document_kind {
-                ("image_url", "file", "url", "file_data", "file")
-            } else {
-                ("file", "image_url", "file_data", "url", "image_url")
-            };
-            if let Some(carrier) = doc.remove(value, old)? {
-                doc.rename(carrier, new)?;
-                if let Some(data) = doc.member(carrier, old_data)? {
-                    doc.rename(data, new_data)?;
-                }
-                doc.append(value, carrier)?;
-                doc.set(value, "type", Value::Text(native_type))?;
-            }
+            native_carrier(&mut doc, value, document_kind)?;
         }
         let supplied_data = if supplied_value.is_none() {
             None
@@ -116,28 +162,7 @@ impl Projection {
         if !matches!(doc.node(data)?.value, Value::Null) {
             return Err(Error::Schema);
         }
-        let binary = if scalar {
-            doc.replace(data, Value::Utf8Media)?;
-            data
-        } else if field == "audio" || (document_kind && doc.member(doc.root(), "mime")?.is_none()) {
-            doc.replace(data, Value::Base64Fragments)?;
-            data
-        } else {
-            let mime = doc.member(doc.root(), "mime")?;
-            let prefix = encode::scratch(owner, |e| {
-                e.bytes(b"\"data:")?;
-                if let Some(mime) = mime {
-                    doc.write_contents(mime, e)?;
-                }
-                e.bytes(b";base64,\"")
-            })?;
-            let prefix = doc.import_json(owner, prefix)?;
-            doc.replace(data, Value::Fragments)?;
-            doc.append(data, prefix)?;
-            let binary = doc.add(None, Value::Base64Fragments)?;
-            doc.append(data, binary)?;
-            binary
-        };
+        let binary = binary_node(owner, &mut doc, data, field, scalar, document_kind)?;
         Ok(Self {
             id,
             document: Some(doc),
