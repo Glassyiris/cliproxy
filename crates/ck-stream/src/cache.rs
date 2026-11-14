@@ -66,7 +66,7 @@ pub(crate) struct Cache {
 pub(crate) struct Inner {
     pub pool: Arc<Pool>,
     pub limits: Limits,
-    cache: Mutex<Cache>,
+    cache: parking_lot::Mutex<Cache>,
     retention: Arc<Retention>,
     closed: AtomicBool,
     reclaim_error: Mutex<Option<io::Error>>,
@@ -126,7 +126,7 @@ impl Drop for RetentionGuard<'_> {
 impl Inner {
     pub(crate) fn evict_one(&self, exclude: u64) -> bool {
         let _retention = self.retention.retain();
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock();
         let mut stale = 0;
         let pass = cache.streams.len() - usize::from(cache.streams.contains_key(&exclude));
         while let Some(key) = cache.order.iter().find(|(_, id)| *id != exclude).copied() {
@@ -172,7 +172,7 @@ impl Inner {
         let now = self.retention.clock.now();
         {
             let _retention = self.retention.retain();
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self.cache.lock();
             while let Some(&(read, id)) = cache.order.first() {
                 if now.saturating_sub(read) <= self.limits.cache_ttl {
                     break;
@@ -235,7 +235,7 @@ impl Store {
         let inner = Arc::new(Inner {
             pool,
             limits,
-            cache: Mutex::new(Cache::default()),
+            cache: parking_lot::Mutex::new(Cache::default()),
             retention: Arc::new(Retention {
                 clock,
                 fence: RwLock::new(()),
@@ -290,7 +290,7 @@ impl Store {
 
     /// Admit one exclusive producer. The returned id is an internal generation, not an auth token.
     pub fn create(&self) -> Result<Writer, Error> {
-        let mut cache = self.inner.cache.lock().unwrap();
+        let mut cache = self.inner.cache.lock();
         if self.inner.closed.load(Ordering::Acquire) {
             return Err(Error::Closed);
         }
@@ -312,15 +312,7 @@ impl Store {
 
     /// Attach at the number of complete records already consumed. Authorization belongs to the caller.
     pub fn reader(&self, id: u64, after: u64) -> Result<Reader, Error> {
-        let stream = self
-            .inner
-            .cache
-            .lock()
-            .unwrap()
-            .streams
-            .get(&id)
-            .cloned()
-            .ok_or(Error::Gone)?;
+        let stream = self.inner.cache.lock().streams.get(&id).cloned().ok_or(Error::Gone)?;
         Reader::new(stream, after)
     }
 
@@ -339,7 +331,7 @@ impl Store {
         self.inner.closed.store(true, Ordering::Release);
         {
             let _retention = self.inner.retention.retain();
-            let mut cache = self.inner.cache.lock().unwrap();
+            let mut cache = self.inner.cache.lock();
             for stream in cache.streams.values() {
                 stream.finish(Terminal::Shutdown);
             }

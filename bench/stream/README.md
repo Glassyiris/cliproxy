@@ -45,7 +45,13 @@ The release driver accepts `ck-stream-bench pool|heap ROW DIRECTORY [RESERVE_BYT
 
 With an explicit reserve, the driver records pool-open time and pre-open, initial-idle and post-expiry/decay RSS, anonymous/shmem and tmpfs/cgroup snapshots. It runs the first burst, expires retained streams, releases their frames through normal ownership and samples decay. With a positive idle interval it then repeats the same workload on the same pool; `metrics` describes that post-decay burst and `startup.first_burst` preserves the cold result. Use two idle seconds to cover a full eligibility interval. Whole-process timing and peak RSS belong in the parent runner and include diagnostic sampling and any idle wait; they are not startup-only measurements.
 
-These diagnostics do not move the ordinary memory row's pre-open baseline or change any gate threshold. A persistent reserve is charged to RSS and tmpfs, including when idle.
+These diagnostics keep the ordinary memory row's pre-open baseline and report the full RSS/tmpfs charge, including the idle reserve. Under the maintainer's 2026-11-14 interpretation of startup option B, explicit-reserve comparisons add the configured reserve to the baseline allowance and heap RSS comparator (§9.3). The ordinary reserve-zero gate is unchanged.
+
+## Cache admission contention
+
+The cache index uses the same `parking_lot` mutex as stream metadata. Stream admission and insertion into the lookup map and last-read queue remain serialized. Retention, publication, quotas and the default startup reserve are unchanged.
+
+In seven interleaved pairs on 2026-11-14, with a 256 MiB reserve and eight workers pinned to one CCD, replacing the cache mutex reduced concurrent-256/1024 TTFB p99 medians from 21.890/19.470 to 17.820/15.620 microseconds. These are affected-row measurements, not complete storage-gate acceptance. Moving stream construction outside the lock reduced reserved-pool tails further but worsened the zero-reserve concurrent-256 tail by 36% in a separate seven-pair comparison, so that experiment was rejected. The small-1 and periodic-latency regressions remain open; the default reserve remains zero.
 
 ## Narrow verification
 
