@@ -209,3 +209,46 @@ fn empty_aliases_fall_through_and_give_way_without_empty_chunks() {
         assert_eq!(parts, [json!("T")], "{delta}");
     }
 }
+
+#[test]
+fn reasoning_alias_wins_over_reasoning_details_in_either_source_order() {
+    let details = json!([{"text":"details"}]);
+    for message in [
+        json!({"reasoning":"alias","reasoning_details":details}),
+        json!({"reasoning_details":details,"reasoning":"alias"}),
+    ] {
+        let body =
+            json!({"id":"r","model":"m","created":1,"choices":[{"index":0,"message":message,"finish_reason":"stop"}]});
+        let mut chunk = body.clone();
+        chunk["choices"][0]["delta"] = chunk["choices"][0]["message"].take();
+        chunk["choices"][0].as_object_mut().unwrap().remove("message");
+        let stream = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+        for (upstream, wire) in [(BodyMode::Buffered, body.to_string()), (BodyMode::Streaming, stream)] {
+            for mode in [BodyMode::Buffered, BodyMode::Streaming] {
+                let case = format!("{message}/{upstream:?}/{mode:?}");
+                let (output, events) = response(wire.as_bytes(), upstream, mode);
+                assert_eq!(canonical_reasoning(&events), ("alias".into(), 1), "{case}");
+                // The unselected alias stays native unknown data, once.
+                let (reasoning, unselected) = if mode == BodyMode::Buffered {
+                    let body: Value = serde_json::from_slice(&output).unwrap();
+                    let message = body["choices"][0]["message"].clone();
+                    assert!(message.get("reasoning").is_none(), "{case}");
+                    (
+                        message["reasoning_content"].as_str().unwrap().to_owned(),
+                        vec![message["reasoning_details"].clone()],
+                    )
+                } else {
+                    let deltas = stream_deltas(&output);
+                    assert!(deltas.iter().all(|delta| delta.get("reasoning").is_none()), "{case}");
+                    let unselected = deltas
+                        .iter()
+                        .filter_map(|delta| delta.get("reasoning_details").cloned())
+                        .collect();
+                    (stream_reasoning(&deltas), unselected)
+                };
+                assert_eq!(reasoning, "alias", "{case}");
+                assert_eq!(unselected, std::slice::from_ref(&details), "{case}");
+            }
+        }
+    }
+}
