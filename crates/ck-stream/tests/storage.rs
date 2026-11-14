@@ -476,6 +476,8 @@ fn tmpfs_enospc_evicts_once_then_reports_the_os_error() {
     let dir = private_tmpfs();
     let mut config = Config::new(dir.path().join("pool"));
     config.pool_bytes = Some(80 * FRAME_BYTES);
+    // Every frame used here is startup reserve, which background decay never punches.
+    config.startup_reserve_bytes = Some(21 * FRAME_BYTES);
     config.max_event_bytes = FRAME_BYTES;
     config.workers = 1;
     let store = Store::open(config).unwrap();
@@ -520,7 +522,9 @@ fn tmpfs_cold_prefault_failure_evicts_once_then_reports_the_os_error() {
     }
     clock.advance(Duration::from_secs(3601));
     drop(store.reader(old.id(), 0).unwrap());
-    // Expiry frees 30 frames; the second decay punches all but the eight warm ones.
+    // Expiry frees 30 frames; the second decay punches all but the eight warm ones. Extra
+    // background decays change nothing: eight warm frames stay and later frees sit above the
+    // low-water mark until the test ends.
     for _ in 0..3 {
         store.tick().unwrap();
     }
