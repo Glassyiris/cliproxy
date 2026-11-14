@@ -93,7 +93,7 @@ count must fit 268,400,000 stored bytes at 40,966 to 41,990 bytes per record
 (content plus at most 1 KiB of stored framing), give or take one frame. Within
 3 s of the error the upstream write must fail with a broken pipe or reset before
 the whole body is sent; an upstream that completes normally fails the case. Raw
-media records first-delivery delay; an external
+media records the delay until the first byte reaches the client; an external
 HTTP clock does not directly prove the internal 100 ms collection bound.
 
 Live and completed SSE resume use only the `X-Ck-Stream-Id` header and positional

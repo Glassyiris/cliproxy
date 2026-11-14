@@ -794,9 +794,11 @@ def run_scenario(gateway, name):
             return check_stream_limit(gateway, response)
         if name in ("long-media", "media-resume"):
             require(response.getheader("Content-Type", "").startswith("audio/mpeg"), "media MIME changed")
-            prefix = response.read(65536)
+            first = response.read(1)
+            require(first, "media response ended before its first byte")
             first_write = next(p["time"] for p in up.progress if p["kind"] == "write")
             first_delivery_s = time.monotonic() - first_write
+            prefix = first + response.read(65535)
             if name == "media-resume":
                 stream_id = response.getheader("X-Ck-Stream-Id")
                 require(stream_id, "missing X-Ck-Stream-Id for byte resume")
