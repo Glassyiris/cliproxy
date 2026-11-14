@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { get } from "node:http";
 import { test } from "node:test";
 
 async function startMock() {
@@ -420,17 +421,28 @@ test("mock configuration and CORS match management responses", { timeout: 15_000
         ["/admin/v1/effective/config", ["X-Ck-Revision", "X-Ck-Published-Revision"]],
       ]) {
         for (const method of ["OPTIONS", "GET"]) {
-          const response = await fetch(`${base}${path}`, {
-            method,
-            headers: { Authorization: "Bearer mock", Origin: "http://dashboard.example.invalid" },
+          const response = await new Promise((resolve, reject) => {
+            get(
+              `${base}${path}`,
+              {
+                method,
+                headers: {
+                  Authorization: "Bearer mock",
+                  Origin: "http://dashboard.example.invalid",
+                },
+              },
+              resolve,
+            ).on("error", reject);
           });
-          assert.equal(response.status, method === "OPTIONS" ? 204 : 200);
-          assert.equal(response.headers.get("access-control-allow-origin"), "*");
+          response.resume();
+          assert.equal(response.statusCode, method === "OPTIONS" ? 204 : 200);
+          assert.equal(response.headers["access-control-allow-origin"], "*");
           assert.deepEqual(
-            response.headers.get("access-control-expose-headers")?.split(/,\s*/),
-            method === "OPTIONS" ? exposed : [...exposed, ...extra],
+            response.headersDistinct["access-control-expose-headers"],
+            method === "OPTIONS" || extra.length === 0
+              ? [exposed.join(", ")]
+              : [exposed.join(", "), extra.join(", ")],
           );
-          await response.arrayBuffer();
         }
       }
     });

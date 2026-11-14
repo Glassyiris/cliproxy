@@ -878,7 +878,7 @@ const server = http.createServer((req, res) => {
       if (url.pathname === "/healthz") return (status = 200), send(200, { "Content-Type": "application/json" }, '{"status":"ok"}');
       if (url.pathname === "/v1/models" && req.method === "GET") return (status = clientModels(req, send));
       if (![PREFIX, "/admin/v1"].some((prefix) => url.pathname.startsWith(prefix + "/") || url.pathname === prefix)) return send(404, {}, "");
-      const exposed = EXPOSED_HEADERS + (url.pathname.startsWith("/admin/v1/") && req.method !== "OPTIONS" ? ", X-Ck-Revision, X-Ck-Published-Revision" : "");
+      const exposed = url.pathname.startsWith("/admin/v1/") && req.method !== "OPTIONS" ? [EXPOSED_HEADERS, "X-Ck-Revision, X-Ck-Published-Revision"] : EXPOSED_HEADERS;
       const headers = { "X-Ck-Version": VERSION, "X-Ck-Commit": "0000000", "X-Ck-Build-Date": BUILD_DATE, "Cache-Control": "no-store", "X-Ck-Revision": String(configVersion), "X-Ck-Published-Revision": String(configVersion), "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS", "Access-Control-Allow-Headers": "*", "Access-Control-Expose-Headers": exposed };
       if (req.method === "OPTIONS") return (status = 204), send(204, headers, "");
       const auth = req.headers.authorization || "";
