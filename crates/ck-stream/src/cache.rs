@@ -433,7 +433,7 @@ impl Store {
             self.inner.limits,
             now,
         ));
-        cache.order.insert((now, id));
+        cache.order.insert((stream.last_read(), id));
         cache.streams.insert(id, stream.clone());
         Ok(Writer::new(self.inner.clone(), stream))
     }

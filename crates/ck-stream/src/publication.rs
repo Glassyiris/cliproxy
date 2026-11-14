@@ -115,7 +115,7 @@ pub(crate) struct Stream {
     limits: Limits,
     pub state: Mutex<State>,
     invalidated: AtomicBool,
-    /// Clock nanoseconds of the last read. Acknowledgements raise it without the state lock.
+    /// Clock milliseconds of the last read. Acknowledgements raise it without the state lock.
     last_read: AtomicU64,
     /// Frames the stream gave up while leases still pin them; they still count as live.
     detached: AtomicU64,
@@ -140,7 +140,7 @@ impl Stream {
             notify: Wakeup::new(),
             stopped: Wakeup::new(),
             invalidated: AtomicBool::new(false),
-            last_read: AtomicU64::new(nanos(now)),
+            last_read: AtomicU64::new(millis(now)),
             detached: AtomicU64::new(0),
             state: Mutex::new(State {
                 frames: VecDeque::new(),
@@ -159,13 +159,17 @@ impl Stream {
     }
 
     pub(crate) fn last_read(&self) -> Duration {
-        Duration::from_nanos(self.last_read.load(Ordering::Relaxed))
+        Duration::from_millis(self.last_read.load(Ordering::Relaxed))
     }
 
     /// Raise the last-read time. An unlocked acknowledgement may store a sample older than a
-    /// read that finished meanwhile, so the time never moves backwards.
+    /// read that finished meanwhile, so the time never moves backwards. The time is kept in
+    /// whole milliseconds, so reads within one millisecond skip the locked update.
     pub(crate) fn touch(&self, now: Duration) {
-        self.last_read.fetch_max(nanos(now), Ordering::Relaxed);
+        let now = millis(now);
+        if now > self.last_read.load(Ordering::Relaxed) {
+            self.last_read.fetch_max(now, Ordering::Relaxed);
+        }
     }
 
     /// Frames that invalidation would return to the pool now: owned and unleased.
@@ -325,6 +329,6 @@ fn last_frame(record: Record) -> u64 {
     }
 }
 
-fn nanos(time: Duration) -> u64 {
-    u64::try_from(time.as_nanos()).unwrap_or(u64::MAX)
+fn millis(time: Duration) -> u64 {
+    u64::try_from(time.as_millis()).unwrap_or(u64::MAX)
 }
