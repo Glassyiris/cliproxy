@@ -1,4 +1,6 @@
 mod heap;
+#[cfg(test)]
+mod tests;
 
 use anyhow::{Context, Result, bail, ensure};
 use ck_stream::{Config, FRAME_BYTES, ManualClock, Read, Store, Terminal};
@@ -8,7 +10,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
+    sync::{Arc, LazyLock},
     task::Poll,
     time::{Duration, Instant},
 };
@@ -157,8 +159,43 @@ fn percentile(values: &mut [u64], p: f64) -> u64 {
     values.sort_unstable();
     values[((values.len() - 1) as f64 * p).round() as usize]
 }
-fn checksum(bytes: &[u8]) -> u64 {
-    bytes.iter().map(|&x| u64::from(x)).sum()
+
+/// Payload byte `i` of stream `id` is `(i + 97 × id) mod 251`. The period is
+/// prime and coprime to the frame size, so a stale, shifted or cross-stream
+/// frame fails the comparison that a constant byte would pass.
+const PERIOD: usize = 251;
+static PATTERN: LazyLock<Vec<u8>> = LazyLock::new(|| (0..PERIOD + FRAME_BYTES).map(|i| (i % PERIOD) as u8).collect());
+fn pattern(id: u64, offset: usize, len: usize) -> &'static [u8] {
+    let phase = (offset + (id % PERIOD as u64) as usize * 97) % PERIOD;
+    &PATTERN[phase..phase + len]
+}
+/// Compares every visited byte with the expected pattern at its logical offset.
+struct Check {
+    id: u64,
+    offset: usize,
+    ok: bool,
+}
+impl Check {
+    fn new(id: u64) -> Self {
+        Self {
+            id,
+            offset: 0,
+            ok: true,
+        }
+    }
+    fn visit(&mut self, bytes: &[u8]) {
+        self.ok &= bytes == pattern(self.id, self.offset, bytes.len());
+        self.offset += bytes.len();
+    }
+    fn finish(&self, expected: usize) -> Result<()> {
+        ensure!(
+            self.ok && self.offset == expected,
+            "payload mismatch: {} of {expected} bytes, pattern intact: {}",
+            self.offset,
+            self.ok
+        );
+        Ok(())
+    }
 }
 
 async fn stream(
@@ -171,31 +208,27 @@ async fn stream(
     let start = Instant::now();
     let mut writer = backend.create().context("create stream")?;
     let mut handles = Vec::new();
+    let id = writer.id();
     for _ in 0..readers {
-        let mut reader = backend.reader(writer.id())?;
+        let mut reader = backend.reader(id)?;
         handles.push(tokio::spawn(async move {
-            let mut sum = 0;
+            let mut check = Check::new(id);
             let mut first = None;
             while let Some(lease) = reader.next().await? {
                 first.get_or_insert(start.elapsed().as_nanos() as u64);
-                lease.visit(|bytes| sum += checksum(bytes))?;
+                lease.visit(|bytes| check.visit(bytes))?;
                 lease.acknowledge();
             }
-            ensure!(
-                sum == total as u64 * 85,
-                "reader checksum {sum}, expected {}",
-                total as u64 * 85
-            );
+            check.finish(total)?;
             first.context("reader observed no bytes")
         }));
     }
-    let payload = vec![85; chunk];
     let mut written = 0;
     let mut next_yield = yield_bytes;
     while written < total {
         let n = chunk.min(total - written);
         writer
-            .append(&payload[..n], chunk == 49152)
+            .append(pattern(id, written, n), chunk == 49152)
             .with_context(|| format!("append at {written}/{total} bytes; {}", backend.counters()))?;
         written += n;
         if written >= next_yield {
@@ -247,23 +280,24 @@ async fn small(backend: Arc<Backend>, tasks: usize, requests: usize) -> Result<V
                 for _ in (task..batch).step_by(tasks) {
                     let start = Instant::now();
                     let mut writer = backend.create()?;
-                    let mut reader = backend.reader(writer.id())?;
-                    for _ in 0..32 {
-                        writer.append(&[85; 64], false)?;
+                    let id = writer.id();
+                    let mut reader = backend.reader(id)?;
+                    for record in 0..32 {
+                        writer.append(pattern(id, record * 64, 64), false)?;
                     }
                     writer.finish();
-                    let mut sum = 0;
+                    let mut check = Check::new(id);
                     loop {
                         match reader.try_next()? {
                             Poll::Ready(Some(lease)) => {
-                                lease.visit(|bytes| sum += checksum(bytes))?;
+                                lease.visit(|bytes| check.visit(bytes))?;
                                 lease.acknowledge();
                             }
                             Poll::Ready(None) => break,
                             Poll::Pending => bail!("completed small stream remained pending"),
                         }
                     }
-                    ensure!(sum == 2048 * 85, "small checksum mismatch");
+                    check.finish(2048)?;
                     drop(reader);
                     drop(writer);
                     latencies.push(start.elapsed().as_nanos() as u64);
@@ -542,6 +576,19 @@ async fn run(
     let backend = Arc::new(Backend::open(kind, directory, reserve_bytes).context("open backend")?);
     let open_ns = open_start.elapsed().as_nanos() as u64;
     let idle = reserve_bytes.map(|_| snapshot(directory)).transpose()?;
+    // Comparison rows run one identical untimed pass, expire it and let the
+    // pool decay once, so both backends start the measured pass with warm code
+    // and idle storage: freed heap memory follows the allocator's trimming, and
+    // freed pool frames are punched except each free list's warm frames.
+    // Startup diagnostics stay cold.
+    let warmup = reserve_bytes.is_none() && !matches!(row.split('-').next(), Some("memory" | "totalcap" | "enospc"));
+    if warmup {
+        workload(backend.clone(), row, directory, None)
+            .await
+            .context("untimed warmup")?;
+        backend.expire()?;
+        backend.tick()?;
+    }
     let mut value = workload(backend.clone(), row, directory, baseline.clone()).await?;
     let startup = if let Some(before_open) = before_open {
         let first_burst = value.clone();
@@ -561,12 +608,22 @@ async fn run(
     } else {
         None
     };
-    Ok(json!({"status":"ok","backend":kind,"row":row,"metrics":value,"counters":backend.counters(),"startup":startup}))
+    Ok(
+        json!({"status":"ok","backend":kind,"row":row,"warmup":warmup,"metrics":value,"counters":backend.counters(),"startup":startup}),
+    )
+}
+
+/// Process-wide minor page faults (all threads), from /proc/self/stat field 10.
+fn minor_faults() -> Result<u64> {
+    let stat = fs::read_to_string("/proc/self/stat")?;
+    let fields = stat.rsplit_once(')').context("stat shape")?.1;
+    Ok(fields.split_whitespace().nth(7).context("minflt")?.parse()?)
 }
 
 async fn workload(backend: Arc<Backend>, row: &str, directory: &Path, baseline: Option<Value>) -> Result<Value> {
     let fields: Vec<&str> = row.split('-').collect();
-    let value = match fields.as_slice() {
+    let faults = minor_faults()?;
+    let mut value = match fields.as_slice() {
         ["small", tasks] => small(backend.clone(), tasks.parse()?, 20000).await?,
         ["smoke"] => small(backend.clone(), 1, 8).await?,
         ["concurrent", streams] => concurrent(backend.clone(), streams.parse()?).await?,
@@ -594,6 +651,9 @@ async fn workload(backend: Arc<Backend>, row: &str, directory: &Path, baseline: 
         ["enospc"] => enospc(&backend, directory)?,
         _ => bail!("unknown workload {row}"),
     };
+    if let Value::Object(metrics) = &mut value {
+        metrics.insert("minor_faults".into(), json!(minor_faults()? - faults));
+    }
     Ok(value)
 }
 

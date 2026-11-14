@@ -58,6 +58,8 @@ def evaluate(row, runs, expected):
         samples[kind] = good
     try:
         group = row.split("-")[0]
+        if group in METRICS and any(run.get("warmup") is not True for kind in kinds for run in samples[kind]):
+            fail("sample without the untimed same-process warmup")
         for metric in METRICS.get(group, ()):
             if any(not isinstance(run["metrics"][metric], (int, float)) or not math.isfinite(run["metrics"][metric]) or run["metrics"][metric] <= 0
                    for kind in kinds for run in samples[kind]):
@@ -76,6 +78,10 @@ def evaluate(row, runs, expected):
                     fail("pool median below heap P25")
                 values["pool_vs_heap_median_pct"] = (pool["median"]/heap["median"]-1)*100
             result["metrics"][metric] = values
+        if group in METRICS and all(samples[kind] for kind in kinds):
+            # Diagnostic only: first-touch cost left inside each measured pass.
+            result["metrics"]["minor_faults"] = {kind: distribution([run["metrics"]["minor_faults"] for run in samples[kind]])
+                                                 for kind in kinds}
         if any(not samples[kind] for kind in kinds):
             return result
         if group == "memory":
@@ -135,24 +141,30 @@ def provenance(root, tmpfs, binary):
             "notes": ["Fresh process per sample; alternating backend order on successive pairs.",
                       "Small requests expire in untimed batches of at most 2048; response delivery never releases bytes.",
                       "49152-byte records are frame-aligned in both backends; other appends are packed.",
-                      "Heap uses safe locked 50000-byte frames, complete Record indexes, Release/Acquire and Notify; payloads stay retained until expiry.",
+                      "Heap: S0 shape; uninitialised 50000-byte frames from the system allocator, lock-free committed reads (Release/Acquire record count), locks only for frame-table growth, run-index updates and pointer lookup; Notify wakeups; payloads retained until expiry.",
+                      "Comparison rows run one identical untimed warmup pass and expiry in the same process for both backends; minor_faults counts the measured pass.",
+                      "Payload bytes follow a per-stream, per-offset pattern; every reader compares every byte.",
                       "No production event, metadata, stream, header or pool quota is increased.",
                       "cgroup and tmpfs measurements are shared-host charges and may include neighbours."]}
 
 
 def self_test():
     row = "throughput-4-64-1"
-    good = [{"backend": k, "status": "ok", "metrics": {"mb_s": v}} for k, v in (("heap", 100), ("pool", 100))]
+    good = [{"backend": k, "status": "ok", "warmup": True, "metrics": {"mb_s": v, "minor_faults": 0}}
+            for k, v in (("heap", 100), ("pool", 100))]
     assert evaluate(row, good, 1)["status"] == "pass"
     assert evaluate(row, good[:1], 1)["status"] == "fail"
     assert evaluate(row, good[:1], 1)["metrics"]["mb_s"]["heap"]["median"] == 100
-    bad = [dict(run, metrics={"mb_s": 99}) if run["backend"] == "pool" else run for run in good]
+    assert evaluate(row, [dict(run, warmup=False) for run in good], 1)["status"] == "fail"
+    assert evaluate(row, [{k: v for k, v in run.items() if k != "warmup"} for run in good], 1)["status"] == "fail"
+    bad = [dict(run, metrics={"mb_s": 99, "minor_faults": 0}) if run["backend"] == "pool" else run for run in good]
     assert evaluate(row, bad, 1)["status"] == "fail"
     assert evaluate(row, [dict(run, status="error") for run in good], 1)["status"] == "fail"
     assert evaluate(row, [dict(run, metrics={}) for run in good], 1)["status"] == "fail"
-    good_latency = [{"backend": k, "status": "ok", "metrics": {"wall_ns": v, "ttfb_p99_ns": v}} for k,v in (("heap",100),("pool",101))]
+    good_latency = [{"backend": k, "status": "ok", "warmup": True, "metrics": {"wall_ns": v, "ttfb_p99_ns": v, "minor_faults": 0}}
+                    for k, v in (("heap", 100), ("pool", 101))]
     assert evaluate("concurrent-256",good_latency,1)["status"] == "fail"
-    spread = [{"backend": k, "status": "ok", "metrics": {"mb_s": v}}
+    spread = [{"backend": k, "status": "ok", "warmup": True, "metrics": {"mb_s": v, "minor_faults": 0}}
               for k, values in (("heap", [50, 100, 110, 120]), ("pool", [80]*4)) for v in values]
     strict = evaluate(row, spread, 4)
     assert "pool median below heap P25" in strict["failures"]
