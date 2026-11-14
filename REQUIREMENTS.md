@@ -87,7 +87,7 @@ S1 Phase A fixes this configuration contract; the stream settings are not implem
 | `stream.max_metadata_bytes` | Deploy-only; restart required | Provisional metadata limit and checked capacity validation, §6.4 |
 | `stream.cache_ttl` | Deploy-only; restart required | Last-read expiry, §6.4 |
 
-These values need no live-editable admin page or page exception under `crates/AGENTS.md`, Admin panel. Later hot-change support must include its admin page in the same change. Codec/pipeline tolerances in `docs/INTERNAL-STREAM.md`, §9.2, remain PROPOSED and need owner approval; they do not change the existing budgets above or the §9.3 storage gate.
+These values need no live-editable admin page or page exception under `crates/AGENTS.md`, Admin panel. Later hot-change support must include its admin page in the same change. Owner-approved codec/pipeline tolerances in `docs/INTERNAL-STREAM.md`, §9.2, allow at most 5% regression per metric and 0% for memory/storage (2026-11-14 morning, option B); they do not change the existing budgets above or the §9.3 storage gate.
 
 ## Enforcement
 

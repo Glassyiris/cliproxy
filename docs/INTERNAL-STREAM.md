@@ -885,22 +885,22 @@ Pending acceptance inputs, not Phase A results:
 
 - The Phase C codec comparison harness over equivalent old/new fixtures. The pinned `ck-translate` has no standalone codec benchmark executable; the captured gateway and latency example do not substitute for one.
 - Matching new release executables and adapted configuration/load harnesses. Do not overwrite old artifacts with new builds.
-- Same-host baseline/load records, raw rounds and owner approval of the tolerances below before performance acceptance.
+- Same-host baseline/load records and raw rounds using the owner-approved tolerances below before performance acceptance.
 - Measurements for initial extent/growth (21 frames each is a hypothesis), header-slot capacity, heap headroom and provisional event/metadata limits. No measured value is claimed here.
 
-#### PROPOSED codec and pipeline tolerances
+#### Codec and pipeline tolerances
 
-Owner approval is required. These are proposed decision rules, not accepted budgets or benchmark results. For each comparable workload, compare the median of three old and three new rounds. Each round reports its own p50/p95/p99; compare matching percentiles across rounds. Do not pool unrelated protocols, directions, modes or body sizes.
+Owner ruling (2026-11-14 morning, option B): each codec/pipeline metric permits at most 5% regression; memory and storage permit none. For each comparable workload, compare the median of three old and three new rounds. Each round reports its own p50/p95/p99; compare matching percentiles across rounds. Do not pool unrelated protocols, directions, modes or body sizes.
 
-| Metric | PROPOSED acceptance rule |
+| Metric | Acceptance rule |
 | --- | --- |
-| Codec CPU ns/event, allocations/event, allocated bytes/event | New median no higher than old median (0% regression). |
-| Pipeline CPU/completion, first-deliverable, inter-event and completion latency p50/p95/p99 | New median no higher than old median (0% regression). |
-| Throughput | New median no lower than old median (0% regression). |
-| Heap peak/retained and total charged memory/storage | New median no higher than old median for equal work and retention. Report retained-cache cost separately from old disconnect cleanup; never call that unequal-lifetime comparison a pass. |
+| Codec CPU ns/event, allocations/event | New median no higher than 1.05 × old median (at most 5% regression). |
+| Pipeline CPU/completion, first-deliverable, inter-event and completion latency p50/p95/p99 | New median no higher than 1.05 × old median (at most 5% regression). |
+| Throughput | New median no lower than 0.95 × old median (at most 5% regression). |
+| Allocated bytes/event, heap peak/retained and total charged memory/storage | New median no higher than old median (0% regression) for equal work and retention. Report retained-cache cost separately from old disconnect cleanup; never call that unequal-lifetime comparison a pass. |
 | Flow, media and semantic correctness | No missing data, duplicate accounting, early commitment, upstream pause or limit/timer violation. These are mandatory contracts, not noise tolerances. |
 
-Zero old values require zero new values; use absolute values, not division by zero. Measurements outside a rule fail the proposal; noise needs another owner-approved decision, not an automatic waiver. Encoded byte counts may change with the grammar and are reported, not compared as byte-exact goldens. Exact decoded media and signature bytes remain contractual. Approval must name the table revision and any changed rule in this document before accepting results. None of these proposals relaxes §9.3, including its unresolved 101-run row, or the existing size, idle and request-heap budgets in `REQUIREMENTS.md`.
+Zero old values require zero new values; use absolute values, not division by zero. Measurements outside a rule fail; the 5% allowance already accounts for noise and grants no further waiver. Encoded byte counts may change with the grammar and are reported, not compared as byte-exact goldens. Exact decoded media and signature bytes remain contractual. These tolerances do not relax §9.3, including its unresolved 101-run row, or the existing size, idle and request-heap budgets in `REQUIREMENTS.md`.
 
 ### 9.3 Storage regression gate (S1)
 
