@@ -5,6 +5,7 @@ pub mod egress;
 mod provenance;
 pub mod request;
 mod request_content;
+mod request_schema;
 pub mod response;
 
 use super::{

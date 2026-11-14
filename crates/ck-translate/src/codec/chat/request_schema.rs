@@ -1,0 +1,280 @@
+use super::request::require_string;
+use crate::codec::{
+    Error, Result,
+    document::{Document, Value},
+    media::Registry,
+};
+
+pub(super) fn validate(doc: &Document, media: &Registry) -> Result<()> {
+    media.validate_document(doc)?;
+    let root = doc.root();
+    for key in ["temperature", "top_p", "presence_penalty", "frequency_penalty"] {
+        optional(doc, root, key, number)?;
+    }
+    for key in ["max_tokens", "max_completion_tokens", "n", "top_logprobs"] {
+        optional(doc, root, key, |doc, node| doc.unsigned(node).map(|_| ()))?;
+    }
+    for key in ["stream", "parallel_tool_calls", "logprobs", "store"] {
+        optional(doc, root, key, boolean)?;
+    }
+    for key in ["user", "safety_identifier", "prompt_cache_key", "service_tier"] {
+        optional(doc, root, key, require_string)?;
+    }
+    optional(doc, root, "seed", integer)?;
+    optional(doc, root, "metadata", object)?;
+    optional(doc, root, "logit_bias", |doc, node| {
+        object(doc, node)?;
+        for value in doc.children(node)? {
+            number(doc, value)?;
+        }
+        Ok(())
+    })?;
+    optional(doc, root, "stop", |doc, node| {
+        if matches!(doc.node(node)?.value, Value::Array) {
+            for value in doc.children(node)? {
+                require_string(doc, value)?;
+            }
+            Ok(())
+        } else {
+            require_string(doc, node)
+        }
+    })?;
+    optional(doc, root, "stream_options", |doc, node| {
+        object(doc, node)?;
+        optional(doc, node, "include_usage", boolean)?;
+        optional(doc, node, "include_obfuscation", boolean)
+    })?;
+    optional(doc, root, "modalities", |doc, node| {
+        array(doc, node)?;
+        for value in doc.children(node)? {
+            enumeration(doc, value, &["text", "audio", "image"])?;
+        }
+        Ok(())
+    })?;
+    optional(doc, root, "audio", |doc, node| {
+        object(doc, node)?;
+        require_string(doc, doc.required(node, "voice")?)?;
+        require_string(doc, doc.required(node, "format")?)
+    })?;
+    optional(doc, root, "response_format", response_format)?;
+    optional(doc, root, "tools", |doc, tools| {
+        array(doc, tools)?;
+        for tool in doc.children(tools)? {
+            let kind = doc.required(tool, "type")?;
+            enumeration(doc, kind, &["function", "custom"])?;
+            let custom = doc.string_is(kind, "custom")?;
+            let declaration = doc.required(tool, if custom { "custom" } else { "function" })?;
+            object(doc, declaration)?;
+            require_string(doc, doc.required(declaration, "name")?)?;
+            optional(doc, declaration, "description", require_string)?;
+            if custom {
+                optional(doc, declaration, "format", |doc, format| {
+                    object(doc, format)?;
+                    let kind = doc.required(format, "type")?;
+                    enumeration(doc, kind, &["text", "grammar"])?;
+                    if doc.string_is(kind, "grammar")? {
+                        let grammar = doc.required(format, "grammar")?;
+                        object(doc, grammar)?;
+                        enumeration(doc, doc.required(grammar, "syntax")?, &["lark", "regex"])?;
+                        require_string(doc, doc.required(grammar, "definition")?)?;
+                    }
+                    Ok(())
+                })?;
+            } else {
+                optional(doc, declaration, "parameters", schema)?;
+                optional(doc, declaration, "strict", boolean)?;
+            }
+        }
+        Ok(())
+    })?;
+    optional(doc, root, "tool_choice", |doc, choice| {
+        if !matches!(doc.node(choice)?.value, Value::Object) {
+            return enumeration(doc, choice, &["auto", "none", "required"]);
+        }
+        let kind = doc.required(choice, "type")?;
+        enumeration(doc, kind, &["function", "custom"])?;
+        let name = if doc.string_is(kind, "custom")? {
+            "custom"
+        } else {
+            "function"
+        };
+        let chosen = doc.required(doc.required(choice, name)?, "name")?;
+        require_string(doc, chosen)?;
+        let tools = doc.required(root, "tools")?;
+        array(doc, tools)?;
+        for tool in doc.children(tools)? {
+            if doc.equal_strings(kind, doc.required(tool, "type")?)?
+                && doc.equal_strings(chosen, doc.required(doc.required(tool, name)?, "name")?)?
+            {
+                return Ok(());
+            }
+        }
+        Err(Error::Schema)
+    })?;
+    optional(doc, root, "prediction", |doc, prediction| {
+        object(doc, prediction)?;
+        enumeration(doc, doc.required(prediction, "type")?, &["content"])?;
+        let content = doc.required(prediction, "content")?;
+        if matches!(doc.node(content)?.value, Value::Array) {
+            for part in doc.children(content)? {
+                enumeration(doc, doc.required(part, "type")?, &["text"])?;
+                require_string(doc, doc.required(part, "text")?)?;
+            }
+            Ok(())
+        } else {
+            require_string(doc, content)
+        }
+    })?;
+    for message in doc.children(doc.required(root, "messages")?)? {
+        if let Some(calls) = doc.member(message, "tool_calls")? {
+            for call in doc.children(calls)? {
+                enumeration(doc, doc.required(call, "type")?, &["function", "custom"])?;
+            }
+        }
+        if let Some(content) = doc.member(message, "content")? {
+            if matches!(doc.node(content)?.value, Value::Array) {
+                for part in doc.children(content)? {
+                    content_part(doc, media, part)?;
+                }
+            } else if matches!(doc.node(content)?.value, Value::Object) && media.get(doc, content)?.is_none() {
+                return Err(Error::Schema);
+            }
+        }
+    }
+    let x = doc.required(root, "x_ck")?;
+    optional(doc, x, "thinking", |doc, thinking| {
+        object(doc, thinking)?;
+        optional(doc, thinking, "effort", require_string)?;
+        optional(doc, thinking, "enabled", boolean)?;
+        optional(doc, thinking, "include", boolean)?;
+        optional(doc, thinking, "budget_tokens", |doc, node| {
+            doc.unsigned(node).map(|_| ())
+        })?;
+        optional(doc, thinking, "native", object)
+    })?;
+    Ok(())
+}
+
+fn content_part(doc: &Document, media: &Registry, part: usize) -> Result<()> {
+    let kind = doc.required(part, "type")?;
+    for text in ["text", "reasoning", "reasoning_summary", "refusal"] {
+        if doc.string_is(kind, text)? {
+            return require_string(doc, doc.required(part, "text")?);
+        }
+    }
+    if doc.string_is(kind, "opaque")? {
+        enumeration(doc, doc.required(part, "protocol")?, &["chat"])?;
+        doc.required(part, "value")?;
+        return Ok(());
+    }
+    enumeration(doc, kind, &["image", "audio", "document"])?;
+    let source = doc.required(part, "source")?;
+    object(doc, source)?;
+    let source_kind = doc.required(source, "kind")?;
+    if doc.string_is(source_kind, "uri")? {
+        require_string(doc, doc.required(source, "uri")?)?;
+    } else if doc.string_is(source_kind, "file")? {
+        require_string(doc, doc.required(source, "file_id")?)?;
+    } else if doc.string_is(source_kind, "data")? {
+        let reference = doc.required(source, "ref")?;
+        media.get(doc, reference)?.ok_or(Error::Position)?;
+    } else {
+        return Err(Error::Unsupported);
+    }
+    for key in ["mime", "filename", "transcript"] {
+        optional(doc, part, key, require_string)?;
+    }
+    optional(doc, part, "detail", |doc, node| {
+        enumeration(doc, node, &["auto", "low", "high"])
+    })?;
+    optional(doc, part, "timing", |doc, timing| {
+        object(doc, timing)?;
+        number(doc, doc.required(timing, "start")?)?;
+        optional(doc, timing, "end", number)?;
+        enumeration(doc, doc.required(timing, "unit")?, &["seconds", "milliseconds"])
+    })
+}
+
+fn response_format(doc: &Document, node: usize) -> Result<()> {
+    object(doc, node)?;
+    let kind = doc.required(node, "type")?;
+    enumeration(doc, kind, &["text", "json_object", "json_schema"])?;
+    if doc.string_is(kind, "json_schema")? {
+        let value = doc.required(node, "json_schema")?;
+        object(doc, value)?;
+        require_string(doc, doc.required(value, "name")?)?;
+        schema(doc, doc.required(value, "schema")?)?;
+        optional(doc, value, "description", require_string)?;
+        optional(doc, value, "strict", boolean)?;
+    }
+    Ok(())
+}
+fn optional(
+    doc: &Document,
+    parent: usize,
+    key: &str,
+    validate: impl FnOnce(&Document, usize) -> Result<()>,
+) -> Result<()> {
+    if let Some(node) = doc.member(parent, key)?
+        && !matches!(doc.node(node)?.value, Value::Null)
+    {
+        validate(doc, node)?;
+    }
+    Ok(())
+}
+fn enumeration(doc: &Document, node: usize, values: &[&str]) -> Result<()> {
+    require_string(doc, node)?;
+    for value in values {
+        if doc.string_is(node, value)? {
+            return Ok(());
+        }
+    }
+    Err(Error::Unsupported)
+}
+fn number(doc: &Document, node: usize) -> Result<()> {
+    if matches!(doc.node(node)?.value, Value::Number(_) | Value::Unsigned(_)) {
+        Ok(())
+    } else {
+        Err(Error::Schema)
+    }
+}
+fn integer(doc: &Document, node: usize) -> Result<()> {
+    number(doc, node)?;
+    if let Value::Number(text) = doc.node(node)?.value {
+        let mut cursor = doc.source(text)?.cursor(text.span)?;
+        while let Some(byte) = cursor.next_byte()? {
+            if matches!(byte, b'.' | b'e' | b'E') {
+                return Err(Error::Schema);
+            }
+        }
+    }
+    Ok(())
+}
+fn boolean(doc: &Document, node: usize) -> Result<()> {
+    if matches!(doc.node(node)?.value, Value::Bool(_)) {
+        Ok(())
+    } else {
+        Err(Error::Schema)
+    }
+}
+fn object(doc: &Document, node: usize) -> Result<()> {
+    if matches!(doc.node(node)?.value, Value::Object) {
+        Ok(())
+    } else {
+        Err(Error::Schema)
+    }
+}
+fn array(doc: &Document, node: usize) -> Result<()> {
+    if matches!(doc.node(node)?.value, Value::Array) {
+        Ok(())
+    } else {
+        Err(Error::Schema)
+    }
+}
+fn schema(doc: &Document, node: usize) -> Result<()> {
+    if matches!(doc.node(node)?.value, Value::Object | Value::Bool(_)) {
+        Ok(())
+    } else {
+        Err(Error::Schema)
+    }
+}

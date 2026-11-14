@@ -119,3 +119,72 @@ fn empty_structured_fields_remain_present() {
         assert_eq!(message[field], json!([]));
     }
 }
+
+#[test]
+fn native_audio_fragments_reassemble_across_every_base64_boundary() {
+    let encoded = "AQIDBA==";
+    let mut pairs: Vec<_> = (1..encoded.len())
+        .map(|split| (&encoded[..split], &encoded[split..]))
+        .collect();
+    pairs.push(("AQI=", "AwQ="));
+    for (first, second) in pairs {
+        let start = json!({"id":"r","model":"m","created":1,"choices":[{"index":0,"delta":{"audio":{"id":"audio-1","data":first,"transcript":"hel"}},"finish_reason":null}]});
+        let end = json!({"id":"r","choices":[{"index":0,"delta":{"audio":{"data":second,"transcript":"lo","expires_at":99}},"finish_reason":"stop"}]});
+        let wire = format!("data: {start}\n\ndata: {end}\n\ndata: [DONE]\n\n");
+        for downstream in [codec::BodyMode::Buffered, codec::BodyMode::Streaming] {
+            let (output, _) = response(wire.as_bytes(), codec::BodyMode::Streaming, downstream);
+            let messages = messages(&output, downstream);
+            let mut bytes = Vec::new();
+            let mut transcript = String::new();
+            for audio in messages.iter().filter_map(|message| message.get("audio")) {
+                bytes.extend(
+                    base64::engine::general_purpose::STANDARD
+                        .decode(audio["data"].as_str().unwrap())
+                        .unwrap(),
+                );
+                if let Some(text) = audio["transcript"].as_str() {
+                    transcript.push_str(text);
+                }
+            }
+            assert_eq!(bytes, [1, 2, 3, 4], "{first}/{second}/{downstream:?}");
+            assert_eq!(transcript, "hello");
+        }
+    }
+}
+
+#[test]
+fn unfinished_native_audio_cannot_publish_successful_choice_finish() {
+    use super::{Mapped, Operation, identity};
+    use codec::{ResponseIngress, event::Direction};
+    let mut mapped = Mapped::new();
+    let mut ingress = codec::chat::response::Ingress::new(
+        &mut mapped.writer,
+        identity(Direction::Response),
+        Operation::Generate,
+        codec::BodyMode::Streaming,
+        1024 * 1024,
+    )
+    .unwrap();
+    let wire = b"data: {\"id\":\"r\",\"model\":\"m\",\"created\":1,\"choices\":[{\"index\":0,\"delta\":{\"audio\":{\"data\":\"AQ\"}},\"finish_reason\":\"stop\"}]}\n\n";
+    assert!(ingress.advance(&mut mapped.writer, wire).is_err());
+    let events = String::from_utf8(mapped.output(&mapped.writer)).unwrap();
+    assert!(events.contains("event: x_ck.error\n"));
+    assert!(!events.contains("event: x_ck.item.end\n"));
+    assert!(!events.contains("event: x_ck.done\n"));
+}
+
+#[test]
+fn nullable_audio_transcript_stays_native_null() {
+    let input = br#"{"id":"r","model":"m","created":1,"choices":[{"index":0,"message":{"audio":{"data":"AQ==","transcript":null}},"finish_reason":"stop"}]}"#;
+    for downstream in [codec::BodyMode::Buffered, codec::BodyMode::Streaming] {
+        let (output, events) = response(input, codec::BodyMode::Buffered, downstream);
+        let messages = messages(&output, downstream);
+        let audio = messages.iter().find_map(|message| message.get("audio")).unwrap();
+        assert_eq!(audio.get("transcript"), Some(&Value::Null));
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.get("text").is_some() && event.get("final").is_some())
+        );
+    }
+}

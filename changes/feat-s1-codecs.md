@@ -7,3 +7,4 @@ Internal
 - Publish completed request fields and messages before the body ends, with empty parent containers before children. Keep complete syntax, schema and destination validation at the request-end fence; a rejected suffix preserves the canonical prefix without authorizing upstream encoding.
 - Normalize Chat image/file data URIs and response media into mapped media records. Reconstruct exact decoded bytes in streaming and buffered output, retaining native IDs, transcripts, timing and structured content order.
 - Preserve response extensions with source pointers and restore their native locations. Keep usage corrections and detail snapshots separate from output projections; reject malformed terminals and preserve multiline SSE text framing.
+- Validate native Chat controls and media registrations before the request-end fence. Reassemble audio base64 quartets across source events and reject successful completion with an unfinished quartet.

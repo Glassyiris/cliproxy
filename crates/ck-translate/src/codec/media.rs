@@ -260,7 +260,7 @@ pub fn bytes(doc: &Document, media: Media, mut emit: impl FnMut(&[u8]) -> Result
 }
 
 pub fn publish(doc: &Document, media: Media, emitter: &mut Emitter, owner: &mut Writer, scope: Scope) -> Result<()> {
-    publish_with_attributes(doc, media, emitter, owner, scope, None, None)
+    publish_with_attributes(doc, media, emitter, owner, (scope, None), None, None)
 }
 
 pub(crate) struct Attributes<'a> {
@@ -274,7 +274,7 @@ pub(crate) fn publish_with_attributes(
     media: Media,
     emitter: &mut Emitter,
     owner: &mut Writer,
-    mut scope: Scope,
+    (mut scope, fragment): (Scope, Option<&mut Base64Fragments>),
     attributes: Option<Attributes<'_>>,
     transcript: Option<usize>,
 ) -> Result<()> {
@@ -332,7 +332,7 @@ pub(crate) fn publish_with_attributes(
         offset += chunk.len() as u64;
         emitter.data_capacity(scope, index, offset)
     };
-    bytes(doc, media, |bytes| {
+    let mut collect = |bytes: &[u8]| {
         for &byte in bytes {
             chunk[len] = byte;
             len += 1;
@@ -342,7 +342,12 @@ pub(crate) fn publish_with_attributes(
             }
         }
         Ok(())
-    })?;
+    };
+    if let Some(fragment) = fragment {
+        fragment.push(doc, media.data, &mut collect)?;
+    } else {
+        bytes(doc, media, &mut collect)?;
+    }
     if len != 0 {
         flush(&chunk[..len])?;
     }
@@ -439,4 +444,39 @@ pub(crate) fn write_base64_fragments(doc: &Document, node: usize, e: &mut Encode
         e.bytes(&encoded)?;
     }
     Ok(())
+}
+
+#[derive(Default)]
+pub(crate) struct Base64Fragments {
+    quartet: [u8; 4],
+    count: usize,
+}
+
+impl Base64Fragments {
+    pub(crate) fn complete(&self) -> bool {
+        self.count == 0
+    }
+
+    fn push(&mut self, doc: &Document, text: Text, mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
+        use base64::Engine;
+        let mut decoded = Decoded::new(doc.source(text)?, text.span)?;
+        let mut padded = false;
+        while let Some(c) = decoded.next_scalar()? {
+            if padded || !c.is_ascii() {
+                return Err(Error::Schema);
+            }
+            self.quartet[self.count] = c as u8;
+            self.count += 1;
+            if self.count == 4 {
+                let mut bytes = [0; 3];
+                let len = base64::engine::general_purpose::STANDARD
+                    .decode_slice(self.quartet, &mut bytes)
+                    .map_err(|_| Error::Schema)?;
+                padded = self.quartet.contains(&b'=');
+                self.count = 0;
+                emit(&bytes[..len])?;
+            }
+        }
+        Ok(())
+    }
 }
