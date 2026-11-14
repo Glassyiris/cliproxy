@@ -119,6 +119,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy -p ck-server --all-targets --features media-relay,pprof --locked -- -D warnings
 python3 -I tools/check-crate-deps.py
+python3 -I tools/check-rust-size.py
 cargo check --locked --manifest-path harness/rust/Cargo.toml --target-dir target
 actionlint -version
 # Every workflow by name: without .git in the context, actionlint finds no project.
