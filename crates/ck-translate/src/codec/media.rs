@@ -10,6 +10,7 @@ use ck_stream::{MetadataPermit, Writer};
 #[derive(Clone, Copy)]
 pub enum Encoding {
     Base64,
+    DataUri { skip: u64 },
     Utf8,
 }
 
@@ -102,7 +103,7 @@ impl Registry {
             node,
             "value_kind",
             Value::Text(match encoding {
-                Encoding::Base64 => "bytes",
+                Encoding::Base64 | Encoding::DataUri { .. } => "bytes",
                 Encoding::Utf8 => "utf8",
             }),
         )?;
@@ -161,7 +162,21 @@ impl Registry {
             .find(|entry| entry.media.node == node)
             .ok_or(Error::Position)?;
         if let Some(chunks) = &entry.chunks {
+            if matches!(entry.media.encoding, Encoding::Utf8) {
+                return e.quoted_json(|e| {
+                    for text in chunks.iter() {
+                        decode_base64(doc, *text, |bytes| e.bytes(bytes))?;
+                    }
+                    Ok(())
+                });
+            }
             e.bytes(b"\"")?;
+            if matches!(entry.media.encoding, Encoding::DataUri { .. }) {
+                e.bytes(b"data:")?;
+                let mime = entry.media.mime.ok_or(Error::Schema)?;
+                doc.write_contents(mime, e)?;
+                e.bytes(b";base64,")?;
+            }
             for text in chunks.iter() {
                 e.string_fragment(doc.source(*text)?, text.span)?;
             }
@@ -208,13 +223,18 @@ pub fn local_id(prefix: u8, mut index: u64) -> Result<LocalId> {
 /// Decodes at most one scalar/quartet at a time. Only the emitted chunk is staged on the stack.
 pub fn bytes(doc: &Document, media: Media, mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
     let mut decoded = Decoded::new(doc.source(media.data)?, media.data.span)?;
+    if let Encoding::DataUri { skip } = media.encoding {
+        for _ in 0..skip {
+            decoded.next_scalar()?.ok_or(Error::Schema)?;
+        }
+    }
     let mut quartet = [0u8; 4];
     let mut count = 0;
     let mut padded = false;
     while let Some(c) = decoded.next_scalar()? {
         match media.encoding {
             Encoding::Utf8 => emit(c.encode_utf8(&mut [0; 4]).as_bytes())?,
-            Encoding::Base64 => {
+            Encoding::Base64 | Encoding::DataUri { .. } => {
                 if padded || !c.is_ascii() {
                     return Err(Error::Schema);
                 }
@@ -239,12 +259,24 @@ pub fn bytes(doc: &Document, media: Media, mut emit: impl FnMut(&[u8]) -> Result
     Ok(())
 }
 
-pub fn publish(
+pub fn publish(doc: &Document, media: Media, emitter: &mut Emitter, owner: &mut Writer, scope: Scope) -> Result<()> {
+    publish_with_attributes(doc, media, emitter, owner, scope, None, None)
+}
+
+pub(crate) struct Attributes<'a> {
+    pub document: &'a Document,
+    pub value: usize,
+    pub mime: Option<usize>,
+}
+
+pub(crate) fn publish_with_attributes(
     doc: &Document,
     media: Media,
     emitter: &mut Emitter,
     owner: &mut Writer,
     mut scope: Scope,
+    attributes: Option<Attributes<'_>>,
+    transcript: Option<usize>,
 ) -> Result<()> {
     scope.media_id = Some(media.id);
     emitter.emit(
@@ -255,7 +287,14 @@ pub fn publish(
             e.bytes(b",\"kind\":")?;
             e.string(media.kind)?;
             e.bytes(b",\"encoding\":\"base64\"")?;
-            if let Some(mime) = media.mime {
+            if let Some(attributes) = &attributes {
+                if let Some(mime) = attributes.mime {
+                    e.bytes(b",\"mime\":")?;
+                    attributes.document.write(mime, e)?;
+                }
+                e.bytes(b",\"attributes\":")?;
+                attributes.document.write(attributes.value, e)?;
+            } else if let Some(mime) = media.mime {
                 e.bytes(b",\"mime\":")?;
                 doc.write(mime, e)?;
             }
@@ -307,6 +346,19 @@ pub fn publish(
     if len != 0 {
         flush(&chunk[..len])?;
     }
+    if let Some(transcript) = transcript {
+        emitter.emit(
+            owner,
+            Kind::MediaTranscript,
+            scope,
+            |e| {
+                e.bytes(b",\"text\":")?;
+                doc.write(transcript, e)?;
+                e.bytes(b",\"final\":true")
+            },
+            |_| Ok(()),
+        )?;
+    }
     emitter.emit(
         owner,
         Kind::MediaEnd,
@@ -325,7 +377,66 @@ pub fn write_reference(media: Media, e: &mut Encoder<'_, '_>) -> Result<()> {
     e.bytes(b"{\"type\":\"x_ck_media\",\"media_id\":")?;
     e.string(media.id.as_str())?;
     e.bytes(match media.encoding {
-        Encoding::Base64 => b",\"value_kind\":\"bytes\"}",
+        Encoding::Base64 | Encoding::DataUri { .. } => b",\"value_kind\":\"bytes\"}",
         Encoding::Utf8 => b",\"value_kind\":\"utf8\"}",
     })
+}
+
+pub(crate) fn decode_base64(doc: &Document, text: Text, mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
+    use base64::Engine;
+    let mut decoded = Decoded::new(doc.source(text)?, text.span)?;
+    let mut quartet = [0; 4];
+    let mut count = 0;
+    let mut padded = false;
+    while let Some(c) = decoded.next_scalar()? {
+        if padded || !c.is_ascii() {
+            return Err(Error::Schema);
+        }
+        quartet[count] = c as u8;
+        count += 1;
+        if count == 4 {
+            let mut bytes = [0; 3];
+            let len = base64::engine::general_purpose::STANDARD
+                .decode_slice(quartet, &mut bytes)
+                .map_err(|_| Error::Schema)?;
+            padded = quartet.contains(&b'=');
+            emit(&bytes[..len])?;
+            count = 0;
+        }
+    }
+    if count == 0 { Ok(()) } else { Err(Error::Schema) }
+}
+
+pub(crate) fn write_base64_fragments(doc: &Document, node: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
+    use base64::Engine;
+    let mut carry = [0; 3];
+    let mut used = 0;
+    for child in doc.children(node)? {
+        let Value::String(text) = doc.node(child)?.value else {
+            return Err(Error::Schema);
+        };
+        decode_base64(doc, text, |bytes| {
+            for &byte in bytes {
+                carry[used] = byte;
+                used += 1;
+                if used == 3 {
+                    let mut encoded = [0; 4];
+                    base64::engine::general_purpose::STANDARD
+                        .encode_slice(carry, &mut encoded)
+                        .map_err(|_| Error::Schema)?;
+                    e.bytes(&encoded)?;
+                    used = 0;
+                }
+            }
+            Ok(())
+        })?;
+    }
+    if used != 0 {
+        let mut encoded = [0; 4];
+        base64::engine::general_purpose::STANDARD
+            .encode_slice(&carry[..used], &mut encoded)
+            .map_err(|_| Error::Schema)?;
+        e.bytes(&encoded)?;
+    }
+    Ok(())
 }

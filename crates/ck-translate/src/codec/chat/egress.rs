@@ -1,3 +1,4 @@
+use super::aggregate::aggregate_chunk;
 use super::response::mapped_document;
 use crate::codec::{
     self, BodyMode, Error, Operation, Result,
@@ -8,6 +9,8 @@ use crate::codec::{
     table::Table,
 };
 use ck_stream::{Lease, ScratchLease, Writer};
+#[path = "egress_media.rs"]
+mod media_events;
 
 pub struct Diagnostic {
     pub identity: Identity,
@@ -31,6 +34,7 @@ pub struct Egress {
     failed: bool,
     document: Option<Document>,
     tools: Table<Tool>,
+    media: Table<media_events::Projection>,
     include_usage: bool,
     diagnostic: fn(Diagnostic),
 }
@@ -55,6 +59,7 @@ impl Egress {
             failed: false,
             document: None,
             tools: Table::new(owner)?,
+            media: Table::new(owner)?,
             include_usage,
             diagnostic,
         })
@@ -99,10 +104,17 @@ impl Egress {
                 self.document = Some(doc);
             }
             Kind::Chunk => {
-                self.project_tools(&mut doc, x)?;
                 let deliverable = chunk_deliverable(&doc)?;
                 doc.remove(root, "x_ck")?;
-                restore_original(&mut doc, x)?;
+                if !super::provenance::restore(&mut doc, x)? {
+                    (self.diagnostic)(Diagnostic {
+                        identity: self.identity,
+                        kind,
+                        destination: "chat",
+                        reason: "source field has no surviving native parent",
+                    });
+                }
+                self.project_tools(&mut doc, x)?;
                 if self.mode == BodyMode::Streaming {
                     if deliverable {
                         output(encode::scratch(owner, |e| {
@@ -185,11 +197,38 @@ impl Egress {
                     ("output_tokens", "completion_tokens"),
                     ("total_tokens", "total_tokens"),
                 ] {
-                    if doc.member(value, wire)?.is_none()
+                    if !matches!(doc.node(value)?.value, Value::Null)
+                        && doc.member(value, wire)?.is_none()
                         && let Some(n) = doc.member(usage, canonical)?
                     {
                         doc.set(value, wire, Value::Unsigned(doc.unsigned(n)?))?;
                     }
+                }
+                if let Some(choice) = doc.member(x, "choice_index")? {
+                    let final_snapshot = matches!(doc.node(doc.required(usage, "final")?)?.value, Value::Bool(true));
+                    let projection = mapped_document(owner, |e| {
+                        e.bytes(b"{")?;
+                        chunk_base(self.document.as_ref().ok_or(Error::Schema)?, e)?;
+                        e.bytes(b",\"choices\":[{\"index\":")?;
+                        doc.write(choice, e)?;
+                        e.bytes(b",\"delta\":{},\"finish_reason\":null,\"usage\":")?;
+                        doc.write(value, e)?;
+                        e.bytes(b"}]}")
+                    })?;
+                    if self.mode == BodyMode::Streaming {
+                        if self.include_usage && final_snapshot {
+                            output(encode::scratch(owner, |e| {
+                                e.bytes(b"data: ")?;
+                                projection.write(projection.root(), e)?;
+                                e.bytes(b"\n\n")
+                            })?)?;
+                        }
+                    } else {
+                        let aggregate = self.document.as_mut().ok_or(Error::Schema)?;
+                        let incoming = aggregate.absorb(projection)?;
+                        aggregate_chunk(aggregate, incoming)?;
+                    }
+                    return Ok(());
                 }
                 if self.mode == BodyMode::Streaming {
                     let final_snapshot = matches!(doc.node(doc.required(usage, "final")?)?.value, Value::Bool(true));
@@ -236,7 +275,43 @@ impl Egress {
                     });
                 }
             }
+            Kind::MediaStart => {
+                let projection = media_events::Projection::start(owner, doc, x)?;
+                if self.media.iter().any(|entry| entry.id == projection.id) {
+                    return Err(Error::Schema);
+                }
+                self.media.push(projection)?;
+            }
+            Kind::Data | Kind::MediaTranscript | Kind::MediaEnd => {
+                let id = media_events::id(&doc, x)?;
+                let position = self
+                    .media
+                    .iter()
+                    .position(|entry| entry.id == id)
+                    .ok_or(Error::Schema)?;
+                if kind == Kind::Data {
+                    self.media[position].data(doc)?;
+                } else if kind == Kind::MediaTranscript {
+                    self.media[position].transcript(doc)?;
+                } else {
+                    let (native, value, field, choice) = self.media[position].end(&doc)?;
+                    let projection = self.native_field(owner, native, value, field, choice)?;
+                    self.project(owner, projection, &mut output)?;
+                }
+            }
+            Kind::Annotation => {
+                if !doc.string_is(doc.required(root, "kind")?, "chat")? {
+                    return Err(Error::Unsupported);
+                }
+                let choice = doc.unsigned(doc.required(x, "choice_index")?)?;
+                let value = doc.required(root, "value")?;
+                let projection = self.native_field(owner, doc, value, "annotations", choice)?;
+                self.project(owner, projection, &mut output)?;
+            }
             Kind::Done => {
+                if self.media.iter().any(|media| media.is_open()) {
+                    return Err(Error::Truncated);
+                }
                 self.terminal = true;
                 if self.mode == BodyMode::Streaming {
                     output(encode::scratch(owner, |e| e.bytes(b"data: [DONE]\n\n"))?)?;
@@ -329,7 +404,9 @@ impl Egress {
             return Ok(());
         };
         let call = doc.node(calls)?.first.ok_or(Error::Schema)?;
-        let function = doc.required(call, "function")?;
+        let Some(function) = doc.member(call, "function")? else {
+            return Ok(());
+        };
         if tool.legacy {
             doc.remove(delta, "tool_calls")?;
             doc.detach(call, function)?;
@@ -460,154 +537,4 @@ fn chunk_deliverable(doc: &Document) -> Result<bool> {
         return Ok(doc.node(fields)?.first.is_some());
     }
     Ok(false)
-}
-fn restore_original(doc: &mut Document, x: usize) -> Result<()> {
-    let Some(original) = doc.member(x, "original")? else {
-        return Ok(());
-    };
-    let mut entry = doc.node(original)?.first;
-    while let Some(item) = entry {
-        entry = doc.node(item)?.next;
-        if doc.string_is(doc.required(item, "pointer")?, "/x_ck")? {
-            let value = doc.remove(item, "value")?.ok_or(Error::Schema)?;
-            doc.rename(value, "x_ck")?;
-            doc.append(doc.root(), value)?;
-        }
-    }
-    Ok(())
-}
-
-fn aggregate_chunk(doc: &mut Document, incoming: usize) -> Result<()> {
-    let target = doc.root();
-    let choices = doc.required(incoming, "choices")?;
-    let output_choices = doc.required(target, "choices")?;
-    let mut next = doc.node(choices)?.first;
-    while let Some(choice) = next {
-        next = doc.node(choice)?.next;
-        let index = doc.unsigned(doc.required(choice, "index")?)?;
-        let mut existing = None;
-        for candidate in doc.children(output_choices)? {
-            if doc.unsigned(doc.required(candidate, "index")?)? == index {
-                existing = Some(candidate);
-                break;
-            }
-        }
-        let output = if let Some(existing) = existing {
-            existing
-        } else {
-            let output = doc.add(None, Value::Object)?;
-            doc.append(output_choices, output)?;
-            doc.set(output, "index", Value::Unsigned(index))?;
-            doc.set(output, "message", Value::Object)?;
-            doc.set(output, "finish_reason", Value::Null)?;
-            output
-        };
-        if let Some(delta) = doc.member(choice, "delta")? {
-            let message = doc.required(output, "message")?;
-            merge_delta(doc, message, delta)?;
-        }
-        while let Some(field) = doc.node(choice)?.first {
-            doc.detach(choice, field)?;
-            let name = doc.node(field)?.name.ok_or(Error::Schema)?;
-            if doc.name_is(name, "index")? || doc.name_is(name, "delta")? {
-                continue;
-            }
-            if doc.name_is(name, "finish_reason")? && matches!(doc.node(field)?.value, Value::Null) {
-                continue;
-            }
-            merge_field(doc, output, field)?;
-        }
-    }
-    while let Some(field) = doc.node(incoming)?.first {
-        doc.detach(incoming, field)?;
-        let name = doc.node(field)?.name.ok_or(Error::Schema)?;
-        if doc.name_is(name, "choices")? || doc.name_is(name, "object")? {
-            continue;
-        }
-        merge_field(doc, target, field)?;
-    }
-    Ok(())
-}
-fn merge_delta(doc: &mut Document, target: usize, incoming: usize) -> Result<()> {
-    while let Some(field) = doc.node(incoming)?.first {
-        doc.detach(incoming, field)?;
-        let name = doc.node(field)?.name.ok_or(Error::Schema)?;
-        if doc.name_is(name, "tool_calls")? {
-            let calls = match doc.member(target, "tool_calls")? {
-                Some(c) => c,
-                None => doc.set(target, "tool_calls", Value::Array)?,
-            };
-            while let Some(call) = doc.node(field)?.first {
-                doc.detach(field, call)?;
-                let index = doc.unsigned(doc.required(call, "index")?)?;
-                let mut existing = None;
-                for c in doc.children(calls)? {
-                    if doc.unsigned(doc.required(c, "index")?)? == index {
-                        existing = Some(c);
-                        break;
-                    }
-                }
-                if let Some(existing) = existing {
-                    merge_delta(doc, existing, call)?;
-                } else {
-                    doc.append(calls, call)?;
-                }
-            }
-        } else {
-            merge_field(doc, target, field)?;
-        }
-    }
-    Ok(())
-}
-fn merge_field(doc: &mut Document, parent: usize, incoming: usize) -> Result<()> {
-    let name = doc.node(incoming)?.name.ok_or(Error::Schema)?;
-    let mut existing = None;
-    for candidate in doc.children(parent)? {
-        if doc.names_equal(name, doc.node(candidate)?.name.ok_or(Error::Schema)?)? {
-            existing = Some(candidate);
-            break;
-        }
-    }
-    let Some(existing) = existing else {
-        return doc.append(parent, incoming);
-    };
-    let a = doc.node(existing)?.value;
-    let b = doc.node(incoming)?.value;
-    if matches!(a, Value::Object) && matches!(b, Value::Object) {
-        return merge_delta(doc, existing, incoming);
-    }
-    if matches!(a, Value::Array) && matches!(b, Value::Array) {
-        while let Some(child) = doc.node(incoming)?.first {
-            doc.detach(incoming, child)?;
-            doc.append(existing, child)?;
-        }
-        return Ok(());
-    }
-    let mut fragment = false;
-    for key in [
-        "content",
-        "reasoning_content",
-        "refusal",
-        "arguments",
-        "input",
-        "data",
-        "transcript",
-    ] {
-        fragment |= doc.name_is(name, key)?;
-    }
-    if fragment && matches!(a, Value::String(_) | Value::Text(_) | Value::Fragments) {
-        if matches!(b, Value::Null) {
-            return Ok(());
-        }
-        if !matches!(b, Value::String(_) | Value::Text(_)) {
-            return Err(Error::Schema);
-        }
-        if !matches!(a, Value::Fragments) {
-            let first = doc.add(None, a)?;
-            doc.replace(existing, Value::Fragments)?;
-            doc.append(existing, first)?;
-        }
-        return doc.append(existing, incoming);
-    }
-    doc.transplant(existing, incoming)
 }

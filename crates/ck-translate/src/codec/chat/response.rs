@@ -1,3 +1,4 @@
+use super::accounting::Accounting;
 use crate::codec::{
     self, BodyMode, Error, Operation, Result,
     document::{Document, Value},
@@ -7,9 +8,10 @@ use crate::codec::{
     source::Source,
     sse,
     table::Table,
-    usage::Usage,
 };
 use ck_stream::Writer;
+#[path = "response_media.rs"]
+mod media_events;
 
 pub struct Ingress {
     owner: u64,
@@ -48,8 +50,7 @@ impl Ingress {
                 emitter: Emitter::new(identity),
                 base: None,
                 choices: Table::new(owner)?,
-                usage: Usage::default(),
-                native_usage: None,
+                usage: Accounting::default(),
                 terminal: false,
                 identity,
                 serial: 0,
@@ -113,6 +114,7 @@ impl Ingress {
         if let Err(error) = result {
             self.failed = true;
             if !self.state.terminal && !matches!(error, Error::Storage(_)) {
+                self.state.emit_usage(owner, true)?;
                 super::failure(&mut self.state.emitter, owner, "upstream")?;
                 self.state.terminal = true;
             }
@@ -126,7 +128,9 @@ struct Choice {
     index: u64,
     item: LocalId,
     blocks: [bool; 3],
+    next_block: u64,
     tools: Table<Tool>,
+    usage: Accounting,
     finished: bool,
 }
 struct Tool {
@@ -142,8 +146,7 @@ struct State {
     emitter: Emitter,
     base: Option<Document>,
     choices: Table<Choice>,
-    usage: Usage,
-    native_usage: Option<Document>,
+    usage: Accounting,
     terminal: bool,
     identity: Identity,
     serial: u64,
@@ -323,10 +326,15 @@ impl State {
             Scope::default(),
             |e| {
                 base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
-                members(
+                e.bytes(b",\"choices\":[]")
+            },
+            |e| {
+                if let Some((source, event)) = wire {
+                    sse_provenance(source, event, e)?;
+                }
+                super::provenance::unknown(
                     doc,
                     doc.root(),
-                    e,
                     &[
                         "id",
                         "model",
@@ -334,18 +342,11 @@ impl State {
                         "object",
                         "choices",
                         "usage",
-                        "x_ck",
                         "system_fingerprint",
                         "service_tier",
                     ],
-                )?;
-                e.bytes(b",\"choices\":[]")
-            },
-            |e| {
-                if let Some((source, event)) = wire {
-                    sse_provenance(source, event, e)?;
-                }
-                original_x(doc, doc.root(), "/x_ck", e)
+                    e,
+                )
             },
         )?;
         let choices = doc.required(doc.root(), "choices")?;
@@ -381,10 +382,17 @@ impl State {
                     |_| Ok(()),
                 )?;
             }
+            if let Some(usage) = doc.member(choice, "usage")? {
+                let scope = self.scope(position);
+                self.choices[position].usage.update(owner, doc, usage)?;
+                self.choices[position]
+                    .usage
+                    .emit(owner, &mut self.emitter, scope, false)?;
+            }
             for field in doc.children(choice)? {
                 let name = doc.node(field)?.name.ok_or(Error::Schema)?;
                 let mut known = false;
-                for key in ["index", "delta", "message", "finish_reason", "logprobs"] {
+                for key in ["index", "delta", "message", "finish_reason", "logprobs", "usage"] {
                     known |= doc.name_is(name, key)?;
                 }
                 if !known {
@@ -396,13 +404,9 @@ impl State {
                             base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
                             e.bytes(b",\"choices\":[{\"index\":")?;
                             e.unsigned(index)?;
-                            e.bytes(b",\"delta\":{},\"finish_reason\":null,")?;
-                            doc.write_name(name, e)?;
-                            e.bytes(b":")?;
-                            doc.write(field, e)?;
-                            e.bytes(b"}]")
+                            e.bytes(b",\"delta\":{},\"finish_reason\":null}]")
                         },
-                        |_| Ok(()),
+                        |e| super::provenance::one(doc, field, e),
                     )?;
                 }
             }
@@ -416,20 +420,9 @@ impl State {
                 return Err(Error::Truncated);
             }
         }
-        if let Some(usage) = doc.member(doc.root(), "usage")?
-            && !matches!(doc.node(usage)?.value, Value::Null)
-        {
-            self.usage.update_chat(doc, usage)?;
-            if let Some(native) = &mut self.native_usage {
-                let lease = encode::scratch(owner, |e| doc.write(usage, e))?;
-                let incoming = native.import_json(owner, lease)?;
-                merge(native, native.root(), incoming)?;
-                let compact = mapped_document(owner, |e| native.write(native.root(), e))?;
-                *native = compact;
-            } else {
-                self.native_usage = Some(mapped_document(owner, |e| doc.write(usage, e))?);
-            }
-            self.emit_usage(owner, false)?;
+        if let Some(usage) = doc.member(doc.root(), "usage")? {
+            self.usage.update(owner, doc, usage)?;
+            self.usage.emit(owner, &mut self.emitter, Scope::default(), false)?;
         }
         Ok(())
     }
@@ -444,7 +437,9 @@ impl State {
             index,
             item,
             blocks: [false; 3],
+            next_block: 3,
             tools: Table::new(owner)?,
+            usage: Accounting::default(),
             finished: false,
         })?;
         self.emitter.emit(
@@ -477,6 +472,27 @@ impl State {
         }
         for field in doc.children(body)? {
             let name = doc.node(field)?.name.ok_or(Error::Schema)?;
+            if doc.name_is(name, "audio")?
+                && matches!(doc.node(field)?.value, Value::Object)
+                && self.media_value(owner, doc, field, self.scope(position), "audio")?
+            {
+                continue;
+            }
+            if doc.name_is(name, "images")?
+                || (doc.name_is(name, "content")? && matches!(doc.node(field)?.value, Value::Array))
+            {
+                let name = if doc.name_is(name, "images")? {
+                    "images"
+                } else {
+                    "content"
+                };
+                self.array_field(owner, doc, field, position, name)?;
+                continue;
+            }
+            if doc.name_is(name, "annotations")? && matches!(doc.node(field)?.value, Value::Array) {
+                self.annotations(owner, doc, field, position)?;
+                continue;
+            }
             if doc.name_is(name, "tool_calls")? {
                 if !matches!(doc.node(field)?.value, Value::Array) {
                     return Err(Error::Schema);
@@ -488,13 +504,39 @@ impl State {
                         call,
                         position,
                         if buffered { Some(index as u64) } else { None },
-                        false,
+                        None,
                     )?;
                 }
                 continue;
             }
             if doc.name_is(name, "function_call")? {
                 self.legacy_tool(owner, doc, field, position)?;
+                continue;
+            }
+            let mut known = false;
+            for key in [
+                "role",
+                "content",
+                "reasoning_content",
+                "refusal",
+                "audio",
+                "annotations",
+            ] {
+                known |= doc.name_is(name, key)?;
+            }
+            if !known {
+                self.emitter.emit(
+                    owner,
+                    Kind::Chunk,
+                    self.scope(position),
+                    |e| {
+                        base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
+                        e.bytes(b",\"choices\":[{\"index\":")?;
+                        e.unsigned(self.choices[position].index)?;
+                        e.bytes(b",\"delta\":{},\"finish_reason\":null}]")
+                    },
+                    |e| super::provenance::one(doc, field, e),
+                )?;
                 continue;
             }
             let mut scope = self.scope(position);
@@ -548,7 +590,7 @@ impl State {
             doc.write(function, e)?;
             e.bytes(b"}")
         })?;
-        self.tool(owner, &call, call.root(), position, None, true)
+        self.tool(owner, &call, call.root(), position, None, Some((doc, function)))
     }
     fn tool(
         &mut self,
@@ -557,8 +599,9 @@ impl State {
         call: usize,
         position: usize,
         buffered_index: Option<u64>,
-        legacy: bool,
+        original: Option<(&Document, usize)>,
     ) -> Result<()> {
+        let legacy = original.is_some();
         let index = if let Some(node) = doc.member(call, "index")? {
             doc.unsigned(node)?
         } else {
@@ -698,55 +741,42 @@ impl State {
                         .advance(tool.arguments.as_ref().ok_or(Error::Schema)?)?;
                 }
             }
-            let unknown = |e: &mut Encoder<'_, '_>| -> Result<()> {
-                e.bytes(b",\"choices\":[{\"index\":")?;
-                e.unsigned(scope.choice_index.ok_or(Error::Schema)?)?;
-                e.bytes(b",\"delta\":{\"tool_calls\":[{\"index\":")?;
-                e.unsigned(index)?;
-                members(doc, call, e, &["index", "id", "type", "function", "custom"])?;
-                e.bytes(b",\"function\":{")?;
-                let mut first = true;
-                for field in doc.children(function)? {
-                    let name = doc.node(field)?.name.ok_or(Error::Schema)?;
-                    if doc.name_is(name, "name")?
-                        || doc.name_is(name, if tool.custom { "input" } else { "arguments" })?
-                    {
-                        continue;
-                    }
-                    if !first {
-                        e.bytes(b",")?;
-                    }
-                    first = false;
-                    doc.write_name(name, e)?;
-                    e.bytes(b":")?;
-                    doc.write(field, e)?;
-                }
-                e.bytes(b"}}]},\"finish_reason\":null}]")
-            };
-            let mut has_unknown = false;
-            for field in doc.children(call)? {
+            for (ordinal, field) in doc.children(function)?.enumerate() {
                 let name = doc.node(field)?.name.ok_or(Error::Schema)?;
-                let mut known = false;
-                for key in ["index", "id", "type", "function", "custom"] {
-                    known |= doc.name_is(name, key)?;
+                if doc.name_is(name, "name")? || doc.name_is(name, if tool.custom { "input" } else { "arguments" })? {
+                    continue;
                 }
-                has_unknown |= !known;
-            }
-            for field in doc.children(function)? {
-                let name = doc.node(field)?.name.ok_or(Error::Schema)?;
-                has_unknown |= !doc.name_is(name, "name")?
-                    && !doc.name_is(name, if tool.custom { "input" } else { "arguments" })?;
-            }
-            if has_unknown {
-                self.emitter.emit(
+                let (source, field) = if let Some((source, function)) = original {
+                    (source, source.children(function)?.nth(ordinal).ok_or(Error::Schema)?)
+                } else {
+                    (doc, field)
+                };
+                preserved_tool_field(
+                    &mut self.emitter,
                     owner,
-                    Kind::Chunk,
+                    self.base.as_ref().ok_or(Error::Schema)?,
+                    source,
+                    field,
                     scope,
-                    |e| {
-                        base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
-                        unknown(e)
-                    },
-                    |_| Ok(()),
+                    true,
+                )?;
+            }
+        }
+        for field in doc.children(call)? {
+            let name = doc.node(field)?.name.ok_or(Error::Schema)?;
+            let mut known = false;
+            for key in ["index", "id", "type", "function", "custom"] {
+                known |= doc.name_is(name, key)?;
+            }
+            if !known {
+                preserved_tool_field(
+                    &mut self.emitter,
+                    owner,
+                    self.base.as_ref().ok_or(Error::Schema)?,
+                    doc,
+                    field,
+                    scope,
+                    false,
                 )?;
             }
         }
@@ -833,18 +863,16 @@ impl State {
         Ok(())
     }
     fn emit_usage(&mut self, owner: &mut Writer, final_snapshot: bool) -> Result<()> {
-        if let Some(native) = &self.native_usage {
-            self.emitter.emit(
-                owner,
-                Kind::Usage,
-                Scope::default(),
-                |e| {
-                    e.bytes(b",\"usage\":")?;
-                    self.usage.write(e, final_snapshot, |e| native.write(native.root(), e))
-                },
-                |_| Ok(()),
-            )?;
+        for choice in self.choices.iter_mut() {
+            let scope = Scope {
+                choice_index: Some(choice.index),
+                item_id: Some(choice.item),
+                ..Scope::default()
+            };
+            choice.usage.emit(owner, &mut self.emitter, scope, final_snapshot)?;
         }
+        self.usage
+            .emit(owner, &mut self.emitter, Scope::default(), final_snapshot)?;
         Ok(())
     }
     fn done(&mut self, owner: &mut Writer) -> Result<()> {
@@ -876,16 +904,6 @@ pub(super) fn members(doc: &Document, object: usize, e: &mut Encoder<'_, '_>, sk
             e.bytes(b":")?;
             doc.write(child, e)?;
         }
-    }
-    Ok(())
-}
-fn original_x(doc: &Document, object: usize, pointer: &str, e: &mut Encoder<'_, '_>) -> Result<()> {
-    if let Some(x) = doc.member(object, "x_ck")? {
-        e.bytes(b",\"original\":[{\"protocol\":\"chat\",\"pointer\":")?;
-        e.string(pointer)?;
-        e.bytes(b",\"value\":")?;
-        doc.write(x, e)?;
-        e.bytes(b"}]")?;
     }
     Ok(())
 }
@@ -923,28 +941,32 @@ fn equal(a: &Document, ai: usize, b: &Document, bi: usize) -> Result<bool> {
         }
     }
 }
-fn merge(doc: &mut Document, target: usize, incoming: usize) -> Result<()> {
-    if matches!(doc.node(target)?.value, Value::Object) && matches!(doc.node(incoming)?.value, Value::Object) {
-        while let Some(child) = doc.node(incoming)?.first {
-            doc.detach(incoming, child)?;
-            let name = doc.node(child)?.name.ok_or(Error::Schema)?;
-            let mut existing = None;
-            for current in doc.children(target)? {
-                let current_name = doc.node(current)?.name.ok_or(Error::Schema)?;
-                let same = doc.names_equal(name, current_name)?;
-                if same {
-                    existing = Some(current);
-                    break;
-                }
+
+fn preserved_tool_field(
+    emitter: &mut Emitter,
+    owner: &mut Writer,
+    metadata: &Document,
+    doc: &Document,
+    field: usize,
+    scope: Scope,
+    inner: bool,
+) -> Result<()> {
+    emitter.emit(
+        owner,
+        Kind::Chunk,
+        scope,
+        |e| {
+            base(metadata, e)?;
+            e.bytes(b",\"choices\":[{\"index\":")?;
+            e.unsigned(scope.choice_index.ok_or(Error::Schema)?)?;
+            e.bytes(b",\"delta\":{\"tool_calls\":[{\"index\":")?;
+            e.unsigned(scope.tool_index.ok_or(Error::Schema)?)?;
+            if inner {
+                e.bytes(b",\"function\":{}")?;
             }
-            if let Some(existing) = existing {
-                merge(doc, existing, child)?;
-            } else {
-                doc.append(target, child)?;
-            }
-        }
-    } else {
-        doc.transplant(target, incoming)?;
-    }
+            e.bytes(b"}]},\"finish_reason\":null}]")
+        },
+        |e| super::provenance::one(doc, field, e),
+    )?;
     Ok(())
 }

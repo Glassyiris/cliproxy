@@ -25,6 +25,7 @@ pub enum Value {
     Object,
     Array,
     Fragments,
+    Base64Fragments,
     String(Text),
     Number(Text),
     Bool(bool),
@@ -436,7 +437,7 @@ impl Document {
     pub fn append(&mut self, parent: usize, child: usize) -> Result<()> {
         if !matches!(
             self.node(parent)?.value,
-            Value::Object | Value::Array | Value::Fragments
+            Value::Object | Value::Array | Value::Fragments | Value::Base64Fragments
         ) || self.node(child)?.next.is_some()
             || self.node(child)?.parent.is_some()
         {
@@ -553,11 +554,9 @@ impl Document {
                 }
                 e.bytes(if object { b"}" } else { b"]" })
             }
-            Value::Fragments => {
+            Value::Fragments | Value::Base64Fragments => {
                 e.bytes(b"\"")?;
-                for child in self.children(index)? {
-                    self.write_contents(child, e)?;
-                }
+                self.write_contents(index, e)?;
                 e.bytes(b"\"")
             }
             Value::String(t) | Value::Number(t) => e.span(self.source(t)?, t.span),
@@ -572,6 +571,13 @@ impl Document {
         match self.node(index)?.value {
             Value::String(t) => e.string_fragment(self.source(t)?, t.span),
             Value::Text(s) => e.escaped(s),
+            Value::Base64Fragments => super::media::write_base64_fragments(self, index, e),
+            Value::Fragments => {
+                for child in self.children(index)? {
+                    self.write_contents(child, e)?;
+                }
+                Ok(())
+            }
             _ => Err(Error::Schema),
         }
     }
@@ -590,6 +596,7 @@ impl Iterator for Children<'_> {
     }
 }
 
+#[derive(Clone)]
 pub enum Characters<'a> {
     Mapped(json::Decoded<'a>),
     Pointer(json::Decoded<'a>),

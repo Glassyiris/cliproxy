@@ -513,6 +513,7 @@ fn string_eq(source: &Source, left: Span, right: Span) -> Result<bool> {
 }
 
 /// Decode one scalar at a time, including surrogate pairs, without a String.
+#[derive(Clone)]
 pub struct Decoded<'a> {
     cursor: Cursor<'a>,
 }

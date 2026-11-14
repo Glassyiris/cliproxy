@@ -1,6 +1,18 @@
 #[path = "semantic/mod.rs"]
 mod semantic;
 
+#[path = "semantic/request_media.rs"]
+mod request_media;
+
+#[path = "semantic/provenance.rs"]
+mod provenance;
+#[path = "semantic/response_media.rs"]
+mod response_media;
+#[path = "semantic/terminal.rs"]
+mod terminal;
+#[path = "semantic/usage.rs"]
+mod usage;
+
 use ck_translate::codec::{
     self, Operation, RequestEgress, RequestIngress,
     chat::request::{ChatCapability, Egress, Ingress},
@@ -144,6 +156,15 @@ fn unsupported_operations_never_create_a_chat_body() {
 }
 
 fn response(input: &[u8], upstream: codec::BodyMode, downstream: codec::BodyMode) -> (Vec<u8>, Vec<serde_json::Value>) {
+    response_fragmented(input, upstream, downstream, 31)
+}
+
+fn response_fragmented(
+    input: &[u8],
+    upstream: codec::BodyMode,
+    downstream: codec::BodyMode,
+    fragment: usize,
+) -> (Vec<u8>, Vec<serde_json::Value>) {
     use codec::{ResponseEgress, ResponseIngress};
     use std::task::Poll;
     let mut mapped = Mapped::new();
@@ -166,7 +187,7 @@ fn response(input: &[u8], upstream: codec::BodyMode, downstream: codec::BodyMode
     )
     .unwrap();
     let mut result = Vec::new();
-    for chunk in input.chunks(31) {
+    for chunk in input.chunks(fragment) {
         ingress.advance(&mut mapped.writer, chunk).unwrap();
     }
     ingress.finish(&mut mapped.writer).unwrap();
