@@ -2,6 +2,12 @@
 mod bindings;
 #[path = "semantic/budget.rs"]
 mod budget;
+#[path = "semantic/coverage_egress.rs"]
+mod coverage_egress;
+#[path = "semantic/coverage_media.rs"]
+mod coverage_media;
+#[path = "semantic/coverage_response.rs"]
+mod coverage_response;
 #[path = "semantic/depth.rs"]
 mod depth;
 #[path = "semantic/incremental.rs"]
