@@ -115,7 +115,7 @@ pub(crate) struct Stream {
     limits: Limits,
     pub state: Mutex<State>,
     invalidated: AtomicBool,
-    /// Clock nanoseconds of the last read. Acknowledgements store it without the state lock.
+    /// Clock nanoseconds of the last read. Acknowledgements raise it without the state lock.
     last_read: AtomicU64,
     /// Frames the stream gave up while leases still pin them; they still count as live.
     detached: AtomicU64,
@@ -162,8 +162,10 @@ impl Stream {
         Duration::from_nanos(self.last_read.load(Ordering::Relaxed))
     }
 
+    /// Raise the last-read time. An unlocked acknowledgement may store a sample older than a
+    /// read that finished meanwhile, so the time never moves backwards.
     pub(crate) fn touch(&self, now: Duration) {
-        self.last_read.store(nanos(now), Ordering::Relaxed);
+        self.last_read.fetch_max(nanos(now), Ordering::Relaxed);
     }
 
     /// Frames that invalidation would return to the pool now: owned and unleased.

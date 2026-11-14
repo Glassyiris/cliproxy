@@ -1,8 +1,9 @@
-use ck_stream::{Config, Error, FRAME_BYTES, ManualClock, Read, Store, Terminal};
+use ck_stream::{Clock, Config, Error, FRAME_BYTES, ManualClock, Read, Store, Terminal};
 use std::{
     future::poll_fn,
-    sync::{Arc, Barrier, mpsc},
+    sync::{Arc, Barrier, Mutex, mpsc},
     task::Poll,
+    thread::{self, ThreadId},
     time::Duration,
 };
 
@@ -239,6 +240,63 @@ fn attach_and_each_pending_wait_refresh_eviction_recency() {
         assert!(matches!(store.reader(second.id(), 0), Err(Error::Gone)));
         assert!(matches!(reader.try_next(), Poll::Pending));
     }
+}
+
+/// Work that runs on one thread between its clock sample and the sample's use.
+type Pause = (ThreadId, Box<dyn FnOnce() + Send>);
+
+/// A clock whose armed thread runs `pause` after one sample, as if preempted before using it.
+#[derive(Default)]
+struct PreemptedClock {
+    time: ManualClock,
+    pause: Mutex<Option<Pause>>,
+}
+
+impl Clock for PreemptedClock {
+    fn now(&self) -> Duration {
+        let sampled = self.time.now();
+        let mut pause = self.pause.lock().unwrap();
+        if pause
+            .as_ref()
+            .is_some_and(|(owner, _)| *owner == thread::current().id())
+        {
+            let (_, resume) = pause.take().unwrap();
+            drop(pause);
+            resume();
+        }
+        sampled
+    }
+}
+
+#[test]
+fn a_delayed_acknowledgement_cannot_make_a_newer_read_look_older() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::new(dir.path().join("pool"));
+    config.pool_bytes = Some(4 * FRAME_BYTES);
+    config.max_event_bytes = 4 * FRAME_BYTES;
+    config.workers = 2;
+    let clock = Arc::new(PreemptedClock::default());
+    let store = Arc::new(Store::with_clock(config, clock.clone()).unwrap());
+    let mut first = store.create().unwrap();
+    first.append(&[1; FRAME_BYTES]).unwrap();
+    let mut second = store.create().unwrap();
+    second.append(&[2; 3 * FRAME_BYTES]).unwrap();
+    clock.time.advance(Duration::from_secs(20));
+    let acknowledged = lease(&mut store.reader(first.id(), 0).unwrap());
+    // The acknowledgement samples 20; second is read at 30 and first again at 40 before it stores.
+    let (reads, time, ids) = (store.clone(), clock.clone(), (first.id(), second.id()));
+    let resume = move || {
+        time.time.advance(Duration::from_secs(10));
+        drop(lease(&mut reads.reader(ids.1, 0).unwrap()));
+        time.time.advance(Duration::from_secs(10));
+        drop(lease(&mut reads.reader(ids.0, 0).unwrap()));
+    };
+    *clock.pause.lock().unwrap() = Some((thread::current().id(), Box::new(resume)));
+    acknowledged.acknowledge();
+    let mut allocating = store.create().unwrap();
+    allocating.append(&[3; FRAME_BYTES]).unwrap();
+    assert!(matches!(store.reader(second.id(), 0), Err(Error::Gone)));
+    assert!(store.reader(first.id(), 0).is_ok());
 }
 
 #[test]
