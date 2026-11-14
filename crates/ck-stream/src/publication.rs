@@ -216,7 +216,8 @@ impl Stream {
     }
 
     pub(crate) fn invalidate(&self) {
-        self.invalidate_locked(&mut self.state.lock());
+        let (mut state, _fence) = self.retention.lock_stable(self);
+        self.invalidate_locked(&mut state);
     }
 
     pub(crate) fn invalidate_locked(&self, state: &mut State) -> u32 {
@@ -426,7 +427,7 @@ impl Writer {
     }
 
     fn rollback(&self, old_count: usize) {
-        let mut state = self.stream.state.lock();
+        let (mut state, _fence) = self.stream.retention.lock_stable(&self.stream);
         while state.frames.len() > old_count {
             if let Some(frame) = state.frames.pop_back().unwrap().pool {
                 self.inner.pool.release(frame);
@@ -455,7 +456,7 @@ impl Writer {
     /// Independent scratch leases release on drop. Frame and record numbers are never recycled.
     pub fn release_before(&mut self, position: Position) -> Result<(), Error> {
         let end = position.byte(self.id())?;
-        let mut state = self.stream.state.lock();
+        let (mut state, _fence) = self.stream.retention.lock_stable(&self.stream);
         if end > state.end {
             return Err(Error::InvalidPosition);
         }

@@ -4,12 +4,14 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     panic::AssertUnwindSafe,
     sync::{
-        Arc, Condvar, Mutex, RwLock, RwLockWriteGuard, Weak,
+        Arc, Condvar, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
+
+use parking_lot::MutexGuard;
 
 use crate::{
     Config, Error, Limits, Reader, Terminal, Writer,
@@ -92,6 +94,9 @@ pub(crate) struct Inner {
     retention: Arc<Retention>,
     closed: AtomicBool,
     maintenance: parking_lot::Mutex<Maintenance>,
+    /// Runs once between planning victims and invalidating them.
+    #[cfg(test)]
+    evict_hook: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 pub(crate) struct Retention {
@@ -110,22 +115,26 @@ impl Retention {
         }
     }
 
-    pub(crate) fn reading<R>(
-        &self,
-        stream: &Stream,
-        read: impl FnOnce(&mut crate::publication::State) -> (R, bool),
-    ) -> R {
-        let mut state = stream.state.lock();
+    /// Lock stream state once no maintenance pass that has observed this stream is running.
+    /// Reads and every writer transition that lowers a stream's reclaimable frames use this,
+    /// so eviction's counted gain cannot shrink before it invalidates its victims.
+    pub(crate) fn lock_stable<'a>(
+        &'a self,
+        stream: &'a Stream,
+    ) -> (MutexGuard<'a, State>, Option<RwLockReadGuard<'a, ()>>) {
+        let state = stream.state.lock();
         // Maintenance sets the flag before locking stream state. Once it has observed a
-        // stream, that mutex's release/acquire edge makes later readers take the fence.
-        let _retention = if self.active.load(Ordering::Acquire) {
-            drop(state);
-            let guard = self.fence.read().unwrap();
-            state = stream.state.lock();
-            Some(guard)
-        } else {
-            None
-        };
+        // stream, that mutex's release/acquire edge makes later callers take the fence.
+        if !self.active.load(Ordering::Acquire) {
+            return (state, None);
+        }
+        drop(state);
+        let fence = self.fence.read().unwrap();
+        (stream.state.lock(), Some(fence))
+    }
+
+    pub(crate) fn reading<R>(&self, stream: &Stream, read: impl FnOnce(&mut State) -> (R, bool)) -> R {
+        let (mut state, _fence) = self.lock_stable(stream);
         let (result, acquired) = read(&mut state);
         if acquired {
             state.last_read = self.clock.now();
@@ -187,6 +196,10 @@ impl Inner {
         }
         if found < wanted {
             return false;
+        }
+        #[cfg(test)]
+        if let Some(hook) = self.evict_hook.lock().take() {
+            hook();
         }
         for key in victims {
             let stream = cache.streams.remove(&key.1).unwrap();
@@ -292,6 +305,8 @@ impl Store {
             }),
             closed: AtomicBool::new(false),
             maintenance: parking_lot::Mutex::new(Maintenance::default()),
+            #[cfg(test)]
+            evict_hook: parking_lot::Mutex::new(None),
         });
         let stop = Arc::new((Mutex::new(false), Condvar::new()));
         let weak: Weak<Inner> = Arc::downgrade(&inner);
@@ -437,8 +452,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut config = Config::new(dir.path().join("pool"));
         config.pool_bytes = Some(4 * FRAME_BYTES);
-        config.max_event_bytes = FRAME_BYTES;
-        config.header_slots = 4;
+        config.max_event_bytes = 4 * FRAME_BYTES;
+        config.header_slots = 8;
         config.workers = 1;
         let store = Store::open(config).unwrap();
         (dir, store)
@@ -465,6 +480,86 @@ mod tests {
         assert_eq!(store.maintenance_failures().errors, 0);
         let error = store.shutdown().unwrap_err();
         assert_eq!(error.to_string(), "stream maintenance tick panicked");
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Transition {
+        Rollback,
+        ReleasePrefix,
+        Invalidate,
+    }
+
+    /// Victims are `victim` (2 frames) and `canonical` (1 frame). While eviction sits between
+    /// counting and invalidating, the victim's writer returns its frames to the pool and, if
+    /// eviction is still planning, `taker` retakes them as scratch.
+    fn interleave(transition: Transition) {
+        let (_dir, store) = store();
+        let planning = Arc::new(AtomicBool::new(false));
+        let (planned, planned_signal) = std::sync::mpsc::channel();
+        let (moved, moved_signal) = std::sync::mpsc::channel::<()>();
+        let hook_planning = planning.clone();
+        *store.inner.evict_hook.lock() = Some(Box::new(move || {
+            hook_planning.store(true, Ordering::Release);
+            planned.send(()).unwrap();
+            let _ = moved_signal.recv_timeout(Duration::from_millis(500));
+            hook_planning.store(false, Ordering::Release);
+        }));
+        let mut victim = store.create().unwrap();
+        let mut canonical = store.create().unwrap();
+        canonical.append(&[2; 10]).unwrap();
+        let mut scratch_owner = store.create().unwrap();
+        let _scratch = scratch_owner.begin_scratch(FRAME_BYTES).unwrap();
+        let mut allocating = store.create().unwrap();
+        let mut taker = store.create().unwrap();
+        let victim_id = victim.id();
+        std::thread::scope(|scope| {
+            let (ready, ready_signal) = std::sync::mpsc::channel();
+            let writer = scope.spawn(move || {
+                let wait = || {
+                    ready.send(()).unwrap();
+                    planned_signal.recv().unwrap();
+                };
+                match transition {
+                    Transition::Rollback => {
+                        let reservation = victim.begin_record(2 * FRAME_BYTES, false, 0, 0).unwrap();
+                        wait();
+                        drop(reservation);
+                    }
+                    Transition::ReleasePrefix => {
+                        let end = victim.append(&[1; 2 * FRAME_BYTES]).unwrap().end;
+                        wait();
+                        victim.release_before(end).unwrap();
+                    }
+                    Transition::Invalidate => {
+                        victim.append(&[1; 2 * FRAME_BYTES]).unwrap();
+                        wait();
+                        victim.finish(Terminal::Gone);
+                    }
+                }
+                // Holding the scratch keeps any frames it took away from the allocation.
+                let taken = planning
+                    .load(Ordering::Acquire)
+                    .then(|| taker.begin_scratch(2 * FRAME_BYTES).unwrap());
+                let _ = moved.send(());
+                taken
+            });
+            ready_signal.recv().unwrap();
+            assert!(
+                allocating.append(&[3; 3 * FRAME_BYTES]).is_ok(),
+                "{transition:?} moved counted frames during eviction"
+            );
+            assert!(writer.join().unwrap().is_none(), "{transition:?} ran inside eviction");
+        });
+        assert!(matches!(store.reader(victim_id, 0), Err(Error::Gone)));
+        assert!(matches!(store.reader(canonical.id(), 0), Err(Error::Gone)));
+        assert_eq!(store.used_frames(), 4);
+    }
+
+    #[test]
+    fn victims_cannot_move_frames_between_count_and_invalidation() {
+        for transition in [Transition::Rollback, Transition::ReleasePrefix, Transition::Invalidate] {
+            interleave(transition);
+        }
     }
 
     #[test]
