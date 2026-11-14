@@ -1,10 +1,11 @@
+use super::request_content::{normalize_part, write_part};
 use crate::codec::{
     self, Capability, Error, Operation, RequestFence, RequestView, Result, ValidatedRequest,
     document::{Document, Name, Value},
     encode::{self, Encoder},
     event::{Emitter, Identity, Kind, Scope},
     json::{self, Decoded},
-    media::{self, Encoding, Registry},
+    media::{self, Registry},
 };
 use ck_stream::{ScratchLease, Writer};
 
@@ -339,7 +340,7 @@ impl Capability for ChatCapability {
     }
 }
 
-fn require_string(doc: &Document, node: usize) -> Result<()> {
+pub(super) fn require_string(doc: &Document, node: usize) -> Result<()> {
     if matches!(doc.node(node)?.value, Value::String(_) | Value::Text(_) | Value::Id(_)) {
         Ok(())
     } else {
@@ -580,115 +581,6 @@ fn original_field(doc: &mut Document, original: usize, pointer: &'static str, va
     doc.set(entry, "pointer", Value::Text(pointer))?;
     doc.rename(value, "value")?;
     doc.append(entry, value)
-}
-
-fn normalize_part(doc: &mut Document, registry: &mut Registry, _owner: &mut Writer, part: usize) -> Result<()> {
-    let kind = doc.required(part, "type")?;
-    if doc.string_is(kind, "text")? {
-        require_string(doc, doc.required(part, "text")?)?;
-        return Ok(());
-    }
-    if doc.string_is(kind, "image_url")? {
-        let image = doc.remove(part, "image_url")?.ok_or(Error::Schema)?;
-        let url = doc.remove(image, "url")?.ok_or(Error::Schema)?;
-        require_string(doc, url)?;
-        doc.replace(kind, Value::Text("image"))?;
-        let source = doc.set(part, "source", Value::Object)?;
-        doc.set(source, "kind", Value::Text("uri"))?;
-        doc.rename(url, "uri")?;
-        doc.append(source, url)?;
-        if let Some(detail) = doc.remove(image, "detail")? {
-            doc.append(part, detail)?;
-        }
-        // Remaining native image attributes remain attached to the typed source.
-        while let Some(extra) = doc.node(image)?.first {
-            doc.detach(image, extra)?;
-            doc.append(source, extra)?;
-        }
-        return Ok(());
-    }
-    if doc.string_is(kind, "input_audio")? {
-        let audio = doc.remove(part, "input_audio")?.ok_or(Error::Schema)?;
-        let data = doc.remove(audio, "data")?.ok_or(Error::Schema)?;
-        let Value::String(text) = doc.node(data)?.value else {
-            return Err(Error::Schema);
-        };
-        let format = doc.member(audio, "format")?;
-        doc.replace(kind, Value::Text("audio"))?;
-        let source = doc.set(part, "source", Value::Object)?;
-        doc.set(source, "kind", Value::Text("data"))?;
-        doc.rename(data, "ref")?;
-        doc.append(source, data)?;
-        let mime = if let Some(format) = format {
-            if doc.string_is(format, "wav")? {
-                Some(doc.set(part, "mime", Value::Text("audio/wav"))?)
-            } else if doc.string_is(format, "mp3")? {
-                Some(doc.set(part, "mime", Value::Text("audio/mpeg"))?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        while let Some(extra) = doc.node(audio)?.first {
-            doc.detach(audio, extra)?;
-            doc.append(source, extra)?;
-        }
-        registry.register(doc, data, text, Encoding::Base64, "audio", mime)?;
-        return Ok(());
-    }
-    if doc.string_is(kind, "file")? {
-        let file = doc.remove(part, "file")?.ok_or(Error::Schema)?;
-        doc.replace(kind, Value::Text("document"))?;
-        let source = doc.set(part, "source", Value::Object)?;
-        if let Some(id) = doc.remove(file, "file_id")? {
-            doc.set(source, "kind", Value::Text("file"))?;
-            doc.append(source, id)?;
-        } else if let Some(data) = doc.remove(file, "file_data")? {
-            let Value::String(text) = doc.node(data)?.value else {
-                return Err(Error::Schema);
-            };
-            doc.set(source, "kind", Value::Text("data"))?;
-            doc.rename(data, "ref")?;
-            doc.append(source, data)?;
-            registry.register(doc, data, text, Encoding::Base64, "document", None)?;
-        } else {
-            return Err(Error::Schema);
-        }
-        while let Some(extra) = doc.node(file)?.first {
-            doc.detach(file, extra)?;
-            doc.append(part, extra)?;
-        }
-        return Ok(());
-    }
-    if doc.string_is(kind, "refusal")? {
-        if let Some(value) = doc.remove(part, "refusal")? {
-            doc.rename(value, "text")?;
-            doc.append(part, value)?;
-        }
-        return Ok(());
-    }
-    for known in [
-        "reasoning",
-        "reasoning_summary",
-        "audio",
-        "image",
-        "video",
-        "document",
-        "tool_result",
-    ] {
-        if doc.string_is(kind, known)? {
-            return Ok(());
-        }
-    }
-    let native = doc.add(Some(Name::Static("value")), Value::Object)?;
-    while let Some(child) = doc.node(part)?.first {
-        doc.detach(part, child)?;
-        doc.append(native, child)?;
-    }
-    doc.set(part, "type", Value::Text("opaque"))?;
-    doc.set(part, "protocol", Value::Text("chat"))?;
-    doc.append(part, native)
 }
 
 #[derive(Clone, Copy)]
@@ -958,55 +850,4 @@ fn write_function(doc: &Document, function: usize, custom: bool, e: &mut Encoder
         }
     }
     e.bytes(b"}")
-}
-fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
-    let doc = view.document;
-    let kind = doc.required(part, "type")?;
-    if doc.string_is(kind, "opaque")? {
-        return doc.write(doc.required(part, "value")?, e);
-    }
-    if doc.string_is(kind, "image")? {
-        let source = doc.required(part, "source")?;
-        e.bytes(b"{\"type\":\"image_url\",\"image_url\":{\"url\":")?;
-        doc.write(doc.required(source, "uri")?, e)?;
-        if let Some(detail) = doc.member(part, "detail")? {
-            e.bytes(b",\"detail\":")?;
-            doc.write(detail, e)?;
-        }
-        super::response::members(doc, source, e, &["kind", "uri", "ref"])?;
-        e.bytes(b"}")?;
-        super::response::members(doc, part, e, &["type", "source", "detail", "mime"])?;
-        e.bytes(b"}")
-    } else if doc.string_is(kind, "audio")? || doc.string_is(kind, "document")? {
-        let audio = doc.string_is(kind, "audio")?;
-        let source = doc.required(part, "source")?;
-        e.bytes(if audio {
-            b"{\"type\":\"input_audio\",\"input_audio\":{"
-        } else {
-            b"{\"type\":\"file\",\"file\":{"
-        })?;
-        if let Some(reference) = doc.member(source, "ref")? {
-            view.media.get(doc, reference)?.ok_or(Error::Position)?;
-            e.string(if audio { "data" } else { "file_data" })?;
-            e.bytes(b":")?;
-            view.media.write_value(doc, reference, e)?;
-        } else {
-            e.bytes(b"\"file_id\":")?;
-            doc.write(doc.required(source, "file_id")?, e)?;
-        }
-        if let Some(format) = doc.member(source, "format")? {
-            e.bytes(b",\"format\":")?;
-            doc.write(format, e)?;
-        }
-        if let Some(filename) = doc.member(part, "filename")? {
-            e.bytes(b",\"filename\":")?;
-            doc.write(filename, e)?;
-        }
-        super::response::members(doc, source, e, &["kind", "ref", "file_id", "format"])?;
-        e.bytes(b"}")?;
-        super::response::members(doc, part, e, &["type", "source", "filename", "mime"])?;
-        e.bytes(b"}")
-    } else {
-        doc.write(part, e)
-    }
 }

@@ -13,9 +13,9 @@ enum Count {
 }
 
 /// Supplied null invalidates a count; only omission retains the previous snapshot.
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct Usage {
-    counts: [Count; 9],
+    counts: [Count; 15],
     seen: bool,
     total_reported: bool,
 }
@@ -32,12 +32,31 @@ const FIELDS: [&str; 9] = [
     "input_uncached_tokens",
 ];
 
+const DETAILS: [&str; 6] = [
+    "accepted_prediction_tokens",
+    "rejected_prediction_tokens",
+    "input_text_tokens",
+    "output_text_tokens",
+    "input_image_tokens",
+    "output_image_tokens",
+];
+
 impl Usage {
     pub fn seen(&self) -> bool {
         self.seen
     }
     pub fn update_chat(&mut self, doc: &Document, usage: usize) -> Result<()> {
+        let mut next = *self;
+        next.apply_chat(doc, usage)?;
+        *self = next;
+        Ok(())
+    }
+
+    fn apply_chat(&mut self, doc: &Document, usage: usize) -> Result<()> {
         if matches!(doc.node(usage)?.value, Value::Null) {
+            self.seen = true;
+            self.counts.fill(Count::Null);
+            self.total_reported = true;
             return Ok(());
         }
         self.seen = true;
@@ -52,11 +71,25 @@ impl Usage {
         for (name, fields) in [
             (
                 "prompt_tokens_details",
-                &[(3, "cached_tokens"), (4, "cache_write_tokens"), (6, "audio_tokens")][..],
+                &[
+                    (3, "cached_tokens"),
+                    (4, "cache_write_tokens"),
+                    (6, "audio_tokens"),
+                    (8, "uncached_tokens"),
+                    (11, "text_tokens"),
+                    (13, "image_tokens"),
+                ][..],
             ),
             (
                 "completion_tokens_details",
-                &[(5, "reasoning_tokens"), (7, "audio_tokens")][..],
+                &[
+                    (5, "reasoning_tokens"),
+                    (7, "audio_tokens"),
+                    (9, "accepted_prediction_tokens"),
+                    (10, "rejected_prediction_tokens"),
+                    (12, "text_tokens"),
+                    (14, "image_tokens"),
+                ][..],
             ),
         ] {
             if let Some(details) = doc.member(usage, name)? {
@@ -99,13 +132,26 @@ impl Usage {
         native(e)?;
         e.bytes(b"},\"final\":")?;
         e.bytes(if final_snapshot { b"true" } else { b"false" })?;
-        for (index, count) in self.counts.iter().enumerate() {
+        for (index, count) in self.counts[..FIELDS.len()].iter().enumerate() {
             if let Count::Known(value) = count {
                 e.bytes(b",")?;
                 e.string(FIELDS[index])?;
                 e.bytes(b":")?;
                 e.unsigned(*value)?;
             }
+        }
+        let mut first = true;
+        for (name, count) in DETAILS.iter().zip(&self.counts[FIELDS.len()..]) {
+            if let Count::Known(value) = count {
+                e.bytes(if first { b",\"details\":{" } else { b"," })?;
+                first = false;
+                e.string(name)?;
+                e.bytes(b":")?;
+                e.unsigned(*value)?;
+            }
+        }
+        if !first {
+            e.bytes(b"}")?;
         }
         if !self.total_reported && matches!(self.counts[2], Count::Known(_)) {
             e.bytes(b",\"derived\":[\"total_tokens\"]")?;

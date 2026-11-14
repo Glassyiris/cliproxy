@@ -16,6 +16,19 @@ A fixture ID is its repository path plus its recorded `name` and occurrence inde
 
 No fixture expectations change in Phase A. Later rows must include a test name, command/result and commit, or an explicit unsupported-operation reason. Empty output, a missing registry arm and a skipped test are not semantic passes. Existing `golden.rs::PENDING` entries remain input obligations; they are not accepted losses.
 
+## Chat reference checkpoints
+
+The old pair registry and its goldens remain unchanged until integration cutover. These new boundary tests prove individual Chat contracts, not full reference-codec acceptance.
+
+| Test in `crates/ck-translate/tests/chat_codec.rs` | Contract and observed result | Commit |
+| --- | --- | --- |
+| `completed_request_fields_and_messages_publish_before_the_body_ends` | Completed root fields and messages publish before EOF; parent containers precede children and pointers are assigned once. | `1405cb20` |
+| `late_destination_rejection_keeps_published_prefix_without_success` | A late unsupported semantic preserves the canonical prefix but emits no request.end or done and authorizes no upstream body. | `1405cb20` |
+| `completed_message_media_is_available_before_later_request_fields` | Media for a completed message is available before later root fields arrive. This does not prove flushing inside an unfinished media string. | `1405cb20` |
+
+At `1405cb20`, fmt check, clippy with warnings denied, and `cargo nextest run -p ck-translate -p ck-stream --locked --no-fail-fast` passed: 149 tests passed, one existing storage test skipped. Unfinished-string/media publication, full Chat media/provenance/usage/terminal coverage and final independent review remain acceptance obligations.
+
+
 ## Registry inventory: 30 arms
 
 Source: `crates/ck-translate/src/lib.rs:283-315`. Each row names one current `(client, upstream)` arm, not a new pair API. `openai` means Chat; `openai-response` means Responses; `codex` and `antigravity` name wire envelopes, not extra client routes.

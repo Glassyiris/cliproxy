@@ -255,6 +255,7 @@ fn advance(position: Position, bytes: u64) -> Result<Position> {
 }
 
 /// A cursor caches only a temporary borrowed frame span under `Source`'s lease.
+#[derive(Clone)]
 pub struct Cursor<'a> {
     source: &'a Source,
     pub(crate) offset: u64,

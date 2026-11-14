@@ -1,6 +1,10 @@
 //! Chat Completions boundary codecs. Transport, credentials and pair dispatch stay outside.
+mod accounting;
+mod aggregate;
 pub mod egress;
+mod provenance;
 pub mod request;
+mod request_content;
 pub mod response;
 
 use super::{
