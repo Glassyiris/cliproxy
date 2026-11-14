@@ -209,6 +209,13 @@ impl Writer {
     }
 
     pub fn append(&mut self, bytes: &[u8]) -> Result<Record, Error> {
+        let mut state = self.stream.state.lock();
+        if let Some(record) = self.append_in_frame(&mut state, bytes) {
+            drop(state);
+            self.stream.notify.wake();
+            return Ok(record);
+        }
+        drop(state);
         let (record, index, old_count, mut state) = self.reserve(bytes.len(), false, 0, 0)?;
         if let Err(error) = self.stream.write_reserved(&state, record.start, bytes) {
             drop(state);
@@ -219,6 +226,54 @@ impl Writer {
         drop(state);
         self.stream.notify.wake();
         Ok(record)
+    }
+
+    /// Publish a record that fits the populated part of the last frame and continues the last
+    /// run, the common case for small records, without reserving. `None` leaves every other
+    /// case, including each error, to the general path.
+    fn append_in_frame(&self, state: &mut State, bytes: &[u8]) -> Option<Record> {
+        let len = bytes.len() as u64;
+        if bytes.is_empty() || bytes.len() > self.inner.limits.max_event_bytes {
+            return None;
+        }
+        if self.stream.invalidated.load(Ordering::Acquire) || state.terminal.is_some() {
+            return None;
+        }
+        let frame_number = (state.base_frame + state.frames.len() as u64).checked_sub(1)?;
+        let frame_start = frame_number * FRAME_BYTES as u64;
+        let (start, end) = (state.end, state.end.checked_add(len)?);
+        if start < frame_start || end > frame_start + FRAME_BYTES as u64 {
+            return None;
+        }
+        let frame = state.frames.back()?.pool?;
+        let offset = (start - frame_start) as usize;
+        if !self.inner.pool.is_ready(frame, offset + bytes.len()) {
+            return None;
+        }
+        let sequence = state.next_sequence;
+        let index = Index {
+            start,
+            sequence,
+            next_sequence: sequence.checked_add(1)?,
+            len,
+            stride: len,
+            kind: 0,
+            correlation: 0,
+        };
+        if !state.records.back().is_some_and(|last| last.extends(&index)) {
+            return None;
+        }
+        // SAFETY: the sole Writer owns the unpublished bytes after the committed end of its
+        // populated last frame; the locked state prevents invalidation.
+        unsafe { self.inner.pool.write(frame, offset, bytes) };
+        self.stream.publish(state, index);
+        Some(Record {
+            sequence,
+            start: Position::at(self.id(), start),
+            end: Position::at(self.id(), end),
+            kind: 0,
+            correlation: 0,
+        })
     }
 
     pub fn finish(&mut self, terminal: Terminal) {

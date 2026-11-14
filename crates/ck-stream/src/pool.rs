@@ -295,6 +295,11 @@ impl Pool {
         Ok(frame)
     }
 
+    /// Whether the first `needed` bytes of a frame the caller owns are populated.
+    pub(crate) fn is_ready(&self, frame: u32, needed: usize) -> bool {
+        needed <= self.ready[frame as usize].load(Ordering::Relaxed) as usize
+    }
+
     /// Populate the pages under the first `needed` bytes of a frame the caller owns. Pages
     /// that are already populated cost nothing; a refusal (tmpfs full) leaves them unwritten.
     pub(crate) fn prefault(&self, frame: u32, needed: usize) -> io::Result<()> {

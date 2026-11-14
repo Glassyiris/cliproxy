@@ -559,10 +559,9 @@ fn tmpfs_cold_prefault_failure_evicts_once_then_reports_the_os_error() {
     assert!(matches!(error, Error::Io(ref error) if error.raw_os_error() == Some(libc::EFAULT)));
 }
 
-#[test]
-#[ignore = "requires a disposable private 8 MiB tmpfs supplied as TMPDIR"]
-fn tmpfs_refusal_while_continuing_a_cold_frame_is_an_error_not_a_fault() {
-    let dir = private_tmpfs();
+/// A stream that has filled eight warm frames and written 100 bytes into a cold ninth,
+/// which populated only the pages under those bytes, with a reader attached from the start.
+fn continuing_a_cold_frame(dir: &PrivateTmpfs) -> (Store, ck_stream::Writer, ck_stream::Reader) {
     let mut config = Config::new(dir.path().join("pool"));
     config.pool_bytes = Some(80 * FRAME_BYTES);
     config.max_event_bytes = FRAME_BYTES;
@@ -579,16 +578,48 @@ fn tmpfs_refusal_while_continuing_a_cold_frame_is_an_error_not_a_fault() {
         store.tick().unwrap();
     }
     let mut new = store.create().unwrap();
-    let mut reader = store.reader(new.id(), 0).unwrap();
+    let reader = store.reader(new.id(), 0).unwrap();
     for _ in 0..8 {
         new.append(&[5; FRAME_BYTES]).unwrap();
     }
-    // The ninth frame is cold: this record populates only the pages under its own bytes.
     new.append(&[6; 100]).unwrap();
+    (store, new, reader)
+}
+
+#[test]
+#[ignore = "requires a disposable private 8 MiB tmpfs supplied as TMPDIR"]
+fn tmpfs_refusal_while_continuing_a_cold_frame_is_an_error_not_a_fault() {
+    let dir = private_tmpfs();
+    let (_store, mut new, mut reader) = continuing_a_cold_frame(&dir);
     let _filler = fill(dir.path());
     let error = new.append(&[7; 20_000]).unwrap_err();
     assert!(matches!(error, Error::Io(ref error) if error.raw_os_error() == Some(libc::EFAULT)));
     for _ in 0..9 {
+        lease(&mut reader);
+    }
+    assert!(matches!(
+        reader.try_next(),
+        Poll::Ready(Some(Read::Terminal(Terminal::StorageExhausted)))
+    ));
+}
+
+#[test]
+#[ignore = "requires a disposable private 8 MiB tmpfs supplied as TMPDIR"]
+fn tmpfs_refusal_while_extending_a_run_into_unpopulated_pages_is_an_error_not_a_fault() {
+    let dir = private_tmpfs();
+    let (_store, mut new, mut reader) = continuing_a_cold_frame(&dir);
+    let _filler = fill(dir.path());
+    // Equal records extend the run in place until one reaches a page never populated.
+    let mut appended = 0;
+    let error = loop {
+        match new.append(&[6; 100]) {
+            Ok(_) => appended += 1,
+            Err(error) => break error,
+        }
+    };
+    assert!(appended < FRAME_BYTES / 100);
+    assert!(matches!(error, Error::Io(ref error) if error.raw_os_error() == Some(libc::EFAULT)));
+    for _ in 0..9 + appended {
         lease(&mut reader);
     }
     assert!(matches!(
