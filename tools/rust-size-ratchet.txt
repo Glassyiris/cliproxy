@@ -92,7 +92,7 @@ file crates/ck-server/src/management/api/oauth.rs 2730
 file crates/ck-server/src/management/api/siwc.rs 1163
 file crates/ck-server/src/net/listener.rs 714
 file crates/ck-server/src/observability/api.rs 674
-file crates/ck-server/src/observability/logging.rs 1390
+file crates/ck-server/src/observability/logging.rs 1435
 file crates/ck-server/src/observability/pprof.rs 812
 file crates/ck-server/src/observability/request_logging.rs 2776
 file crates/ck-server/src/observability/usage_record.rs 3078
