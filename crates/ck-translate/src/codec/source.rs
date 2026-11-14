@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ck_stream::{ByteSpan, Lease, MetadataPermit, Position, ScratchLease, Writer};
+use ck_stream::{ByteSpan, FRAME_BYTES, Lease, MetadataPermit, Position, ScratchLease, ScratchReservation, Writer};
 
 use super::{Error, Result};
 
@@ -27,6 +27,7 @@ enum Storage {
         lease: Lease,
     },
     Scratch(ScratchLease),
+    Pending(ScratchReservation),
 }
 
 struct Segment {
@@ -123,17 +124,32 @@ impl Source {
         self.insert(Storage::Scratch(lease), len)
     }
 
-    pub fn push_bytes(&mut self, owner: &mut Writer, bytes: &[u8]) -> Result<Span> {
+    pub fn push_bytes(&mut self, owner: &mut Writer, mut bytes: &[u8]) -> Result<Span> {
         self.check_owner(owner)?;
-        if bytes.is_empty() {
-            return Ok(Span {
-                start: self.len,
-                end: self.len,
-            });
+        let start = self.len;
+        self.len.checked_add(bytes.len() as u64).ok_or(Error::Limit)?;
+        while !bytes.is_empty() {
+            if let Some(segment) = self.segments.last_mut()
+                && segment.end == self.len
+                && let Storage::Pending(reservation) = &mut segment.storage
+            {
+                let available = FRAME_BYTES - (segment.end - segment.start) as usize;
+                let count = available.min(bytes.len());
+                if count != 0 {
+                    reservation.write(&bytes[..count])?;
+                    segment.end += count as u64;
+                    self.len = segment.end;
+                    bytes = &bytes[count..];
+                    continue;
+                }
+            }
+            let count = bytes.len().min(FRAME_BYTES);
+            let mut reservation = owner.begin_scratch(FRAME_BYTES)?;
+            reservation.write(&bytes[..count])?;
+            self.insert(Storage::Pending(reservation), count as u64)?;
+            bytes = &bytes[count..];
         }
-        let mut reservation = owner.begin_scratch(bytes.len())?;
-        reservation.write(bytes)?;
-        self.push_scratch(reservation.complete()?)
+        Ok(Span { start, end: self.len })
     }
 
     fn insert(&mut self, storage: Storage, bytes: u64) -> Result<Span> {
@@ -190,7 +206,7 @@ impl Source {
         if self
             .segments
             .iter()
-            .all(|segment| matches!(segment.storage, Storage::Scratch(_)))
+            .all(|segment| matches!(segment.storage, Storage::Scratch(_) | Storage::Pending(_)))
         {
             self.release_before(self.len)?;
         }
@@ -256,6 +272,7 @@ impl Source {
                 ByteSpan::new(lease, span.clone())?.chunk(position)?
             }
             Storage::Scratch(lease) => lease.chunk((offset - segment.start) as usize)?,
+            Storage::Pending(reservation) => reservation.chunk((offset - segment.start) as usize)?,
         };
         Ok(&bytes[..bytes.len().min((end - offset) as usize)])
     }

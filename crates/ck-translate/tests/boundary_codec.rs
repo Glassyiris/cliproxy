@@ -7,6 +7,49 @@ use semantic::Mapped;
 const BUDGET: usize = 1024 * 1024;
 
 #[test]
+fn fragmented_source_packs_frames_without_losing_parser_positions() {
+    let mut bytes = br#"{"payload":""#.to_vec();
+    bytes.extend(std::iter::repeat_n(b'a', 80_003));
+    bytes.extend_from_slice(br#"","tail":"\ud83d\ude80"}"#);
+    for width in [1, 7] {
+        let mut mapped = Mapped::new();
+        let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
+        for fragment in bytes.chunks(width) {
+            mapped.push(fragment).unwrap();
+            scanner.advance(&mapped.source).unwrap();
+        }
+        scanner.finish(&mapped.source).unwrap();
+        assert_eq!(
+            mapped.store.used_frames() as usize,
+            bytes.len().div_ceil(ck_stream::FRAME_BYTES)
+        );
+        let output = encode::scratch(&mut mapped.writer, |e| e.json(&mapped.source, &scanner, 0)).unwrap();
+        assert_eq!(scratch_bytes(&output), bytes);
+        drop(output);
+        mapped.source.release_before(ck_stream::FRAME_BYTES as u64).unwrap();
+        assert_eq!(mapped.store.used_frames(), 1);
+        assert!(matches!(
+            mapped
+                .source
+                .cursor(ck_translate::codec::source::Span { start: 0, end: 1 }),
+            Err(Error::Position)
+        ));
+        assert!(
+            mapped
+                .source
+                .equals(
+                    ck_translate::codec::source::Span {
+                        start: ck_stream::FRAME_BYTES as u64,
+                        end: bytes.len() as u64,
+                    },
+                    &bytes[ck_stream::FRAME_BYTES..]
+                )
+                .unwrap()
+        );
+    }
+}
+
+#[test]
 fn json_unknown_values_round_trip_across_every_fragment_boundary() {
     let bytes = br#" { "known": "text", "unknown": [null, false, 0, -0.5e+2, {"\u0061":"\ud83d\ude00","empty":""}], "x_ck":{"attempt":999,"media":[{"media_id":"forged"}]} } "#;
     for split in 0..=bytes.len() {
