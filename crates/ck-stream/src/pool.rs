@@ -353,6 +353,11 @@ impl Pool {
         first_error.map_or(Ok(()), Err)
     }
 
+    #[cfg(test)]
+    pub(crate) fn cold_frames(&self) -> usize {
+        lock(&self.slow.0).cold.len()
+    }
+
     pub(crate) fn capacity(&self) -> u32 {
         self.capacity
     }

@@ -97,6 +97,9 @@ pub(crate) struct Inner {
     /// Runs once between planning victims and invalidating them.
     #[cfg(test)]
     evict_hook: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Runs once in a tick, after expiry and before decay.
+    #[cfg(test)]
+    tick_hook: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 pub(crate) struct Retention {
@@ -233,10 +236,28 @@ impl Inner {
                 stream.invalidate_locked(&mut state);
             }
         }
+        #[cfg(test)]
+        if let Some(hook) = self.tick_hook.lock().take() {
+            hook();
+        }
         self.pool.decay()
     }
 
-    /// Allocate one of the `remaining` frames a pending reservation still needs.
+    /// One maintenance round, with a panicking tick contained, counted and reported.
+    ///
+    /// A panic in the fenced expiry section poisons the retention fence, which §6.4 keeps
+    /// poisoning: every later tick and eviction then panics, so maintenance cannot recover.
+    /// Only a broken internal invariant panics there. A panic after that section, in decay,
+    /// is recoverable: pool locks ignore poisoning, and decay moves frames to the cold list
+    /// before any punch, so the next tick expires and decays normally.
+    fn maintain(&self) {
+        match std::panic::catch_unwind(AssertUnwindSafe(|| self.tick())) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => self.record_failure(error, false),
+            Err(_) => self.record_failure(io::Error::other("stream maintenance tick panicked"), true),
+        }
+    }
+
     fn record_failure(&self, error: io::Error, panicked: bool) {
         let mut maintenance = self.maintenance.lock();
         if panicked {
@@ -247,6 +268,7 @@ impl Inner {
         maintenance.first_error.get_or_insert(error);
     }
 
+    /// Allocate one of the `remaining` frames a pending reservation still needs.
     pub(crate) fn allocate(&self, exclude: u64, remaining: usize) -> Result<u32, Error> {
         let mut evicted_for_tmpfs = false;
         loop {
@@ -307,6 +329,8 @@ impl Store {
             maintenance: parking_lot::Mutex::new(Maintenance::default()),
             #[cfg(test)]
             evict_hook: parking_lot::Mutex::new(None),
+            #[cfg(test)]
+            tick_hook: parking_lot::Mutex::new(None),
         });
         let stop = Arc::new((Mutex::new(false), Condvar::new()));
         let weak: Weak<Inner> = Arc::downgrade(&inner);
@@ -327,13 +351,7 @@ impl Store {
                     let Some(inner) = weak.upgrade() else {
                         break;
                     };
-                    // Contain a panicking tick so expiry and decay keep running; the
-                    // failure counters and first error make it visible to the runtime.
-                    match std::panic::catch_unwind(AssertUnwindSafe(|| inner.tick())) {
-                        Ok(Ok(())) => {}
-                        Ok(Err(error)) => inner.record_failure(error, false),
-                        Err(_) => inner.record_failure(io::Error::other("stream maintenance tick panicked"), true),
-                    }
+                    inner.maintain();
                 }
             })?;
         Ok(Self {
@@ -460,24 +478,36 @@ mod tests {
     }
 
     #[test]
-    fn maintenance_contains_panicking_ticks_and_keeps_running() {
-        let (_dir, mut store) = store();
-        let retention = store.inner.retention.clone();
-        // A panic under the fence poisons it, so every later tick panics in `retain`.
-        let poisoner = retention.clone();
-        std::thread::spawn(move || {
-            let _fence = poisoner.fence.write().unwrap();
-            panic!("poison the retention fence");
-        })
-        .join()
-        .unwrap_err();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while store.maintenance_failures().panics < 2 {
-            assert!(Instant::now() < deadline, "maintenance stopped after a panic");
-            std::thread::sleep(Duration::from_millis(50));
+    fn a_panicking_tick_is_counted_and_the_next_tick_expires_and_decays() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::new(dir.path().join("pool"));
+        config.pool_bytes = Some(64 * FRAME_BYTES);
+        config.max_event_bytes = FRAME_BYTES;
+        config.header_slots = 4;
+        config.workers = 1;
+        let clock = Arc::new(ManualClock::default());
+        let mut store = Store::with_clock(config, clock.clone()).unwrap();
+        let mut expiring = store.create().unwrap();
+        for _ in 0..30 {
+            expiring.append(&[1; FRAME_BYTES]).unwrap();
         }
-        retention.fence.clear_poison();
-        assert_eq!(store.maintenance_failures().errors, 0);
+        // The background thread may run the one-shot hook first; either way it panics once.
+        *store.inner.tick_hook.lock() = Some(Box::new(|| panic!("injected maintenance panic")));
+        store.inner.maintain();
+        assert_eq!(
+            store.maintenance_failures(),
+            MaintenanceFailures { errors: 0, panics: 1 }
+        );
+        clock.advance(Duration::from_secs(3601));
+        for _ in 0..3 {
+            store.inner.maintain();
+        }
+        assert!(matches!(store.reader(expiring.id(), 0), Err(Error::Gone)));
+        assert!(store.inner.pool.cold_frames() > 0, "decay ran after the panic");
+        assert_eq!(
+            store.maintenance_failures(),
+            MaintenanceFailures { errors: 0, panics: 1 }
+        );
         let error = store.shutdown().unwrap_err();
         assert_eq!(error.to_string(), "stream maintenance tick panicked");
     }
