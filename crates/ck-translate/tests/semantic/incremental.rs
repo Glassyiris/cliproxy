@@ -54,6 +54,13 @@ fn unfinished_string_releases_source_and_survives_unicode_tails() {
         b"\\\\",
     ] {
         ingress.advance(&mut mapped.writer, fragment).unwrap();
+        ingress.flush(&mut mapped.writer).unwrap();
+        assert!(ingress.flush_deadline().is_none());
+        assert!(
+            !String::from_utf8(mapped.output(&mapped.writer))
+                .unwrap()
+                .contains("event: x_ck.media.end\n")
+        );
     }
     ingress.advance(&mut mapped.writer, br#""}]}"#).unwrap();
     let ready = ingress.finish(&mut mapped.writer, &ChatCapability).unwrap();

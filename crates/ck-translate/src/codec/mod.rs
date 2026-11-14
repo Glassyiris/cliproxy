@@ -178,6 +178,17 @@ impl RequestFence {
 }
 
 pub trait RequestIngress {
+    /// Deadline for the oldest ready payload still awaiting publication, or none.
+    /// The owner must schedule `flush` even while input is idle, and recheck this
+    /// after every advance/flush. Later input must not postpone an existing deadline.
+    fn flush_deadline(&self) -> Option<std::time::Instant>;
+
+    /// Publish ready payload without completing the request or an open media object.
+    /// May be called before the deadline; empty advance has the same flush contract.
+    fn flush(&mut self, owner: &mut Writer) -> Result<()> {
+        self.advance(owner, &[])
+    }
+
     fn advance(&mut self, owner: &mut Writer, bytes: &[u8]) -> Result<()>;
     fn finish<'a>(&'a mut self, owner: &mut Writer, destination: &impl Capability) -> Result<ValidatedRequest<'a>>;
 }

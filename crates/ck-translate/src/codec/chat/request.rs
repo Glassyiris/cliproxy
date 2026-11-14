@@ -690,6 +690,11 @@ impl Ingress {
 }
 
 impl codec::RequestIngress for Ingress {
+    fn flush_deadline(&self) -> Option<std::time::Instant> {
+        // Every complete decoded fragment is published within advance.
+        None
+    }
+
     fn advance(&mut self, owner: &mut Writer, bytes: &[u8]) -> Result<()> {
         if owner.id() != self.owner {
             return Err(Error::Position);
