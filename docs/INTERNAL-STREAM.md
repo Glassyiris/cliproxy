@@ -69,7 +69,7 @@ Every record is UTF-8 SSE: optional `event: NAME\n`, optional `id: SEQUENCE\n`, 
 The unnamed/default event is a Chat chunk; extension event names start `x_ck.`. Emit LF; boundary parsers accept LF, CRLF and CR.
 Ingress SSE joins multiple `data:` lines with LF, observes empty-event boundaries, and validates text across fragmented network reads.
 Internal JSON has no literal newlines outside strings, duplicate object keys or non-finite numbers. Reject ambiguous duplicate-key input rather than silently selecting a value.
-An external event's `id`, `retry`, comments and unrecognized SSE fields are preserved in `X.source.sse`; internal SSE `id`, when present, equals `X.seq`.
+An external event's `id`, `retry`, comments and unrecognized SSE fields are preserved in `X.source.sse`, including on the terminal record that becomes `done`; a buffered destination without an SSE carrier reports their loss; internal SSE `id`, when present, equals `X.seq`.
 Transport keepalive comments become heartbeat metadata if needed; internal heartbeats are named events. Internal `[DONE]` is forbidden; boundary codecs translate it to/from terminal events.
 
 ```text

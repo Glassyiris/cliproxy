@@ -98,7 +98,7 @@ impl Egress {
             | Kind::MediaEnd
             | Kind::Annotation => self.deliver_projection(owner, kind, doc, x, &mut output)?,
             Kind::Opaque => self.deliver_opaque(owner, doc, x, &mut output)?,
-            Kind::Done => self.deliver_done(owner, &mut output)?,
+            Kind::Done => self.deliver_done(owner, &doc, x, &mut output)?,
             Kind::Error | Kind::Cancelled => self.deliver_error(owner, kind, &doc, &mut output)?,
             Kind::ItemStart | Kind::ItemEnd | Kind::BlockStart | Kind::BlockEnd | Kind::ToolEnd | Kind::Heartbeat => (),
             Kind::RequestStart | Kind::RequestField | Kind::RequestEnd | Kind::CountTokens | Kind::Compact => {
@@ -220,7 +220,13 @@ impl Egress {
     }
 
     /// Ends the stream, or writes the aggregate once every buffered choice has finished.
-    fn deliver_done(&mut self, owner: &mut Writer, output: &mut impl FnMut(ScratchLease) -> Result<()>) -> Result<()> {
+    fn deliver_done(
+        &mut self,
+        owner: &mut Writer,
+        doc: &Document,
+        x: usize,
+        output: &mut impl FnMut(ScratchLease) -> Result<()>,
+    ) -> Result<()> {
         if self.reduction.has_open_media() {
             return Err(Error::Truncated);
         }
@@ -229,8 +235,19 @@ impl Egress {
         }
         self.terminal = true;
         if self.mode == BodyMode::Streaming {
-            output(encode::scratch(owner, |e| e.bytes(b"data: [DONE]\n\n"))?)?;
+            output(encode::scratch(owner, |e| {
+                source_fields(doc, x, e)?;
+                e.bytes(b"data: [DONE]\n\n")
+            })?)?;
         } else {
+            if doc.member(x, "source")?.is_some() {
+                (self.diagnostic)(Diagnostic {
+                    identity: self.identity,
+                    kind: Kind::Done,
+                    destination: "chat.buffered",
+                    reason: "no native event carrier",
+                });
+            }
             let aggregate = self.reduction.document.as_mut().ok_or(Error::Schema)?;
             let choices = aggregate.required(aggregate.root(), "choices")?;
             let mut choice = aggregate.node(choices)?.first;

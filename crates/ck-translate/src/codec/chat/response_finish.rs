@@ -111,13 +111,26 @@ impl State {
             .emit(owner, &mut self.emitter, Scope::default(), final_snapshot)?;
         Ok(())
     }
-    pub(super) fn done(&mut self, owner: &mut Writer) -> Result<()> {
+    /// Publishes Done; `record` is the terminal SSE record whose other fields Done keeps.
+    pub(super) fn done(&mut self, owner: &mut Writer, record: Option<(&Source, &sse::Event)>) -> Result<()> {
         if self.terminal || self.choices.is_empty() || self.choices.iter().any(|choice| !choice.finished) {
             return Err(Error::Truncated);
         }
         self.emit_usage(owner, true)?;
-        self.emitter
-            .emit(owner, Kind::Done, Scope::default(), |_| Ok(()), |_| Ok(()))?;
+        let record = match record {
+            Some((source, event)) if sse_metadata(source, event)? => Some((source, event)),
+            _ => None,
+        };
+        self.emitter.emit(
+            owner,
+            Kind::Done,
+            Scope::default(),
+            |_| Ok(()),
+            |e| match record {
+                Some((source, event)) => sse_provenance(source, event, e),
+                None => Ok(()),
+            },
+        )?;
         self.terminal = true;
         Ok(())
     }

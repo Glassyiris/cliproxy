@@ -215,7 +215,7 @@ impl State {
         let mut data = Source::new(owner)?;
         data.push_scratch(lease)?;
         if known && data.equals(data.whole(), b"[DONE]")? {
-            return self.done(owner);
+            return self.done(owner, Some((source, event)));
         }
         if !known && !error_event {
             self.ensure_start(owner, None)?;
@@ -528,6 +528,15 @@ pub(super) fn members(doc: &Document, object: usize, e: &mut Encoder<'_, '_>, sk
         }
     }
     Ok(())
+}
+/// Whether an SSE record carries any field besides its data lines.
+fn sse_metadata(source: &Source, event: &sse::Event) -> Result<bool> {
+    for field in event.fields() {
+        if field.comment || !source.equals(field.name, b"data")? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 fn sse_provenance(source: &Source, event: &sse::Event, e: &mut Encoder<'_, '_>) -> Result<()> {
     e.bytes(b",\"source\":{\"protocol\":\"chat\",\"sse\":[")?;

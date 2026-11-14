@@ -54,7 +54,7 @@ impl Buffered {
             self.collect(owner, state, index)?;
         }
         state.document(owner, &mut self.input.document, true, None)?;
-        state.done(owner)
+        state.done(owner, None)
     }
 
     fn begin(&mut self, owner: &mut Writer, state: &mut State, wire: usize) -> Result<()> {

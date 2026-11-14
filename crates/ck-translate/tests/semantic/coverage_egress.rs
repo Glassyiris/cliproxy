@@ -240,3 +240,36 @@ fn done_requires_every_started_tool_ended_in_both_modes() {
         }
     }
 }
+
+static TERMINAL_LOST: AtomicUsize = AtomicUsize::new(0);
+
+fn count_terminal_loss(diagnostic: Diagnostic) {
+    if diagnostic.kind == Kind::Done {
+        TERMINAL_LOST.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn done_record_sse_fields_are_restored_or_reported() {
+    let wire = VENDOR.replace(
+        "data: [DONE]\n\n",
+        "id: terminal-id\nretry: 123\nvendor: keep\n: note\ndata: [DONE]\n\n",
+    );
+    let (output, result) = transformed(&wire, BodyMode::Streaming, count_terminal_loss, |_, _| 1);
+    result.unwrap();
+    let text = String::from_utf8(output).unwrap();
+    assert!(
+        text.ends_with("id: terminal-id\nretry: 123\nvendor: keep\n: note\ndata: [DONE]\n\n"),
+        "{text}"
+    );
+    let before = TERMINAL_LOST.load(Ordering::SeqCst);
+    transformed(&wire, BodyMode::Buffered, count_terminal_loss, |_, _| 1)
+        .1
+        .unwrap();
+    assert_eq!(TERMINAL_LOST.load(Ordering::SeqCst) - before, 1);
+    let before = TERMINAL_LOST.load(Ordering::SeqCst);
+    transformed(VENDOR, BodyMode::Buffered, count_terminal_loss, |_, _| 1)
+        .1
+        .unwrap();
+    assert_eq!(TERMINAL_LOST.load(Ordering::SeqCst) - before, 0);
+}
