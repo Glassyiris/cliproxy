@@ -11,6 +11,9 @@ use ck_stream::{ScratchLease, Writer};
 #[path = "request_string.rs"]
 mod string;
 
+#[path = "request_index.rs"]
+mod index;
+
 #[path = "request_records.rs"]
 mod records;
 pub use records::read_request;

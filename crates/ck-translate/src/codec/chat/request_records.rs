@@ -1,3 +1,4 @@
+use super::index::Index;
 use crate::codec::{
     Error, Result,
     document::{Document, Name, Text, Value},
@@ -8,7 +9,6 @@ use crate::codec::{
     table::Table,
 };
 use ck_stream::{MetadataPermit, Reader, Writer};
-use std::collections::HashMap;
 
 /// One media payload's records, from its start to its end.
 struct Payload {
@@ -29,9 +29,9 @@ pub fn read_request(owner: &mut Writer, reader: &mut Reader) -> Result<(Document
     let mut payloads: Table<Payload> = Table::new(owner)?;
     let mut references: Table<(LocalId, usize)> = Table::new(owner)?;
     let mut counts = Counts {
-        children: HashMap::new(),
-        objects: HashMap::new(),
-        members: HashMap::new(),
+        children: Index::new(),
+        objects: Index::new(),
+        members: Index::new(),
         builds: 0,
         permit: owner.reserve_metadata(0)?,
     };
@@ -99,21 +99,14 @@ pub fn read_request(owner: &mut Writer, reader: &mut Reader) -> Result<(Document
 /// member name to the member, under the build that indexed it; a field whose hash is absent
 /// names a new member, and a hash collision falls back to a scan.
 struct Counts {
-    children: HashMap<usize, (usize, Option<usize>)>,
+    children: Index<usize, (usize, Option<usize>)>,
     /// The current build of each indexed object. Replacing an object's value drops its build,
     /// so the next field rebuilds the index and entries of earlier builds are never read.
-    objects: HashMap<usize, u32>,
-    members: HashMap<(usize, u32, u64), usize>,
+    objects: Index<usize, u32>,
+    members: Index<(usize, u32, u64), usize>,
     builds: u32,
+    /// The charge of all three indexes.
     permit: MetadataPermit,
-}
-
-/// Grows a full map before an insertion, so its capacity can be charged first.
-fn grow<K: Eq + std::hash::Hash, V>(map: &mut HashMap<K, V>) -> Result<()> {
-    if map.len() == map.capacity() {
-        map.try_reserve(map.capacity().max(4)).map_err(|_| Error::Limit)?;
-    }
-    Ok(())
 }
 
 /// Hashes decoded name characters; equal names, as `Segment::matches` compares them, hash equal.
@@ -127,33 +120,10 @@ fn name_hash(mut next: impl FnMut() -> Result<Option<char>>) -> Result<u64> {
 }
 
 impl Counts {
-    /// Charges the capacity of every index map; a hash table slot holds the key, the value and
-    /// one control byte.
-    fn charge(&mut self) -> Result<()> {
-        let bytes = [
-            (
-                self.children.capacity(),
-                std::mem::size_of::<(usize, (usize, Option<usize>))>(),
-            ),
-            (self.objects.capacity(), std::mem::size_of::<(usize, u32)>()),
-            (
-                self.members.capacity(),
-                std::mem::size_of::<((usize, u32, u64), usize)>(),
-            ),
-        ]
-        .into_iter()
-        .try_fold(0usize, |sum, (capacity, slot)| {
-            capacity.checked_mul(slot + 1).and_then(|bytes| sum.checked_add(bytes))
-        })
-        .ok_or(Error::Limit)?;
-        self.permit.resize(bytes)?;
-        Ok(())
-    }
-
     /// Forgets the indexes of a container whose value a field replaced.
     fn replaced(&mut self, node: usize) {
-        self.children.remove(&node);
-        self.objects.remove(&node);
+        self.children.map.remove(&node);
+        self.objects.map.remove(&node);
     }
 
     /// Indexes one member under its object's current build. The first member with a name keeps
@@ -161,24 +131,20 @@ impl Counts {
     fn index_member(&mut self, doc: &Document, object: usize, build: u32, child: usize) -> Result<()> {
         let mut chars = doc.name_chars(doc.node(child)?.name.ok_or(Error::Schema)?)?;
         let key = (object, build, name_hash(|| chars.next_scalar())?);
-        if !self.members.contains_key(&key) {
-            grow(&mut self.members)?;
-            self.charge()?;
-            self.members.insert(key, child);
+        if !self.members.map.contains_key(&key) {
+            self.members.insert(&mut self.permit, key, child)?;
         }
         Ok(())
     }
 
     /// The build of an object's member index, indexing every member on first use.
     fn build(&mut self, doc: &Document, object: usize) -> Result<u32> {
-        if let Some(&build) = self.objects.get(&object) {
+        if let Some(&build) = self.objects.map.get(&object) {
             return Ok(build);
         }
         self.builds = self.builds.checked_add(1).ok_or(Error::Limit)?;
         let build = self.builds;
-        grow(&mut self.objects)?;
-        self.charge()?;
-        self.objects.insert(object, build);
+        self.objects.insert(&mut self.permit, object, build)?;
         for child in doc.children(object)? {
             self.index_member(doc, object, build, child)?;
         }
@@ -189,7 +155,7 @@ impl Counts {
     fn member(&mut self, doc: &Document, object: usize, name: &provenance::Segment) -> Result<Option<usize>> {
         let build = self.build(doc, object)?;
         let mut chars = name.clone();
-        let Some(&child) = self.members.get(&(object, build, name_hash(|| chars.next())?)) else {
+        let Some(&child) = self.members.map.get(&(object, build, name_hash(|| chars.next())?)) else {
             return Ok(None);
         };
         if name.matches(doc, doc.node(child)?.name.ok_or(Error::Schema)?)? {
@@ -204,17 +170,15 @@ impl Counts {
     }
 
     fn get(&mut self, doc: &Document, array: usize) -> Result<&mut (usize, Option<usize>)> {
-        if !self.children.contains_key(&array) {
-            grow(&mut self.children)?;
-            self.charge()?;
+        if !self.children.map.contains_key(&array) {
             let (mut count, mut last) = (0, None);
             for child in doc.children(array)? {
                 count += 1;
                 last = Some(child);
             }
-            self.children.insert(array, (count, last));
+            self.children.insert(&mut self.permit, array, (count, last))?;
         }
-        self.children.get_mut(&array).ok_or(Error::Schema)
+        self.children.map.get_mut(&array).ok_or(Error::Schema)
     }
 }
 
@@ -269,11 +233,11 @@ fn field(doc: &mut Document, counts: &mut Counts, event: Document) -> Result<usi
     )?;
     doc.transplant(node, value)?;
     doc.append(parent, node)?;
-    if let Some((count, last)) = counts.children.get_mut(&parent) {
+    if let Some((count, last)) = counts.children.map.get_mut(&parent) {
         *count += 1;
         *last = Some(node);
     }
-    if let Some(&build) = counts.objects.get(&parent) {
+    if let Some(&build) = counts.objects.map.get(&parent) {
         counts.index_member(doc, parent, build, node)?;
     }
     Ok(node)
