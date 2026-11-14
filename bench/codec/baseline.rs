@@ -14,6 +14,7 @@ static ALLOCS: AtomicU64 = AtomicU64::new(0);
 static BYTES: AtomicU64 = AtomicU64::new(0);
 static COUNT: AtomicBool = AtomicBool::new(false);
 static TRACK: AtomicBool = AtomicBool::new(false);
+static CLOCK_OVERHEAD: AtomicU64 = AtomicU64::new(0);
 fn allocated(size: usize) {
     let live = LIVE.fetch_add(size as u64, Relaxed) + size as u64;
     if TRACK.load(Relaxed) { PEAK.fetch_max(live, Relaxed); }
@@ -45,6 +46,13 @@ fn cpu() -> u64 {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     assert_eq!(unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut ts) }, 0);
     ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
+}
+/// CPU time since `start`, less the calibrated cost of one empty clock pair.
+fn cpu_since(start: u64) -> u64 { (cpu() - start).saturating_sub(CLOCK_OVERHEAD.load(Relaxed)) }
+/// Median of 1,001 empty `cpu()` pairs; the clock is a syscall, not vDSO.
+fn calibrate_clock() -> u64 {
+    let mut samples: Vec<u64> = (0..1001).map(|_| { let start = cpu(); cpu() - start }).collect();
+    samples.sort_unstable(); samples[500]
 }
 fn faults() -> Result<(u64, u64)> {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
@@ -204,7 +212,7 @@ fn operation(prepared: &Prepared, client: Format, upstream: Format, measured: bo
         // Stream construction and teardown are part of CPU/completion and heap peaks.
         let construct_start = cpu();
         let mut stream = go_stream(client, upstream).ok_or("unregistered stream")?(&prepared.response());
-        completion_cpu += cpu() - construct_start;
+        completion_cpu += cpu_since(construct_start);
         for (line, selected) in prepared.lines.iter().zip(&prepared.selected) {
             let before_allocs = ALLOCS.load(Relaxed); let before_bytes = BYTES.load(Relaxed);
             COUNT.store(measured && *selected, Relaxed);
@@ -214,7 +222,7 @@ fn operation(prepared: &Prepared, client: Format, upstream: Format, measured: bo
                 if let Some(frame) = ck_translate::stream::frame(client, chunk) { *chunk = frame; }
                 else { chunk.clear(); }
             }
-            let event_cpu = cpu() - event_start;
+            let event_cpu = cpu_since(event_start);
             completion_cpu += event_cpu;
             COUNT.store(false, Relaxed); TRACK.store(false, Relaxed);
             if measured {
@@ -239,7 +247,7 @@ fn operation(prepared: &Prepared, client: Format, upstream: Format, measured: bo
                 if let Some(frame) = ck_translate::stream::frame(client, chunk) { *chunk = frame; }
                 else { chunk.clear(); }
             }
-            let elapsed_cpu = cpu() - finalize_start;
+            let elapsed_cpu = cpu_since(finalize_start);
             completion_cpu += elapsed_cpu;
             COUNT.store(false, Relaxed); TRACK.store(false, Relaxed);
             if measured {
@@ -254,14 +262,14 @@ fn operation(prepared: &Prepared, client: Format, upstream: Format, measured: bo
             drop(outputs); TRACK.store(measured, Relaxed);
         }
         black_box(stream.tool_input_failed());
-        let drop_start = cpu(); drop(stream); completion_cpu += cpu() - drop_start;
+        let drop_start = cpu(); drop(stream); completion_cpu += cpu_since(drop_start);
         if prepared.lines.is_empty() && selected_kind == "empty-stream" && measured { stats.events += 1; }
     } else {
         let before_allocs = ALLOCS.load(Relaxed); let before_bytes = BYTES.load(Relaxed);
         COUNT.store(measured, Relaxed);
         let event_start = cpu();
         let output = prepared.single(client, upstream)?;
-        let event_cpu = cpu() - event_start;
+        let event_cpu = cpu_since(event_start);
         completion_cpu += event_cpu;
         COUNT.store(false, Relaxed); TRACK.store(false, Relaxed);
         let outputs = std::slice::from_ref(&output);
@@ -370,7 +378,7 @@ fn measure(row: &Value, manifest: &Value, cg: &Path) -> Result<(Value, Value)> {
         "heap_before": before_heap, "heap_after": after_heap, "smaps_before": before_os,
         "smaps_after": after_os, "private_cgroup": cg, "charge_before": before_charge,
         "charge_after": charge, "charge_peak": charge_peak,
-        "no_output_completions": stats.no_output});
+        "no_output_completions": stats.no_output, "cpu_clock_overhead_ns": CLOCK_OVERHEAD.load(Relaxed)});
     Ok((Value::Object(metrics), evidence))
 }
 fn main() -> Result<()> {
@@ -381,6 +389,7 @@ fn main() -> Result<()> {
         return Err("usage: baseline-harness --describe | --run MANIFEST --round N".into());
     }
     let cg = cgroup()?;
+    CLOCK_OVERHEAD.store(calibrate_clock(), Relaxed);
     let raw = fs::read(&args[2])?;
     let execution_checksum = format!("{:x}", Sha256::digest(&raw));
     let checksum = std::env::var("CODEC_MANIFEST_SHA256").unwrap_or(execution_checksum.clone());
