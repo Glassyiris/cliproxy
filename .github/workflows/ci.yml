@@ -221,6 +221,16 @@ jobs:
           cache-from: type=gha,scope=perf
       - name: Smoke test
         run: docker run --rm cooker:ci --version
+      - name: Build information smoke test
+        env:
+          EXPECTED_COMMIT: ${{ steps.build-info.outputs.commit }}
+        run: |
+          trap 'docker rm -f cooker-build-info >/dev/null 2>&1 || true' EXIT
+          status=0
+          timeout --kill-after=5s 10s docker run --rm --name cooker-build-info --network none cooker:ci > "$RUNNER_TEMP/build-info.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/build-info.log"
+          test "$status" -eq 124
+          grep -F "commit=$EXPECTED_COMMIT " "$RUNNER_TEMP/build-info.log"
       - name: Image size gate
         run: bench/gate.sh image cooker:ci
 
