@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
+    hash::{BuildHasherDefault, Hasher},
     io,
     ops::Bound::{Excluded, Unbounded},
     panic::AssertUnwindSafe,
@@ -80,9 +81,28 @@ struct Maintenance {
     first_error: Option<io::Error>,
 }
 
+/// Hashes stream ids by one multiplication. The store assigns ids sequentially, so no client
+/// chooses the keys in the table, and a lookup skips SipHash's cost.
+#[derive(Default)]
+struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.write_u64(self.0.rotate_left(8) ^ u64::from(byte));
+        }
+    }
+    fn write_u64(&mut self, id: u64) {
+        self.0 = id.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Cache {
-    streams: HashMap<u64, Arc<Stream>>,
+    streams: HashMap<u64, Arc<Stream>, BuildHasherDefault<IdHasher>>,
     order: BTreeSet<(Duration, u64)>,
 }
 
