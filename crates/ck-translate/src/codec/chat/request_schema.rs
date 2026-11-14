@@ -172,8 +172,14 @@ fn content_part(doc: &Document, media: &Registry, part: usize) -> Result<()> {
     object(doc, source)?;
     let source_kind = doc.required(source, "kind")?;
     if doc.string_is(source_kind, "uri")? {
+        if !doc.string_is(kind, "image")? {
+            return Err(Error::Unsupported);
+        }
         require_string(doc, doc.required(source, "uri")?)?;
     } else if doc.string_is(source_kind, "file")? {
+        if !doc.string_is(kind, "document")? {
+            return Err(Error::Unsupported);
+        }
         require_string(doc, doc.required(source, "file_id")?)?;
     } else if doc.string_is(source_kind, "data")? {
         let reference = doc.required(source, "ref")?;

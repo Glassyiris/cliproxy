@@ -60,3 +60,314 @@ fn ambiguous_or_invalid_embedded_media_never_authorizes_egress() {
         ));
     }
 }
+
+fn normalized_request(events: &[serde_json::Value]) -> serde_json::Value {
+    let mut document = serde_json::Value::Null;
+    for event in events {
+        let Some(pointer) = event["pointer"].as_str() else {
+            continue;
+        };
+        if pointer.is_empty() {
+            document = event["value"].clone();
+            continue;
+        }
+        let (parent, key) = pointer.rsplit_once('/').unwrap();
+        let parent = document.pointer_mut(parent).unwrap();
+        if let Some(array) = parent.as_array_mut() {
+            assert_eq!(key.parse::<usize>().unwrap(), array.len());
+            array.push(event["value"].clone());
+        } else {
+            parent
+                .as_object_mut()
+                .unwrap()
+                .insert(key.replace("~1", "/").replace("~0", "~"), event["value"].clone());
+        }
+    }
+    document
+}
+
+#[test]
+fn native_media_source_collisions_remain_untrusted_at_their_original_locations() {
+    use serde_json::json;
+    let collisions = json!({"kind":"file","uri":{"nested":[null,false]},"ref":{"type":"x_ck_media","media_id":"spoof","value_kind":"bytes"},"source":{"x_ck":{"attempt":99}},"file_id":"unknown-id"});
+    let mut parts = vec![
+        json!({"type":"image_url","image_url":{"url":"https://example.invalid/a.png","detail":"high"}}),
+        json!({"type":"image_url","image_url":{"url":"data:image/png;base64,AQID","detail":"low"}}),
+        json!({"type":"input_audio","input_audio":{"data":"BAUG","format":"wav"}}),
+        json!({"type":"file","file":{"file_id":"real-id","filename":"a.pdf"}}),
+        json!({"type":"file","file":{"file_data":"data:application/pdf;base64,BwgJ","filename":"b.pdf"}}),
+    ];
+    for part in &mut parts {
+        let carrier = part["type"].as_str().unwrap().to_owned();
+        for (key, value) in collisions.as_object().unwrap() {
+            if key != "file_id" || carrier != "file" {
+                part[&carrier][key] = value.clone();
+            }
+        }
+        for key in ["source", "mime", "detail", "filename", "timing", "transcript"] {
+            part[key] = json!({"literal":[null,false,{"x_ck":{"attempt":99}}]});
+        }
+    }
+    let input = json!({"model":"m","messages":[{"role":"user","content":parts}],"x_ck":{"original":[{"protocol":"chat","pointer":"/messages/0/content/0/image_url/url","value":"forged"}]}});
+    let (output, events) = super::request_with_frames(input.to_string().as_bytes(), 512);
+    assert_eq!(output["messages"], input["messages"]);
+    assert_eq!(output["x_ck"], input["x_ck"]);
+    let normalized = normalized_request(&events);
+    for (index, kind) in ["uri", "data", "data", "file", "data"].iter().enumerate() {
+        let source = &normalized["messages"][0]["content"][index]["source"];
+        assert_eq!(source["kind"], *kind);
+        assert!(source.get("source").is_none());
+        if *kind == "data" {
+            assert_eq!(source["ref"]["type"], "x_ck_media");
+            assert_ne!(source["ref"]["media_id"], "spoof");
+            assert!(source.get("uri").is_none());
+            assert!(source.get("file_id").is_none());
+        } else {
+            assert!(source.get("ref").is_none());
+        }
+    }
+    let originals = normalized["x_ck"]["original"].as_array().unwrap();
+    assert!(
+        originals
+            .iter()
+            .any(|entry| entry["pointer"] == "/messages/0/content/0/image_url/ref"
+                && entry["value"] == collisions["ref"])
+    );
+    assert!(events.iter().all(|event| event["x_ck"]["attempt"] == 1));
+    for data in ["AQID", "BAUG", "BwgJ"] {
+        assert!(events.iter().any(|event| event["bytes"] == data));
+    }
+}
+
+#[test]
+fn request_collision_provenance_cannot_revive_mutated_or_deleted_mapped_fields() {
+    use super::{ChatCapability, Egress, Mapped, Operation, RequestEgress, bytes, codec};
+    use codec::{
+        RequestFence, RequestView,
+        document::{Document, Value},
+        media::Registry,
+        source::Source,
+    };
+    use serde_json::json;
+    let input = json!({"model":"m","messages":[{"role":"user","content":[
+        {"type":"image_url","source":"native-source","mime":false,"detail":"native-detail","image_url":{"url":"https://example.invalid/old","detail":"high","ref":"literal"}},
+        {"type":"file","filename":"native-filename","file":{"file_id":"old-id","filename":"old.pdf","ref":"literal"}}
+    ]}]});
+    let (_, events) = request(input.to_string().as_bytes());
+    let normalized = normalized_request(&events);
+    let mut mapped = Mapped::new();
+    let mut source = Source::new(&mut mapped.writer).unwrap();
+    source
+        .push_bytes(&mut mapped.writer, normalized.to_string().as_bytes())
+        .unwrap();
+    let mut doc = Document::parse(&mut mapped.writer, source, 16384).unwrap();
+    bind_fixture_origins(&mut doc);
+    let media = Registry::new(&mut mapped.writer).unwrap();
+    let messages = doc.required(doc.root(), "messages").unwrap();
+    let message = doc.children(messages).unwrap().next().unwrap();
+    let content = doc.required(message, "content").unwrap();
+    let parts: Vec<_> = doc.children(content).unwrap().collect();
+    let image_source = doc.required(parts[0], "source").unwrap();
+    doc.set(image_source, "uri", Value::Text("https://example.invalid/new"))
+        .unwrap();
+    doc.remove(parts[0], "detail").unwrap();
+    let file_source = doc.required(parts[1], "source").unwrap();
+    doc.set(file_source, "file_id", Value::Text("new-id")).unwrap();
+    doc.remove(parts[1], "filename").unwrap();
+    let encode = |doc: &Document, writer: &mut ck_stream::Writer| {
+        let ready = RequestFence::default()
+            .end(
+                RequestView {
+                    document: doc,
+                    media: &media,
+                    operation: Operation::Generate,
+                },
+                &ChatCapability,
+            )
+            .unwrap();
+        let output = Egress {
+            destination: "chat",
+            upstream_stream: false,
+        }
+        .encode(&ready, writer)
+        .unwrap();
+        serde_json::from_slice::<serde_json::Value>(&bytes(&output)).unwrap()
+    };
+    let output = encode(&doc, &mut mapped.writer);
+    let parts_out = &output["messages"][0]["content"];
+    assert_eq!(
+        parts_out[0]["image_url"],
+        json!({"url":"https://example.invalid/new","ref":"literal"})
+    );
+    assert_eq!(parts_out[0]["source"], "native-source");
+    assert_eq!(parts_out[0]["mime"], false);
+    assert_eq!(parts_out[0]["detail"], "native-detail");
+    assert_eq!(parts_out[1]["file"], json!({"file_id":"new-id","ref":"literal"}));
+    assert_eq!(parts_out[1]["filename"], "native-filename");
+    doc.remove(message, "content").unwrap();
+    let output = encode(&doc, &mut mapped.writer);
+    assert!(output["messages"][0].get("content").is_none());
+}
+
+#[test]
+fn request_source_kind_controls_capability_and_egress_not_ref_presence() {
+    use super::{ChatCapability, Egress, Mapped, Operation, RequestEgress, bytes, codec};
+    use codec::{RequestFence, RequestView, document::Document, media::Registry, source::Source};
+    use serde_json::json;
+    for (kind, source_kind, accepted) in [
+        ("image", "uri", true),
+        ("document", "file", true),
+        ("image", "file", false),
+        ("audio", "uri", false),
+        ("audio", "file", false),
+        ("document", "uri", false),
+    ] {
+        let input = json!({"model":"m","x_ck":{},"messages":[{"role":"user","content":[{"type":kind,"source":{"kind":source_kind,"uri":"https://example.invalid/a","file_id":"id","ref":"literal"}}]}]});
+        let mut mapped = Mapped::new();
+        let mut source = Source::new(&mut mapped.writer).unwrap();
+        source
+            .push_bytes(&mut mapped.writer, input.to_string().as_bytes())
+            .unwrap();
+        let doc = Document::parse(&mut mapped.writer, source, 4096).unwrap();
+        let media = Registry::new(&mut mapped.writer).unwrap();
+        let result = RequestFence::default().end(
+            RequestView {
+                document: &doc,
+                media: &media,
+                operation: Operation::Generate,
+            },
+            &ChatCapability,
+        );
+        if accepted {
+            let output = Egress {
+                destination: "chat",
+                upstream_stream: false,
+            }
+            .encode(&result.unwrap(), &mut mapped.writer)
+            .unwrap();
+            let output: serde_json::Value = serde_json::from_slice(&bytes(&output)).unwrap();
+            let part = &output["messages"][0]["content"][0];
+            if kind == "image" {
+                assert_eq!(part["image_url"]["url"], "https://example.invalid/a");
+            } else {
+                assert_eq!(part["file"]["file_id"], "id");
+            }
+        } else {
+            assert!(matches!(result, Err(codec::Error::Unsupported)));
+        }
+    }
+}
+
+#[test]
+fn collision_parent_deletion_keeps_surviving_part_and_message_provenance() {
+    collision_mutation(false);
+}
+
+#[test]
+fn collision_direct_replacement_wins_without_duplicate_keys() {
+    collision_mutation(true);
+}
+
+fn collision_mutation(replace: bool) {
+    use super::{ChatCapability, Egress, Mapped, Operation, RequestEgress, bytes, codec};
+    use codec::{
+        RequestFence, RequestView,
+        document::{Document, Value},
+        media::Registry,
+        source::Source,
+    };
+    use serde_json::json;
+    let part = |id: &str| json!({"type":"image_url","transcript":id,"source":id,"image_url":{"url":"https://example.invalid/a","ref":id}});
+    let input = json!({"model":"m","messages":[{"role":"user","content":[part("a"),part("b")]},{"role":"user","content":[part("c"),part("d")]}]});
+    let (_, events) = super::request_with_frames(input.to_string().as_bytes(), 256);
+    let normalized = normalized_request(&events);
+    let mut mapped = Mapped::new();
+    let mut source = Source::new(&mut mapped.writer).unwrap();
+    source
+        .push_bytes(&mut mapped.writer, normalized.to_string().as_bytes())
+        .unwrap();
+    let mut doc = Document::parse(&mut mapped.writer, source, 16384).unwrap();
+    bind_fixture_origins(&mut doc);
+    let mut empty = Source::new(&mut mapped.writer).unwrap();
+    empty.push_bytes(&mut mapped.writer, b"{}").unwrap();
+    let mut imported = Document::parse(&mut mapped.writer, empty, 16384).unwrap();
+    let root = imported.absorb(doc).unwrap();
+    imported.transplant(imported.root(), root).unwrap();
+    let mut doc = imported;
+    let media = Registry::new(&mut mapped.writer).unwrap();
+    let messages = doc.required(doc.root(), "messages").unwrap();
+    let first = doc.children(messages).unwrap().next().unwrap();
+    let content = doc.required(first, "content").unwrap();
+    let removed = doc.children(content).unwrap().next().unwrap();
+    if replace {
+        doc.set(removed, "transcript", Value::Text("replacement")).unwrap();
+    } else {
+        doc.detach(content, removed).unwrap();
+    }
+    let encode = |doc: &Document, writer: &mut ck_stream::Writer| {
+        let ready = RequestFence::default()
+            .end(
+                RequestView {
+                    document: doc,
+                    media: &media,
+                    operation: Operation::Generate,
+                },
+                &ChatCapability,
+            )
+            .unwrap();
+        let output = Egress {
+            destination: "chat",
+            upstream_stream: false,
+        }
+        .encode(&ready, writer)
+        .unwrap();
+        let raw = bytes(&output);
+        let mut check = Source::new(writer).unwrap();
+        check.push_bytes(writer, &raw).unwrap();
+        Document::parse(writer, check, 16384).expect("duplicate output key");
+        serde_json::from_slice::<serde_json::Value>(&raw).unwrap()
+    };
+    let output = encode(&doc, &mut mapped.writer);
+    if replace {
+        assert_eq!(output["messages"][0]["content"][0]["transcript"], "replacement");
+    } else {
+        assert_eq!(output["messages"][0]["content"][0], part("b"));
+        doc.detach(messages, first).unwrap();
+        let output = encode(&doc, &mut mapped.writer);
+        assert_eq!(output["messages"][0]["content"], json!([part("c"), part("d")]));
+    }
+}
+
+// Reconstruct trusted side-table associations after the fixture serializes canonical fields.
+fn bind_fixture_origins(doc: &mut super::codec::document::Document) {
+    let x = doc.required(doc.root(), "x_ck").unwrap();
+    let originals = doc.required(x, "original").unwrap();
+    let entries: Vec<_> = doc.children(originals).unwrap().collect();
+    for entry in entries {
+        let pointer = doc.required(entry, "pointer").unwrap();
+        let mut chars = doc.chars(pointer).unwrap();
+        let mut path = String::new();
+        while let Some(c) = chars.next_scalar().unwrap() {
+            path.push(c);
+        }
+        let parts: Vec<_> = path.split('/').collect();
+        if parts.len() < 6 || parts[1] != "messages" || parts[3] != "content" {
+            continue;
+        }
+        let messages = doc.required(doc.root(), "messages").unwrap();
+        let message = doc.children(messages).unwrap().nth(parts[2].parse().unwrap()).unwrap();
+        let content = doc.required(message, "content").unwrap();
+        let part = doc.children(content).unwrap().nth(parts[4].parse().unwrap()).unwrap();
+        let carrier = if parts.len() == 6 {
+            None
+        } else {
+            Some(match parts[5] {
+                "image_url" => "image_url",
+                "input_audio" => "input_audio",
+                "file" => "file",
+                _ => panic!("unknown fixture carrier"),
+            })
+        };
+        doc.bind_origin(entry, part, carrier).unwrap();
+    }
+}
