@@ -12,6 +12,10 @@ use ck_stream::{ScratchLease, Writer};
 #[path = "request_string.rs"]
 mod string;
 
+#[path = "request_records.rs"]
+mod records;
+pub use records::read_document;
+
 pub struct Ingress {
     owner: u64,
     scanner: Option<json::Scanner>,
@@ -243,6 +247,13 @@ impl Ingress {
                         }
                     }
                     self.document.append(self.document.root(), node)?;
+                    if self.document.name_is(name, "functions")? {
+                        let mut next = self.document.node(node)?.first;
+                        while let Some(function) = next {
+                            next = self.document.node(function)?.next;
+                            super::request_controls::cache(&mut self.document, owner, function)?;
+                        }
+                    }
                     normalize_options(&mut self.document)?;
                     let published = if self.document.name_is(name, "functions")? {
                         Some(self.document.required(self.document.root(), "tools")?)
@@ -435,6 +446,7 @@ impl Ingress {
                 Value::String(text),
             )?;
             self.document.append(parent, node)?;
+            super::request_provenance::capture(&mut self.document, owner, node)?;
             let media_index = self.media.len();
             let media = self
                 .media
@@ -656,6 +668,8 @@ impl Ingress {
             .ok_or(Error::Closed)?
             .finish(self.document.input())?;
         self.consume(owner)?;
+        super::request_controls::declarations(&mut self.document, owner)?;
+        super::provenance::bindings(&mut self.document, owner)?;
         validate(&self.document)?;
         super::request_schema::validate(&self.document, &self.media)?;
         let x = self.document.required(self.document.root(), "x_ck")?;
@@ -762,7 +776,8 @@ impl Capability for ChatCapability {
             return Err(Error::Unsupported);
         }
         validate(view.document)?;
-        super::request_schema::validate(view.document, view.media)
+        super::request_schema::validate(view.document, view.media)?;
+        super::request_controls::destination(view.document)
     }
 }
 
@@ -816,6 +831,8 @@ fn validate(doc: &Document) -> Result<()> {
                             "document",
                             "tool_result",
                             "opaque",
+                            "redacted",
+                            "encrypted",
                         ] {
                             supported |= doc.string_is(kind, name)?;
                         }
@@ -934,6 +951,7 @@ fn normalize_message(
     owner: &mut Writer,
 ) -> Result<()> {
     let x = doc.required(doc.root(), "x_ck")?;
+    super::request_controls::message(doc, owner, m, current_message)?;
     if let Some(content) = doc.member(m, "content")?
         && matches!(doc.node(content)?.value, Value::Array)
     {
@@ -958,8 +976,10 @@ fn normalize_message(
             Some(n) => n,
             None => doc.set(x, "chat_legacy_calls", Value::Array)?,
         };
-        let entry = doc.add(None, Value::Unsigned(current_message))?;
+        let entry = doc.add(None, Value::Object)?;
         doc.append(legacy, entry)?;
+        doc.set(entry, "message_index", Value::Unsigned(current_message))?;
+        doc.bind_origin(entry, m, None)?;
     }
     if let Some(calls) = doc.member(m, "tool_calls")? {
         require_array(doc, calls)?;
@@ -1003,6 +1023,7 @@ fn normalize_message(
 fn original_field(doc: &mut Document, original: usize, pointer: &'static str, value: usize) -> Result<()> {
     let entry = doc.add(None, Value::Object)?;
     doc.append(original, entry)?;
+    doc.bind_origin(entry, doc.root(), None)?;
     doc.set(entry, "protocol", Value::Text("chat"))?;
     doc.set(entry, "pointer", Value::Text(pointer))?;
     doc.rename(value, "value")?;
@@ -1050,13 +1071,31 @@ fn field(
     if doc.published(node)? {
         return Ok(registered.is_some());
     }
+    super::request_provenance::capture(doc, owner, node)?;
+    if let Some(parent) = doc.node(node)?.parent {
+        field(doc, media, parent, &[], emitter, owner, reader)?;
+        if matches!(doc.node(parent)?.value, Value::Array) {
+            let mut prior = doc.node(parent)?.first;
+            while let Some(sibling) = prior {
+                if sibling == node {
+                    break;
+                }
+                prior = doc.node(sibling)?.next;
+                field(doc, media, sibling, &[], emitter, owner, reader)?;
+            }
+        }
+    }
     emitter.emit(
         owner,
         Kind::RequestField,
         Scope::default(),
         |e| {
             e.bytes(b",\"pointer\":")?;
-            pointer(doc, path, e)?;
+            if path.is_empty() || super::request_provenance::preserved(doc, node)? {
+                super::provenance::pointer(doc, node, e)?;
+            } else {
+                pointer(doc, path, e)?;
+            }
             e.bytes(b",\"value\":")?;
             if let Some(m) = registered {
                 return media::write_reference(m, e);
@@ -1129,15 +1168,15 @@ fn write_request(view: RequestView<'_>, streaming: bool, e: &mut Encoder<'_, '_>
                 if i != 0 {
                     e.bytes(b",")?;
                 }
-                doc.write(doc.required(tool, "function")?, e)?;
+                super::request_controls::write(doc, doc.required(tool, "function")?, e)?;
             }
             e.bytes(b"]")?;
         } else if doc.name_is(name, "tool_choice")? && doc.member(x, "chat_legacy_choice")?.is_some() {
             e.bytes(b"\"function_call\":")?;
             if matches!(doc.node(child)?.value, Value::Object) {
-                doc.write(doc.required(child, "function")?, e)?;
+                super::request_controls::write(doc, doc.required(child, "function")?, e)?;
             } else {
-                doc.write(child, e)?;
+                super::request_controls::write(doc, child, e)?;
             }
         } else {
             doc.write_name(name, e)?;
@@ -1152,7 +1191,7 @@ fn write_request(view: RequestView<'_>, streaming: bool, e: &mut Encoder<'_, '_>
                 }
                 e.bytes(b"]")?;
             } else {
-                doc.write(child, e)?;
+                super::request_controls::write(doc, child, e)?;
             }
         }
     }
@@ -1171,19 +1210,11 @@ fn write_request(view: RequestView<'_>, streaming: bool, e: &mut Encoder<'_, '_>
             }
         }
     }
-    if let Some(original) = doc.member(x, "original")? {
-        for entry in doc.children(original)? {
-            let p = doc.required(entry, "pointer")?;
-            if doc.string_is(p, "/x_ck")? {
-                e.bytes(b",\"x_ck\":")?;
-                doc.write(doc.required(entry, "value")?, e)?;
-            }
-        }
-    }
+    super::provenance::request_members(doc, root, None, &[], &["x_ck"], e)?;
     e.bytes(b"}")
 }
 
-fn write_message(view: RequestView<'_>, message: usize, message_index: u64, e: &mut Encoder<'_, '_>) -> Result<()> {
+fn write_message(view: RequestView<'_>, message: usize, _message_index: u64, e: &mut Encoder<'_, '_>) -> Result<()> {
     let doc = view.document;
     e.bytes(b"{")?;
     for (i, field) in doc.children(message)?.enumerate() {
@@ -1196,7 +1227,7 @@ fn write_message(view: RequestView<'_>, message: usize, message_index: u64, e: &
             let mut legacy = false;
             if let Some(calls) = doc.member(x, "chat_legacy_calls")? {
                 for call in doc.children(calls)? {
-                    legacy |= doc.unsigned(call)? == message_index;
+                    legacy |= doc.origin(call)?.is_some_and(|(parent, _)| parent == message);
                 }
             }
             if legacy {
@@ -1232,9 +1263,11 @@ fn write_message(view: RequestView<'_>, message: usize, message_index: u64, e: &
                         } else {
                             doc.write_name(name, e)?;
                             e.bytes(b":")?;
-                            doc.write(member, e)?;
+                            super::request_controls::write(doc, member, e)?;
                         }
                     }
+                    super::request_controls::members(doc, call, &mut first, e)?;
+                    super::provenance::request_members(doc, call, None, &[], &[], e)?;
                     e.bytes(b"}")?;
                 }
                 e.bytes(b"]")?;
@@ -1252,10 +1285,12 @@ fn write_message(view: RequestView<'_>, message: usize, message_index: u64, e: &
                 }
                 e.bytes(b"]")?;
             } else {
-                doc.write(field, e)?;
+                super::request_controls::write(doc, field, e)?;
             }
         }
     }
+    super::request_controls::members(doc, message, &mut false, e)?;
+    super::provenance::request_members(doc, message, None, &[], &[], e)?;
     e.bytes(b"}")
 }
 fn write_function(doc: &Document, function: usize, custom: bool, e: &mut Encoder<'_, '_>) -> Result<()> {
@@ -1276,9 +1311,11 @@ fn write_function(doc: &Document, function: usize, custom: bool, e: &mut Encoder
         } else {
             doc.write_name(name, e)?;
             e.bytes(b":")?;
-            doc.write(field, e)?;
+            super::request_controls::write(doc, field, e)?;
         }
     }
+    super::request_controls::members(doc, function, &mut false, e)?;
+    super::provenance::request_members(doc, function, None, &[], &[], e)?;
     e.bytes(b"}")
 }
 

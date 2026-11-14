@@ -62,6 +62,17 @@ pub(super) fn normalize_part(
                 &["kind", "uri", "ref", "file_id", "source"],
             )?;
         }
+        super::provenance::native_members(
+            doc,
+            owner,
+            part,
+            carrier,
+            match carrier {
+                "image_url" => &["url", "detail"],
+                "input_audio" => &["data", "format"],
+                _ => &["file_id", "file_data", "filename"],
+            },
+        )?;
     }
     if doc.string_is(kind, "image_url")? {
         let image = doc.remove(part, "image_url")?.ok_or(Error::Schema)?;
@@ -214,6 +225,8 @@ pub(super) fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_,
         e.bytes(b"{\"type\":\"refusal\",\"refusal\":")?;
         doc.write(doc.required(part, "text")?, e)?;
         super::response::members(doc, part, e, &["type", "text"])?;
+        super::request_controls::members(doc, part, &mut false, e)?;
+        super::provenance::request_members(doc, part, None, &[], &[], e)?;
         return e.bytes(b"}");
     }
     if doc.string_is(kind, "image")? {
@@ -241,6 +254,7 @@ pub(super) fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_,
             e,
         )?;
         e.bytes(b"}")?;
+        super::request_controls::members(doc, part, &mut false, e)?;
         super::response::members(doc, part, e, &["type", "source", "detail", "mime"])?;
         super::provenance::request_members(
             doc,
@@ -293,6 +307,7 @@ pub(super) fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_,
             e,
         )?;
         e.bytes(b"}")?;
+        super::request_controls::members(doc, part, &mut false, e)?;
         super::response::members(doc, part, e, &["type", "source", "filename", "mime"])?;
         super::provenance::request_members(
             doc,
@@ -304,7 +319,7 @@ pub(super) fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_,
         )?;
         e.bytes(b"}")
     } else {
-        doc.write(part, e)
+        super::request_controls::write(doc, part, e)
     }
 }
 
