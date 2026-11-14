@@ -169,6 +169,7 @@ COPY --from=test /home/builder/out/ /
 # The release binary. The default build excludes the CPU profiler and its symbol resolver.
 FROM source AS build
 ARG BUILD_JOBS
+ARG CK_COMMIT CK_BUILD_DATE
 RUN --mount=type=cache,id=cooker-cargo-src-release,target=/usr/local/cargo/registry/src,uid=1000,gid=1000 \
     --mount=type=cache,id=cooker-target-release,target=/src/target,uid=1000,gid=1000 <<'EOF'
 if cargo tree --locked -p cooker --edges normal --prefix none | grep -E '^(pprof|backtrace) v'; then
