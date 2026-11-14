@@ -22,6 +22,8 @@ mod media_events;
 mod snapshot;
 #[path = "response_tool.rs"]
 mod tool;
+#[path = "response_validate.rs"]
+mod validate;
 
 pub struct Ingress {
     owner: u64,
