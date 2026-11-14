@@ -179,6 +179,7 @@ For realtime, `media.start.attributes` names track, packet/message ID, timestamp
 Large media values embedded in JSON are decoded incrementally into these chunks, with a media-reference content part instead of a second inline byte copy.
 
 Chat ingress flushes every available complete decoded fragment at bounded processing steps; it retains no ready decoded bytes between calls. An incomplete UTF-8 scalar, JSON escape or base64 quartet remains parser state, not a decoded chunk. Buffered JSON uses this collection path without ending the response before full-body validation; external SSE still requires complete records before response semantics are published.
+Chat SSE audio uses one media lifetime per choice/item slot, including late native identity and metadata. Ready audio and scalar-text fragments reach streaming egress before choice finish; media end validates the cumulative byte count without replaying content. Complete image/file occurrences remain independent. Trusted response decoding resolves native provenance before topology edits, so removing an already restored leaf cannot recover its old source value during encoding. A removed media carrier makes its later data unreachable. Transformations apply before delivery; Chat cannot retract bytes already sent to a client.
 
 ### 3.5 Usage snapshots
 

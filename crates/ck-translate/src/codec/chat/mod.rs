@@ -11,6 +11,12 @@ mod request_provenance;
 mod request_schema;
 pub mod response;
 
+pub(crate) fn prepare_response(doc: &mut crate::codec::document::Document) -> crate::codec::Result<()> {
+    let x = doc.required(doc.root(), "x_ck")?;
+    provenance::restore(doc, x)?;
+    Ok(())
+}
+
 use super::{
     Result,
     event::{Emitter, Kind, Scope},

@@ -124,7 +124,17 @@ impl Egress {
                     && let Some(name) = doc.member(root, "name")?
                     && doc.string_is(name, "chat.media.attributes")?
                 {
-                    self.reduction.project(owner, kind, doc)?;
+                    if let (Some(projection), _) = self.reduction.project(owner, kind, doc)? {
+                        if self.mode == BodyMode::Buffered {
+                            self.reduction.fold(projection)?;
+                        } else {
+                            output(encode::scratch(owner, |e| {
+                                e.bytes(b"data: ")?;
+                                projection.write(projection.root(), e)?;
+                                e.bytes(b"\n\n")
+                            })?)?;
+                        }
+                    }
                 } else if self.mode == BodyMode::Streaming {
                     output(encode::scratch(owner, |e| {
                         source_fields(&doc, x, e)?;

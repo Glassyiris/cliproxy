@@ -60,6 +60,12 @@ impl Reduction {
                 None
             }
             Kind::Chunk => {
+                if doc.member(x, "media_id")?.is_some() {
+                    let id = media_events::id(&doc, x)?;
+                    if self.media.iter().any(|media| media.id == id && !media.reachable()) {
+                        return Ok((None, false));
+                    }
+                }
                 doc.remove(root, "x_ck")?;
                 lost = !super::provenance::restore(&mut doc, x)?;
                 self.project_tools(&mut doc, x)?;
@@ -147,20 +153,26 @@ impl Reduction {
             }
             Kind::Opaque => {
                 let id = media_events::id(&doc, x)?;
-                self.media
+                let native = self
+                    .media
                     .iter_mut()
                     .find(|entry| entry.id == id)
                     .ok_or(Error::Schema)?
                     .attributes(doc)?;
-                None
+                native
+                    .map(|(doc, value, field, choice)| self.native_field(owner, doc, value, field, choice))
+                    .transpose()?
             }
             Kind::MediaStart => {
-                let projection = media_events::Projection::start(owner, doc, x)?;
+                let mut projection = media_events::Projection::start(owner, doc, x)?;
                 if self.media.iter().any(|entry| entry.id == projection.id) {
                     return Err(Error::Schema);
                 }
+                let native = projection.initial()?;
                 self.media.push(projection)?;
-                None
+                native
+                    .map(|(doc, value, field, choice)| self.native_field(owner, doc, value, field, choice))
+                    .transpose()?
             }
             Kind::Data | Kind::MediaTranscript | Kind::MediaEnd => {
                 let id = media_events::id(&doc, x)?;
@@ -169,16 +181,16 @@ impl Reduction {
                     .iter()
                     .position(|entry| entry.id == id)
                     .ok_or(Error::Schema)?;
-                if kind == Kind::Data {
-                    self.media[position].data(doc)?;
-                    None
+                let native = if kind == Kind::Data {
+                    self.media[position].data(doc)?
                 } else if kind == Kind::MediaTranscript {
-                    self.media[position].transcript(doc)?;
-                    None
+                    self.media[position].transcript(doc)?
                 } else {
-                    let (native, value, field, choice) = self.media[position].end(&doc)?;
-                    Some(self.native_field(owner, native, value, field, choice)?)
-                }
+                    self.media[position].end(&doc)?
+                };
+                native
+                    .map(|(doc, value, field, choice)| self.native_field(owner, doc, value, field, choice))
+                    .transpose()?
             }
             Kind::Annotation => {
                 if !doc.string_is(doc.required(root, "kind")?, "chat")? {

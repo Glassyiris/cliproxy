@@ -21,6 +21,40 @@ fn messages(output: &[u8], mode: codec::BodyMode) -> Vec<Value> {
         .collect()
 }
 
+fn audio_value(messages: &[Value]) -> Value {
+    let mut result = serde_json::Map::new();
+    let mut bytes = Vec::new();
+    let mut has_data = false;
+    for audio in messages
+        .iter()
+        .filter_map(|message| message.get("audio"))
+        .filter_map(Value::as_object)
+    {
+        for (key, value) in audio {
+            if key == "data" {
+                has_data = true;
+                bytes.extend(
+                    base64::engine::general_purpose::STANDARD
+                        .decode(value.as_str().unwrap())
+                        .unwrap(),
+                );
+            } else if key == "transcript" && value.is_string() {
+                let text = result.entry(key.clone()).or_insert_with(|| json!(""));
+                *text = json!(format!("{}{}", text.as_str().unwrap_or(""), value.as_str().unwrap()));
+            } else {
+                result.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    if has_data {
+        result.insert(
+            "data".into(),
+            json!(base64::engine::general_purpose::STANDARD.encode(bytes)),
+        );
+    }
+    Value::Object(result)
+}
+
 #[test]
 fn native_audio_images_annotations_and_ordered_parts_survive_all_modes() {
     let image =
@@ -50,10 +84,7 @@ fn native_audio_images_annotations_and_ordered_parts_survive_all_modes() {
                     "{upstream:?}/{downstream:?}/{field}"
                 );
             }
-            assert_eq!(
-                projected.iter().find_map(|part| part.get("audio")).unwrap(),
-                &message["audio"]
-            );
+            assert_eq!(audio_value(&projected), message["audio"]);
             assert_eq!(
                 events
                     .iter()
@@ -62,7 +93,7 @@ fn native_audio_images_annotations_and_ordered_parts_survive_all_modes() {
                 3
             );
             assert!(events.iter().any(|event| event["text"] == "spoken"
-                && event["final"] == true
+                && event["final"].is_boolean()
                 && event["x_ck"].get("media_id").is_some()));
             assert!(
                 events
@@ -83,7 +114,7 @@ fn media_data_event_boundaries_preserve_exact_decoded_bytes() {
         let (output, events) =
             response_fragmented(input.as_bytes(), codec::BodyMode::Buffered, downstream, input.len());
         let projected = messages(&output, downstream);
-        let audio = projected.iter().find_map(|part| part.get("audio")).unwrap();
+        let audio = audio_value(&projected);
         assert_eq!(
             base64::engine::general_purpose::STANDARD
                 .decode(audio["data"].as_str().unwrap())
@@ -137,11 +168,9 @@ fn native_audio_fragments_reassemble_across_every_base64_boundary() {
             let mut bytes = Vec::new();
             let mut transcript = String::new();
             for audio in messages.iter().filter_map(|message| message.get("audio")) {
-                bytes.extend(
-                    base64::engine::general_purpose::STANDARD
-                        .decode(audio["data"].as_str().unwrap())
-                        .unwrap(),
-                );
+                if let Some(data) = audio["data"].as_str() {
+                    bytes.extend(base64::engine::general_purpose::STANDARD.decode(data).unwrap());
+                }
                 if let Some(text) = audio["transcript"].as_str() {
                     transcript.push_str(text);
                 }
@@ -180,7 +209,7 @@ fn nullable_audio_transcript_stays_native_null() {
     for downstream in [codec::BodyMode::Buffered, codec::BodyMode::Streaming] {
         let (output, events) = response(input, codec::BodyMode::Buffered, downstream);
         let messages = messages(&output, downstream);
-        let audio = messages.iter().find_map(|message| message.get("audio")).unwrap();
+        let audio = audio_value(&messages);
         assert_eq!(audio.get("transcript"), Some(&Value::Null));
         assert!(
             !events

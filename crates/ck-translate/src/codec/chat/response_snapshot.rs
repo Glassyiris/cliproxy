@@ -46,6 +46,43 @@ impl State {
             }
         }
         let prior = self.reduction.document.as_ref().ok_or(Error::Schema)?;
+        for choice in doc.children(choices)? {
+            let Some(finish) = doc.member(choice, "finish_reason")? else {
+                continue;
+            };
+            if matches!(doc.node(finish)?.value, Value::Null) {
+                continue;
+            }
+            let index = doc.unsigned(doc.required(choice, "index")?)?;
+            let position = self
+                .choices
+                .iter()
+                .position(|choice| choice.index == index)
+                .ok_or(Error::Schema)?;
+            let message = doc.member(choice, "message")?;
+            let supplied_audio = message
+                .map(|message| doc.member(message, "audio"))
+                .transpose()?
+                .flatten();
+            let supplied_data = match supplied_audio {
+                Some(audio) if matches!(doc.node(audio)?.value, Value::Object) => doc.member(audio, "data")?.is_some(),
+                _ => false,
+            };
+            if !supplied_data && !self.choices[position].audio.complete() {
+                return Err(Error::Truncated);
+            }
+            if doc.string_is(finish, "length")? || doc.string_is(finish, "content_filter")? {
+                continue;
+            }
+            let old = indexed(prior, prior.required(prior.root(), "choices")?, index)?
+                .map(|choice| prior.required(choice, "message"))
+                .transpose()?;
+            if let Some(message) = message {
+                validate_completion(owner, prior, old, doc, message)?;
+            } else if let Some(old) = old {
+                validate_completion(owner, prior, None, prior, old)?;
+            }
+        }
         let mut changes = Table::new(owner)?;
         let mut seen = Table::new(owner)?;
         for choice in doc.children(choices)? {
@@ -84,13 +121,6 @@ impl State {
                 self.choices[position].audio.validate_snapshot(doc, data, published)?;
             }
             reconcile_object(owner, prior, old, doc, message, &mut changes, Context::Message)?;
-            if let Some(finish) = doc.member(choice, "finish_reason")?
-                && !matches!(doc.node(finish)?.value, Value::Null)
-                && !doc.string_is(finish, "length")?
-                && !doc.string_is(finish, "content_filter")?
-            {
-                validate_completion(owner, prior, old, doc, message)?;
-            }
         }
         for choice in doc.children(choices)? {
             if let Some(message) = doc.member(choice, "message")?
@@ -187,7 +217,7 @@ fn indexed(doc: &Document, array: usize, index: u64) -> Result<Option<usize>> {
     Ok(None)
 }
 
-fn matching_member(old: &Document, parent: usize, new: &Document, node: usize) -> Result<Option<usize>> {
+pub(super) fn matching_member(old: &Document, parent: usize, new: &Document, node: usize) -> Result<Option<usize>> {
     let name = new.node(node)?.name.ok_or(Error::Schema)?;
     for child in old.children(parent)? {
         let mut a = old.name_chars(old.node(child)?.name.ok_or(Error::Schema)?)?;
@@ -285,7 +315,10 @@ fn reconcile_object(
                             .iter()
                             .any(|key| new.name_is(name, key).unwrap_or(false)))
                     || (context == Context::Function && new.name_is(name, "name")?)
-                    || (context == Context::Audio && new.name_is(name, "id")?);
+                    || (context == Context::Audio
+                        && ["id", "format", "codec", "sample_rate", "channels"]
+                            .iter()
+                            .any(|key| new.name_is(name, key).unwrap_or(false)));
                 // A previously absent/null value can acquire content; a published value cannot be cleared.
                 if !same && immutable && !matches!(old.node(previous)?.value, Value::Null) {
                     return Err(Error::Schema);
@@ -413,7 +446,7 @@ fn bytes_prefix(old: &Document, prior: usize, new: &Document, node: usize, prefi
     Ok((length, equal))
 }
 
-fn exact(old: &Document, prior: usize, new: &Document, node: usize, depth: usize) -> Result<bool> {
+pub(super) fn exact(old: &Document, prior: usize, new: &Document, node: usize, depth: usize) -> Result<bool> {
     if depth >= 128 {
         return Err(Error::Limit);
     }

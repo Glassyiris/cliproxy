@@ -142,6 +142,7 @@ struct Choice {
     blocks: [bool; 3],
     next_block: u64,
     audio: media::Base64Fragments,
+    audio_output: Option<media_events::Audio>,
     tools: Table<Tool>,
     usage: Accounting,
     finished: bool,
@@ -467,6 +468,7 @@ impl State {
             blocks: [false; 3],
             next_block: 3,
             audio: media::Base64Fragments::default(),
+            audio_output: None,
             tools: Table::new(owner)?,
             usage: Accounting::default(),
             finished: false,
@@ -831,6 +833,9 @@ impl State {
             {
                 return Err(error);
             }
+        }
+        if let Some(audio) = &mut self.choices[position].audio_output {
+            audio.finish(&mut self.emitter, owner)?;
         }
         for tool in self.choices[position].tools.iter_mut() {
             let mut tool_scope = scope;

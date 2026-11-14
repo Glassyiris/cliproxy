@@ -117,10 +117,13 @@ pub fn decode(owner: &mut Writer, lease: Lease) -> Result<(Kind, Document)> {
     }
     let mut source = Source::new(owner)?;
     source.push(lease, advance(record.start, start)?..advance(record.start, end)?)?;
-    let doc = Document::parse(owner, source, record.len())?;
+    let mut doc = Document::parse(owner, source, record.len())?;
     let x = doc.required(doc.root(), "x_ck")?;
     if doc.unsigned(doc.required(x, "v")?)? != 1 || Some(doc.unsigned(doc.required(x, "seq")?)?) != sequence {
         return Err(Error::Schema);
+    }
+    if kind == Kind::Chunk {
+        super::chat::prepare_response(&mut doc)?;
     }
     Ok((kind, doc))
 }
