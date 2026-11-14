@@ -790,6 +790,17 @@ fn logrus_level(level: &Level) -> &'static str {
     }
 }
 
+/// The caller's source path relative to the crate's `src/` directory, so modules that
+/// share a file name stay distinguishable (`management/api.rs`, not `api.rs`). A path
+/// with no `src/` component is returned as given.
+fn caller_path(file: &str) -> std::borrow::Cow<'_, str> {
+    let normalized = file.replace('\\', "/");
+    match normalized.rfind("/src/") {
+        Some(at) => std::borrow::Cow::Owned(normalized[at + "/src/".len()..].to_owned()),
+        None => std::borrow::Cow::Borrowed(file),
+    }
+}
+
 fn format_line(now: chrono::NaiveDateTime, level: &Level, caller: Option<(&str, u32)>, fields: Fields) -> String {
     let request_id = match fields.request_id.trim() {
         "" => "--------",
@@ -805,8 +816,7 @@ fn format_line(now: chrono::NaiveDateTime, level: &Level, caller: Option<(&str, 
     };
     let mut line = format!("[{}] [{request_id}] [{level:<5}] ", now.format("%Y-%m-%d %H:%M:%S"));
     if let Some((file, number)) = caller {
-        let base = file.rsplit(['/', '\\']).next().unwrap_or(file);
-        line.push_str(&format!("[{base}:{number}] "));
+        line.push_str(&format!("[{}:{number}] ", caller_path(file)));
     }
     line.push_str(fields.message.trim_end_matches(['\r', '\n']));
     let mut rest = fields.rest;
@@ -847,6 +857,26 @@ mod tests {
     }
 
     #[test]
+    fn caller_path_is_relative_to_src() {
+        assert_eq!(
+            caller_path("crates/ck-server/src/management/api.rs"),
+            "management/api.rs"
+        );
+        assert_eq!(
+            caller_path("C:\\work\\ck-server\\src\\runtime\\state.rs"),
+            "runtime/state.rs"
+        );
+        // The last `/src/` wins when a checkout path contains one too.
+        assert_eq!(caller_path("/home/u/src/cooker/crates/ck-server/src/lib.rs"), "lib.rs");
+        // No `src/` component: the path stays as given.
+        assert_eq!(
+            caller_path("/rustc/abc/library/core/lib.rs"),
+            "/rustc/abc/library/core/lib.rs"
+        );
+        assert_eq!(caller_path("lib.rs"), "lib.rs");
+    }
+
+    #[test]
     fn lines_follow_go_log_formatter() {
         let now = chrono::NaiveDate::from_ymd_opt(2025, 12, 23)
             .unwrap()
@@ -862,6 +892,16 @@ mod tests {
                 fields("Use API key\r\n", "0198-aaaa-a1b2c3d4", &[])
             ),
             "[2025-12-23 20:14:04] [a1b2c3d4] [warn ] [manager.rs:524] Use API key\n"
+        );
+        // Files with the same name in different modules stay distinguishable.
+        assert_eq!(
+            format_line(
+                now,
+                &Level::WARN,
+                Some(("crates/x/src/management/api.rs", 42)),
+                fields("m\n", "", &[])
+            ),
+            "[2025-12-23 20:14:04] [--------] [warn ] [management/api.rs:42] m\n"
         );
         // Known fields in Go's order (model before auth_id; quoted auth_id), others after.
         assert_eq!(
