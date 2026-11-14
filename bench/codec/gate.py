@@ -5,6 +5,7 @@ import datetime
 from decimal import Decimal
 from fractions import Fraction
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -45,13 +46,20 @@ METRICS = {
 # may exceed old by a calibrated noise band; beyond it the 0% rule holds. Heap and
 # allocation metrics stay exact.
 BANDED_METRICS = ("rss", "pss", "cgroup_charge", "total_charged")
+BAND_SCHEMA_VERSION = 2
 BAND_SIGMAS = 3
-BAND_RULE = ("new_median - old_median <= band for rss, pss, cgroup_charge and total_charged; "
-             "band = ceil(3 x max(pooled sigma, workload sigma)) over warm old-vs-old rounds")
+BAND_RULE = ("new_median - old_median <= allowance for rss, pss, cgroup_charge and total_charged; "
+             "allowance = max(one page, ceil(3 x sigma), largest difference), where sigma and the largest "
+             "difference come from median(3 warm old rounds) - median(3 other warm old rounds) over every "
+             "ordered pair of disjoint triples of that workload's calibration rounds")
 BAND_MAX_AGE_DAYS = 30
-# One discarded cold round, then ten warm rounds: 3,710 samples per counter.
-CALIBRATION_ROUNDS = 11
-CALIBRATION_WARMUP = 1
+# The first run of a harness is cold (RSS about 260 KiB lower), so the gate and the
+# calibration both discard it and compare warm rounds only.
+WARMUP_ROUNDS = 1
+GATE_ROUNDS = 3
+# Ten warm rounds give 4,200 ordered pairs of disjoint triples per workload.
+CALIBRATION_ROUNDS = WARMUP_ROUNDS + 10
+PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
 
 
 def unique_object(pairs):
@@ -250,7 +258,7 @@ def acceptable(old, new, direction, tolerance):
     return new * 100 <= old * (100 + tolerance)
 
 
-def compare(workloads, rounds, band):
+def compare(workloads, rounds, allowances):
     comparisons = []
     for workload in workloads:
         key = workload["id"]
@@ -261,7 +269,7 @@ def compare(workloads, rounds, band):
                    "old_median": old, "new_median": new,
                    "direction": direction, "regression_percent": tolerance}
             if metric in BANDED_METRICS:
-                allowance = band["workloads"][key][metric]["band"]
+                allowance = allowances[key][metric]
                 row["noise_band"] = allowance
                 row["pass"] = new - old <= allowance
             else:
@@ -270,46 +278,87 @@ def compare(workloads, rounds, band):
     return comparisons
 
 
-def calibrated_band(workloads, rounds):
-    """Per-workload band = ceil(3 x max(pooled sigma, the workload's own sigma)) for each counter."""
-    result, pooled = {}, {}
-    for metric in BANDED_METRICS:
-        squares, freedom, sigmas = 0.0, 0, {}
-        for workload in workloads:
-            values = [float(row[workload["id"]][metric]) for row in rounds]
-            mean = statistics.fmean(values)
-            squares += sum((value - mean) ** 2 for value in values)
-            freedom += len(values) - 1
-            sigmas[workload["id"]] = statistics.stdev(values)
-        pooled[metric] = math.sqrt(squares / freedom)
-        for key, sigma in sigmas.items():
-            band = math.ceil(BAND_SIGMAS * max(pooled[metric], sigma))
-            result.setdefault(key, {})[metric] = {"sigma": sigma, "band": band}
-    return result, pooled
+def median_differences(samples):
+    """Old-vs-old differences between medians of GATE_ROUNDS, sampled as compare() samples them."""
+    indices = range(len(samples))
+    medians = {triple: sorted(samples[index] for index in triple)[GATE_ROUNDS // 2]
+               for triple in itertools.combinations(indices, GATE_ROUNDS)}
+    return [medians[second] - medians[first]
+            for first in medians for second in medians if not set(first) & set(second)]
 
 
-def load_band(path, old, checksum):
-    """Fail closed unless the band was calibrated for this baseline, corpus, host and month."""
+def allowance(samples):
+    """max(one page, ceil(3 x sigma), largest difference) over median_differences(samples), in bytes.
+
+    Every ordered pair appears in both orders, so the differences have mean zero and sigma is
+    their root mean square. The page floor is the counters' resolution and never exceeds one page.
+    """
+    differences = median_differences(samples)
+    target = BAND_SIGMAS ** 2 * sum(value * value for value in differences)
+    sigmas = math.isqrt(target // len(differences))
+    while sigmas * sigmas * len(differences) < target:
+        sigmas += 1
+    return max(PAGE_SIZE, sigmas, max(differences))
+
+
+def band_samples(workloads, rounds):
+    result = {}
+    for workload in workloads:
+        result[workload["id"]] = {}
+        for metric in BANDED_METRICS:
+            values = [row[workload["id"]][metric] for row in rounds]
+            if any(value != value.to_integral_value() for value in values):
+                raise ValueError(f"{workload['id']} {metric}: byte counters must be integers")
+            result[workload["id"]][metric] = [int(value) for value in values]
+    return result
+
+
+def load_band(path, old, checksum, required):
+    """Fail closed unless the band is raw old-vs-old evidence for this build, corpus, host and month.
+
+    Allowances are recomputed from the recorded samples; the file carries no allowance to trust.
+    """
     if not path:
         raise ValueError("CODEC_NOISE_BAND is unset; calibrate with bench/codec-gate.sh --calibrate")
     band = loads(Path(path).read_text())
-    expected = {"schema_version": 1, "rule": BAND_RULE, "sigma_multiplier": BAND_SIGMAS,
-                "metrics": list(BANDED_METRICS), "revision": old["revision"],
-                "source_checksum": old["source_checksum"], "manifest_sha256": checksum,
-                "hostname": platform.node(), "kernel": platform.release()}
+    expected = {"schema_version": BAND_SCHEMA_VERSION, "rule": BAND_RULE, "unit": "B",
+                "metrics": list(BANDED_METRICS), "sigma_multiplier": BAND_SIGMAS, "page_size": PAGE_SIZE,
+                "rounds": CALIBRATION_ROUNDS, "discarded_warmup_rounds": WARMUP_ROUNDS,
+                "revision": old["revision"], "source_checksum": old["source_checksum"],
+                "executable_sha256": old["executable_sha256"], "manifest_sha256": checksum,
+                "hostname": platform.node(), "kernel": platform.release(),
+                "affinity": sorted(os.sched_getaffinity(0))}
+    fields = {*expected, "created_utc", "load_before", "load_after", "samples"}
+    if not isinstance(band, dict) or set(band) != fields:
+        raise ValueError(f"noise band fields must be exactly {sorted(fields)}")
     for field, value in expected.items():
-        if band.get(field) != value:
-            raise ValueError(f"noise band {field} is {band.get(field)!r}, expected {value!r}")
+        if type(band[field]) is not type(value) or band[field] != value:
+            raise ValueError(f"noise band {field} is {band[field]!r}, expected {value!r}")
+    if not all(isinstance(band[field], str) for field in ("created_utc", "load_before", "load_after")):
+        raise ValueError("noise band created_utc and load fields must be strings")
     created = datetime.datetime.fromisoformat(band["created_utc"])
+    if created.tzinfo is None:
+        raise ValueError("noise band created_utc needs a UTC offset")
     age = datetime.datetime.now(datetime.timezone.utc) - created
     if not datetime.timedelta(0) <= age <= datetime.timedelta(days=BAND_MAX_AGE_DAYS):
         raise ValueError(f"noise band is stale: created {band['created_utc']}, limit {BAND_MAX_AGE_DAYS} days")
-    for key, metrics in band["workloads"].items():
-        for metric in BANDED_METRICS:
-            value = metrics[metric]["band"]
-            if type(value) is not int or value < 0:
-                raise ValueError(f"noise band for {key} {metric} must be a nonnegative integer")
-    return band
+    samples = band["samples"]
+    if not isinstance(samples, dict) or set(samples) != required:
+        keys = set(samples) if isinstance(samples, dict) else set()
+        raise ValueError(f"noise band samples: {len(required - keys)} missing and "
+                         f"{len(keys - required)} extra workloads")
+    allowances = {}
+    for key, metrics in samples.items():
+        if not isinstance(metrics, dict) or set(metrics) != set(BANDED_METRICS):
+            raise ValueError(f"noise band samples for {key} must cover exactly {list(BANDED_METRICS)}")
+        allowances[key] = {}
+        for metric, values in metrics.items():
+            if (not isinstance(values, list) or len(values) != CALIBRATION_ROUNDS - WARMUP_ROUNDS
+                    or any(type(value) is not int or value < 0 for value in values)):
+                raise ValueError(f"noise band samples for {key} {metric} must be "
+                                 f"{CALIBRATION_ROUNDS - WARMUP_ROUNDS} nonnegative integer bytes")
+            allowances[key][metric] = allowance(values)
+    return band, allowances
 
 
 def prepare(out):
@@ -375,17 +424,21 @@ def run(old, new, out):
             raise ValueError("old/new configuration differs")
         data, path, checksum, required = matrix(out, summary)
         band_path = os.environ.get("CODEC_NOISE_BAND")
-        band = load_band(band_path, descriptions["old"], checksum)
+        band, allowances = load_band(band_path, descriptions["old"], checksum, required)
         summary["noise_band"] = {"path": str(Path(band_path).resolve()), "sha256": digest(Path(band_path)),
                                  "created_utc": band["created_utc"]}
         storage = [out, *(Path(value["storage_directory"]) for value in descriptions.values())]
         summary["host"] = snapshot(storage)
         rounds = {"old": [], "new": []}
-        for round_number in (1, 2, 3):
+        for round_number in range(1, WARMUP_ROUNDS + GATE_ROUNDS + 1):
             for label in ("old", "new"):
-                rounds[label].append(measure(executables[label], descriptions[label], label, round_number,
-                                             path, checksum, required, out, storage, summary))
-        comparisons = compare(data["workloads"], rounds, band)
+                values = measure(executables[label], descriptions[label], label, round_number,
+                                 path, checksum, required, out, storage, summary)
+                if round_number > WARMUP_ROUNDS:
+                    rounds[label].append(values)
+                else:
+                    summary["rounds"][-1]["discarded_warmup"] = True
+        comparisons = compare(data["workloads"], rounds, allowances)
         summary["comparisons"] = comparisons
         summary["failed_metrics"] = sum(not row["pass"] for row in comparisons)
         summary["status"] = "fail" if summary["failed_metrics"] else "pass"
@@ -413,9 +466,11 @@ def calibrate(old, out):
         summary["host"] = snapshot(storage)
         rounds = [measure(executable, description, "old", round_number, path, checksum, required,
                           out, storage, summary) for round_number in range(1, CALIBRATION_ROUNDS + 1)]
-        workloads, pooled = calibrated_band(data["workloads"], rounds[CALIBRATION_WARMUP:])
-        band = {"schema_version": 1, "rule": BAND_RULE, "sigma_multiplier": BAND_SIGMAS,
-                "metrics": list(BANDED_METRICS),
+        for state in summary["rounds"][:WARMUP_ROUNDS]:
+            state["discarded_warmup"] = True
+        samples = band_samples(data["workloads"], rounds[WARMUP_ROUNDS:])
+        band = {"schema_version": BAND_SCHEMA_VERSION, "rule": BAND_RULE, "unit": "B",
+                "metrics": list(BANDED_METRICS), "sigma_multiplier": BAND_SIGMAS, "page_size": PAGE_SIZE,
                 "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "revision": description["revision"], "source_checksum": description["source_checksum"],
                 "executable_sha256": description["executable_sha256"], "manifest_sha256": checksum,
@@ -423,9 +478,10 @@ def calibrate(old, out):
                 "load_before": summary["rounds"][0]["before"]["load"],
                 "load_after": summary["rounds"][-1]["after"]["load"],
                 "affinity": summary["host"]["affinity"], "rounds": CALIBRATION_ROUNDS,
-                "discarded_warmup_rounds": CALIBRATION_WARMUP, "pooled_sigma": pooled,
-                "workloads": workloads}
+                "discarded_warmup_rounds": WARMUP_ROUNDS, "samples": samples}
         save(out / "noise-band.json", band)
+        summary["allowances"] = {key: {metric: allowance(values) for metric, values in metrics.items()}
+                                 for key, metrics in samples.items()}
         summary["status"] = "calibrated"
         return 0
     except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as error:

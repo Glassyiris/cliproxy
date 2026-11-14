@@ -52,7 +52,7 @@ class Thresholds(unittest.TestCase):
         return {"old": [{"w": {**base, **(old or {})}}] * 3, "new": [{"w": {**base, **(new or {})}}] * 3}
 
     def band(self, value):
-        return {"workloads": {"w": {metric: {"band": value} for metric in gate.BANDED_METRICS}}}
+        return {"w": {metric: value for metric in gate.BANDED_METRICS}}
 
     def test_memory_counters_pass_inside_noise_band_and_fail_beyond(self):
         for metric in gate.BANDED_METRICS:
@@ -67,6 +67,37 @@ class Thresholds(unittest.TestCase):
             with self.subTest(metric=metric):
                 rows = gate.compare([{"id": "w"}], self.rounds(new={metric: Decimal(101)}), self.band(10**9))
                 self.assertEqual([row["metric"] for row in rows if not row["pass"]], [metric])
+
+    def test_allowance_is_the_median_of_three_difference_distribution(self):
+        samples = [0, 0, 0, 0, 0, 8192, 8192, 8192, 8192, 8192]
+        differences = gate.median_differences(samples)
+        self.assertEqual(len(differences), 4200)
+        self.assertEqual(sum(differences), 0)
+        self.assertEqual(max(differences), 8192)
+        rms = (sum(value * value for value in differences) / len(differences)) ** 0.5
+        self.assertEqual(gate.allowance(samples), max(gate.PAGE_SIZE, -(-3 * rms // 1), 8192))
+
+    def test_noisy_workload_does_not_widen_a_constant_one(self):
+        # Review repro: one outlier in another workload gave a constant workload a 670 MB band.
+        rounds = [{"constant": {metric: Decimal(2 ** 20) for metric in gate.BANDED_METRICS},
+                   "noisy": {metric: Decimal(2 ** 20 + (10 ** 9 if index == 4 else 4096 * index))
+                             for metric in gate.BANDED_METRICS}} for index in range(10)]
+        samples = gate.band_samples([{"id": "constant"}, {"id": "noisy"}], rounds)
+        self.assertEqual({gate.allowance(values) for values in samples["constant"].values()}, {gate.PAGE_SIZE})
+        self.assertLess(max(gate.allowance(values) for values in samples["noisy"].values()), 10 ** 6)
+        # Review repro: a repeatable 1,000,000 B RSS regression on a zero-sigma workload fails.
+        allowances = {key: {metric: gate.allowance(values) for metric, values in metrics.items()}
+                      for key, metrics in samples.items()}
+        regression = {"old": [{"constant": {name: Decimal(2 ** 20) for name in gate.METRICS}}] * 3,
+                      "new": [{"constant": {name: Decimal(2 ** 20 + (10 ** 6 if name == "rss" else 0))
+                                            for name in gate.METRICS}}] * 3}
+        rows = gate.compare([{"id": "constant"}], regression, allowances)
+        self.assertEqual([row["metric"] for row in rows if not row["pass"]], ["rss"])
+
+    def test_fractional_byte_counter_is_not_calibrated(self):
+        rounds = [{"w": {metric: Decimal("1.5") for metric in gate.BANDED_METRICS}}] * 10
+        with self.assertRaisesRegex(ValueError, "must be integers"):
+            gate.band_samples([{"id": "w"}], rounds)
 
     def test_sub_context_precision_regression_fails(self):
         self.assertFalse(gate.acceptable(Decimal(100),
@@ -167,7 +198,8 @@ class GateControls(unittest.TestCase):
         summary, out = self.control("pass", 0)
         self.assertEqual(summary["status"], "pass")
         self.assertEqual([(row["harness"], row["round"]) for row in summary["rounds"]],
-                         [(side, number) for number in (1, 2, 3) for side in ("old", "new")])
+                         [(side, number) for number in (1, 2, 3, 4) for side in ("old", "new")])
+        self.assertEqual([row.get("discarded_warmup", False) for row in summary["rounds"]], [True] * 2 + [False] * 6)
         workloads = json.loads((out / "workloads.json").read_text())["workloads"]
         self.assertEqual({row["role"] for row in workloads},
                          {"client_decode+upstream_encode", "upstream_decode+client_encode"})
@@ -196,29 +228,49 @@ class GateControls(unittest.TestCase):
         self.assertIn("new source must not be the baseline revision", summary["error"])
         self.assertEqual(summary["rounds"], [])
 
-    def test_calibration_writes_a_band_for_every_workload(self):
+    def test_calibration_writes_raw_warm_samples_for_every_workload(self):
         band = json.loads(self.band.read_text())
-        self.assertEqual((band["rounds"], band["discarded_warmup_rounds"], band["sigma_multiplier"]), (11, 1, 3))
+        self.assertEqual((band["rounds"], band["discarded_warmup_rounds"], band["sigma_multiplier"], band["unit"]),
+                         (11, 1, 3, "B"))
         self.assertEqual(band["revision"], gate.BASELINE_REVISION)
-        self.assertEqual(len(band["workloads"]), len(gate.manifest()["workloads"]))
-        # The synthetic old harness repeats its values exactly, so its band is zero.
-        self.assertEqual({row[metric]["band"] for row in band["workloads"].values() for metric in gate.BANDED_METRICS},
-                         {0})
+        self.assertEqual(set(band["samples"]), {row["id"] for row in gate.manifest()["workloads"]})
+        # The synthetic old harness repeats its values exactly, so every allowance is the one-page floor.
+        self.assertEqual({tuple(values) for row in band["samples"].values() for values in row.values()},
+                         {(100,) * 10})
+        summary = json.loads((self.band.parent / "summary.json").read_text())
+        self.assertEqual({value for row in summary["allowances"].values() for value in row.values()},
+                         {gate.PAGE_SIZE})
 
     def test_missing_band_is_error(self):
         summary, _ = self.control("pass-without-band", 2, band="")
         self.assertIn("CODEC_NOISE_BAND is unset", summary["error"])
         self.assertEqual(summary["rounds"], [])
 
-    def test_band_for_another_revision_host_or_month_is_error(self):
+    def test_band_for_another_build_host_or_month_or_with_bad_evidence_is_error(self):
         band = json.loads(self.band.read_text())
         old = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=gate.BAND_MAX_AGE_DAYS + 1)
-        for field, value in (("revision", "c" * 40), ("hostname", "elsewhere"), ("created_utc", old.isoformat()),
-                             ("manifest_sha256", "0" * 64)):
-            with self.subTest(field=field):
-                path = ARTIFACTS / f"band-{field}.json"
-                path.write_text(json.dumps({**band, field: value}))
-                summary, _ = self.control(f"band-{field}", 2, band=path)
+        first = next(iter(band["samples"]))
+        def samples(**changes):
+            return {**band["samples"], **changes}
+        cases = {
+            "revision": {"revision": "c" * 40}, "hostname": {"hostname": "elsewhere"},
+            "created": {"created_utc": old.isoformat()}, "naive-date": {"created_utc": "2026-11-14T00:00:00"},
+            "manifest": {"manifest_sha256": "0" * 64}, "executable": {"executable_sha256": "0" * 64},
+            "affinity": {"affinity": [0]}, "unit": {"unit": "KiB"}, "rounds": {"rounds": 0},
+            "float-rounds": {"rounds": 11.0}, "page": {"page_size": 1},
+            # Review repro: a stored allowance of 10**30 was trusted.
+            "stored-allowance": {"workloads": {first: {metric: {"band": 10 ** 30} for metric in gate.BANDED_METRICS}}},
+            "extra-workload": {"samples": samples(unrequested=band["samples"][first])},
+            "missing-workload": {"samples": {key: value for key, value in band["samples"].items() if key != first}},
+            "short-samples": {"samples": samples(**{first: {**band["samples"][first], "rss": [100] * 9}})},
+            "float-sample": {"samples": samples(**{first: {**band["samples"][first], "rss": [100.0] * 10}})},
+            "missing-metric": {"samples": samples(**{first: {"rss": [100] * 10}})},
+        }
+        for name, change in cases.items():
+            with self.subTest(case=name):
+                path = ARTIFACTS / f"band-{name}.json"
+                path.write_text(json.dumps({**band, **change}))
+                summary, _ = self.control(f"band-{name}", 2, band=path)
                 self.assertIn("noise band", summary["error"])
                 self.assertEqual(summary["rounds"], [])
 

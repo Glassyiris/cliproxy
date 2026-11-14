@@ -63,7 +63,9 @@ CPU, allocations and latency may rise by at most 5%; throughput may fall by at
 most 5%. Allocated bytes/event and heap metrics allow no regression. RSS, PSS
 and the cgroup charges may exceed old only by a noise band calibrated from
 old-against-old baseline runs (owner ruling 2026-11-14); beyond it the 0% rule
-holds. Calibrate with `bench/codec-gate.sh --calibrate "$OLD_CODEC" "$BAND_OUT"`
+holds. Each workload's band comes from its own differences between medians of
+three warm old rounds, recomputed by the gate from the raw samples in the band
+file, with a one-page floor. Calibrate with `bench/codec-gate.sh --calibrate "$OLD_CODEC" "$BAND_OUT"`
 and pass `CODEC_NOISE_BAND="$BAND_OUT/noise-band.json"`; the gate refuses a
 missing, stale or mismatched band. Backend-specific splits are diagnostics; mapped/tmpfs costs still
 contribute to the charged totals. A zero old cost requires a zero new cost;
