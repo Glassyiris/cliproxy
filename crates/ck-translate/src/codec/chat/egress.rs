@@ -86,148 +86,10 @@ impl Egress {
             | Kind::Data
             | Kind::MediaTranscript
             | Kind::MediaEnd
-            | Kind::Annotation => {
-                let deliverable = if kind == Kind::Chunk {
-                    if self.mode == BodyMode::Streaming {
-                        self.reduction.refresh_metadata(owner, &doc)?;
-                    }
-                    chunk_deliverable(&doc)?
-                } else if kind == Kind::Usage {
-                    let usage = doc.required(root, "usage")?;
-                    self.include_usage && matches!(doc.node(doc.required(usage, "final")?)?.value, Value::Bool(true))
-                } else {
-                    true
-                };
-                let (projection, lost) = self.reduction.project(owner, kind, doc)?;
-                if lost {
-                    (self.diagnostic)(Diagnostic {
-                        identity: self.identity,
-                        kind,
-                        destination: "chat",
-                        reason: "source field has no surviving native parent",
-                    });
-                }
-                if let Some(projection) = projection {
-                    if self.mode == BodyMode::Buffered {
-                        self.reduction.fold(projection)?;
-                    } else if deliverable {
-                        output(encode::scratch(owner, |e| {
-                            if kind == Kind::Chunk {
-                                source_fields(&projection, x, e)?;
-                            }
-                            e.bytes(b"data: ")?;
-                            projection.write(projection.root(), e)?;
-                            e.bytes(b"\n\n")
-                        })?)?;
-                    }
-                }
-            }
-            Kind::Opaque => {
-                if doc.member(x, "media_id")?.is_some()
-                    && let Some(name) = doc.member(root, "name")?
-                    && doc.string_is(name, "chat.media.attributes")?
-                {
-                    if let (Some(projection), _) = self.reduction.project(owner, kind, doc)? {
-                        if self.mode == BodyMode::Buffered {
-                            self.reduction.fold(projection)?;
-                        } else {
-                            output(encode::scratch(owner, |e| {
-                                e.bytes(b"data: ")?;
-                                projection.write(projection.root(), e)?;
-                                e.bytes(b"\n\n")
-                            })?)?;
-                        }
-                    }
-                } else if self.mode == BodyMode::Streaming {
-                    output(encode::scratch(owner, |e| {
-                        source_fields(&doc, x, e)?;
-                        e.bytes(b"data: ")?;
-                        let value = doc.required(root, "value")?;
-                        if doc.string_is(doc.required(root, "format")?, "text")? {
-                            let mut chars = doc.chars(value)?;
-                            while let Some(c) = chars.next_scalar()? {
-                                if c == '\n' {
-                                    e.bytes(b"\ndata: ")?;
-                                } else {
-                                    e.bytes(c.encode_utf8(&mut [0; 4]).as_bytes())?;
-                                }
-                            }
-                        } else {
-                            doc.write(value, e)?;
-                        }
-                        e.bytes(b"\n\n")
-                    })?)?;
-                } else {
-                    (self.diagnostic)(Diagnostic {
-                        identity: self.identity,
-                        kind,
-                        destination: "chat.buffered",
-                        reason: "no native event carrier",
-                    });
-                }
-            }
-            Kind::Done => {
-                if self.reduction.has_open_media() {
-                    return Err(Error::Truncated);
-                }
-                self.terminal = true;
-                if self.mode == BodyMode::Streaming {
-                    output(encode::scratch(owner, |e| e.bytes(b"data: [DONE]\n\n"))?)?;
-                } else {
-                    let aggregate = self.reduction.document.as_mut().ok_or(Error::Schema)?;
-                    let choices = aggregate.required(aggregate.root(), "choices")?;
-                    let mut choice = aggregate.node(choices)?.first;
-                    while let Some(c) = choice {
-                        choice = aggregate.node(c)?.next;
-                        if matches!(
-                            aggregate.node(aggregate.required(c, "finish_reason")?)?.value,
-                            Value::Null
-                        ) {
-                            return Err(Error::Truncated);
-                        }
-                        if let Some(message) = aggregate.member(c, "message")?
-                            && let Some(calls) = aggregate.member(message, "tool_calls")?
-                        {
-                            let mut call = aggregate.node(calls)?.first;
-                            while let Some(t) = call {
-                                call = aggregate.node(t)?.next;
-                                aggregate.remove(t, "index")?;
-                            }
-                        }
-                    }
-                    output(encode::scratch(owner, |e| aggregate.write(aggregate.root(), e))?)?;
-                }
-            }
-            Kind::Error | Kind::Cancelled => {
-                self.terminal = true;
-                output(encode::scratch(owner, |e| {
-                    if self.mode == BodyMode::Streaming {
-                        e.bytes(b"data: ")?;
-                    }
-                    e.bytes(b"{\"error\":{")?;
-                    if kind == Kind::Error {
-                        let mut first = true;
-                        for key in ["code", "message", "status"] {
-                            if let Some(value) = doc.member(root, key)? {
-                                if !first {
-                                    e.bytes(b",")?;
-                                }
-                                first = false;
-                                e.string(key)?;
-                                e.bytes(b":")?;
-                                doc.write(value, e)?;
-                            }
-                        }
-                    } else {
-                        e.bytes(b"\"code\":\"stream.cancelled\",\"message\":\"Request cancelled\"")?;
-                    }
-                    e.bytes(b"}}")?;
-                    if self.mode == BodyMode::Streaming {
-                        e.bytes(b"\n\n")?;
-                    }
-                    Ok(())
-                })?)?;
-            }
+            | Kind::Annotation => self.deliver_projection(owner, kind, doc, x, &mut output)?,
+            Kind::Opaque => self.deliver_opaque(owner, doc, x, &mut output)?,
+            Kind::Done => self.deliver_done(owner, &mut output)?,
+            Kind::Error | Kind::Cancelled => self.deliver_error(owner, kind, &doc, &mut output)?,
             Kind::ItemStart | Kind::ItemEnd | Kind::BlockStart | Kind::BlockEnd | Kind::ToolEnd | Kind::Heartbeat => (),
             Kind::RequestStart | Kind::RequestField | Kind::RequestEnd | Kind::CountTokens | Kind::Compact => {
                 return Err(Error::Unsupported);
@@ -239,6 +101,182 @@ impl Egress {
                 reason: "no native carrier",
             }),
         }
+        Ok(())
+    }
+    /// Delivers an event that projects onto a native chunk: streamed when deliverable, folded
+    /// into the aggregate when buffered.
+    fn deliver_projection(
+        &mut self,
+        owner: &mut Writer,
+        kind: Kind,
+        doc: Document,
+        x: usize,
+        output: &mut impl FnMut(ScratchLease) -> Result<()>,
+    ) -> Result<()> {
+        let root = doc.root();
+        let deliverable = if kind == Kind::Chunk {
+            if self.mode == BodyMode::Streaming {
+                self.reduction.refresh_metadata(owner, &doc)?;
+            }
+            chunk_deliverable(&doc)?
+        } else if kind == Kind::Usage {
+            let usage = doc.required(root, "usage")?;
+            self.include_usage && matches!(doc.node(doc.required(usage, "final")?)?.value, Value::Bool(true))
+        } else {
+            true
+        };
+        let (projection, lost) = self.reduction.project(owner, kind, doc)?;
+        if lost {
+            (self.diagnostic)(Diagnostic {
+                identity: self.identity,
+                kind,
+                destination: "chat",
+                reason: "source field has no surviving native parent",
+            });
+        }
+        if let Some(projection) = projection {
+            if self.mode == BodyMode::Buffered {
+                self.reduction.fold(projection)?;
+            } else if deliverable {
+                output(encode::scratch(owner, |e| {
+                    if kind == Kind::Chunk {
+                        source_fields(&projection, x, e)?;
+                    }
+                    e.bytes(b"data: ")?;
+                    projection.write(projection.root(), e)?;
+                    e.bytes(b"\n\n")
+                })?)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Delivers a media attributes record as a native field, or another opaque record as its
+    /// own SSE event when streaming.
+    fn deliver_opaque(
+        &mut self,
+        owner: &mut Writer,
+        doc: Document,
+        x: usize,
+        output: &mut impl FnMut(ScratchLease) -> Result<()>,
+    ) -> Result<()> {
+        let root = doc.root();
+        if doc.member(x, "media_id")?.is_some()
+            && let Some(name) = doc.member(root, "name")?
+            && doc.string_is(name, "chat.media.attributes")?
+        {
+            if let (Some(projection), _) = self.reduction.project(owner, Kind::Opaque, doc)? {
+                if self.mode == BodyMode::Buffered {
+                    self.reduction.fold(projection)?;
+                } else {
+                    output(encode::scratch(owner, |e| {
+                        e.bytes(b"data: ")?;
+                        projection.write(projection.root(), e)?;
+                        e.bytes(b"\n\n")
+                    })?)?;
+                }
+            }
+        } else if self.mode == BodyMode::Streaming {
+            output(encode::scratch(owner, |e| {
+                source_fields(&doc, x, e)?;
+                e.bytes(b"data: ")?;
+                let value = doc.required(root, "value")?;
+                if doc.string_is(doc.required(root, "format")?, "text")? {
+                    let mut chars = doc.chars(value)?;
+                    while let Some(c) = chars.next_scalar()? {
+                        if c == '\n' {
+                            e.bytes(b"\ndata: ")?;
+                        } else {
+                            e.bytes(c.encode_utf8(&mut [0; 4]).as_bytes())?;
+                        }
+                    }
+                } else {
+                    doc.write(value, e)?;
+                }
+                e.bytes(b"\n\n")
+            })?)?;
+        } else {
+            (self.diagnostic)(Diagnostic {
+                identity: self.identity,
+                kind: Kind::Opaque,
+                destination: "chat.buffered",
+                reason: "no native event carrier",
+            });
+        }
+        Ok(())
+    }
+
+    /// Ends the stream, or writes the aggregate once every buffered choice has finished.
+    fn deliver_done(&mut self, owner: &mut Writer, output: &mut impl FnMut(ScratchLease) -> Result<()>) -> Result<()> {
+        if self.reduction.has_open_media() {
+            return Err(Error::Truncated);
+        }
+        self.terminal = true;
+        if self.mode == BodyMode::Streaming {
+            output(encode::scratch(owner, |e| e.bytes(b"data: [DONE]\n\n"))?)?;
+        } else {
+            let aggregate = self.reduction.document.as_mut().ok_or(Error::Schema)?;
+            let choices = aggregate.required(aggregate.root(), "choices")?;
+            let mut choice = aggregate.node(choices)?.first;
+            while let Some(c) = choice {
+                choice = aggregate.node(c)?.next;
+                if matches!(
+                    aggregate.node(aggregate.required(c, "finish_reason")?)?.value,
+                    Value::Null
+                ) {
+                    return Err(Error::Truncated);
+                }
+                if let Some(message) = aggregate.member(c, "message")?
+                    && let Some(calls) = aggregate.member(message, "tool_calls")?
+                {
+                    let mut call = aggregate.node(calls)?.first;
+                    while let Some(t) = call {
+                        call = aggregate.node(t)?.next;
+                        aggregate.remove(t, "index")?;
+                    }
+                }
+            }
+            output(encode::scratch(owner, |e| aggregate.write(aggregate.root(), e))?)?;
+        }
+        Ok(())
+    }
+
+    fn deliver_error(
+        &mut self,
+        owner: &mut Writer,
+        kind: Kind,
+        doc: &Document,
+        output: &mut impl FnMut(ScratchLease) -> Result<()>,
+    ) -> Result<()> {
+        let root = doc.root();
+        self.terminal = true;
+        output(encode::scratch(owner, |e| {
+            if self.mode == BodyMode::Streaming {
+                e.bytes(b"data: ")?;
+            }
+            e.bytes(b"{\"error\":{")?;
+            if kind == Kind::Error {
+                let mut first = true;
+                for key in ["code", "message", "status"] {
+                    if let Some(value) = doc.member(root, key)? {
+                        if !first {
+                            e.bytes(b",")?;
+                        }
+                        first = false;
+                        e.string(key)?;
+                        e.bytes(b":")?;
+                        doc.write(value, e)?;
+                    }
+                }
+            } else {
+                e.bytes(b"\"code\":\"stream.cancelled\",\"message\":\"Request cancelled\"")?;
+            }
+            e.bytes(b"}}")?;
+            if self.mode == BodyMode::Streaming {
+                e.bytes(b"\n\n")?;
+            }
+            Ok(())
+        })?)?;
         Ok(())
     }
 }
