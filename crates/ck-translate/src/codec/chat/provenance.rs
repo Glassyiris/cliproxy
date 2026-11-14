@@ -177,89 +177,7 @@ pub(super) fn restore(doc: &mut Document, x: usize) -> Result<bool> {
             return Err(Error::Schema);
         };
         let mut consumed = false;
-        let parent = {
-            let mut chars = doc.chars(pointer)?;
-            if chars.next_scalar()? != Some('/') {
-                return Err(Error::Schema);
-            }
-            let mut parent = doc.root();
-            loop {
-                let start = chars.clone();
-                let mut length = 0;
-                let last = loop {
-                    match chars.next_scalar()? {
-                        Some('/') => break false,
-                        None => break true,
-                        Some(_) => length += 1,
-                    }
-                };
-                let segment = Segment {
-                    chars: start,
-                    remaining: length,
-                };
-                if last {
-                    if !matches!(doc.node(parent)?.value, Value::Object) {
-                        restored = false;
-                        break None;
-                    }
-                    let mut exists = false;
-                    for child in doc.children(parent)? {
-                        if let Some(name) = doc.node(child)?.name {
-                            exists |= segment.matches(doc, name)?;
-                        }
-                    }
-                    consumed = exists
-                        && !(parent == doc.root() && segment.is("x_ck")? && doc.member(parent, "x_ck")? == Some(x));
-                    break if exists { None } else { Some(parent) };
-                }
-                let child = if matches!(doc.node(parent)?.value, Value::Array) {
-                    let mut digits = segment.clone();
-                    let mut index = 0usize;
-                    while let Some(c) = digits.next()? {
-                        let digit = c.to_digit(10).ok_or(Error::Schema)? as usize;
-                        index = index
-                            .checked_mul(10)
-                            .and_then(|value| value.checked_add(digit))
-                            .ok_or(Error::Limit)?;
-                    }
-                    let first = doc.node(parent)?.first;
-                    if first.is_some_and(|first| doc.node(first).is_ok_and(|node| node.next.is_none())) {
-                        first
-                    } else {
-                        doc.children(parent)?.nth(index)
-                    }
-                } else {
-                    let mut found = None;
-                    for child in doc.children(parent)? {
-                        if let Some(name) = doc.node(child)?.name
-                            && segment.matches(doc, name)?
-                        {
-                            found = Some(child);
-                            break;
-                        }
-                    }
-                    if found.is_none() && segment.is("message")? {
-                        found = doc.member(parent, "delta")?;
-                    }
-                    if found.is_none() && segment.is("custom")? {
-                        found = doc.member(parent, "function")?;
-                    }
-                    if found.is_none()
-                        && segment.is("function_call")?
-                        && let Some(calls) = doc.member(parent, "tool_calls")?
-                        && let Some(call) = doc.node(calls)?.first
-                    {
-                        found = doc.member(call, "function")?;
-                    }
-                    found
-                };
-                let Some(child) = child else {
-                    restored = false;
-                    break None;
-                };
-                parent = child;
-            }
-        };
+        let parent = insertion_parent(doc, x, pointer, &mut restored, &mut consumed)?;
         if let Some(parent) = parent {
             let value = doc.remove(entry, "value")?.ok_or(Error::Schema)?;
             let target = doc.add(Some(Name::Pointer(text)), Value::Null)?;
@@ -272,6 +190,102 @@ pub(super) fn restore(doc: &mut Document, x: usize) -> Result<bool> {
         }
     }
     Ok(restored)
+}
+
+/// Walks a restore pointer from the root. Returns the object that receives the value when the
+/// last member is absent; returns None when the member already exists or the path is missing.
+fn insertion_parent(
+    doc: &Document,
+    x: usize,
+    pointer: usize,
+    restored: &mut bool,
+    consumed: &mut bool,
+) -> Result<Option<usize>> {
+    let mut chars = doc.chars(pointer)?;
+    if chars.next_scalar()? != Some('/') {
+        return Err(Error::Schema);
+    }
+    let mut parent = doc.root();
+    Ok(loop {
+        let start = chars.clone();
+        let mut length = 0;
+        let last = loop {
+            match chars.next_scalar()? {
+                Some('/') => break false,
+                None => break true,
+                Some(_) => length += 1,
+            }
+        };
+        let segment = Segment {
+            chars: start,
+            remaining: length,
+        };
+        if last {
+            if !matches!(doc.node(parent)?.value, Value::Object) {
+                *restored = false;
+                break None;
+            }
+            let mut exists = false;
+            for child in doc.children(parent)? {
+                if let Some(name) = doc.node(child)?.name {
+                    exists |= segment.matches(doc, name)?;
+                }
+            }
+            *consumed =
+                exists && !(parent == doc.root() && segment.is("x_ck")? && doc.member(parent, "x_ck")? == Some(x));
+            break if exists { None } else { Some(parent) };
+        }
+        let child = if matches!(doc.node(parent)?.value, Value::Array) {
+            array_child(doc, parent, &segment)?
+        } else {
+            let mut found = None;
+            for child in doc.children(parent)? {
+                if let Some(name) = doc.node(child)?.name
+                    && segment.matches(doc, name)?
+                {
+                    found = Some(child);
+                    break;
+                }
+            }
+            if found.is_none() && segment.is("message")? {
+                found = doc.member(parent, "delta")?;
+            }
+            if found.is_none() && segment.is("custom")? {
+                found = doc.member(parent, "function")?;
+            }
+            if found.is_none()
+                && segment.is("function_call")?
+                && let Some(calls) = doc.member(parent, "tool_calls")?
+                && let Some(call) = doc.node(calls)?.first
+            {
+                found = doc.member(call, "function")?;
+            }
+            found
+        };
+        let Some(child) = child else {
+            *restored = false;
+            break None;
+        };
+        parent = child;
+    })
+}
+
+/// Selects the array element a pointer segment names; a one-element array always yields its element.
+fn array_child(doc: &Document, parent: usize, segment: &Segment<'_>) -> Result<Option<usize>> {
+    let mut digits = segment.clone();
+    let mut index = 0usize;
+    while let Some(c) = digits.next()? {
+        let digit = c.to_digit(10).ok_or(Error::Schema)? as usize;
+        index = index
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(digit))
+            .ok_or(Error::Limit)?;
+    }
+    let first = doc.node(parent)?.first;
+    if first.is_some_and(|first| doc.node(first).is_ok_and(|node| node.next.is_none())) {
+        return Ok(first);
+    }
+    Ok(doc.children(parent)?.nth(index))
 }
 
 pub(super) fn preserve_request_members<const N: usize>(
