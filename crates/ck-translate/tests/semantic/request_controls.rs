@@ -67,6 +67,35 @@ fn late_invalid_native_semantics_never_publish_request_end() {
     }
 }
 
+#[test]
+fn long_string_aliases_fail_like_short_ones() {
+    for key in ["reasoning", "functions"] {
+        let input = format!(
+            r#"{{"model":"m","messages":[{{"role":"user","content":"x"}}],"{key}":"{}"}}"#,
+            "x".repeat(2048)
+        );
+        let mut mapped = Mapped::new();
+        let mut ingress = Ingress::new(
+            &mut mapped.writer,
+            &mapped.store,
+            identity(Direction::Request),
+            Operation::Generate,
+            1024 * 1024,
+        )
+        .unwrap();
+        let result = input
+            .as_bytes()
+            .chunks(19)
+            .try_for_each(|chunk| ingress.advance(&mut mapped.writer, chunk));
+        assert!(
+            result.is_err() || ingress.finish(&mut mapped.writer, &ChatCapability).is_err(),
+            "accepted a long {key} string"
+        );
+        let output = String::from_utf8(mapped.output(&mapped.writer)).unwrap();
+        assert!(!output.contains("event: x_ck.request.end\n"));
+    }
+}
+
 use super::codec::{
     self, Capability, RequestFence, RequestView,
     document::{Document, Value},

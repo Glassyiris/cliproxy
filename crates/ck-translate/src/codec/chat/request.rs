@@ -179,6 +179,8 @@ impl Ingress {
                         && wire.span.end == 0
                         && wire.validated_end - wire.span.start > 1024
                         && !json::string_is(self.document.input(), key, "reasoning_effort")?
+                        && !json::string_is(self.document.input(), key, "reasoning")?
+                        && !json::string_is(self.document.input(), key, "functions")?
                         && !json::string_is(self.document.input(), key, "function_call")?
                         && !json::string_is(self.document.input(), key, "x_ck")?)
                 {
