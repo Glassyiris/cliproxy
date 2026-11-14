@@ -43,23 +43,25 @@
 //!
 //! # Storage integration
 //!
-//! `Source` accepts leases; it does not allocate an independent stream or pool.
-//! Its allowance and scanner allowances must be reserved from one exchange's
-//! metadata budget by the owner. The current ck-stream API does not yet provide
-//! unpublished scratch leases or external metadata permits. Do not interleave
-//! raw scratch in the canonical publication log, treat storage sequence as a
-//! semantic sequence, or release a response prefix to reclaim scratch. These
-//! scanners can be exercised against existing mapped records; production wiring
-//! requires those shared-quota storage facilities first.
+//! Sources and scanners bind to one writer, including empty inputs. Raw input
+//! and external encoded output use unpublished scratch leases; canonical events
+//! alone enter the publication log. All metadata capacity reserves permits from
+//! that writer's quota before allocation. Scratch drops independently; never
+//! release a response prefix to reclaim parser input.
 
+pub mod chat;
+pub mod document;
 pub mod encode;
 pub mod event;
+pub mod internal;
 pub mod json;
+pub mod media;
 pub mod source;
 pub mod sse;
+mod table;
+pub mod usage;
 
-use ck_stream::{Record, Writer};
-use source::Source;
+use ck_stream::{ScratchLease, Writer};
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -123,8 +125,8 @@ pub enum BodyMode {
 /// Authentication, transport secrets and routing credentials never belong here.
 #[derive(Clone, Copy)]
 pub struct RequestView<'a> {
-    pub source: &'a Source,
-    pub json: &'a json::Scanner,
+    pub document: &'a document::Document,
+    pub media: &'a media::Registry,
     pub operation: Operation,
 }
 
@@ -165,7 +167,8 @@ impl RequestFence {
             return Err(Error::Closed);
         }
         self.closed = true;
-        request.json.validate_source(request.source)?;
+        request.media.validate_document(request.document)?;
+        request.document.check_live()?;
         destination.validate(request)?;
         Ok(ValidatedRequest {
             view: request,
@@ -175,17 +178,22 @@ impl RequestFence {
 }
 
 pub trait RequestIngress {
-    fn advance(&mut self, source: &Source) -> Result<()>;
-    fn finish<'a>(&'a mut self, source: &'a Source, destination: &impl Capability) -> Result<ValidatedRequest<'a>>;
+    fn advance(&mut self, owner: &mut Writer, bytes: &[u8]) -> Result<()>;
+    fn finish<'a>(&'a mut self, owner: &mut Writer, destination: &impl Capability) -> Result<ValidatedRequest<'a>>;
 }
 pub trait RequestEgress {
-    fn encode(&self, request: &ValidatedRequest<'_>, output: &mut Writer) -> Result<Record>;
+    fn encode(&self, request: &ValidatedRequest<'_>, output: &mut Writer) -> Result<ScratchLease>;
 }
 pub trait ResponseIngress {
-    fn advance(&mut self, source: &Source, output: &mut Writer) -> Result<()>;
-    fn finish(&mut self, source: &Source, output: &mut Writer) -> Result<()>;
+    fn advance(&mut self, owner: &mut Writer, bytes: &[u8]) -> Result<()>;
+    fn finish(&mut self, owner: &mut Writer) -> Result<()>;
 }
 pub trait ResponseEgress {
-    fn advance(&mut self, source: &Source, output: &mut Writer) -> Result<()>;
-    fn finish(&mut self, source: &Source, output: &mut Writer) -> Result<()>;
+    fn advance(
+        &mut self,
+        owner: &mut Writer,
+        input: ck_stream::Lease,
+        output: impl FnMut(ScratchLease) -> Result<()>,
+    ) -> Result<()>;
+    fn finish(&mut self) -> Result<()>;
 }

@@ -70,15 +70,15 @@ pub struct Scanner {
     offset: u64,
     source_id: Option<u64>,
     max_bytes: u64,
-    max_metadata: usize,
+    metadata: ck_stream::MetadataPermit,
     failed: bool,
     finished: bool,
     utf8: Utf8,
 }
 
 impl Scanner {
-    pub fn new(max_bytes: u64, max_metadata: usize) -> Self {
-        Self {
+    pub fn new(owner: &mut ck_stream::Writer, max_bytes: u64) -> Result<Self> {
+        Ok(Self {
             nodes: Vec::new(),
             frames: Vec::new(),
             keys: Vec::new(),
@@ -88,11 +88,11 @@ impl Scanner {
             offset: 0,
             source_id: None,
             max_bytes,
-            max_metadata,
+            metadata: owner.reserve_metadata(0)?,
             failed: false,
             finished: false,
             utf8: Utf8::default(),
-        }
+        })
     }
 
     pub fn nodes(&self) -> &[Node] {
@@ -105,6 +105,9 @@ impl Scanner {
     /// Reject pairing validated locations with another or subsequently extended source.
     pub fn validate_source(&self, source: &Source) -> Result<()> {
         source.check_live()?;
+        if source.stream_id() != self.metadata.stream_id() {
+            return Err(Error::Position);
+        }
         if self.source_id != Some(source.id()) || self.offset != source.len() {
             return Err(Error::Position);
         }
@@ -126,7 +129,7 @@ impl Scanner {
     }
 
     fn scan(&mut self, source: &Source) -> Result<()> {
-        if self.source_id.is_some_and(|id| id != source.id()) {
+        if source.stream_id() != self.metadata.stream_id() || self.source_id.is_some_and(|id| id != source.id()) {
             return Err(Error::Position);
         }
         self.source_id = Some(source.id());
@@ -286,9 +289,7 @@ impl Scanner {
             .and_then(|v| v.checked_add(f * std::mem::size_of::<Frame>()))
             .and_then(|v| v.checked_add(k * (std::mem::size_of::<Key>() + 4 * 32)))
             .ok_or(Error::Limit)?;
-        if bytes > self.max_metadata {
-            return Err(Error::Limit);
-        }
+        self.metadata.resize(bytes)?;
         if n > self.nodes.capacity() {
             self.nodes
                 .try_reserve_exact(n - self.nodes.len())

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ck_stream::{ByteSpan, Lease, Position};
+use ck_stream::{ByteSpan, Lease, MetadataPermit, Position, ScratchLease, Writer};
 
 use super::{Error, Result};
 
@@ -21,10 +21,18 @@ impl Span {
     }
 }
 
+enum Storage {
+    Canonical {
+        span: std::ops::Range<Position>,
+        lease: Lease,
+    },
+    Scratch(ScratchLease),
+}
+
 struct Segment {
     start: u64,
-    span: std::ops::Range<Position>,
-    lease: Lease,
+    end: u64,
+    storage: Storage,
 }
 
 static NEXT_SOURCE: AtomicU64 = AtomicU64::new(1);
@@ -42,24 +50,37 @@ fn next_source_id() -> u64 {
 
 /// Leased input fragments. Only coordinates and leases are held on the heap.
 ///
-/// The caller owns publication and the exchange quota. Ingress must store network
-/// bytes before adding a lease; incomplete input is never a semantic event.
-/// The metadata allowance includes allocated segment capacity, not just length.
+/// Scratch and canonical leases share the owning writer's quota. Releasing input
+/// segments never releases a canonical response prefix.
 pub struct Source {
     id: u64,
     segments: Vec<Segment>,
     len: u64,
-    max_metadata: usize,
+    metadata: MetadataPermit,
+    base: u64,
 }
 
 impl Source {
-    pub fn new(max_metadata: usize) -> Self {
-        Self {
+    pub fn new(owner: &mut Writer) -> Result<Self> {
+        Ok(Self {
             id: next_source_id(),
             segments: Vec::new(),
             len: 0,
-            max_metadata,
+            metadata: owner.reserve_metadata(0)?,
+            base: 0,
+        })
+    }
+
+    pub fn stream_id(&self) -> u64 {
+        self.metadata.stream_id()
+    }
+
+    pub fn check_owner(&self, owner: &Writer) -> Result<()> {
+        self.check_live()?;
+        if owner.id() != self.stream_id() {
+            return Err(Error::Position);
         }
+        Ok(())
     }
 
     pub(crate) fn id(&self) -> u64 {
@@ -67,9 +88,7 @@ impl Source {
     }
 
     pub(crate) fn check_live(&self) -> Result<()> {
-        if let Some(segment) = self.segments.first() {
-            ByteSpan::new(&segment.lease, segment.span.clone())?;
-        }
+        self.metadata.check_live()?;
         Ok(())
     }
 
@@ -85,35 +104,57 @@ impl Source {
         self.segments.capacity() * std::mem::size_of::<Segment>()
     }
 
-    /// Retain a complete mapped record, or a validated subspan of it.
+    /// Retain a complete canonical record or a subspan under its lease.
     pub fn push(&mut self, lease: Lease, range: std::ops::Range<Position>) -> Result<Span> {
-        let bytes = ByteSpan::new(&lease, range.clone())?.len();
-        if self
-            .segments
-            .first()
-            .is_some_and(|segment| segment.span.start.generation != range.start.generation)
-        {
+        self.check_live()?;
+        if range.start.generation != self.stream_id() {
             return Err(Error::Position);
         }
+        let bytes = ByteSpan::new(&lease, range.clone())?.len();
+        self.insert(Storage::Canonical { span: range, lease }, bytes)
+    }
+
+    pub fn push_scratch(&mut self, lease: ScratchLease) -> Result<Span> {
+        self.check_live()?;
+        if lease.stream_id() != self.stream_id() {
+            return Err(Error::Position);
+        }
+        let len = lease.len() as u64;
+        self.insert(Storage::Scratch(lease), len)
+    }
+
+    pub fn push_bytes(&mut self, owner: &mut Writer, bytes: &[u8]) -> Result<Span> {
+        self.check_owner(owner)?;
+        if bytes.is_empty() {
+            return Ok(Span {
+                start: self.len,
+                end: self.len,
+            });
+        }
+        let mut reservation = owner.begin_scratch(bytes.len())?;
+        reservation.write(bytes)?;
+        self.push_scratch(reservation.complete()?)
+    }
+
+    fn insert(&mut self, storage: Storage, bytes: u64) -> Result<Span> {
         let end = self.len.checked_add(bytes).ok_or(Error::Limit)?;
         if bytes != 0 {
             if self.segments.len() == self.segments.capacity() {
                 let capacity = self.segments.capacity().max(4).checked_mul(2).ok_or(Error::Limit)?;
-                if capacity
-                    .checked_mul(std::mem::size_of::<Segment>())
-                    .ok_or(Error::Limit)?
-                    > self.max_metadata
-                {
-                    return Err(Error::Limit);
-                }
+                self.metadata.resize(
+                    capacity
+                        .checked_mul(std::mem::size_of::<Segment>())
+                        .ok_or(Error::Limit)?,
+                )?;
                 self.segments
                     .try_reserve_exact(capacity - self.segments.len())
                     .map_err(|_| Error::Limit)?;
+                self.metadata.resize(self.metadata_bytes())?;
             }
             self.segments.push(Segment {
                 start: self.len,
-                span: range,
-                lease,
+                end,
+                storage,
             });
         }
         let span = Span { start: self.len, end };
@@ -121,16 +162,39 @@ impl Source {
         Ok(span)
     }
 
+    /// The caller must have retired every parser/provenance position before this offset.
+    pub fn release_before(&mut self, offset: u64) -> Result<()> {
+        self.check_live()?;
+        if offset < self.base || offset > self.len {
+            return Err(Error::Position);
+        }
+        let count = self.segments.partition_point(|segment| segment.end <= offset);
+        self.segments.drain(..count);
+        self.base = self.segments.first().map_or(self.len, |segment| segment.start);
+        Ok(())
+    }
+
+    pub(crate) fn retire_scratch(&mut self) -> Result<()> {
+        if self
+            .segments
+            .iter()
+            .all(|segment| matches!(segment.storage, Storage::Scratch(_)))
+        {
+            self.release_before(self.len)?;
+        }
+        Ok(())
+    }
+
     pub fn whole(&self) -> Span {
         Span {
-            start: 0,
+            start: self.base,
             end: self.len,
         }
     }
 
     pub fn cursor(&self, span: Span) -> Result<Cursor<'_>> {
         self.check_live()?;
-        if span.start > span.end || span.end > self.len {
+        if span.start < self.base || span.start > span.end || span.end > self.len {
             return Err(Error::Position);
         }
         Ok(Cursor {
@@ -164,21 +228,16 @@ impl Source {
         Ok(true)
     }
 
-    /// Resolve a source offset to its owning stream generation and frame.
-    pub fn position(&self, offset: u64) -> Result<Position> {
-        if offset >= self.len {
-            return Err(Error::Position);
-        }
-        let index = self.segments.partition_point(|segment| segment.start <= offset) - 1;
-        let segment = &self.segments[index];
-        advance(segment.span.start, offset - segment.start)
-    }
-
     fn chunk(&self, offset: u64, end: u64) -> Result<&[u8]> {
         let index = self.segments.partition_point(|segment| segment.start <= offset) - 1;
         let segment = &self.segments[index];
-        let position = advance(segment.span.start, offset - segment.start)?;
-        let bytes = ByteSpan::new(&segment.lease, segment.span.clone())?.chunk(position)?;
+        let bytes = match &segment.storage {
+            Storage::Canonical { span, lease } => {
+                let position = advance(span.start, offset - segment.start)?;
+                ByteSpan::new(lease, span.clone())?.chunk(position)?
+            }
+            Storage::Scratch(lease) => lease.chunk((offset - segment.start) as usize)?,
+        };
         Ok(&bytes[..bytes.len().min((end - offset) as usize)])
     }
 }
