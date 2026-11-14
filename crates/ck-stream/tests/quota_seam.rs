@@ -297,3 +297,27 @@ fn scratch_metadata_is_charged_and_external_permits_reject_invalidated_growth() 
     assert!(matches!(writer.reserve_metadata(0), Err(Error::Gone)));
     assert!(matches!(writer.begin_scratch(1), Err(Error::Gone)));
 }
+
+#[test]
+fn multi_frame_leases_stay_charged_after_their_reader_drops() {
+    let (_dir, store) = store(4, 4);
+    let mut writer = store.create().unwrap();
+    writer.append(&[7; FRAME_BYTES + 1]).unwrap();
+    // Each lease keeps its two-frame list after its reader drops, so attaching again must
+    // eventually exhaust the ceiling instead of growing uncharged heap.
+    let mut leases = Vec::new();
+    loop {
+        assert!(leases.len() < 4096 / 8, "leases outgrew the metadata ceiling");
+        let Ok(mut reader) = store.reader(writer.id(), 0) else {
+            break;
+        };
+        match reader.try_next() {
+            Poll::Ready(Some(Read::Record(lease))) => leases.push(lease),
+            Poll::Ready(Some(Read::Terminal(Terminal::StorageExhausted))) => break,
+            _ => panic!("expected a record or storage exhaustion"),
+        }
+    }
+    drop(leases);
+    let mut reader = store.reader(writer.id(), 0).unwrap();
+    assert_eq!(record(&mut reader).record().len(), FRAME_BYTES as u64 + 1);
+}

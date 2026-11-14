@@ -113,7 +113,7 @@ impl Writer {
         if state.terminal.is_some() {
             return Err(Error::Closed);
         }
-        let live = state.frames.iter().filter(|frame| frame.pool.is_some()).count() + state.scratch_frames;
+        let live = self.stream.live_frames(&state);
         if count > (self.stream.limits.max_frames as usize).saturating_sub(live) {
             return Err(Error::StorageExhausted);
         }
@@ -150,7 +150,8 @@ impl Writer {
         };
         for taken in 0..count {
             // Cache eviction may lock stream state. The quota is reserved, but no lock is held.
-            let frame = self.inner.allocate(self.id(), count - taken)?;
+            let needed = (len - taken * FRAME_BYTES).min(FRAME_BYTES);
+            let frame = self.inner.allocate(self.id(), count - taken, needed)?;
             lease.frames.push(frame);
             let state = self.stream.state.lock();
             if self.stream.invalidated.load(Ordering::Acquire) {

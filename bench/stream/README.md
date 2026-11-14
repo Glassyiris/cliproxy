@@ -55,6 +55,35 @@ The cache index uses the same `parking_lot` mutex as stream metadata. Stream adm
 
 In seven interleaved pairs on 2026-11-14, with a 256 MiB reserve and eight workers pinned to one CCD, replacing the cache mutex reduced concurrent-256/1024 TTFB p99 medians from 21.890/19.470 to 17.820/15.620 microseconds. These are affected-row measurements, not complete storage-gate acceptance. Moving stream construction outside the lock reduced reserved-pool tails further but worsened the zero-reserve concurrent-256 tail by 36% in a separate seven-pair comparison, so that experiment was rejected. The small-1 and periodic-latency regressions remain open; the default reserve remains zero.
 
+## Pool against heap
+
+The gate still fails after the pool work on `perf/s1-pool-vs-heap`. Seven rows fail: small-1, small-64, concurrent-256, concurrent-1024, throughput-4-49152-1, latency-1 and latency-4. Medians come from one full gate on each tree on 2026-11-14, pinned to cores 0-7 and 16-23. Host load was 7 for the base run and 10-11 for the branch run. "Base" is `feat/s1-stream-rewrite` at 67219e95; "pool" is the branch head; "heap" is the branch run's comparator median and range.
+
+| Row | Metric | Base | Pool | Heap | Pool status |
+| --- | --- | --- | --- | --- | --- |
+| small-1 | req/s | 243,900 | 379,900 | 416,500 [412,200..436,700] | fail |
+| small-1 | p50 / p99 ns | 3,300 / 11,010 | 2,440 / 4,410 | 2,220 / 3,930 | fail |
+| small-64 | req/s | 651,300 | 1,797,000 | 2,445,000 [2,269,000..2,479,000] | fail |
+| small-64 | p50 / p99 ns | 4,620 / 84,090 | 3,640 / 8,380 | 2,660 / 5,140 | fail |
+| concurrent-256 | wall ms / TTFB p99 us | 15.2 / 137.3 | 6.60 / 8.7 | 5.04 / 3.0 | fail |
+| concurrent-1024 | wall ms / TTFB p99 us | 65.0 / 138.2 | 25.5 / 12.0 | 21.3 / 3.1 | fail |
+| throughput-1-49152-1 | MB/s | 9,062 | 27,220 | 27,730 [19,670..32,480] | pass |
+| throughput-4-49152-1 | MB/s | 9,154 | 14,650 | 21,500 [19,030..23,310] | fail |
+| throughput-4-64-1 | MB/s | 62.5 | 109.7 | 63.8 [61.4..84.8] | pass |
+| other throughput rows | MB/s | | 1.16-1.80x heap | | pass |
+| latency-1 | p50 ns / TTFB p50 ns | 1,840 / 4,450 | 1,850 / 4,140 | 1,800 [1,790..1,820] / 3,550 | fail |
+| latency-4 | TTFB p50 ns | 6,910 | 7,719 | 5,330 [4,100..7,270] | fail |
+| memory, totalcap, enospc | | pass | pass | | pass |
+
+The remaining gaps and their measured causes:
+
+- Concurrent rows and the first batch of each small pass refault punched frames. After warmup, expiry and two decay ticks the pool keeps 8 warm frames per free list and punches the rest; glibc keeps the freed heap memory in its arenas. concurrent-256 takes about 15,800 minor faults against the heap's 2,100. Each refault is a shared-file tmpfs fault on one inode, where the heap takes a private anonymous fault. A larger warm budget would break the post-decay memory rows.
+- small-1 costs the same user-space cycles on both backends: per request, pool 12.8k and heap 12.9k cycles; pool 33.2k and heap 20.1k instructions. The remaining 9% lies outside user space. Each pass takes 3,024 minor faults on the pool and 400-4,000 on the heap. The kernel cause was not isolated.
+- small-64 still loses about 27% after per-frame counters stopped sharing cache lines. Its cause was not isolated.
+- latency-1 misses by 30-50 ns at p50, within the run-to-run spread of a 7-pair A/B on the same host. In a 7-pair A/B at load 8-10, latency-4 TTFB p50 stays inside the heap range (6,409 against 5,160..7,690). The branch gate ran at load 10-11.
+
+A decay budget counted in populated bytes rather than frames was measured and rejected: in a 7-pair A/B it left the faults (3,024) and req/s unchanged.
+
 ## Narrow verification
 
 ```sh

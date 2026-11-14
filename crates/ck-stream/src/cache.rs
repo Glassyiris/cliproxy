@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
+    hash::{BuildHasherDefault, Hasher},
     io,
     ops::Bound::{Excluded, Unbounded},
     panic::AssertUnwindSafe,
@@ -21,6 +22,8 @@ use crate::{
 
 /// Monotonic elapsed time. Implementations must never move backwards.
 pub trait Clock: Send + Sync + 'static {
+    /// Must not panic: reads and lease drops call it after taking frame references and
+    /// metadata charges, and an unwind there strands both.
     fn now(&self) -> Duration;
 }
 
@@ -80,9 +83,28 @@ struct Maintenance {
     first_error: Option<io::Error>,
 }
 
+/// Hashes stream ids by one multiplication. The store assigns ids sequentially, so no client
+/// chooses the keys in the table, and a lookup skips SipHash's cost.
+#[derive(Default)]
+struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.write_u64(self.0.rotate_left(8) ^ u64::from(byte));
+        }
+    }
+    fn write_u64(&mut self, id: u64) {
+        self.0 = id.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Cache {
-    streams: HashMap<u64, Arc<Stream>>,
+    streams: HashMap<u64, Arc<Stream>, BuildHasherDefault<IdHasher>>,
     order: BTreeSet<(Duration, u64)>,
 }
 
@@ -140,9 +162,13 @@ impl Retention {
         let (mut state, _fence) = self.lock_stable(stream);
         let (result, acquired) = read(&mut state);
         if acquired {
-            state.last_read = self.clock.now();
+            stream.touch(self.clock.now());
         }
         result
+    }
+
+    pub(crate) fn now(&self) -> Duration {
+        self.clock.now()
     }
 }
 
@@ -161,7 +187,7 @@ impl Inner {
     /// Invalidate the least recently read streams whose `gain` (what invalidation returns now)
     /// together covers `wanted`. Streams that would return nothing stay cached; if every
     /// candidate together cannot cover the request, nothing is invalidated and this returns false.
-    fn evict(&self, exclude: Option<u64>, wanted: usize, gain: fn(&State) -> usize) -> bool {
+    fn evict(&self, exclude: Option<u64>, wanted: usize, gain: fn(&Stream, &State) -> usize) -> bool {
         let _retention = self.retention.retain();
         let mut cache = self.cache.lock();
         let mut victims = Vec::new();
@@ -183,15 +209,17 @@ impl Inner {
             let stream = cache.streams[&key.1].clone();
             let state = stream.state.lock();
             // Queue timestamps are lower bounds. Once maintenance has observed a stream, the
-            // fence keeps its timestamp stable, so one requeue at the real value is exact.
-            if state.last_read != key.0 && refreshed.insert(key.1) {
-                let real = (state.last_read, key.1);
+            // fence holds off new leases, so one requeue at the real value is exact except for
+            // an acknowledgement racing this pass, which then counts as arriving after it.
+            let last_read = stream.last_read();
+            if last_read != key.0 && refreshed.insert(key.1) {
+                let real = (last_read, key.1);
                 drop(state);
                 cache.order.remove(&key);
                 cache.order.insert(real);
                 continue;
             }
-            let returned = gain(&state);
+            let returned = gain(&stream, &state);
             if returned > 0 {
                 found += returned;
                 victims.push(key);
@@ -226,10 +254,11 @@ impl Inner {
                 cache.order.remove(&(read, id));
                 // An outstanding wait is a read even without publication or another poll.
                 if state.readers > 0 {
-                    state.last_read = now;
+                    stream.touch(now);
                 }
-                if state.last_read != read {
-                    cache.order.insert((state.last_read, id));
+                let last_read = stream.last_read();
+                if last_read != read {
+                    cache.order.insert((last_read, id));
                     continue;
                 }
                 cache.streams.remove(&id);
@@ -268,14 +297,15 @@ impl Inner {
         maintenance.first_error.get_or_insert(error);
     }
 
-    /// Allocate one of the `remaining` frames a pending reservation still needs.
-    pub(crate) fn allocate(&self, exclude: u64, remaining: usize) -> Result<u32, Error> {
+    /// Allocate one of the `remaining` frames a pending reservation still needs, with its
+    /// first `needed` bytes populated.
+    pub(crate) fn allocate(&self, exclude: u64, remaining: usize, needed: usize) -> Result<u32, Error> {
         let mut evicted_for_tmpfs = false;
         loop {
-            match self.pool.allocate() {
+            match self.pool.allocate(needed) {
                 Ok(frame) => return Ok(frame),
                 Err(error) if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() => {
-                    if !self.evict(Some(exclude), remaining, State::reclaimable) {
+                    if !self.evict(Some(exclude), remaining, Stream::reclaimable) {
                         return Err(Error::StorageExhausted);
                     }
                 }
@@ -284,7 +314,7 @@ impl Inner {
                 Err(error)
                     if !evicted_for_tmpfs
                         && matches!(error.raw_os_error(), Some(libc::ENOSPC | libc::EFAULT))
-                        && self.evict(Some(exclude), remaining, State::reclaimable) =>
+                        && self.evict(Some(exclude), remaining, Stream::reclaimable) =>
                 {
                     evicted_for_tmpfs = true;
                 }
@@ -405,7 +435,7 @@ impl Store {
             self.inner.limits,
             now,
         ));
-        cache.order.insert((now, id));
+        cache.order.insert((stream.last_read(), id));
         cache.streams.insert(id, stream.clone());
         Ok(Writer::new(self.inner.clone(), stream))
     }
@@ -462,152 +492,4 @@ impl Drop for Store {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::FRAME_BYTES;
-
-    fn store() -> (tempfile::TempDir, Store) {
-        let dir = tempfile::tempdir().unwrap();
-        let mut config = Config::new(dir.path().join("pool"));
-        config.pool_bytes = Some(4 * FRAME_BYTES);
-        config.max_event_bytes = 4 * FRAME_BYTES;
-        config.header_slots = 8;
-        config.workers = 1;
-        let store = Store::open(config).unwrap();
-        (dir, store)
-    }
-
-    #[test]
-    fn a_panicking_tick_is_counted_and_the_next_tick_expires_and_decays() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut config = Config::new(dir.path().join("pool"));
-        config.pool_bytes = Some(64 * FRAME_BYTES);
-        config.max_event_bytes = FRAME_BYTES;
-        config.header_slots = 4;
-        config.workers = 1;
-        let clock = Arc::new(ManualClock::default());
-        let mut store = Store::with_clock(config, clock.clone()).unwrap();
-        let mut expiring = store.create().unwrap();
-        for _ in 0..30 {
-            expiring.append(&[1; FRAME_BYTES]).unwrap();
-        }
-        // Stop the background thread so every tick below runs synchronously on this thread.
-        *store.stop.0.lock().unwrap() = true;
-        store.stop.1.notify_all();
-        store.worker.take().unwrap().join().unwrap();
-        *store.inner.tick_hook.lock() = Some(Box::new(|| panic!("injected maintenance panic")));
-        store.inner.maintain();
-        assert_eq!(
-            store.maintenance_failures(),
-            MaintenanceFailures { errors: 0, panics: 1 }
-        );
-        clock.advance(Duration::from_secs(3601));
-        for _ in 0..3 {
-            store.inner.maintain();
-        }
-        assert!(matches!(store.reader(expiring.id(), 0), Err(Error::Gone)));
-        assert!(store.inner.pool.cold_frames() > 0, "decay ran after the panic");
-        assert_eq!(
-            store.maintenance_failures(),
-            MaintenanceFailures { errors: 0, panics: 1 }
-        );
-        let error = store.shutdown().unwrap_err();
-        assert_eq!(error.to_string(), "stream maintenance tick panicked");
-    }
-
-    #[derive(Clone, Copy, Debug)]
-    enum Transition {
-        Rollback,
-        ReleasePrefix,
-        Invalidate,
-    }
-
-    /// Victims are `victim` (2 frames) and `canonical` (1 frame). While eviction sits between
-    /// counting and invalidating, the victim's writer returns its frames to the pool and, if
-    /// eviction is still planning, `taker` retakes them as scratch.
-    fn interleave(transition: Transition) {
-        let (_dir, store) = store();
-        let planning = Arc::new(AtomicBool::new(false));
-        let (planned, planned_signal) = std::sync::mpsc::channel();
-        let (moved, moved_signal) = std::sync::mpsc::channel::<()>();
-        let hook_planning = planning.clone();
-        *store.inner.evict_hook.lock() = Some(Box::new(move || {
-            hook_planning.store(true, Ordering::Release);
-            planned.send(()).unwrap();
-            let _ = moved_signal.recv_timeout(Duration::from_millis(500));
-            hook_planning.store(false, Ordering::Release);
-        }));
-        let mut victim = store.create().unwrap();
-        let mut canonical = store.create().unwrap();
-        canonical.append(&[2; 10]).unwrap();
-        let mut scratch_owner = store.create().unwrap();
-        let _scratch = scratch_owner.begin_scratch(FRAME_BYTES).unwrap();
-        let mut allocating = store.create().unwrap();
-        let mut taker = store.create().unwrap();
-        let victim_id = victim.id();
-        std::thread::scope(|scope| {
-            let (ready, ready_signal) = std::sync::mpsc::channel();
-            let writer = scope.spawn(move || {
-                let wait = || {
-                    ready.send(()).unwrap();
-                    planned_signal.recv().unwrap();
-                };
-                match transition {
-                    Transition::Rollback => {
-                        let reservation = victim.begin_record(2 * FRAME_BYTES, false, 0, 0).unwrap();
-                        wait();
-                        drop(reservation);
-                    }
-                    Transition::ReleasePrefix => {
-                        let end = victim.append(&[1; 2 * FRAME_BYTES]).unwrap().end;
-                        wait();
-                        victim.release_before(end).unwrap();
-                    }
-                    Transition::Invalidate => {
-                        victim.append(&[1; 2 * FRAME_BYTES]).unwrap();
-                        wait();
-                        victim.finish(Terminal::Gone);
-                    }
-                }
-                // Holding the scratch keeps any frames it took away from the allocation.
-                let taken = planning
-                    .load(Ordering::Acquire)
-                    .then(|| taker.begin_scratch(2 * FRAME_BYTES).unwrap());
-                let _ = moved.send(());
-                taken
-            });
-            ready_signal.recv().unwrap();
-            assert!(
-                allocating.append(&[3; 3 * FRAME_BYTES]).is_ok(),
-                "{transition:?} moved counted frames during eviction"
-            );
-            assert!(writer.join().unwrap().is_none(), "{transition:?} ran inside eviction");
-        });
-        assert!(matches!(store.reader(victim_id, 0), Err(Error::Gone)));
-        assert!(matches!(store.reader(canonical.id(), 0), Err(Error::Gone)));
-        assert_eq!(store.used_frames(), 4);
-    }
-
-    #[test]
-    fn victims_cannot_move_frames_between_count_and_invalidation() {
-        for transition in [Transition::Rollback, Transition::ReleasePrefix, Transition::Invalidate] {
-            interleave(transition);
-        }
-    }
-
-    #[test]
-    fn maintenance_keeps_the_first_error_and_counts_later_ones() {
-        let (_dir, store) = store();
-        store.inner.record_failure(io::Error::other("first"), false);
-        store.inner.record_failure(io::Error::other("second"), false);
-        store.inner.record_failure(io::Error::other("third"), true);
-        assert_eq!(
-            store.maintenance_failures(),
-            MaintenanceFailures { errors: 2, panics: 1 }
-        );
-        assert_eq!(store.take_reclaim_error().unwrap().to_string(), "first");
-        assert!(store.take_reclaim_error().is_none());
-        store.inner.record_failure(io::Error::other("fourth"), false);
-        assert_eq!(store.take_reclaim_error().unwrap().to_string(), "fourth");
-    }
-}
+mod tests;
