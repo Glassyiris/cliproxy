@@ -282,74 +282,7 @@ fn reconcile_object(
         let same = if context == Context::Message && new.name_is(name, "tool_calls")? {
             reconcile_tools(owner, old, previous, new, field, changes)?
         } else if let Some(previous) = previous {
-            let append = match context {
-                Context::Message => ["content", "refusal", "reasoning_content"]
-                    .iter()
-                    .any(|key| new.name_is(name, key).unwrap_or(false)),
-                Context::Function => new.name_is(name, "arguments")? || new.name_is(name, "input")?,
-                Context::Audio => new.name_is(name, "transcript")?,
-                _ => false,
-            };
-            if context == Context::Audio && new.name_is(name, "data")? {
-                let (skip, equal) = bytes_prefix(old, previous, new, field, 0)?;
-                if !equal {
-                    changes.push(Change::Bytes(field, skip))?;
-                }
-                equal
-            } else if append && is_string(old.node(previous)?.value) {
-                let (skip, equal) = text_prefix(old, previous, new, field)?;
-                if !equal {
-                    changes.push(Change::Text(field, skip))?;
-                }
-                equal
-            } else if matches!(old.node(previous)?.value, Value::Array)
-                && matches!(new.node(field)?.value, Value::Array)
-            {
-                let mut incoming = new.children(field)?;
-                for entry in old.children(previous)? {
-                    let supplied = incoming.next().ok_or(Error::Schema)?;
-                    if !exact(old, entry, new, supplied, 0)? {
-                        return Err(Error::Schema);
-                    }
-                    changes.push(Change::Remove(supplied))?;
-                }
-                incoming.next().is_none()
-            } else if matches!(old.node(previous)?.value, Value::Object)
-                && matches!(new.node(field)?.value, Value::Object)
-            {
-                let nested = if context == Context::Message && new.name_is(name, "audio")? {
-                    Context::Audio
-                } else if new.name_is(name, "function")?
-                    || new.name_is(name, "custom")?
-                    || new.name_is(name, "function_call")?
-                {
-                    Context::Function
-                } else {
-                    Context::Metadata
-                };
-                reconcile_object(owner, old, Some(previous), new, field, changes, nested)?
-            } else {
-                let same = exact(old, previous, new, field, 0)?;
-                let immutable = append
-                    || (context == Context::Message
-                        && ["role", "audio", "images", "function_call"]
-                            .iter()
-                            .any(|key| new.name_is(name, key).unwrap_or(false)))
-                    || (context == Context::Tool
-                        && ["id", "index", "type"]
-                            .iter()
-                            .any(|key| new.name_is(name, key).unwrap_or(false)))
-                    || (context == Context::Function && new.name_is(name, "name")?)
-                    || (context == Context::Audio
-                        && ["id", "format", "codec", "sample_rate", "channels"]
-                            .iter()
-                            .any(|key| new.name_is(name, key).unwrap_or(false)));
-                // A previously absent/null value can acquire content; a published value cannot be cleared.
-                if !same && immutable && !matches!(old.node(previous)?.value, Value::Null) {
-                    return Err(Error::Schema);
-                }
-                same
-            }
+            reconcile_member(owner, old, previous, new, field, changes, context)?
         } else {
             if context == Context::Message && new.name_is(name, "function_call")? {
                 new.required(field, "name")?;
@@ -363,6 +296,84 @@ fn reconcile_object(
         }
     }
     Ok(empty)
+}
+
+/// Compares one member with its published counterpart; returns whether it is unchanged.
+/// Append-only text and media yield a suffix change; an immutable member may not change.
+fn reconcile_member(
+    owner: &mut Writer,
+    old: &Document,
+    previous: usize,
+    new: &Document,
+    field: usize,
+    changes: &mut Table<Change>,
+    context: Context,
+) -> Result<bool> {
+    let name = new.node(field)?.name.ok_or(Error::Schema)?;
+    let append = match context {
+        Context::Message => ["content", "refusal", "reasoning_content"]
+            .iter()
+            .any(|key| new.name_is(name, key).unwrap_or(false)),
+        Context::Function => new.name_is(name, "arguments")? || new.name_is(name, "input")?,
+        Context::Audio => new.name_is(name, "transcript")?,
+        _ => false,
+    };
+    Ok(if context == Context::Audio && new.name_is(name, "data")? {
+        let (skip, equal) = bytes_prefix(old, previous, new, field, 0)?;
+        if !equal {
+            changes.push(Change::Bytes(field, skip))?;
+        }
+        equal
+    } else if append && is_string(old.node(previous)?.value) {
+        let (skip, equal) = text_prefix(old, previous, new, field)?;
+        if !equal {
+            changes.push(Change::Text(field, skip))?;
+        }
+        equal
+    } else if matches!(old.node(previous)?.value, Value::Array) && matches!(new.node(field)?.value, Value::Array) {
+        let mut incoming = new.children(field)?;
+        for entry in old.children(previous)? {
+            let supplied = incoming.next().ok_or(Error::Schema)?;
+            if !exact(old, entry, new, supplied, 0)? {
+                return Err(Error::Schema);
+            }
+            changes.push(Change::Remove(supplied))?;
+        }
+        incoming.next().is_none()
+    } else if matches!(old.node(previous)?.value, Value::Object) && matches!(new.node(field)?.value, Value::Object) {
+        let nested = if context == Context::Message && new.name_is(name, "audio")? {
+            Context::Audio
+        } else if new.name_is(name, "function")?
+            || new.name_is(name, "custom")?
+            || new.name_is(name, "function_call")?
+        {
+            Context::Function
+        } else {
+            Context::Metadata
+        };
+        reconcile_object(owner, old, Some(previous), new, field, changes, nested)?
+    } else {
+        let same = exact(old, previous, new, field, 0)?;
+        let immutable = append
+            || (context == Context::Message
+                && ["role", "audio", "images", "function_call"]
+                    .iter()
+                    .any(|key| new.name_is(name, key).unwrap_or(false)))
+            || (context == Context::Tool
+                && ["id", "index", "type"]
+                    .iter()
+                    .any(|key| new.name_is(name, key).unwrap_or(false)))
+            || (context == Context::Function && new.name_is(name, "name")?)
+            || (context == Context::Audio
+                && ["id", "format", "codec", "sample_rate", "channels"]
+                    .iter()
+                    .any(|key| new.name_is(name, key).unwrap_or(false)));
+        // A previously absent/null value can acquire content; a published value cannot be cleared.
+        if !same && immutable && !matches!(old.node(previous)?.value, Value::Null) {
+            return Err(Error::Schema);
+        }
+        same
+    })
 }
 
 fn reconcile_tools(
