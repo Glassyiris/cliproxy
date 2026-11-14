@@ -546,6 +546,18 @@ impl Document {
         })
     }
 
+    pub(crate) fn clone_tree(&mut self, node: usize) -> Result<usize> {
+        let source = self.node(node)?;
+        let target = self.add(source.name, source.value)?;
+        let mut child = source.first;
+        while let Some(index) = child {
+            child = self.node(index)?.next;
+            let copy = self.clone_tree(index)?;
+            self.append(target, copy)?;
+        }
+        Ok(target)
+    }
+
     pub fn add(&mut self, name: Option<Name>, value: Value) -> Result<usize> {
         self.reserve(1, 0)?;
         let index = self.nodes.len();

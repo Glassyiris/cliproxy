@@ -62,7 +62,10 @@ pub(super) fn validate(doc: &Document, media: &Registry) -> Result<()> {
         array(doc, tools)?;
         for tool in doc.children(tools)? {
             let kind = doc.required(tool, "type")?;
-            enumeration(doc, kind, &["function", "custom"])?;
+            require_string(doc, kind)?;
+            if !doc.string_is(kind, "function")? && !doc.string_is(kind, "custom")? {
+                continue;
+            }
             let custom = doc.string_is(kind, "custom")?;
             let declaration = doc.required(tool, if custom { "custom" } else { "function" })?;
             object(doc, declaration)?;
@@ -153,6 +156,35 @@ pub(super) fn validate(doc: &Document, media: &Registry) -> Result<()> {
         })?;
         optional(doc, thinking, "native", object)
     })?;
+    for key in ["session", "provider_parameters"] {
+        optional(doc, x, key, object)?;
+    }
+    optional(doc, x, "cache_control", |doc, list| {
+        array(doc, list)?;
+        for entry in doc.children(list)? {
+            require_string(doc, doc.required(entry, "pointer")?)?;
+            if let Some(value) = doc.member(entry, "value")?
+                && !matches!(doc.node(value)?.value, Value::Null)
+            {
+                object(doc, value)?;
+                optional(doc, value, "type", require_string)?;
+                optional(doc, value, "ttl", require_string)?;
+            }
+        }
+        Ok(())
+    })?;
+    optional(doc, x, "replay", |doc, list| {
+        array(doc, list)?;
+        for entry in doc.children(list)? {
+            doc.unsigned(doc.required(entry, "message_index")?)?;
+            doc.unsigned(doc.required(entry, "block_index")?)?;
+            for key in ["item_id", "kind", "source"] {
+                require_string(doc, doc.required(entry, key)?)?;
+            }
+            optional(doc, entry, "signature", require_string)?;
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -162,6 +194,27 @@ fn content_part(doc: &Document, media: &Registry, part: usize) -> Result<()> {
         if doc.string_is(kind, text)? {
             return require_string(doc, doc.required(part, "text")?);
         }
+    }
+    if doc.string_is(kind, "redacted")? || doc.string_is(kind, "encrypted")? {
+        require_string(doc, doc.required(part, "data")?)?;
+        let index = usize::try_from(doc.unsigned(doc.required(part, "replay_index")?)?).map_err(|_| Error::Schema)?;
+        let x = doc.required(doc.root(), "x_ck")?;
+        let replay = doc.required(x, "replay")?;
+        let entry = doc.children(replay)?.nth(index).ok_or(Error::Schema)?;
+        let content = doc.node(part)?.parent.ok_or(Error::Schema)?;
+        let message = doc.node(content)?.parent.ok_or(Error::Schema)?;
+        let messages = doc.required(doc.root(), "messages")?;
+        let message_index = doc
+            .children(messages)?
+            .position(|n| n == message)
+            .ok_or(Error::Schema)?;
+        let block_index = doc.children(content)?.position(|n| n == part).ok_or(Error::Schema)?;
+        if doc.unsigned(doc.required(entry, "message_index")?)? != message_index as u64
+            || doc.unsigned(doc.required(entry, "block_index")?)? != block_index as u64
+        {
+            return Err(Error::Schema);
+        }
+        return Ok(());
     }
     if doc.string_is(kind, "opaque")? {
         enumeration(doc, doc.required(part, "protocol")?, &["chat"])?;

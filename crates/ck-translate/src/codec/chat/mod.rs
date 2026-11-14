@@ -5,6 +5,8 @@ pub mod egress;
 mod provenance;
 pub mod request;
 mod request_content;
+mod request_controls;
+mod request_provenance;
 mod request_schema;
 pub mod response;
 

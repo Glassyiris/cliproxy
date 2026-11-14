@@ -141,27 +141,18 @@ fn native_media_source_collisions_remain_untrusted_at_their_original_locations()
 
 #[test]
 fn request_collision_provenance_cannot_revive_mutated_or_deleted_mapped_fields() {
-    use super::{ChatCapability, Egress, Mapped, Operation, RequestEgress, bytes, codec};
+    use super::{ChatCapability, Egress, Operation, RequestEgress, bytes, codec};
     use codec::{
         RequestFence, RequestView,
         document::{Document, Value},
         media::Registry,
-        source::Source,
     };
     use serde_json::json;
     let input = json!({"model":"m","messages":[{"role":"user","content":[
         {"type":"image_url","source":"native-source","mime":false,"detail":"native-detail","image_url":{"url":"https://example.invalid/old","detail":"high","ref":"literal"}},
         {"type":"file","filename":"native-filename","file":{"file_id":"old-id","filename":"old.pdf","ref":"literal"}}
     ]}]});
-    let (_, events) = request(input.to_string().as_bytes());
-    let normalized = normalized_request(&events);
-    let mut mapped = Mapped::new();
-    let mut source = Source::new(&mut mapped.writer).unwrap();
-    source
-        .push_bytes(&mut mapped.writer, normalized.to_string().as_bytes())
-        .unwrap();
-    let mut doc = Document::parse(&mut mapped.writer, source, 16384).unwrap();
-    bind_fixture_origins(&mut doc);
+    let (mut mapped, mut doc) = super::request_controls::canonical(&input, &ChatCapability);
     let media = Registry::new(&mut mapped.writer).unwrap();
     let messages = doc.required(doc.root(), "messages").unwrap();
     let message = doc.children(messages).unwrap().next().unwrap();
@@ -269,7 +260,7 @@ fn collision_direct_replacement_wins_without_duplicate_keys() {
 }
 
 fn collision_mutation(replace: bool) {
-    use super::{ChatCapability, Egress, Mapped, Operation, RequestEgress, bytes, codec};
+    use super::{ChatCapability, Egress, Operation, RequestEgress, bytes, codec};
     use codec::{
         RequestFence, RequestView,
         document::{Document, Value},
@@ -279,15 +270,7 @@ fn collision_mutation(replace: bool) {
     use serde_json::json;
     let part = |id: &str| json!({"type":"image_url","transcript":id,"source":id,"image_url":{"url":"https://example.invalid/a","ref":id}});
     let input = json!({"model":"m","messages":[{"role":"user","content":[part("a"),part("b")]},{"role":"user","content":[part("c"),part("d")]}]});
-    let (_, events) = super::request_with_frames(input.to_string().as_bytes(), 256);
-    let normalized = normalized_request(&events);
-    let mut mapped = Mapped::new();
-    let mut source = Source::new(&mut mapped.writer).unwrap();
-    source
-        .push_bytes(&mut mapped.writer, normalized.to_string().as_bytes())
-        .unwrap();
-    let mut doc = Document::parse(&mut mapped.writer, source, 16384).unwrap();
-    bind_fixture_origins(&mut doc);
+    let (mut mapped, doc) = super::request_controls::canonical(&input, &ChatCapability);
     let mut empty = Source::new(&mut mapped.writer).unwrap();
     empty.push_bytes(&mut mapped.writer, b"{}").unwrap();
     let mut imported = Document::parse(&mut mapped.writer, empty, 16384).unwrap();
@@ -335,39 +318,5 @@ fn collision_mutation(replace: bool) {
         doc.detach(messages, first).unwrap();
         let output = encode(&doc, &mut mapped.writer);
         assert_eq!(output["messages"][0]["content"], json!([part("c"), part("d")]));
-    }
-}
-
-// Reconstruct trusted side-table associations after the fixture serializes canonical fields.
-fn bind_fixture_origins(doc: &mut super::codec::document::Document) {
-    let x = doc.required(doc.root(), "x_ck").unwrap();
-    let originals = doc.required(x, "original").unwrap();
-    let entries: Vec<_> = doc.children(originals).unwrap().collect();
-    for entry in entries {
-        let pointer = doc.required(entry, "pointer").unwrap();
-        let mut chars = doc.chars(pointer).unwrap();
-        let mut path = String::new();
-        while let Some(c) = chars.next_scalar().unwrap() {
-            path.push(c);
-        }
-        let parts: Vec<_> = path.split('/').collect();
-        if parts.len() < 6 || parts[1] != "messages" || parts[3] != "content" {
-            continue;
-        }
-        let messages = doc.required(doc.root(), "messages").unwrap();
-        let message = doc.children(messages).unwrap().nth(parts[2].parse().unwrap()).unwrap();
-        let content = doc.required(message, "content").unwrap();
-        let part = doc.children(content).unwrap().nth(parts[4].parse().unwrap()).unwrap();
-        let carrier = if parts.len() == 6 {
-            None
-        } else {
-            Some(match parts[5] {
-                "image_url" => "image_url",
-                "input_audio" => "input_audio",
-                "file" => "file",
-                _ => panic!("unknown fixture carrier"),
-            })
-        };
-        doc.bind_origin(entry, part, carrier).unwrap();
     }
 }

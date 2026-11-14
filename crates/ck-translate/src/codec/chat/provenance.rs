@@ -43,7 +43,7 @@ fn entry(doc: &Document, field: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
     e.bytes(b"}")
 }
 
-fn pointer(doc: &Document, mut node: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
+pub(super) fn pointer(doc: &Document, mut node: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
     let mut path = [None; 128];
     let mut depth = 0;
     while let Some(parent) = doc.node(node)?.parent {
@@ -76,11 +76,26 @@ fn pointer(doc: &Document, mut node: usize, e: &mut Encoder<'_, '_>) -> Result<(
 }
 
 #[derive(Clone)]
-struct Segment<'a> {
+pub(super) struct Segment<'a> {
     chars: Characters<'a>,
     remaining: usize,
 }
 impl Segment<'_> {
+    pub(super) fn index(mut self) -> Result<usize> {
+        let mut index = 0usize;
+        let mut any = false;
+        while let Some(c) = self.next()? {
+            if !c.is_ascii_digit() {
+                return Err(Error::Schema);
+            }
+            index = index
+                .checked_mul(10)
+                .and_then(|n| n.checked_add(c as usize - '0' as usize))
+                .ok_or(Error::Limit)?;
+            any = true;
+        }
+        if any { Ok(index) } else { Err(Error::Schema) }
+    }
     fn next(&mut self) -> Result<Option<char>> {
         if self.remaining == 0 {
             return Ok(None);
@@ -109,7 +124,7 @@ impl Segment<'_> {
         }
         Ok(chars.next()?.is_none())
     }
-    fn matches(&self, doc: &Document, name: Name) -> Result<bool> {
+    pub(super) fn matches(&self, doc: &Document, name: Name) -> Result<bool> {
         let mut chars = self.clone();
         let mut name = doc.name_chars(name)?;
         loop {
@@ -122,6 +137,27 @@ impl Segment<'_> {
             }
         }
     }
+}
+
+pub(super) fn leaf(doc: &Document, pointer: usize) -> Result<Segment<'_>> {
+    let mut chars = doc.chars(pointer)?;
+    if chars.next_scalar()? != Some('/') {
+        return Err(Error::Schema);
+    }
+    loop {
+        let (name, last) = segment(&mut chars)?;
+        if last {
+            return Ok(name);
+        }
+    }
+}
+
+pub(super) fn write_segment(mut name: Segment<'_>, e: &mut Encoder<'_, '_>) -> Result<()> {
+    e.bytes(b"\"")?;
+    while let Some(c) = name.next()? {
+        e.escaped(c.encode_utf8(&mut [0; 4]))?;
+    }
+    e.bytes(b"\"")
 }
 
 pub(super) fn restore(doc: &mut Document, x: usize) -> Result<bool> {
@@ -283,6 +319,18 @@ pub(super) fn request_members(
     mapped_elsewhere: &[&str],
     e: &mut Encoder<'_, '_>,
 ) -> Result<()> {
+    request_members_first(doc, parent, carrier, skip, mapped_elsewhere, &mut false, e)
+}
+
+pub(super) fn request_members_first(
+    doc: &Document,
+    parent: usize,
+    carrier: Option<&str>,
+    skip: &[&str],
+    mapped_elsewhere: &[&str],
+    first: &mut bool,
+    e: &mut Encoder<'_, '_>,
+) -> Result<()> {
     let x = doc.required(doc.root(), "x_ck")?;
     let Some(original) = doc.member(x, "original")? else {
         return Ok(());
@@ -325,7 +373,10 @@ pub(super) fn request_members(
             }
         }
         // Only unmapped members are restored; mapped deletions must not revive source data.
-        e.bytes(b",")?;
+        if !*first {
+            e.bytes(b",")?;
+        }
+        *first = false;
         e.bytes(b"\"")?;
         let mut name = name;
         while let Some(c) = name.next()? {
@@ -354,4 +405,146 @@ fn segment<'a>(chars: &mut Characters<'a>) -> Result<(Segment<'a>, bool)> {
         },
         last,
     ))
+}
+
+pub(super) fn bindings(doc: &mut Document, owner: &mut ck_stream::Writer) -> Result<()> {
+    let x = doc.required(doc.root(), "x_ck")?;
+    for key in ["original", "cache_control", "replay", "tools", "chat_legacy_calls"] {
+        let Some(list) = doc.member(x, key)? else {
+            continue;
+        };
+        let mut next = doc.node(list)?.first;
+        while let Some(entry) = next {
+            next = doc.node(entry)?.next;
+            let Some((parent, carrier)) = doc.origin(entry)? else {
+                continue;
+            };
+            let lease = crate::codec::encode::scratch(owner, |e| pointer(doc, parent, e))?;
+            let binding = doc.import_json(owner, lease)?;
+            doc.rename(binding, "binding")?;
+            doc.append(entry, binding)?;
+            if let Some(carrier) = carrier {
+                doc.set(entry, "carrier", Value::Text(carrier))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn resolve(doc: &Document, pointer: usize) -> Result<usize> {
+    resolve_to(doc, pointer, false)
+}
+
+pub(super) fn resolve_parent(doc: &Document, pointer: usize) -> Result<usize> {
+    resolve_to(doc, pointer, true)
+}
+
+fn resolve_to(doc: &Document, pointer: usize, parent_only: bool) -> Result<usize> {
+    let mut chars = doc.chars(pointer)?;
+    match chars.next_scalar()? {
+        None => return Ok(doc.root()),
+        Some('/') => (),
+        _ => return Err(Error::Schema),
+    }
+    let mut parent = doc.root();
+    loop {
+        let (name, last) = segment(&mut chars)?;
+        if last && parent_only {
+            return Ok(parent);
+        }
+        parent = match doc.node(parent)?.value {
+            Value::Object => {
+                let mut found = None;
+                for child in doc.children(parent)? {
+                    if name.matches(doc, doc.node(child)?.name.ok_or(Error::Schema)?)? {
+                        found = Some(child);
+                        break;
+                    }
+                }
+                found.ok_or(Error::Schema)?
+            }
+            Value::Array => doc.children(parent)?.nth(name.index()?).ok_or(Error::Schema)?,
+            _ => return Err(Error::Schema),
+        };
+        if last {
+            return Ok(parent);
+        }
+    }
+}
+
+pub(super) fn restore_bindings(doc: &mut Document) -> Result<()> {
+    let x = doc.required(doc.root(), "x_ck")?;
+    for key in ["original", "cache_control", "replay", "tools", "chat_legacy_calls"] {
+        let Some(list) = doc.member(x, key)? else {
+            continue;
+        };
+        let mut next = doc.node(list)?.first;
+        while let Some(entry) = next {
+            next = doc.node(entry)?.next;
+            let Some(binding) = doc.member(entry, "binding")? else {
+                continue;
+            };
+            let parent = resolve(doc, binding)?;
+            let carrier = if let Some(carrier) = doc.member(entry, "carrier")? {
+                let mut found = None;
+                for name in ["image_url", "input_audio", "file"] {
+                    if doc.string_is(carrier, name)? {
+                        found = Some(name);
+                    }
+                }
+                Some(found.ok_or(Error::Schema)?)
+            } else {
+                None
+            };
+            doc.bind_origin(entry, parent, carrier)?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn preserve_request_field(
+    doc: &mut Document,
+    owner: &mut ck_stream::Writer,
+    field: usize,
+    target: usize,
+    carrier: Option<&'static str>,
+) -> Result<usize> {
+    let parent = doc.node(field)?.parent.ok_or(Error::Schema)?;
+    let lease = crate::codec::encode::scratch(owner, |e| pointer(doc, field, e))?;
+    let pointer = doc.import_json(owner, lease)?;
+    let x = doc.required(doc.root(), "x_ck")?;
+    let original = doc.required(x, "original")?;
+    let entry = doc.add(None, Value::Object)?;
+    doc.append(original, entry)?;
+    doc.bind_origin(entry, target, carrier)?;
+    doc.set(entry, "protocol", Value::Text("chat"))?;
+    doc.rename(pointer, "pointer")?;
+    doc.append(entry, pointer)?;
+    doc.detach(parent, field)?;
+    doc.rename(field, "value")?;
+    doc.append(entry, field)?;
+    Ok(entry)
+}
+
+pub(super) fn native_members(
+    doc: &mut Document,
+    owner: &mut ck_stream::Writer,
+    part: usize,
+    carrier: &'static str,
+    known: &[&str],
+) -> Result<()> {
+    let native = doc.required(part, carrier)?;
+    let mut next = doc.node(native)?.first;
+    while let Some(field) = next {
+        next = doc.node(field)?.next;
+        let name = doc.node(field)?.name.ok_or(Error::Schema)?;
+        let mut mapped = false;
+        for key in known {
+            mapped |= doc.name_is(name, key)?;
+        }
+        if !mapped {
+            preserve_request_field(doc, owner, field, part, Some(carrier))?;
+        }
+    }
+    Ok(())
 }
