@@ -19,6 +19,30 @@ impl State {
         if !snapshots {
             return Ok(());
         }
+        self.replay(owner)?;
+        self.validate_finishes(owner, doc, choices)?;
+        let changes = self.snapshot_changes(owner, doc, choices)?;
+        for choice in doc.children(choices)? {
+            if let Some(message) = doc.member(choice, "message")?
+                && let Some(audio) = doc.member(message, "audio")?
+                && matches!(doc.node(audio)?.value, Value::Object)
+                && doc.member(audio, "data")?.is_some()
+            {
+                let index = doc.unsigned(doc.required(choice, "index")?)?;
+                let position = self
+                    .choices
+                    .iter()
+                    .position(|choice| choice.index == index)
+                    .ok_or(Error::Schema)?;
+                self.choices[position].audio = media::Base64Fragments::default();
+            }
+        }
+        apply(owner, doc, &changes)
+    }
+
+    /// Folds every ingress record published so far into the reduction, skipping usage and
+    /// opaque records other than media attributes.
+    fn replay(&mut self, owner: &mut Writer) -> Result<()> {
         while let Poll::Ready(Some(record)) = self.reader.try_next() {
             let ck_stream::Read::Record(lease) = record else {
                 return Err(Error::Closed);
@@ -45,6 +69,11 @@ impl State {
                 self.reduction.fold(projection)?;
             }
         }
+        Ok(())
+    }
+
+    /// Rejects a finished choice whose audio is incomplete or whose final arguments are not JSON.
+    fn validate_finishes(&self, owner: &mut Writer, doc: &Document, choices: usize) -> Result<()> {
         let prior = self.reduction.document.as_ref().ok_or(Error::Schema)?;
         for choice in doc.children(choices)? {
             let Some(finish) = doc.member(choice, "finish_reason")? else {
@@ -83,6 +112,13 @@ impl State {
                 super::validate::validate_completion(owner, prior, None, prior, old)?;
             }
         }
+        Ok(())
+    }
+
+    /// Validates each snapshot message against the published prefix and records the edits that
+    /// reduce it to a suffix.
+    fn snapshot_changes(&mut self, owner: &mut Writer, doc: &Document, choices: usize) -> Result<Table<Change>> {
+        let prior = self.reduction.document.as_ref().ok_or(Error::Schema)?;
         let mut changes = Table::new(owner)?;
         let mut seen = Table::new(owner)?;
         for choice in doc.children(choices)? {
@@ -122,81 +158,70 @@ impl State {
             }
             reconcile_object(owner, prior, old, doc, message, &mut changes, Context::Message)?;
         }
-        for choice in doc.children(choices)? {
-            if let Some(message) = doc.member(choice, "message")?
-                && let Some(audio) = doc.member(message, "audio")?
-                && matches!(doc.node(audio)?.value, Value::Object)
-                && doc.member(audio, "data")?.is_some()
-            {
-                let index = doc.unsigned(doc.required(choice, "index")?)?;
-                let position = self
-                    .choices
-                    .iter()
-                    .position(|choice| choice.index == index)
-                    .ok_or(Error::Schema)?;
-                self.choices[position].audio = media::Base64Fragments::default();
-            }
-        }
-        // Mutate only the parsed incoming topology after every choice validates.
-        // Scratch contains new suffixes, never a serialized accumulated message.
-        for change in changes.iter() {
-            match *change {
-                Change::Remove(node) => {
-                    let parent = doc.node(node)?.parent.ok_or(Error::Schema)?;
-                    doc.detach(parent, node)?;
-                }
-                Change::Index(node, index) => {
-                    doc.set(node, "index", Value::Unsigned(index))?;
-                }
-                Change::Text(node, skip) => {
-                    let suffix = encode::scratch(owner, |e| {
-                        let mut chars = doc.chars(node)?;
-                        for _ in 0..skip {
-                            chars.next_scalar()?.ok_or(Error::Schema)?;
-                        }
-                        e.bytes(b"\"")?;
-                        while let Some(c) = chars.next_scalar()? {
-                            e.escaped(c.encode_utf8(&mut [0; 4]))?;
-                        }
-                        e.bytes(b"\"")
-                    })?;
-                    let value = doc.import_json(owner, suffix)?;
-                    doc.transplant(node, value)?;
-                }
-                Change::Bytes(node, skip) => {
-                    let suffix = encode::scratch(owner, |e| {
-                        use base64::Engine;
-                        let mut bytes = doc.decoded_bytes(node)?;
-                        for _ in 0..skip {
-                            bytes.next_byte()?.ok_or(Error::Schema)?;
-                        }
-                        e.bytes(b"\"")?;
-                        loop {
-                            let mut block = [0; 3];
-                            let mut len = 0;
-                            for slot in &mut block {
-                                let Some(byte) = bytes.next_byte()? else { break };
-                                *slot = byte;
-                                len += 1;
-                            }
-                            if len == 0 {
-                                break;
-                            }
-                            let mut encoded = [0; 4];
-                            let n = base64::engine::general_purpose::STANDARD
-                                .encode_slice(&block[..len], &mut encoded)
-                                .map_err(|_| Error::Schema)?;
-                            e.bytes(&encoded[..n])?;
-                        }
-                        e.bytes(b"\"")
-                    })?;
-                    let value = doc.import_json(owner, suffix)?;
-                    doc.transplant(node, value)?;
-                }
-            }
-        }
-        Ok(())
+        Ok(changes)
     }
+}
+
+fn apply(owner: &mut Writer, doc: &mut Document, changes: &Table<Change>) -> Result<()> {
+    // Mutate only the parsed incoming topology after every choice validates.
+    // Scratch contains new suffixes, never a serialized accumulated message.
+    for change in changes.iter() {
+        match *change {
+            Change::Remove(node) => {
+                let parent = doc.node(node)?.parent.ok_or(Error::Schema)?;
+                doc.detach(parent, node)?;
+            }
+            Change::Index(node, index) => {
+                doc.set(node, "index", Value::Unsigned(index))?;
+            }
+            Change::Text(node, skip) => {
+                let suffix = encode::scratch(owner, |e| {
+                    let mut chars = doc.chars(node)?;
+                    for _ in 0..skip {
+                        chars.next_scalar()?.ok_or(Error::Schema)?;
+                    }
+                    e.bytes(b"\"")?;
+                    while let Some(c) = chars.next_scalar()? {
+                        e.escaped(c.encode_utf8(&mut [0; 4]))?;
+                    }
+                    e.bytes(b"\"")
+                })?;
+                let value = doc.import_json(owner, suffix)?;
+                doc.transplant(node, value)?;
+            }
+            Change::Bytes(node, skip) => {
+                let suffix = encode::scratch(owner, |e| {
+                    use base64::Engine;
+                    let mut bytes = doc.decoded_bytes(node)?;
+                    for _ in 0..skip {
+                        bytes.next_byte()?.ok_or(Error::Schema)?;
+                    }
+                    e.bytes(b"\"")?;
+                    loop {
+                        let mut block = [0; 3];
+                        let mut len = 0;
+                        for slot in &mut block {
+                            let Some(byte) = bytes.next_byte()? else { break };
+                            *slot = byte;
+                            len += 1;
+                        }
+                        if len == 0 {
+                            break;
+                        }
+                        let mut encoded = [0; 4];
+                        let n = base64::engine::general_purpose::STANDARD
+                            .encode_slice(&block[..len], &mut encoded)
+                            .map_err(|_| Error::Schema)?;
+                        e.bytes(&encoded[..n])?;
+                    }
+                    e.bytes(b"\"")
+                })?;
+                let value = doc.import_json(owner, suffix)?;
+                doc.transplant(node, value)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, PartialEq)]
