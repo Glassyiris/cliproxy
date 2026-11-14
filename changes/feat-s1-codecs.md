@@ -19,3 +19,4 @@ Internal
 - Honor deletion of complete response media carriers and image MIME without resurrecting stored bytes or inventing a media type. Extend trusted replacement-record tests across media edits, sibling isolation, sparse audio choices, invalid positions and error terminals.
 - Preserve provider identity in streaming tool, media and usage projections after an initial heartbeat. Keep opaque multiline text inside one SSE event, including its final empty line.
 - Expose request-ingress flush deadlines and an idle flush callback for coalescing protocol codecs. Require callers to schedule pending payload deadlines without waiting for another network read; Chat retains immediate publication.
+- Share request binding serialization, reconstruction and JSON pointer helpers across protocol codecs, including Anthropic block order and server-result shape bindings.

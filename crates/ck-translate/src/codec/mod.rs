@@ -56,6 +56,7 @@ pub mod event;
 pub mod internal;
 pub mod json;
 pub mod media;
+pub mod provenance;
 pub mod source;
 pub mod sse;
 mod table;

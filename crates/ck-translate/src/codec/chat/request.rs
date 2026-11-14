@@ -120,7 +120,7 @@ impl Ingress {
             .finish(self.document.input())?;
         self.consume(owner)?;
         super::request_controls::declarations(&mut self.document, owner)?;
-        super::provenance::bindings(&mut self.document, owner)?;
+        crate::codec::provenance::bindings(&mut self.document, owner)?;
         messages::validate(&self.document)?;
         super::request_schema::validate(&self.document, &self.media)?;
         let x = self.document.required(self.document.root(), "x_ck")?;

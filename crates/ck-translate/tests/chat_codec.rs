@@ -1,3 +1,5 @@
+#[path = "semantic/bindings.rs"]
+mod bindings;
 #[path = "semantic/incremental.rs"]
 mod incremental;
 #[path = "semantic/media_lifetime.rs"]

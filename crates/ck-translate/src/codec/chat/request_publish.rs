@@ -62,7 +62,7 @@ pub(super) fn field(
         |e| {
             e.bytes(b",\"pointer\":")?;
             if path.is_empty() || super::super::request_provenance::preserved(doc, node)? {
-                super::super::provenance::pointer(doc, node, e)?;
+                crate::codec::provenance::pointer(doc, node, e)?;
             } else {
                 pointer(doc, path, e)?;
             }

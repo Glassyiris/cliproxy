@@ -2,7 +2,7 @@ use crate::codec::{
     Error, Result,
     document::{Document, Name, Value},
     event::Kind,
-    internal,
+    internal, provenance,
 };
 use ck_stream::{Reader, Writer};
 
@@ -23,8 +23,8 @@ pub fn read_document(owner: &mut Writer, reader: &mut Reader) -> Result<Document
                     doc.transplant(doc.root(), value)?;
                     continue;
                 }
-                let parent = super::super::provenance::resolve_parent(&doc, pointer)?;
-                let name = super::super::provenance::leaf(&doc, pointer)?;
+                let parent = provenance::resolve_parent(&doc, pointer)?;
+                let name = provenance::leaf(&doc, pointer)?;
                 let target = if matches!(doc.node(parent)?.value, Value::Array) {
                     let index = name.index()?;
                     let count = doc.children(parent)?.count();
@@ -63,7 +63,7 @@ pub fn read_document(owner: &mut Writer, reader: &mut Reader) -> Result<Document
             }
             Kind::MediaStart | Kind::Data | Kind::MediaEnd if started => (),
             Kind::RequestEnd if started => {
-                super::super::provenance::restore_bindings(&mut doc)?;
+                provenance::restore_bindings(&mut doc)?;
                 return Ok(doc);
             }
             Kind::Error => return Err(Error::Schema),

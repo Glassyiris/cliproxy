@@ -3,6 +3,7 @@ use crate::codec::{
     document::{Document, Value},
     encode,
     encode::Encoder,
+    provenance::{leaf, pointer, write_segment},
 };
 use ck_stream::Writer;
 
@@ -24,7 +25,7 @@ fn entry(
     value_key: &'static str,
 ) -> Result<usize> {
     let parent = doc.node(field)?.parent.ok_or(Error::Schema)?;
-    let lease = encode::scratch(owner, |e| provenance::pointer(doc, field, e))?;
+    let lease = encode::scratch(owner, |e| pointer(doc, field, e))?;
     let pointer = doc.import_json(owner, lease)?;
     let list = list(doc, key)?;
     let entry = doc.add(None, Value::Object)?;
@@ -140,7 +141,7 @@ pub(super) fn declarations(doc: &mut Document, owner: &mut Writer) -> Result<()>
         }
         if doc.string_is(kind, "custom")? {
             let declaration = doc.required(tool, "custom")?;
-            let lease = encode::scratch(owner, |e| provenance::pointer(doc, tool, e))?;
+            let lease = encode::scratch(owner, |e| pointer(doc, tool, e))?;
             let pointer = doc.import_json(owner, lease)?;
             let tools = list(doc, "tools")?;
             let item = doc.add(None, Value::Object)?;
@@ -232,7 +233,7 @@ pub(super) fn members(doc: &Document, parent: usize, first: &mut bool, e: &mut E
                 continue;
             };
             let pointer = doc.required(entry, "pointer")?;
-            let name = provenance::leaf(doc, pointer)?;
+            let name = leaf(doc, pointer)?;
             let mut exists = false;
             for child in doc.children(parent)? {
                 exists |= name.matches(doc, doc.node(child)?.name.ok_or(Error::Schema)?)?;
@@ -244,7 +245,7 @@ pub(super) fn members(doc: &Document, parent: usize, first: &mut bool, e: &mut E
                 e.bytes(b",")?;
             }
             *first = false;
-            provenance::write_segment(name, e)?;
+            write_segment(name, e)?;
             e.bytes(b":")?;
             write(doc, value, e)?;
         }
