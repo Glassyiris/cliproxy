@@ -8,3 +8,5 @@ Internal
 - Normalize Chat image/file data URIs and response media into mapped media records. Reconstruct exact decoded bytes in streaming and buffered output, retaining native IDs, transcripts, timing and structured content order.
 - Preserve response extensions with source pointers and restore their native locations. Keep usage corrections and detail snapshots separate from output projections; reject malformed terminals and preserve multiline SSE text framing.
 - Validate native Chat controls and media registrations before the request-end fence. Reassemble audio base64 quartets across source events and reject successful completion with an unfinished quartet.
+- Isolate native Chat media source-key collisions in request provenance and restore their original locations. Use canonical source kinds for capability and egress dispatch; preserve normalized mutation and deletion authority.
+- Bind collision provenance to stable normalized objects across deletion and document absorption. Prefer emitted normalized fields over preserved same-name fields without duplicate JSON keys.

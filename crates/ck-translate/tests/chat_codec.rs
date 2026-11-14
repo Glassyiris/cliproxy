@@ -38,7 +38,10 @@ fn bytes(lease: &ck_stream::ScratchLease) -> Vec<u8> {
     bytes
 }
 fn request(input: &[u8]) -> (serde_json::Value, Vec<serde_json::Value>) {
-    let mut mapped = Mapped::new();
+    request_with_frames(input, 64)
+}
+fn request_with_frames(input: &[u8], frames: usize) -> (serde_json::Value, Vec<serde_json::Value>) {
+    let mut mapped = Mapped::configured(std::sync::Arc::new(ck_stream::ManualClock::default()), frames);
     let mut ingress = Ingress::new(
         &mut mapped.writer,
         &mapped.store,
@@ -305,6 +308,13 @@ fn mapped_image_extensions_keep_native_locations() {
         out["messages"][0]["content"][0]["image_url"]["vendor_image"],
         serde_json::json!({"k":2})
     );
+}
+
+#[test]
+fn native_image_ref_collision_preserves_url_and_unknown_data() {
+    let input = serde_json::json!({"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/a.png","ref":"literal"}}]}]});
+    let (output, _) = request(input.to_string().as_bytes());
+    assert_eq!(output["messages"], input["messages"]);
 }
 
 #[test]

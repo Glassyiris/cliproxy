@@ -44,6 +44,7 @@ pub struct Node {
     pub parent: Option<usize>,
     pub revision: u64,
     last: Option<usize>,
+    origin: Option<(usize, Option<&'static str>)>,
 }
 
 /// Mutable normalized topology; payloads remain under mapped leases.
@@ -187,6 +188,7 @@ impl Document {
                 parent: None,
                 revision: 0,
                 last: None,
+                origin: None,
             });
         }
         for parent in base..self.nodes.len() {
@@ -230,6 +232,7 @@ impl Document {
             node.next = node.next.map(|i| i + base);
             node.parent = node.parent.map(|i| i + base);
             node.last = node.last.map(|i| i + base);
+            node.origin = node.origin.map(|(parent, carrier)| (parent + base, carrier));
             self.nodes.push(node);
         }
         self.sources.append(&mut other.sources);
@@ -420,6 +423,19 @@ impl Document {
             _ => Err(Error::Schema),
         }
     }
+    /// Bind trusted provenance to a stable node, independently of its array position.
+    /// JSON imports never create these associations; absorb remaps their node indexes.
+    pub fn bind_origin(&mut self, entry: usize, parent: usize, carrier: Option<&'static str>) -> Result<()> {
+        self.node(parent)?;
+        self.node(entry)?;
+        self.nodes[entry].origin = Some((parent, carrier));
+        Ok(())
+    }
+
+    pub fn origin(&self, entry: usize) -> Result<Option<(usize, Option<&'static str>)>> {
+        Ok(self.node(entry)?.origin)
+    }
+
     pub fn add(&mut self, name: Option<Name>, value: Value) -> Result<usize> {
         self.reserve(1, 0)?;
         let index = self.nodes.len();
@@ -431,6 +447,7 @@ impl Document {
             last: None,
             parent: None,
             revision: 0,
+            origin: None,
         });
         Ok(index)
     }

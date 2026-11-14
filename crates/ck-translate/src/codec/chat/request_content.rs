@@ -17,6 +17,43 @@ pub(super) fn normalize_part(
         require_string(doc, doc.required(part, "text")?)?;
         return Ok(());
     }
+    if doc.string_is(kind, "image_url")? || doc.string_is(kind, "input_audio")? || doc.string_is(kind, "file")? {
+        super::provenance::preserve_request_members(
+            doc,
+            owner,
+            part,
+            part,
+            None,
+            &["source", "mime", "detail", "filename", "transcript", "timing"],
+        )?;
+        let carrier = if doc.string_is(kind, "image_url")? {
+            "image_url"
+        } else if doc.string_is(kind, "input_audio")? {
+            "input_audio"
+        } else {
+            "file"
+        };
+        let native = doc.required(part, carrier)?;
+        if carrier == "file" {
+            super::provenance::preserve_request_members(
+                doc,
+                owner,
+                native,
+                part,
+                Some(carrier),
+                &["kind", "uri", "ref", "source"],
+            )?;
+        } else {
+            super::provenance::preserve_request_members(
+                doc,
+                owner,
+                native,
+                part,
+                Some(carrier),
+                &["kind", "uri", "ref", "file_id", "source"],
+            )?;
+        }
+    }
     if doc.string_is(kind, "image_url")? {
         let image = doc.remove(part, "image_url")?.ok_or(Error::Schema)?;
         let url = doc.remove(image, "url")?.ok_or(Error::Schema)?;
@@ -39,7 +76,7 @@ pub(super) fn normalize_part(
         if let Some(detail) = doc.remove(image, "detail")? {
             doc.append(part, detail)?;
         }
-        // Remaining native image attributes remain attached to the typed source.
+        // Noncolliding native attributes remain attached to the typed source.
         while let Some(extra) = doc.node(image)?.first {
             doc.detach(image, extra)?;
             doc.append(source, extra)?;
@@ -142,18 +179,37 @@ pub(super) fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_,
     if doc.string_is(kind, "image")? {
         let source = doc.required(part, "source")?;
         e.bytes(b"{\"type\":\"image_url\",\"image_url\":{\"url\":")?;
-        if let Some(reference) = doc.member(source, "ref")? {
-            view.media.write_value(doc, reference, e)?;
-        } else {
+        let source_kind = doc.required(source, "kind")?;
+        if doc.string_is(source_kind, "data")? {
+            view.media.write_value(doc, doc.required(source, "ref")?, e)?;
+        } else if doc.string_is(source_kind, "uri")? {
             doc.write(doc.required(source, "uri")?, e)?;
+        } else {
+            return Err(Error::Unsupported);
         }
         if let Some(detail) = doc.member(part, "detail")? {
             e.bytes(b",\"detail\":")?;
             doc.write(detail, e)?;
         }
         super::response::members(doc, source, e, &["kind", "uri", "ref"])?;
+        super::provenance::request_members(
+            doc,
+            part,
+            Some("image_url"),
+            &["url", "detail"],
+            &["kind", "uri", "ref"],
+            e,
+        )?;
         e.bytes(b"}")?;
         super::response::members(doc, part, e, &["type", "source", "detail", "mime"])?;
+        super::provenance::request_members(
+            doc,
+            part,
+            None,
+            &["type", "image_url"],
+            &["type", "source", "detail", "mime"],
+            e,
+        )?;
         e.bytes(b"}")
     } else if doc.string_is(kind, "audio")? || doc.string_is(kind, "document")? {
         let audio = doc.string_is(kind, "audio")?;
@@ -163,14 +219,17 @@ pub(super) fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_,
         } else {
             b"{\"type\":\"file\",\"file\":{"
         })?;
-        if let Some(reference) = doc.member(source, "ref")? {
-            view.media.get(doc, reference)?.ok_or(Error::Position)?;
+        let source_kind = doc.required(source, "kind")?;
+        if doc.string_is(source_kind, "data")? {
+            let reference = doc.required(source, "ref")?;
             e.string(if audio { "data" } else { "file_data" })?;
             e.bytes(b":")?;
             view.media.write_value(doc, reference, e)?;
-        } else {
+        } else if !audio && doc.string_is(source_kind, "file")? {
             e.bytes(b"\"file_id\":")?;
             doc.write(doc.required(source, "file_id")?, e)?;
+        } else {
+            return Err(Error::Unsupported);
         }
         if let Some(format) = doc.member(source, "format")? {
             e.bytes(b",\"format\":")?;
@@ -181,8 +240,28 @@ pub(super) fn write_part(view: RequestView<'_>, part: usize, e: &mut Encoder<'_,
             doc.write(filename, e)?;
         }
         super::response::members(doc, source, e, &["kind", "ref", "file_id", "format"])?;
+        super::provenance::request_members(
+            doc,
+            part,
+            Some(if audio { "input_audio" } else { "file" }),
+            if audio {
+                &["data", "format"]
+            } else {
+                &["file_data", "file_id", "filename"]
+            },
+            &["kind", "ref", "file_id"],
+            e,
+        )?;
         e.bytes(b"}")?;
         super::response::members(doc, part, e, &["type", "source", "filename", "mime"])?;
+        super::provenance::request_members(
+            doc,
+            part,
+            None,
+            &["type", "input_audio", "file"],
+            &["type", "source", "filename", "mime"],
+            e,
+        )?;
         e.bytes(b"}")
     } else {
         doc.write(part, e)
