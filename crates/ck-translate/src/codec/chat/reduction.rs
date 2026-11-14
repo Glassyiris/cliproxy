@@ -109,86 +109,113 @@ impl Reduction {
                 self.project_tools(&mut doc, x)?;
                 Some(doc)
             }
-            Kind::ToolStart => {
+            Kind::ToolStart => Some(self.project_tool_start(owner, &doc, x)?),
+            Kind::Usage => Some(self.project_usage(owner, &mut doc, x)?),
+            Kind::Opaque | Kind::MediaStart | Kind::Data | Kind::MediaTranscript | Kind::MediaEnd => {
+                self.project_media(owner, kind, doc, x)?
+            }
+            Kind::Annotation => {
+                if !doc.string_is(doc.required(root, "kind")?, "chat")? {
+                    return Err(Error::Unsupported);
+                }
                 let choice = doc.unsigned(doc.required(x, "choice_index")?)?;
-                let index = doc.unsigned(doc.required(x, "tool_index")?)?;
-                if self
-                    .tools
-                    .iter()
-                    .any(|tool| tool.choice == choice && tool.index == index)
-                {
-                    return Err(Error::Schema);
-                }
-                let custom = doc.string_is(doc.required(root, "arguments_format")?, "text")?;
-                let legacy = doc.member(x, "chat_legacy")?.is_some();
-                self.tools.push(Tool {
-                    choice,
-                    index,
-                    custom,
-                    legacy,
-                })?;
-                let source = doc.required(x, "source")?;
-                let ids = doc.required(source, "ids")?;
-                let id = doc.required(ids, "id")?;
-                let name = doc.required(root, "name")?;
-                Some(mapped_document(owner, |e| {
-                    e.bytes(b"{")?;
-                    chunk_base(self.document.as_ref().ok_or(Error::Schema)?, e)?;
-                    e.bytes(b",\"choices\":[{\"index\":")?;
-                    e.unsigned(choice)?;
-                    if legacy {
-                        e.bytes(b",\"delta\":{\"function_call\":{\"name\":")?;
-                        doc.write(name, e)?;
-                        e.bytes(b"}},\"finish_reason\":null}]")?;
-                    } else {
-                        e.bytes(b",\"delta\":{\"tool_calls\":[{\"index\":")?;
-                        e.unsigned(index)?;
-                        e.bytes(b",\"id\":")?;
-                        doc.write(id, e)?;
-                        e.bytes(b",\"type\":")?;
-                        e.string(if custom { "custom" } else { "function" })?;
-                        e.bytes(b",")?;
-                        e.string(if custom { "custom" } else { "function" })?;
-                        e.bytes(b":{\"name\":")?;
-                        doc.write(name, e)?;
-                        e.bytes(b"}}]},\"finish_reason\":null}]")?;
-                    }
-                    e.bytes(b"}")
-                })?)
+                let value = doc.required(root, "value")?;
+                Some(self.native_field(owner, doc, value, "annotations", choice)?)
             }
-            Kind::Usage => {
-                let usage = doc.required(root, "usage")?;
-                let native = doc.required(usage, "native")?;
-                let value = doc.required(native, "value")?;
-                for (canonical, wire) in [
-                    ("input_tokens", "prompt_tokens"),
-                    ("output_tokens", "completion_tokens"),
-                    ("total_tokens", "total_tokens"),
-                ] {
-                    if !matches!(doc.node(value)?.value, Value::Null)
-                        && doc.member(value, wire)?.is_none()
-                        && let Some(n) = doc.member(usage, canonical)?
-                    {
-                        doc.set(value, wire, Value::Unsigned(doc.unsigned(n)?))?;
-                    }
-                }
-                Some(mapped_document(owner, |e| {
-                    e.bytes(b"{")?;
-                    chunk_base(self.document.as_ref().ok_or(Error::Schema)?, e)?;
-                    e.bytes(b",\"choices\":[")?;
-                    if let Some(choice) = doc.member(x, "choice_index")? {
-                        e.bytes(b"{\"index\":")?;
-                        doc.write(choice, e)?;
-                        e.bytes(b",\"delta\":{},\"finish_reason\":null,\"usage\":")?;
-                        doc.write(value, e)?;
-                        e.bytes(b"}]")?;
-                    } else {
-                        e.bytes(b"],\"usage\":")?;
-                        doc.write(value, e)?;
-                    }
-                    e.bytes(b"}")
-                })?)
+            _ => None,
+        };
+        Ok((projection, lost))
+    }
+
+    /// Publishes a tool call's name and identity as a native tool_calls or function_call delta.
+    fn project_tool_start(&mut self, owner: &mut Writer, doc: &Document, x: usize) -> Result<Document> {
+        let root = doc.root();
+        let choice = doc.unsigned(doc.required(x, "choice_index")?)?;
+        let index = doc.unsigned(doc.required(x, "tool_index")?)?;
+        if self
+            .tools
+            .iter()
+            .any(|tool| tool.choice == choice && tool.index == index)
+        {
+            return Err(Error::Schema);
+        }
+        let custom = doc.string_is(doc.required(root, "arguments_format")?, "text")?;
+        let legacy = doc.member(x, "chat_legacy")?.is_some();
+        self.tools.push(Tool {
+            choice,
+            index,
+            custom,
+            legacy,
+        })?;
+        let source = doc.required(x, "source")?;
+        let ids = doc.required(source, "ids")?;
+        let id = doc.required(ids, "id")?;
+        let name = doc.required(root, "name")?;
+        mapped_document(owner, |e| {
+            e.bytes(b"{")?;
+            chunk_base(self.document.as_ref().ok_or(Error::Schema)?, e)?;
+            e.bytes(b",\"choices\":[{\"index\":")?;
+            e.unsigned(choice)?;
+            if legacy {
+                e.bytes(b",\"delta\":{\"function_call\":{\"name\":")?;
+                doc.write(name, e)?;
+                e.bytes(b"}},\"finish_reason\":null}]")?;
+            } else {
+                e.bytes(b",\"delta\":{\"tool_calls\":[{\"index\":")?;
+                e.unsigned(index)?;
+                e.bytes(b",\"id\":")?;
+                doc.write(id, e)?;
+                e.bytes(b",\"type\":")?;
+                e.string(if custom { "custom" } else { "function" })?;
+                e.bytes(b",")?;
+                e.string(if custom { "custom" } else { "function" })?;
+                e.bytes(b":{\"name\":")?;
+                doc.write(name, e)?;
+                e.bytes(b"}}]},\"finish_reason\":null}]")?;
             }
+            e.bytes(b"}")
+        })
+    }
+
+    /// Fills the native usage value from canonical counts it lacks and publishes it as a chunk.
+    fn project_usage(&self, owner: &mut Writer, doc: &mut Document, x: usize) -> Result<Document> {
+        let root = doc.root();
+        let usage = doc.required(root, "usage")?;
+        let native = doc.required(usage, "native")?;
+        let value = doc.required(native, "value")?;
+        for (canonical, wire) in [
+            ("input_tokens", "prompt_tokens"),
+            ("output_tokens", "completion_tokens"),
+            ("total_tokens", "total_tokens"),
+        ] {
+            if !matches!(doc.node(value)?.value, Value::Null)
+                && doc.member(value, wire)?.is_none()
+                && let Some(n) = doc.member(usage, canonical)?
+            {
+                doc.set(value, wire, Value::Unsigned(doc.unsigned(n)?))?;
+            }
+        }
+        mapped_document(owner, |e| {
+            e.bytes(b"{")?;
+            chunk_base(self.document.as_ref().ok_or(Error::Schema)?, e)?;
+            e.bytes(b",\"choices\":[")?;
+            if let Some(choice) = doc.member(x, "choice_index")? {
+                e.bytes(b"{\"index\":")?;
+                doc.write(choice, e)?;
+                e.bytes(b",\"delta\":{},\"finish_reason\":null,\"usage\":")?;
+                doc.write(value, e)?;
+                e.bytes(b"}]")?;
+            } else {
+                e.bytes(b"],\"usage\":")?;
+                doc.write(value, e)?;
+            }
+            e.bytes(b"}")
+        })
+    }
+
+    /// Projects a media event onto the native field its attributes name.
+    fn project_media(&mut self, owner: &mut Writer, kind: Kind, doc: Document, x: usize) -> Result<Option<Document>> {
+        Ok(match kind {
             Kind::Opaque => {
                 let id = media_events::id(&doc, x)?;
                 let native = self
@@ -212,7 +239,7 @@ impl Reduction {
                     .map(|(doc, value, field, choice)| self.native_field(owner, doc, value, field, choice))
                     .transpose()?
             }
-            Kind::Data | Kind::MediaTranscript | Kind::MediaEnd => {
+            _ => {
                 let id = media_events::id(&doc, x)?;
                 let position = self
                     .media
@@ -230,17 +257,7 @@ impl Reduction {
                     .map(|(doc, value, field, choice)| self.native_field(owner, doc, value, field, choice))
                     .transpose()?
             }
-            Kind::Annotation => {
-                if !doc.string_is(doc.required(root, "kind")?, "chat")? {
-                    return Err(Error::Unsupported);
-                }
-                let choice = doc.unsigned(doc.required(x, "choice_index")?)?;
-                let value = doc.required(root, "value")?;
-                Some(self.native_field(owner, doc, value, "annotations", choice)?)
-            }
-            _ => None,
-        };
-        Ok((projection, lost))
+        })
     }
 
     pub(super) fn fold(&mut self, projection: Document) -> Result<()> {
