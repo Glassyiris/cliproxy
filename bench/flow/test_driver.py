@@ -613,28 +613,38 @@ class StreamLimitChecks(unittest.TestCase):
 
 
 class FlowSummaryChecks(unittest.TestCase):
-    def results(self):
-        observed = {"consumer_lag_bytes": 9, "blocked_read_s": 0.01, "resumes": 3, "stream_gone": 2,
-                    "cancelled_stream_cleanup_s": 0.1}
-        return [{"scenario": "slow-downstream", "status": "pass", "flow": observed}]
+    OBSERVED = {"consumer_lag_bytes": 9, "blocked_read_s": 0.01, "resumes": 3, "stream_gone": 2,
+                "cancelled_stream_cleanup_s": 0.1}
 
-    def test_development_run_records_missing_gateway_metrics(self):
-        flow, failures = driver.summarize(self.results(), None, acceptance=False)
-        self.assertEqual(failures, [])
-        self.assertEqual(flow["resumes"], 3)
-        self.assertIsNone(flow["evictions"])
+    def results(self, **gateway_metrics):
+        return [{"scenario": "slow-downstream", "status": "pass", "flow": {**self.OBSERVED, **gateway_metrics}}]
 
-    def test_acceptance_rejects_unverified_provenance_and_missing_metrics(self):
+    def test_default_fails_closed_on_missing_gateway_metrics_and_provenance(self):
         for provenance in (None, "", driver.UNVERIFIED):
-            _, failures = driver.summarize(self.results(), provenance, acceptance=True)
-            self.assertIn("FLOW_BUILD_PROVENANCE is unset; acceptance needs verified build provenance", failures)
-        _, failures = driver.summarize(self.results(), "rev abc; rustc 1.99", acceptance=True)
-        self.assertEqual(failures, [f"missing flow metric {name}" for name in driver.GATEWAY_ONLY_METRICS])
+            summary = driver.summarize(self.results(), provenance, diagnostic=False)
+            self.assertFalse(summary["pass"])
+            self.assertEqual(summary["mode"], "acceptance")
+            self.assertIn("FLOW_BUILD_PROVENANCE is unset; acceptance needs verified build provenance",
+                          summary["failures"])
+        summary = driver.summarize(self.results(), "rev abc; rustc 1.99", diagnostic=False)
+        self.assertEqual(summary["failures"], [f"missing flow metric {name}" for name in driver.GATEWAY_ONLY_METRICS])
+
+    def test_complete_evidence_passes(self):
+        with mock.patch.dict(driver.FLOW_METRICS, {name: max for name in driver.GATEWAY_ONLY_METRICS}):
+            summary = driver.summarize(self.results(**{name: 0 for name in driver.GATEWAY_ONLY_METRICS}),
+                                       "rev abc; rustc 1.99", diagnostic=False)
+        self.assertTrue(summary["pass"])
+
+    def test_diagnostic_never_passes(self):
+        summary = driver.summarize(self.results(), None, diagnostic=True)
+        self.assertEqual((summary["mode"], summary["pass"], summary["failures"]), (driver.DIAGNOSTIC, False, []))
+        self.assertIn("missing flow metric evictions", summary["unverified"])
+        self.assertEqual(summary["flow_metrics"]["resumes"], 3)
 
     def test_failed_scenario_fails_the_run(self):
         failed = [{"scenario": "stream-limit", "status": "fail", "error": "boom"}]
-        self.assertEqual(driver.summarize(failed, None, acceptance=False)[1], ["stream-limit: boom"])
-
+        for diagnostic in (False, True):
+            self.assertIn("stream-limit: boom", driver.summarize(failed, "rev", diagnostic)["failures"])
 
 if __name__ == "__main__":
     unittest.main()

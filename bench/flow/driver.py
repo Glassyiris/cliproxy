@@ -34,6 +34,7 @@ BULK_CONTENT = 40966  # f"{i:05d}:" plus 40,960 bytes per bulk record
 # Stored framing allowed per bulk record when locating the storage error
 # (2.5% of BULK_CONTENT); the error must arrive within one frame of the limit.
 STREAM_LIMIT_FRAMING = 1024
+DIAGNOSTIC = "diagnostic, not acceptance"
 # §9.2 flow-limit metrics and how scenario values combine. The gateway exposes
 # no internal stream counters, so the second group stays missing until it does.
 FLOW_METRICS = {"consumer_lag_bytes": max, "blocked_read_s": max, "resumes": sum, "stream_gone": sum,
@@ -417,6 +418,7 @@ class RecordedResponse:
 
 class Gateway:
     resumes = gone = 0  # resume attaches and 410 Gone responses seen by request()
+    diagnostic = False
 
     def __init__(self, binary, out, upstream):
         self.request_number = 0
@@ -843,8 +845,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("out", type=Path)
-    parser.add_argument("--acceptance", action="store_true",
-                        help="fail on unverified build provenance or any missing §9.2 flow metric")
+    parser.add_argument("--diagnostic", action="store_true",
+                        help=f"{DIAGNOSTIC}: report unverified provenance, metrics and positions without passing")
     args = parser.parse_args()
     binary, out = args.binary.resolve(strict=True), args.out.resolve()
     require(os.access(binary, os.X_OK), "gateway binary is not executable")
@@ -855,7 +857,7 @@ def main():
          "load": os.getloadavg(), "filesystem": subprocess.check_output(["stat", "-f", "-c", "%T", str(out)], text=True).strip(),
          "version": subprocess.check_output([str(binary), "--version"], text=True).strip(),
          "build_provenance": os.environ.get("FLOW_BUILD_PROVENANCE") or UNVERIFIED,
-         "acceptance": args.acceptance, "scenarios": SCENARIOS, "timeout_s": TIMEOUT})
+         "mode": DIAGNOSTIC if args.diagnostic else "acceptance", "scenarios": SCENARIOS, "timeout_s": TIMEOUT})
     results = []
     for name in SCENARIOS:
         directory = out / name
@@ -868,6 +870,7 @@ def main():
         row = {"scenario": name, "status": "fail"}
         try:
             gateway = Gateway(binary, directory, up)
+            gateway.diagnostic = args.diagnostic
             gateway.await_ready()
             row.update(run_scenario(gateway, name))
             row.setdefault("flow", {}).update(resumes=gateway.resumes, stream_gone=gateway.gone)
@@ -896,26 +899,33 @@ def main():
         print(json.dumps(row), flush=True)
         with (out / "results.jsonl").open("a") as raw:
             raw.write(json.dumps(row) + "\n")
-    flow, failures = summarize(results, os.environ.get("FLOW_BUILD_PROVENANCE"), args.acceptance)
-    dump(out / "summary.json", {"pass": not failures, "failures": failures, "flow_metrics": flow,
-                                "acceptance": args.acceptance, "results": results})
-    for failure in failures:
+    summary = summarize(results, os.environ.get("FLOW_BUILD_PROVENANCE"), args.diagnostic)
+    dump(out / "summary.json", {**summary, "results": results})
+    for failure in summary["failures"] + summary.get("unverified", []):
         print(f"flow-gate: {failure}", file=sys.stderr)
-    return 0 if not failures else 1
+    print(f"flow-gate: {summary['mode']}: {'pass' if summary['pass'] else 'fail'}", file=sys.stderr)
+    return 1 if summary["failures"] else 0
 
 
-def summarize(results, provenance, acceptance):
-    """Combine §9.2 flow metrics; acceptance also requires every metric and verified provenance."""
+def summarize(results, provenance, diagnostic):
+    """Acceptance fails closed on any failed scenario, missing §9.2 metric or unverified provenance.
+
+    Diagnostic mode lists the acceptance gaps as unverified and never reports a pass;
+    its exit status covers only the scenarios' own checks.
+    """
     flow = {name: None for name in (*FLOW_METRICS, *GATEWAY_ONLY_METRICS)}
     for name, combine in FLOW_METRICS.items():
         values = [r["flow"][name] for r in results if r["status"] == "pass" and name in r.get("flow", {})]
         flow[name] = combine(values) if values else None
     failures = [f"{r['scenario']}: {r.get('error', 'failed')}" for r in results if r["status"] != "pass"]
-    if acceptance:
-        if not provenance or provenance.startswith("UNVERIFIED"):
-            failures.append("FLOW_BUILD_PROVENANCE is unset; acceptance needs verified build provenance")
-        failures += [f"missing flow metric {name}" for name, value in flow.items() if value is None]
-    return flow, failures
+    gaps = [f"missing flow metric {name}" for name, value in flow.items() if value is None]
+    if not provenance or provenance.startswith("UNVERIFIED"):
+        gaps.append("FLOW_BUILD_PROVENANCE is unset; acceptance needs verified build provenance")
+    if diagnostic:
+        gaps += [f"{r['scenario']}: {r['position']}" for r in results if "position" in r]
+        return {"mode": DIAGNOSTIC, "pass": False, "failures": failures, "unverified": gaps, "flow_metrics": flow}
+    failures += gaps
+    return {"mode": "acceptance", "pass": not failures, "failures": failures, "flow_metrics": flow}
 
 
 if __name__ == "__main__":

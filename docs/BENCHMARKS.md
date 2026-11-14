@@ -143,9 +143,13 @@ duration (the longest upstream write interval during that stall), resume
 attaches, `410 Gone` responses and cancelled-stream cleanup (seconds from the
 storage error to the upstream's end). The gateway exposes no cache bytes, time
 since last read, evictions, expiries, allocation failures or outstanding leases,
-so those stay `null`. Run acceptance with `--acceptance`: it exits nonzero when
-`FLOW_BUILD_PROVENANCE` is unset or any flow metric is missing, so this gate
-cannot pass acceptance until the gateway reports the internal counters.
+so those stay `null`.
+
+`bench/flow-gate.sh NEW OUT` is the acceptance run and fails closed: it exits
+nonzero when any scenario fails, any flow metric is missing or
+`FLOW_BUILD_PROVENANCE` is unset. It cannot pass until the gateway reports the internal counters. Add `--diagnostic` to see the remaining checks: the summary is
+marked "diagnostic, not acceptance", lists those gaps under `unverified`, never
+sets `"pass": true`, and its exit status covers only the scenarios' own checks.
 
 ### Container startup
 
