@@ -10,3 +10,5 @@ Internal
 - Validate native Chat controls and media registrations before the request-end fence. Reassemble audio base64 quartets across source events and reject successful completion with an unfinished quartet.
 - Isolate native Chat media source-key collisions in request provenance and restore their original locations. Use canonical source kinds for capability and egress dispatch; preserve normalized mutation and deletion authority.
 - Bind collision provenance to stable normalized objects across deletion and document absorption. Prefer emitted normalized fields over preserved same-name fields without duplicate JSON keys.
+- Publish unfinished Chat request strings and typed media from validated prefixes, retaining logical string access and structured tool arguments. Rebind live names, values and duplicate-key comparisons to canonical positions before retiring bounded raw leases.
+- Collect buffered Chat response text and media before their JSON containers close, without publishing successful completion before full-body validation. Re-encode short base64 chunks with a carry and preserve late media attributes and transcripts.

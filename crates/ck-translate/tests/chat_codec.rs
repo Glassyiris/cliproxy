@@ -1,3 +1,5 @@
+#[path = "semantic/incremental.rs"]
+mod incremental;
 #[path = "semantic/request_controls.rs"]
 mod request_controls;
 #[path = "semantic/mod.rs"]

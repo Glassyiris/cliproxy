@@ -10,6 +10,9 @@ impl State {
         scope: Scope,
         field: &'static str,
     ) -> Result<bool> {
+        if self.finish_published(owner, input, value)? {
+            return Ok(true);
+        }
         let audio = field == "audio";
         let native_data = if audio {
             input.member(value, "data")?
@@ -85,7 +88,7 @@ impl State {
         let media = Media {
             node: native_data,
             id: media::local_id(b'm', self.serial)?,
-            data: text,
+            data: Some(text),
             encoding,
             kind: if audio { "audio" } else { "image" },
             mime: None,
@@ -132,16 +135,21 @@ impl State {
             return self.empty_array(owner, position, name);
         }
         for part in doc.children(field)? {
-            let mut scope = self.scope(position);
-            scope.block_index = Some(self.choices[position].next_block);
-            self.choices[position].next_block += 1;
-            self.emitter.emit(
-                owner,
-                Kind::BlockStart,
-                scope,
-                |e| e.bytes(b",\"kind\":\"content\""),
-                |_| Ok(()),
-            )?;
+            let scope = if let Some(scope) = self.published_scope(part) {
+                scope
+            } else {
+                let mut scope = self.scope(position);
+                scope.block_index = Some(self.choices[position].next_block);
+                self.choices[position].next_block += 1;
+                self.emitter.emit(
+                    owner,
+                    Kind::BlockStart,
+                    scope,
+                    |e| e.bytes(b",\"kind\":\"content\""),
+                    |_| Ok(()),
+                )?;
+                scope
+            };
             if !self.media_value(owner, doc, part, scope, name)? {
                 self.emitter.emit(
                     owner,

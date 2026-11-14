@@ -23,9 +23,12 @@ pub enum Kind {
 pub struct Node {
     pub kind: Kind,
     pub span: Span,
+    /// End of the last complete decoded scalar, excluding the closing quote.
+    pub validated_end: u64,
     pub key: Option<Span>,
     pub first: Option<usize>,
     pub next: Option<usize>,
+    pub parent: Option<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -46,12 +49,14 @@ struct Frame {
 }
 struct Key {
     span: Span,
+    parent: usize,
+    retained: Option<super::document::Name>,
     previous: Option<usize>,
 }
 #[derive(Clone, Copy)]
 enum Mode {
     Idle,
-    String { start: u64, escaped: bool, key: bool },
+    String { start: u64, key: bool, node: Option<usize> },
     Atom { start: u64 },
 }
 
@@ -74,6 +79,7 @@ pub struct Scanner {
     failed: bool,
     finished: bool,
     utf8: Utf8,
+    string: StringDecoder,
 }
 
 impl Scanner {
@@ -92,6 +98,7 @@ impl Scanner {
             failed: false,
             finished: false,
             utf8: Utf8::default(),
+            string: StringDecoder::default(),
         })
     }
 
@@ -142,14 +149,63 @@ impl Scanner {
         if self.failed || self.finished {
             return Err(Error::Closed);
         }
-        let result = self.scan(source);
+        let result = self.scan(source, None);
         if result.is_err() {
             self.failed = true;
         }
         result
     }
 
-    fn scan(&mut self, source: &Source) -> Result<()> {
+    pub(crate) fn advance_document(&mut self, doc: &super::document::Document) -> Result<()> {
+        if self.failed || self.finished {
+            return Err(Error::Closed);
+        }
+        let result = self.scan(doc.input(), Some(doc));
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    pub(crate) fn bind_key(&mut self, span: Span, name: super::document::Name) {
+        if let Ok(index) = self.keys.binary_search_by_key(&span.start, |key| key.span.start) {
+            self.keys[index].retained = Some(name);
+        }
+    }
+
+    pub(crate) fn key_is(&self, doc: &super::document::Document, span: Span, text: &str) -> Result<bool> {
+        if let Ok(index) = self.keys.binary_search_by_key(&span.start, |key| key.span.start)
+            && let Some(name) = self.keys[index].retained
+        {
+            return doc.name_is(name, text);
+        }
+        string_is(doc.input(), span, text)
+    }
+
+    pub(crate) fn needs_key(&self, span: Span) -> bool {
+        self.keys
+            .binary_search_by_key(&span.start, |key| key.span.start)
+            .ok()
+            .is_some_and(|index| {
+                let key = &self.keys[index];
+                key.retained.is_none() && self.frames.iter().any(|frame| frame.node == key.parent)
+            })
+    }
+
+    pub(crate) fn raw_floor(&self) -> u64 {
+        let mut floor = match self.mode {
+            Mode::String { start, key: true, .. } | Mode::Atom { start } => start,
+            _ => self.offset,
+        };
+        for key in &self.keys {
+            if key.retained.is_none() && self.frames.iter().any(|frame| frame.node == key.parent) {
+                floor = floor.min(key.span.start);
+            }
+        }
+        floor
+    }
+
+    fn scan(&mut self, source: &Source, document: Option<&super::document::Document>) -> Result<()> {
         if source.stream_id() != self.metadata.stream_id() || self.source_id.is_some_and(|id| id != source.id()) {
             return Err(Error::Position);
         }
@@ -168,39 +224,26 @@ impl Scanner {
             let at = self.offset;
             self.utf8.push(byte)?;
             self.offset += 1;
-            self.byte(source, at, byte)?;
+            self.byte(source, at, byte, document)?;
         }
         Ok(())
     }
 
-    fn byte(&mut self, source: &Source, at: u64, byte: u8) -> Result<()> {
+    fn byte(&mut self, source: &Source, at: u64, byte: u8, document: Option<&super::document::Document>) -> Result<()> {
         match self.mode {
-            Mode::String { start, escaped, key } => {
-                if byte < 0x20 {
-                    return Err(Error::Json);
-                }
-                if escaped {
-                    self.mode = Mode::String {
-                        start,
-                        escaped: false,
-                        key,
-                    };
-                } else if byte == b'\\' {
-                    self.mode = Mode::String {
-                        start,
-                        escaped: true,
-                        key,
-                    };
-                } else if byte == b'"' {
+            Mode::String { start, key, node } => {
+                if byte == b'"' && self.string.complete() {
                     let span = Span { start, end: at + 1 };
-                    let mut decoded = Decoded::new(source, span)?;
-                    while decoded.next_scalar()?.is_some() {}
                     self.mode = Mode::Idle;
                     if key {
-                        self.key(source, span)?;
+                        self.key(source, span, document)?;
                     } else {
-                        self.value(Kind::String, span)?;
+                        self.nodes[node.ok_or(Error::Json)?].span = span;
                     }
+                } else if self.string.push(byte)?.is_some()
+                    && let Some(node) = node
+                {
+                    self.nodes[node].validated_end = at + 1;
                 }
                 return Ok(());
             }
@@ -251,10 +294,11 @@ impl Scanner {
                 frame.expect = Expect::Value;
             }
             b'"' if matches!(expect, Some(Expect::ObjectFirst | Expect::Key)) => {
+                self.string = StringDecoder::default();
                 self.mode = Mode::String {
                     start: at,
-                    escaped: false,
                     key: true,
+                    node: None,
                 };
             }
             _ => {
@@ -285,11 +329,14 @@ impl Scanner {
                         });
                     }
                     b'"' => {
+                        let node = self.value(Kind::String, Span { start: at, end: 0 })?;
+                        self.nodes[node].validated_end = at + 1;
+                        self.string = StringDecoder::default();
                         self.mode = Mode::String {
                             start: at,
-                            escaped: false,
                             key: false,
-                        }
+                            node: Some(node),
+                        };
                     }
                     b'-' | b'0'..=b'9' | b't' | b'f' | b'n' => self.mode = Mode::Atom { start: at },
                     _ => return Err(Error::Json),
@@ -332,7 +379,7 @@ impl Scanner {
         Ok(())
     }
 
-    fn key(&mut self, source: &Source, span: Span) -> Result<()> {
+    fn key(&mut self, source: &Source, span: Span, document: Option<&super::document::Document>) -> Result<()> {
         let parent = self.frames.last().ok_or(Error::Json)?.node;
         let mut hash = self.hash.build_hasher();
         let mut decoded = Decoded::new(source, span)?;
@@ -343,14 +390,35 @@ impl Scanner {
         let previous = self.key_heads.get(&key).copied();
         let mut cursor = previous;
         while let Some(index) = cursor {
-            if string_eq(source, span, self.keys[index].span)? {
+            let equal = if let Some(name) = self.keys[index].retained {
+                let doc = document.ok_or(Error::Position)?;
+                let mut left = Decoded::new(source, span)?;
+                let mut right = doc.name_chars(name)?;
+                loop {
+                    let c = left.next_scalar()?;
+                    if c != right.next_scalar()? {
+                        break false;
+                    }
+                    if c.is_none() {
+                        break true;
+                    }
+                }
+            } else {
+                string_eq(source, span, self.keys[index].span)?
+            };
+            if equal {
                 return Err(Error::DuplicateKey);
             }
             cursor = self.keys[index].previous;
         }
         self.reserve(0, 0, 1)?;
         self.key_heads.insert(key, self.keys.len());
-        self.keys.push(Key { span, previous });
+        self.keys.push(Key {
+            span,
+            parent,
+            retained: None,
+            previous,
+        });
         let frame = self.frames.last_mut().unwrap();
         frame.key = Some(span);
         frame.expect = Expect::Colon;
@@ -375,9 +443,11 @@ impl Scanner {
         self.nodes.push(Node {
             kind,
             span,
+            validated_end: span.end,
             key,
             first: None,
             next: None,
+            parent: self.frames.last().map(|frame| frame.node),
         });
         Ok(index)
     }
@@ -545,6 +615,12 @@ impl<'a> Decoded<'a> {
         })
     }
 
+    pub(crate) fn fragment(source: &'a Source, span: Span) -> Result<Self> {
+        Ok(Self {
+            cursor: source.cursor(span)?,
+        })
+    }
+
     fn hex(&mut self) -> Result<u32> {
         let mut value = 0;
         for _ in 0..4 {
@@ -614,6 +690,127 @@ impl<'a> Decoded<'a> {
                 .ok_or(Error::Utf8)?
         };
         Ok(Some(scalar))
+    }
+}
+
+/// Resumable JSON string decoder. Only an incomplete scalar or escape survives a call.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct StringDecoder {
+    state: u8,
+    digits: u8,
+    code: u32,
+    high: u32,
+    utf8: [u8; 4],
+    used: usize,
+    needed: usize,
+}
+
+impl StringDecoder {
+    pub(crate) fn complete(&self) -> bool {
+        self.state == 0 && self.used == 0
+    }
+
+    pub(crate) fn push(&mut self, byte: u8) -> Result<Option<char>> {
+        if self.used != 0 {
+            if !(0x80..=0xbf).contains(&byte) {
+                return Err(Error::Utf8);
+            }
+            self.utf8[self.used] = byte;
+            self.used += 1;
+            if self.used != self.needed {
+                return Ok(None);
+            }
+            let c = std::str::from_utf8(&self.utf8[..self.used])
+                .map_err(|_| Error::Utf8)?
+                .chars()
+                .next()
+                .ok_or(Error::Utf8)?;
+            self.used = 0;
+            return Ok(Some(c));
+        }
+        match self.state {
+            0 => match byte {
+                b'\\' => self.state = 1,
+                0..=0x1f | b'"' => return Err(Error::Json),
+                0x20..=0x7f => return Ok(Some(byte as char)),
+                _ => {
+                    self.needed = match byte {
+                        0xc2..=0xdf => 2,
+                        0xe0..=0xef => 3,
+                        0xf0..=0xf4 => 4,
+                        _ => return Err(Error::Utf8),
+                    };
+                    self.utf8[0] = byte;
+                    self.used = 1;
+                }
+            },
+            1 => {
+                self.state = 0;
+                return Ok(Some(match byte {
+                    b'"' => '"',
+                    b'\\' => '\\',
+                    b'/' => '/',
+                    b'b' => '\u{8}',
+                    b'f' => '\u{c}',
+                    b'n' => '\n',
+                    b'r' => '\r',
+                    b't' => '\t',
+                    b'u' => {
+                        self.state = 2;
+                        self.code = 0;
+                        self.digits = 0;
+                        return Ok(None);
+                    }
+                    _ => return Err(Error::Json),
+                }));
+            }
+            2 | 5 => {
+                let digit = match byte {
+                    b'0'..=b'9' => byte - b'0',
+                    b'a'..=b'f' => byte - b'a' + 10,
+                    b'A'..=b'F' => byte - b'A' + 10,
+                    _ => return Err(Error::Json),
+                };
+                self.code = self.code * 16 + u32::from(digit);
+                self.digits += 1;
+                if self.digits == 4 {
+                    let code = self.code;
+                    if self.state == 5 {
+                        if !(0xdc00..=0xdfff).contains(&code) {
+                            return Err(Error::Json);
+                        }
+                        self.state = 0;
+                        return Ok(Some(
+                            char::from_u32(0x10000 + ((self.high - 0xd800) << 10) + code - 0xdc00)
+                                .ok_or(Error::Json)?,
+                        ));
+                    }
+                    if (0xd800..=0xdbff).contains(&code) {
+                        self.high = code;
+                        self.state = 3;
+                    } else {
+                        self.state = 0;
+                        return Ok(Some(char::from_u32(code).ok_or(Error::Json)?));
+                    }
+                }
+            }
+            3 => {
+                if byte != b'\\' {
+                    return Err(Error::Json);
+                }
+                self.state = 4;
+            }
+            4 => {
+                if byte != b'u' {
+                    return Err(Error::Json);
+                }
+                self.state = 5;
+                self.code = 0;
+                self.digits = 0;
+            }
+            _ => return Err(Error::Json),
+        }
+        Ok(None)
     }
 }
 

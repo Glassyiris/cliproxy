@@ -18,7 +18,7 @@ pub enum Encoding {
 pub struct Media {
     pub node: usize,
     pub id: LocalId,
-    pub data: Text,
+    pub data: Option<Text>,
     pub encoding: Encoding,
     pub kind: &'static str,
     pub mime: Option<usize>,
@@ -28,6 +28,7 @@ struct Entry {
     media: Media,
     lineage: [Option<(usize, u64)>; 128],
     chunks: Option<super::table::Table<Text>>,
+    active: bool,
 }
 
 pub struct Registry {
@@ -54,11 +55,18 @@ impl Registry {
     }
     pub fn get(&self, doc: &Document, node: usize) -> Result<Option<Media>> {
         self.validate_document(doc)?;
-        let Some(entry) = self.entries.iter().find(|entry| entry.media.node == node) else {
+        let Some(entry) = self
+            .entries
+            .iter()
+            .find(|entry| entry.active && entry.media.node == node)
+        else {
             return Ok(None);
         };
         if lineage(doc, node)? != entry.lineage {
             return Err(Error::Position);
+        }
+        if matches!(entry.media.encoding, Encoding::Utf8) && matches!(doc.node(node)?.value, Value::Utf8Media) {
+            return Ok(Some(entry.media));
         }
         let kind = doc.required(node, "type")?;
         let id = doc.required(node, "media_id")?;
@@ -91,37 +99,79 @@ impl Registry {
         let media = Media {
             node,
             id,
-            data,
+            data: Some(data),
             encoding,
             kind,
             mime,
         };
-        doc.replace(node, Value::Object)?;
-        doc.set(node, "type", Value::Text("x_ck_media"))?;
-        doc.set(node, "media_id", Value::Id(id))?;
-        doc.set(
-            node,
-            "value_kind",
-            Value::Text(match encoding {
-                Encoding::Base64 | Encoding::DataUri { .. } => "bytes",
-                Encoding::Utf8 => "utf8",
-            }),
-        )?;
+        if matches!(encoding, Encoding::Utf8) {
+            doc.replace(node, Value::Utf8Media)?;
+        } else {
+            doc.replace(node, Value::Object)?;
+            doc.set(node, "type", Value::Text("x_ck_media"))?;
+            doc.set(node, "media_id", Value::Id(id))?;
+            doc.set(node, "value_kind", Value::Text("bytes"))?;
+        }
         self.entries.push(Entry {
             media,
             lineage: lineage(doc, node)?,
             chunks: None,
+            active: true,
         });
         Ok(media)
     }
     pub fn entries(&self) -> impl Iterator<Item = Media> + '_ {
-        self.entries.iter().map(|entry| entry.media)
+        self.entries
+            .iter()
+            .filter(|entry| entry.active)
+            .map(|entry| entry.media)
     }
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
     pub(crate) fn at(&self, index: usize) -> Media {
         self.entries[index].media
+    }
+
+    pub(crate) fn validate_registrations(&self, doc: &Document) -> Result<()> {
+        for media in self.entries() {
+            if lineage(doc, media.node)?
+                .iter()
+                .flatten()
+                .any(|(node, _)| *node == doc.root())
+            {
+                self.get(doc, media.node)?.ok_or(Error::Position)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Only ingress normalization may relocate bindings; ordinary get never refreshes lineage.
+    pub(crate) fn relocate_ingress(&mut self, doc: &Document) -> Result<()> {
+        self.validate_document(doc)?;
+        for entry in &mut self.entries {
+            if !entry.active {
+                continue;
+            }
+            if matches!(entry.media.encoding, Encoding::Utf8)
+                && !matches!(doc.node(entry.media.node)?.value, Value::Utf8Media)
+            {
+                entry.active = false;
+            } else {
+                entry.lineage = lineage(doc, entry.media.node)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn update_mime(&mut self, node: usize, mime: Option<usize>) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.active && entry.media.node == node)
+        {
+            entry.media.mime = mime;
+        }
     }
 
     pub(crate) fn retain(
@@ -131,27 +181,43 @@ impl Registry {
         owner: &mut Writer,
         reader: &mut ck_stream::Reader,
     ) -> Result<()> {
-        let mut chunks = super::table::Table::new(owner)?;
-        let (kind, _) = super::internal::next(owner, reader)?;
-        if kind != Kind::MediaStart {
+        if self.retain_record(doc, index, owner, reader)? != Kind::MediaStart {
             return Err(Error::Schema);
         }
-        loop {
-            let (kind, event) = super::internal::next(owner, reader)?;
-            if kind == Kind::MediaEnd {
-                break;
-            }
-            if kind != Kind::Data {
-                return Err(Error::Schema);
-            }
-            let node = event.required(event.root(), "bytes")?;
-            let Value::String(text) = event.node(node)?.value else {
-                return Err(Error::Schema);
-            };
-            chunks.push(doc.retain_text(event, text)?)?;
-        }
-        self.entries[index].chunks = Some(chunks);
+        while self.retain_record(doc, index, owner, reader)? != Kind::MediaEnd {}
         Ok(())
+    }
+
+    pub(crate) fn retain_record(
+        &mut self,
+        doc: &mut Document,
+        index: usize,
+        owner: &mut Writer,
+        reader: &mut ck_stream::Reader,
+    ) -> Result<Kind> {
+        let (kind, event) = super::internal::next(owner, reader)?;
+        let entry = &mut self.entries[index];
+        match kind {
+            Kind::MediaStart => {
+                entry.chunks = Some(super::table::Table::new(owner)?);
+                entry.media.data = None;
+            }
+            Kind::Data => {
+                let node = event.required(event.root(), "bytes")?;
+                let Value::String(text) = event.node(node)?.value else {
+                    return Err(Error::Schema);
+                };
+                let text = doc.retain_text(event, text)?;
+                entry.chunks.as_mut().ok_or(Error::Schema)?.push(text)?;
+                if matches!(entry.media.encoding, Encoding::Utf8) {
+                    let child = doc.add(None, Value::String(text))?;
+                    doc.append(entry.media.node, child)?;
+                }
+            }
+            Kind::MediaEnd => (),
+            _ => return Err(Error::Schema),
+        }
+        Ok(kind)
     }
 
     pub fn write_value(&self, doc: &Document, node: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
@@ -177,12 +243,11 @@ impl Registry {
                 doc.write_contents(mime, e)?;
                 e.bytes(b";base64,")?;
             }
-            for text in chunks.iter() {
-                e.string_fragment(doc.source(*text)?, text.span)?;
-            }
+            write_encoded_chunks(doc, chunks.iter().copied(), e)?;
             e.bytes(b"\"")
         } else {
-            e.span(doc.source(entry.media.data)?, entry.media.data.span)
+            let text = entry.media.data.ok_or(Error::Position)?;
+            e.span(doc.source(text)?, text.span)
         }
     }
 }
@@ -222,7 +287,8 @@ pub fn local_id(prefix: u8, mut index: u64) -> Result<LocalId> {
 
 /// Decodes at most one scalar/quartet at a time. Only the emitted chunk is staged on the stack.
 pub fn bytes(doc: &Document, media: Media, mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
-    let mut decoded = Decoded::new(doc.source(media.data)?, media.data.span)?;
+    let text = media.data.ok_or(Error::Position)?;
+    let mut decoded = Decoded::new(doc.source(text)?, text.span)?;
     if let Encoding::DataUri { skip } = media.encoding {
         for _ in 0..skip {
             decoded.next_scalar()?.ok_or(Error::Schema)?;
@@ -344,7 +410,7 @@ pub(crate) fn publish_with_attributes(
         Ok(())
     };
     if let Some(fragment) = fragment {
-        fragment.push(doc, media.data, &mut collect)?;
+        fragment.push(doc, media.data.ok_or(Error::Position)?, &mut collect)?;
     } else {
         bytes(doc, media, &mut collect)?;
     }
@@ -413,14 +479,27 @@ pub(crate) fn decode_base64(doc: &Document, text: Text, mut emit: impl FnMut(&[u
 }
 
 pub(crate) fn write_base64_fragments(doc: &Document, node: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
+    let texts = doc.children(node)?.map(|child| match doc.node(child)?.value {
+        Value::String(text) => Ok(text),
+        _ => Err(Error::Schema),
+    });
+    write_encoded_chunks_checked(doc, texts, e)
+}
+
+fn write_encoded_chunks(doc: &Document, texts: impl Iterator<Item = Text>, e: &mut Encoder<'_, '_>) -> Result<()> {
+    write_encoded_chunks_checked(doc, texts.map(Ok), e)
+}
+
+fn write_encoded_chunks_checked(
+    doc: &Document,
+    texts: impl Iterator<Item = Result<Text>>,
+    e: &mut Encoder<'_, '_>,
+) -> Result<()> {
     use base64::Engine;
     let mut carry = [0; 3];
     let mut used = 0;
-    for child in doc.children(node)? {
-        let Value::String(text) = doc.node(child)?.value else {
-            return Err(Error::Schema);
-        };
-        decode_base64(doc, text, |bytes| {
+    for text in texts {
+        decode_base64(doc, text?, |bytes| {
             for &byte in bytes {
                 carry[used] = byte;
                 used += 1;
@@ -444,6 +523,212 @@ pub(crate) fn write_base64_fragments(doc: &Document, node: usize, e: &mut Encode
         e.bytes(&encoded)?;
     }
     Ok(())
+}
+
+/// One media lifetime; payload is committed immediately, never retained on the heap.
+pub(crate) struct Publisher {
+    scope: Scope,
+    index: u64,
+    offset: u64,
+    ended: bool,
+}
+
+impl Publisher {
+    pub(crate) fn begin(doc: &Document, media: Media, emitter: &mut Emitter, owner: &mut Writer) -> Result<Self> {
+        let scope = Scope {
+            media_id: Some(media.id),
+            ..Scope::default()
+        };
+        Self::start(emitter, owner, scope, |e| {
+            e.bytes(b",\"kind\":")?;
+            e.string(media.kind)?;
+            e.bytes(b",\"encoding\":\"base64\"")?;
+            if let Some(mime) = media.mime {
+                e.bytes(b",\"mime\":")?;
+                doc.write(mime, e)?;
+            }
+            Ok(())
+        })
+    }
+
+    pub(crate) fn start(
+        emitter: &mut Emitter,
+        owner: &mut Writer,
+        scope: Scope,
+        fields: impl Fn(&mut Encoder<'_, '_>) -> Result<()>,
+    ) -> Result<Self> {
+        emitter.emit(owner, Kind::MediaStart, scope, fields, |_| Ok(()))?;
+        Ok(Self {
+            scope,
+            index: 0,
+            offset: 0,
+            ended: false,
+        })
+    }
+
+    pub(crate) fn append(&mut self, bytes: &[u8], emitter: &mut Emitter, owner: &mut Writer) -> Result<()> {
+        use base64::Engine;
+        if self.ended {
+            return Err(Error::Closed);
+        }
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        if bytes.len() > emitter.data_capacity(self.scope, self.index, self.offset)? {
+            return Err(Error::EventTooLarge);
+        }
+        let mut encoded = [0; 49_152];
+        let count = base64::engine::general_purpose::STANDARD
+            .encode_slice(bytes, &mut encoded)
+            .map_err(|_| Error::Schema)?;
+        emitter.emit(
+            owner,
+            Kind::Data,
+            self.scope,
+            |e| {
+                e.bytes(b",\"index\":")?;
+                e.unsigned(self.index)?;
+                e.bytes(b",\"offset\":")?;
+                e.unsigned(self.offset)?;
+                e.bytes(b",\"bytes\":\"")?;
+                e.bytes(&encoded[..count])?;
+                e.bytes(b"\"")
+            },
+            |_| Ok(()),
+        )?;
+        self.index = self.index.checked_add(1).ok_or(Error::Limit)?;
+        self.offset = self.offset.checked_add(bytes.len() as u64).ok_or(Error::Limit)?;
+        Ok(())
+    }
+
+    pub(crate) fn end(&mut self, emitter: &mut Emitter, owner: &mut Writer) -> Result<()> {
+        if self.ended {
+            return Err(Error::Closed);
+        }
+        emitter.emit(
+            owner,
+            Kind::MediaEnd,
+            self.scope,
+            |e| {
+                e.bytes(b",\"bytes\":")?;
+                e.unsigned(self.offset)?;
+                e.bytes(b",\"status\":\"completed\"")
+            },
+            |_| Ok(()),
+        )?;
+        self.ended = true;
+        Ok(())
+    }
+}
+
+pub(crate) enum DataUriPrefix {
+    Incomplete,
+    Plain,
+    Encoded {
+        encoding: Encoding,
+        mime: ck_stream::ScratchLease,
+    },
+}
+
+pub(crate) fn data_uri_prefix(
+    owner: &mut Writer,
+    source: &super::source::Source,
+    span: super::source::Span,
+) -> Result<DataUriPrefix> {
+    let mut chars = Decoded::fragment(source, span)?;
+    for expected in "data:".chars() {
+        let Some(c) = chars.next_scalar()? else {
+            return Ok(DataUriPrefix::Incomplete);
+        };
+        if !c.eq_ignore_ascii_case(&expected) {
+            return Ok(DataUriPrefix::Plain);
+        }
+    }
+    let mut count = 0u64;
+    let mut suffix = ['\0'; 7];
+    loop {
+        let Some(c) = chars.next_scalar()? else {
+            return Ok(DataUriPrefix::Incomplete);
+        };
+        if c == ',' {
+            break;
+        }
+        if !c.is_ascii() || c.is_ascii_control() {
+            return Err(Error::Schema);
+        }
+        suffix.rotate_left(1);
+        suffix[6] = c;
+        count = count.checked_add(1).ok_or(Error::Limit)?;
+    }
+    if suffix != [';', 'b', 'a', 's', 'e', '6', '4'] {
+        return Err(Error::Unsupported);
+    }
+    let mime_chars = count.checked_sub(7).ok_or(Error::Schema)?;
+    let mime = super::encode::scratch(owner, |e| {
+        let mut chars = Decoded::fragment(source, span)?;
+        for _ in 0..5 {
+            chars.next_scalar()?;
+        }
+        e.bytes(b"\"")?;
+        for _ in 0..mime_chars {
+            e.escaped(chars.next_scalar()?.ok_or(Error::Schema)?.encode_utf8(&mut [0; 4]))?;
+        }
+        e.bytes(b"\"")
+    })?;
+    Ok(DataUriPrefix::Encoded {
+        encoding: Encoding::DataUri { skip: count + 6 },
+        mime,
+    })
+}
+
+pub(crate) struct InputDecoder {
+    encoding: Encoding,
+    skip: u64,
+    quartet: [u8; 4],
+    count: usize,
+    padded: bool,
+}
+impl InputDecoder {
+    pub(crate) fn new(encoding: Encoding) -> Self {
+        Self {
+            encoding,
+            skip: match encoding {
+                Encoding::DataUri { skip } => skip,
+                _ => 0,
+            },
+            quartet: [0; 4],
+            count: 0,
+            padded: false,
+        }
+    }
+    pub(crate) fn complete(&self) -> bool {
+        self.skip == 0 && self.count == 0
+    }
+    pub(crate) fn push(&mut self, c: char, mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
+        use base64::Engine;
+        if self.skip != 0 {
+            self.skip -= 1;
+            return Ok(());
+        }
+        if matches!(self.encoding, Encoding::Utf8) {
+            return emit(c.encode_utf8(&mut [0; 4]).as_bytes());
+        }
+        if self.padded || !c.is_ascii() {
+            return Err(Error::Schema);
+        }
+        self.quartet[self.count] = c as u8;
+        self.count += 1;
+        if self.count == 4 {
+            let mut bytes = [0; 3];
+            let len = base64::engine::general_purpose::STANDARD
+                .decode_slice(self.quartet, &mut bytes)
+                .map_err(|_| Error::Schema)?;
+            self.padded = self.quartet.contains(&b'=');
+            self.count = 0;
+            emit(&bytes[..len])?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]

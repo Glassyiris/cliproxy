@@ -178,6 +178,8 @@ Binary data bytes are exact after base64 decoding; JSON whitespace, escaping and
 For realtime, `media.start.attributes` names track, packet/message ID, timestamp/timebase and flags; `media.end` closes that packet/message, not the whole session.
 Large media values embedded in JSON are decoded incrementally into these chunks, with a media-reference content part instead of a second inline byte copy.
 
+Chat ingress flushes every available complete decoded fragment at bounded processing steps; it retains no ready decoded bytes between calls. An incomplete UTF-8 scalar, JSON escape or base64 quartet remains parser state, not a decoded chunk. Buffered JSON uses this collection path without ending the response before full-body validation; external SSE still requires complete records before response semantics are published.
+
 ### 3.5 Usage snapshots
 
 | `UsageSnapshot` field | Meaning |
@@ -238,6 +240,7 @@ The logical request is a Chat-based document plus `x_ck`, with typed content and
 `request.field` uses absolute JSON pointers into this document. Emit parent containers as empty objects/arrays before their child fields; arrays use consecutive numeric indexes.
 The reference spelling is `{type: "x_ck_media", media_id: string, value_kind: "bytes"|"utf8"}`. Egress resolves only references registered by trusted ingress at the exact document position in this stream's own media table, never by JSON shape or client-supplied `X.media`; literal look-alike objects pass through as data.
 Large strings use registered references with `mime: text/plain;charset=utf-8` and custom-data events; the logical value is concatenated decoded UTF-8. Encoders escape incrementally from positions after validation, not from a second accumulated body.
+Chat request ingress rebinds live normalized names, values, media and duplicate-key backing to canonical positions before retiring raw input leases. Pending strings expose only validated prefixes. When later members determine a content part's type, typed publication waits for that context rather than interpreting an unknown subtree as media.
 Routing may select model/operation/destination early, but no upstream request is sent before the whole internal request, including final fields and media, passes syntax/schema and destination capability validation at `request.end`. Authentication remains outside the document.
 Capability validation covers supplied model/operation, roles and ordered content kinds, tool declarations/choice/call-result linkage, signed/encrypted replay, cache directives, sampling/token limits, output schema/modalities, session controls and mapped provider parameters. Unsupported members fail with 400; unknown unmapped fields follow §3.7. No unresolved field is exempt from the fence.
 

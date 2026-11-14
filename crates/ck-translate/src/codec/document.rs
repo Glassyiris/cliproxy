@@ -1,3 +1,6 @@
+#[path = "document_pending.rs"]
+pub(crate) mod pending;
+
 use ck_stream::{MetadataPermit, Writer};
 
 use super::{
@@ -26,6 +29,7 @@ pub enum Value {
     Array,
     Fragments,
     Base64Fragments,
+    Utf8Media,
     String(Text),
     Number(Text),
     Bool(bool),
@@ -45,6 +49,11 @@ pub struct Node {
     pub revision: u64,
     last: Option<usize>,
     origin: Option<(usize, Option<&'static str>)>,
+    origin_next: Option<usize>,
+    origins: Option<usize>,
+    last_origin: Option<usize>,
+    published: bool,
+    input_key: Option<Span>,
 }
 
 /// Mutable normalized topology; payloads remain under mapped leases.
@@ -189,6 +198,11 @@ impl Document {
                 revision: 0,
                 last: None,
                 origin: None,
+                origin_next: None,
+                origins: None,
+                last_origin: None,
+                published: false,
+                input_key: if part == 0 { n.key } else { None },
             });
         }
         for parent in base..self.nodes.len() {
@@ -233,6 +247,9 @@ impl Document {
             node.parent = node.parent.map(|i| i + base);
             node.last = node.last.map(|i| i + base);
             node.origin = node.origin.map(|(parent, carrier)| (parent + base, carrier));
+            node.origin_next = node.origin_next.map(|i| i + base);
+            node.origins = node.origins.map(|i| i + base);
+            node.last_origin = node.last_origin.map(|i| i + base);
             self.nodes.push(node);
         }
         self.sources.append(&mut other.sources);
@@ -273,6 +290,53 @@ impl Document {
     pub fn node(&self, index: usize) -> Result<Node> {
         self.check_live()?;
         self.nodes.get(index).copied().ok_or(Error::Position)
+    }
+    pub(crate) fn published(&self, index: usize) -> Result<bool> {
+        Ok(self.node(index)?.published)
+    }
+    pub(crate) fn mark_published(&mut self, index: usize) {
+        self.nodes[index].published = true;
+    }
+
+    pub(crate) fn release_input_before(&mut self, offset: u64) -> Result<()> {
+        self.sources[0].release_before(offset)
+    }
+    pub(crate) fn release_input_range(&mut self, span: Span) -> Result<()> {
+        self.sources[0].release_range(span)
+    }
+
+    pub(crate) fn rebind_keys(&mut self, scanner: &mut json::Scanner) -> Result<()> {
+        for index in 0..self.nodes.len() {
+            let node = self.nodes[index];
+            if let (Some(span), Some(name)) = (node.input_key, node.name) {
+                if !scanner.needs_key(span) {
+                    self.nodes[index].input_key = None;
+                    continue;
+                }
+                if matches!(name, Name::Mapped(Text { source: 0, .. })) {
+                    continue;
+                }
+                if self.names_equal(Name::Mapped(Text { source: 0, span }), name)? {
+                    scanner.bind_key(span, name);
+                    self.nodes[index].input_key = None;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn raw_floor(&self, index: usize, mut floor: u64) -> Result<u64> {
+        let node = self.node(index)?;
+        if let Some(Name::Mapped(Text { source: 0, span })) = node.name {
+            floor = floor.min(span.start);
+        }
+        if let Value::String(Text { source: 0, span }) | Value::Number(Text { source: 0, span }) = node.value {
+            floor = floor.min(span.start);
+        }
+        for child in self.children(index)? {
+            floor = self.raw_floor(child, floor)?;
+        }
+        Ok(floor)
     }
     pub fn source(&self, text: Text) -> Result<&Source> {
         self.sources.get(text.source).ok_or(Error::Position)
@@ -372,12 +436,13 @@ impl Document {
         self.member(parent, name)?.ok_or(Error::Schema)
     }
     pub fn string_is(&self, index: usize, value: &str) -> Result<bool> {
-        match self.node(index)?.value {
-            Value::String(t) => json::string_is(self.source(t)?, t.span, value),
-            Value::Text(s) => Ok(s == value),
-            Value::Id(id) => Ok(id.as_str() == value),
-            _ => Err(Error::Schema),
+        let mut chars = self.chars(index)?;
+        for expected in value.chars() {
+            if chars.next_scalar()? != Some(expected) {
+                return Ok(false);
+            }
         }
+        Ok(chars.next_scalar()?.is_none())
     }
     pub fn chars(&self, index: usize) -> Result<Characters<'_>> {
         self.check_live()?;
@@ -385,6 +450,14 @@ impl Document {
             Value::String(t) => Ok(Characters::Mapped(json::Decoded::new(self.source(*t)?, t.span)?)),
             Value::Text(s) => Ok(Characters::Static(s.chars())),
             Value::Id(id) => Ok(Characters::Static(id.as_str().chars())),
+            Value::Utf8Media => Ok(Characters::Encoded(EncodedCharacters {
+                doc: self,
+                next: self.nodes[index].first,
+                decoded: None,
+                bytes: [0; 3],
+                used: 0,
+                length: 0,
+            })),
             _ => Err(Error::Schema),
         }
     }
@@ -427,13 +500,50 @@ impl Document {
     /// JSON imports never create these associations; absorb remaps their node indexes.
     pub fn bind_origin(&mut self, entry: usize, parent: usize, carrier: Option<&'static str>) -> Result<()> {
         self.node(parent)?;
-        self.node(entry)?;
+        let old = self.node(entry)?.origin;
+        if old == Some((parent, carrier)) {
+            return Ok(());
+        }
+        if let Some((old_parent, _)) = old {
+            let mut at = self.nodes[old_parent].origins;
+            let mut previous: Option<usize> = None;
+            while let Some(index) = at {
+                let next = self.nodes[index].origin_next;
+                if index == entry {
+                    if let Some(previous) = previous {
+                        self.nodes[previous].origin_next = next;
+                    } else {
+                        self.nodes[old_parent].origins = next;
+                    }
+                    if self.nodes[old_parent].last_origin == Some(entry) {
+                        self.nodes[old_parent].last_origin = previous;
+                    }
+                    break;
+                }
+                previous = Some(index);
+                at = next;
+            }
+        }
         self.nodes[entry].origin = Some((parent, carrier));
+        self.nodes[entry].origin_next = None;
+        if let Some(last) = self.nodes[parent].last_origin {
+            self.nodes[last].origin_next = Some(entry);
+        } else {
+            self.nodes[parent].origins = Some(entry);
+        }
+        self.nodes[parent].last_origin = Some(entry);
         Ok(())
     }
 
     pub fn origin(&self, entry: usize) -> Result<Option<(usize, Option<&'static str>)>> {
         Ok(self.node(entry)?.origin)
+    }
+
+    pub(crate) fn origins(&self, parent: usize) -> Result<Origins<'_>> {
+        Ok(Origins {
+            doc: self,
+            next: self.node(parent)?.origins,
+        })
     }
 
     pub fn add(&mut self, name: Option<Name>, value: Value) -> Result<usize> {
@@ -448,13 +558,21 @@ impl Document {
             parent: None,
             revision: 0,
             origin: None,
+            origin_next: None,
+            origins: None,
+            last_origin: None,
+            published: false,
+            input_key: match name {
+                Some(Name::Mapped(Text { source: 0, span })) => Some(span),
+                _ => None,
+            },
         });
         Ok(index)
     }
     pub fn append(&mut self, parent: usize, child: usize) -> Result<()> {
         if !matches!(
             self.node(parent)?.value,
-            Value::Object | Value::Array | Value::Fragments | Value::Base64Fragments
+            Value::Object | Value::Array | Value::Fragments | Value::Base64Fragments | Value::Utf8Media
         ) || self.node(child)?.next.is_some()
             || self.node(child)?.parent.is_some()
         {
@@ -571,7 +689,7 @@ impl Document {
                 }
                 e.bytes(if object { b"}" } else { b"]" })
             }
-            Value::Fragments | Value::Base64Fragments => {
+            Value::Fragments | Value::Base64Fragments | Value::Utf8Media => {
                 e.bytes(b"\"")?;
                 self.write_contents(index, e)?;
                 e.bytes(b"\"")
@@ -588,6 +706,13 @@ impl Document {
         match self.node(index)?.value {
             Value::String(t) => e.string_fragment(self.source(t)?, t.span),
             Value::Text(s) => e.escaped(s),
+            Value::Utf8Media => {
+                let mut chars = self.chars(index)?;
+                while let Some(c) = chars.next_scalar()? {
+                    e.escaped(c.encode_utf8(&mut [0; 4]))?;
+                }
+                Ok(())
+            }
             Value::Base64Fragments => super::media::write_base64_fragments(self, index, e),
             Value::Fragments => {
                 for child in self.children(index)? {
@@ -613,17 +738,32 @@ impl Iterator for Children<'_> {
     }
 }
 
+pub(crate) struct Origins<'a> {
+    doc: &'a Document,
+    next: Option<usize>,
+}
+impl Iterator for Origins<'_> {
+    type Item = usize;
+    fn next(&mut self) -> Option<usize> {
+        let index = self.next?;
+        self.next = self.doc.nodes[index].origin_next;
+        Some(index)
+    }
+}
+
 #[derive(Clone)]
 pub enum Characters<'a> {
     Mapped(json::Decoded<'a>),
     Pointer(json::Decoded<'a>),
     Static(std::str::Chars<'a>),
+    Encoded(EncodedCharacters<'a>),
 }
 impl Characters<'_> {
     pub fn next_scalar(&mut self) -> Result<Option<char>> {
         match self {
             Self::Mapped(d) => d.next_scalar(),
             Self::Static(s) => Ok(s.next()),
+            Self::Encoded(s) => s.next_scalar(),
             Self::Pointer(d) => match d.next_scalar()? {
                 Some('~') => match d.next_scalar()? {
                     Some('0') => Ok(Some('~')),
@@ -633,5 +773,83 @@ impl Characters<'_> {
                 value => Ok(value),
             },
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct EncodedCharacters<'a> {
+    doc: &'a Document,
+    next: Option<usize>,
+    decoded: Option<json::Decoded<'a>>,
+    bytes: [u8; 3],
+    used: usize,
+    length: usize,
+}
+
+impl EncodedCharacters<'_> {
+    fn next_byte(&mut self) -> Result<Option<u8>> {
+        use base64::Engine;
+        loop {
+            if self.used < self.length {
+                let byte = self.bytes[self.used];
+                self.used += 1;
+                return Ok(Some(byte));
+            }
+            if let Some(decoded) = &mut self.decoded {
+                let mut quartet = [0; 4];
+                if let Some(c) = decoded.next_scalar()? {
+                    if !c.is_ascii() {
+                        return Err(Error::Schema);
+                    }
+                    quartet[0] = c as u8;
+                    for slot in &mut quartet[1..] {
+                        let c = decoded.next_scalar()?.ok_or(Error::Schema)?;
+                        if !c.is_ascii() {
+                            return Err(Error::Schema);
+                        }
+                        *slot = c as u8;
+                    }
+                    self.length = base64::engine::general_purpose::STANDARD
+                        .decode_slice(quartet, &mut self.bytes)
+                        .map_err(|_| Error::Schema)?;
+                    self.used = 0;
+                    continue;
+                }
+            }
+            let Some(node) = self.next else {
+                return Ok(None);
+            };
+            let node = self.doc.node(node)?;
+            self.next = node.next;
+            let Value::String(text) = node.value else {
+                return Err(Error::Schema);
+            };
+            self.decoded = Some(json::Decoded::new(self.doc.source(text)?, text.span)?);
+        }
+    }
+
+    fn next_scalar(&mut self) -> Result<Option<char>> {
+        let Some(byte) = self.next_byte()? else {
+            return Ok(None);
+        };
+        let length = match byte {
+            0..=0x7f => return Ok(Some(byte as char)),
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => return Err(Error::Utf8),
+        };
+        let mut bytes = [0; 4];
+        bytes[0] = byte;
+        for slot in &mut bytes[1..length] {
+            *slot = self.next_byte()?.ok_or(Error::Utf8)?;
+        }
+        Ok(Some(
+            std::str::from_utf8(&bytes[..length])
+                .map_err(|_| Error::Utf8)?
+                .chars()
+                .next()
+                .ok_or(Error::Utf8)?,
+        ))
     }
 }

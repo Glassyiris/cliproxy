@@ -41,11 +41,22 @@ impl Projection {
             "images"
         } else if doc.string_is(name, "content")? {
             "content"
+        } else if doc.string_is(name, "refusal")? {
+            "refusal"
+        } else if doc.string_is(name, "reasoning_content")? {
+            "reasoning_content"
         } else {
             return Err(Error::Unsupported);
         };
         let value = doc.required(attributes, "value")?;
-        let data = if field == "audio" {
+        let scalar = doc
+            .member(attributes, "scalar")?
+            .map(|node| doc.node(node))
+            .transpose()?
+            .is_some_and(|node| matches!(node.value, Value::Bool(true)));
+        let data = if scalar {
+            value
+        } else if field == "audio" {
             doc.required(value, "data")?
         } else {
             doc.required(doc.required(value, "image_url")?, "url")?
@@ -53,7 +64,10 @@ impl Projection {
         if !matches!(doc.node(data)?.value, Value::Null) {
             return Err(Error::Schema);
         }
-        let binary = if field == "audio" {
+        let binary = if scalar {
+            doc.replace(data, Value::Utf8Media)?;
+            data
+        } else if field == "audio" {
             doc.replace(data, Value::Base64Fragments)?;
             data
         } else {
@@ -118,6 +132,35 @@ impl Projection {
         doc.append(self.value, text)
     }
 
+    pub(super) fn attributes(&mut self, incoming: Document) -> Result<()> {
+        let value = incoming.required(incoming.root(), "value")?;
+        if !incoming.string_is(incoming.required(incoming.root(), "format")?, "json")? {
+            return Err(Error::Schema);
+        }
+        let doc = self.document.as_mut().ok_or(Error::Closed)?;
+        let old_data = if self.field == "audio" {
+            doc.required(self.value, "data")?
+        } else {
+            doc.required(doc.required(self.value, "image_url")?, "url")?
+        };
+        let root = incoming.root();
+        let value = doc.absorb(incoming)? - root + value;
+        let data = if self.field == "audio" {
+            doc.required(value, "data")?
+        } else {
+            doc.required(doc.required(value, "image_url")?, "url")?
+        };
+        if !matches!(doc.node(data)?.value, Value::Null) {
+            return Err(Error::Schema);
+        }
+        doc.transplant(data, old_data)?;
+        if self.field == "audio" {
+            self.data = data;
+        }
+        self.value = value;
+        Ok(())
+    }
+
     pub(super) fn end(&mut self, incoming: &Document) -> Result<(Document, usize, &'static str, u64)> {
         if incoming.unsigned(incoming.required(incoming.root(), "bytes")?)? != self.offset
             || !incoming.string_is(incoming.required(incoming.root(), "status")?, "completed")?
@@ -156,7 +199,7 @@ impl Egress {
         let choices = projection.required(projection.root(), "choices")?;
         let choice = projection.node(choices)?.first.ok_or(Error::Schema)?;
         let delta = projection.required(choice, "delta")?;
-        if field == "audio" {
+        if field == "audio" || matches!(projection.node(imported)?.value, Value::Utf8Media) {
             projection.rename(imported, field)?;
             projection.append(delta, imported)?;
         } else {

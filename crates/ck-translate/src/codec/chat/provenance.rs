@@ -287,8 +287,8 @@ pub(super) fn request_members(
     let Some(original) = doc.member(x, "original")? else {
         return Ok(());
     };
-    'entries: for entry in doc.children(original)? {
-        if doc.origin(entry)? != Some((parent, carrier)) {
+    'entries: for entry in doc.origins(parent)? {
+        if doc.node(entry)?.parent != Some(original) || doc.origin(entry)? != Some((parent, carrier)) {
             continue;
         }
         if !doc.string_is(doc.required(entry, "protocol")?, "chat")? {
