@@ -53,6 +53,8 @@ UI scale/layout values remain in `ui/DESIGN.md` and code limits in `ui/CONVENTIO
 | Frontend entry chunk, gzip | Initial JS 360000 B; initial CSS 55000 B; largest lazy chunk 120000 B; source: ui/tools/size-budget.json | 333632 B, 47776 B, 105870 B (2026-11-09, committed build; host/load not recorded) | npm run check in ui/; ui/tools/size.mjs |
 | Frontend total JS + CSS, gzip | Report-only, no ceiling; ui/tools/size-budget.json totalJs/totalCss are null | JS 946229 B, CSS 55811 B (2026-11-09, committed build; host/load not recorded) | ui/tools/size.mjs |
 | Source file size, p90 of this repository (pass bar) | | | Measure physical lines in crates/*/src/**/*.rs, ui/src/**/*.ts and ui/src/**/*.tsx; exclude tests/, testdata/, fixtures/, generated files and *.test.*, *.spec.*; include inline Rust tests; review |
+| Rust file length | 600 physical lines per *.rs file outside vendor/, including tests; files marked `@generated` are exempt. Files over the cap on 2026-11-14 are held at their size in tools/rust-size-ratchet.txt and may only shrink (Exceptions) | 168 files over the cap; largest crates/ck-server/src/runtime/state.rs, 9215 lines (2026-11-14, origin/master 2ce72daf; a line count, so host and load do not apply) | tools/check-rust-size.py in the Dockerfile check stage |
+| Rust function length | 80 lines from the `fn` line through its closing brace, test functions included; closures count toward their function. Functions over the cap on 2026-11-14 are held in tools/rust-size-ratchet.txt and may only shrink (Exceptions) | 459 functions over the cap; largest crates/cooker/src/main.rs::tests::online_builtin_flows_wait_for_durable_save_and_preserve_source_fences, 722 lines (2026-11-14, origin/master 2ce72daf; a line count, so host and load do not apply) | tools/check-rust-size.py in the Dockerfile check stage |
 | Wait timeout before a stuck step is recorded and left | | | Agent; decision 13 |
 | Context handoff limit (share of the model's window) | | | Orchestrator; decision 13 |
 | Status check interval while several jobs run | | | Orchestrator; decision 13 |
@@ -85,7 +87,7 @@ Names exactly match `###` headings and tags. Gate commands cover existing mechan
 | AGENTS.md: When unsure | | `REVIEW.md`, "Rule priority" and "Scope" | |
 | AGENTS.md: Waiting | | `REVIEW.md`, "Every finding has evidence"; check execution records against the configured settings | |
 | AGENTS.md: Reporting | | `REVIEW.md`, "Every finding has evidence" and "Report" | |
-| AGENTS.md: Code quality | `cargo fmt --all --check`; `cargo clippy --workspace --all-targets --locked -- -D warnings`; `npm run check` in ui/ | `REVIEW.md`, Pass bar; checks cover formatting/lints, not all design judgment | |
+| AGENTS.md: Code quality | `cargo fmt --all --check`; `cargo clippy --workspace --all-targets --locked -- -D warnings`; `python3 -I tools/check-rust-size.py`; `npm run check` in ui/ | `REVIEW.md`, Pass bar; checks cover formatting, lints and Rust file and function length, not all design judgment | |
 | AGENTS.md: Impact and edge cases | | `REVIEW.md`, "Scope" and "Checking against the rules" | |
 | AGENTS.md: Secrets | | `REVIEW.md`, "Checking against the rules" and "Review guidelines" | |
 | AGENTS.md: Performance baseline | | `REVIEW.md`, "Every finding has evidence"; compare same-host measurements | |
@@ -152,6 +154,7 @@ Intentional designs that look like defects:
 | Polling pauses in hidden tabs | Avoid work for an unseen dashboard | Existing ui/REQUIREMENTS.md design |
 | ProviderIcon.tsx draws brand marks from vendored providerMarks.ts path data | Lucide lacks brand marks; monochrome vendored artwork follows text color; check:ui permits that file's SVG | Existing ui/REQUIREMENTS.md design; attribution/license provenance stays in the existing source and notices |
 | Optional Rosé Pine palettes (Main, Moon, Dawn) may fall below WCAG AA | Preserve the optional palettes' published colors; the default Neutral palette must meet AA. Measurements below distinguish AA failures from stricter project-target misses. | An owner, 2026-11-13: 「主題的話是例外的」 |
+| Rust files and functions listed in tools/rust-size-ratchet.txt exceed the 600-line file and 80-line function caps | New and rewritten code meets the caps; existing items are refactored case by case later, and each entry may only go down (tools/check-rust-size.py `--update` lowers or removes, never adds or raises) | An owner, 2026-11-14: 「会不会太严厉需要的就做吧」 |
 
 Contrast inventory copied from `ui/REQUIREMENTS.md`. Browser rows cover rendered sign-in/System pages, open menus and info/error banners at 1440 px in English. Palette rows are computed mapped pairs, not proof they appear in a measured page. Dawn applies to both Rosé Pine palettes. Disabled text is exempt where noted; that does not exempt placeholder text.
 
