@@ -244,10 +244,18 @@ fn attach_and_each_pending_wait_refresh_eviction_recency() {
 #[test]
 fn terminals_render_only_registered_codes_and_reasons() {
     use Terminal::*;
-    let rendered: Vec<_> = [Done, Cancelled, Shutdown, UpstreamError, StorageExhausted, Gone]
-        .into_iter()
-        .map(|terminal| (terminal.error_code(), terminal.cancel_reason()))
-        .collect();
+    let rendered: Vec<_> = [
+        Done,
+        Cancelled,
+        Shutdown,
+        UpstreamError,
+        StorageExhausted,
+        Gone,
+        ProducerLost,
+    ]
+    .into_iter()
+    .map(|terminal| (terminal.error_code(), terminal.cancel_reason()))
+    .collect();
     assert_eq!(
         rendered,
         [
@@ -257,6 +265,35 @@ fn terminals_render_only_registered_codes_and_reasons() {
             (None, None),
             (Some("stream.storage_exhausted"), None),
             (Some("stream.gone"), None),
+            (Some("stream.producer_lost"), None),
         ]
     );
+}
+
+#[test]
+fn dropped_writer_ends_readers_with_producer_lost_not_client_cancel() {
+    let (_dir, store, _) = store(4);
+    let mut lost = store.create().unwrap();
+    lost.append(b"prefix").unwrap();
+    let mut reader = store.reader(lost.id(), 0).unwrap();
+    let id = lost.id();
+    drop(lost);
+    for mut reader in [reader, store.reader(id, 0).unwrap()] {
+        assert_eq!(lease(&mut reader).record().sequence, 0);
+        assert!(matches!(
+            reader.try_next(),
+            Poll::Ready(Some(Read::Terminal(Terminal::ProducerLost)))
+        ));
+    }
+    assert_eq!(Terminal::ProducerLost.error_code(), Some("stream.producer_lost"));
+    assert_eq!(Terminal::ProducerLost.cancel_reason(), None);
+    // An explicit client cancel stays a cancellation after the writer drops.
+    let mut cancelled = store.create().unwrap();
+    cancelled.finish(Terminal::Cancelled);
+    reader = store.reader(cancelled.id(), 0).unwrap();
+    drop(cancelled);
+    assert!(matches!(
+        reader.try_next(),
+        Poll::Ready(Some(Read::Terminal(Terminal::Cancelled)))
+    ));
 }

@@ -306,7 +306,10 @@ async fn notification_registration_cannot_lose_publication_or_cancellation() {
             };
             assert_eq!(read.chunk(read.record().start).unwrap(), &[expected]);
         }
-        assert!(matches!(reader.next().await, Some(Read::Terminal(Terminal::Cancelled))));
+        assert!(matches!(
+            reader.next().await,
+            Some(Read::Terminal(Terminal::ProducerLost))
+        ));
         assert!(reader.next().await.is_none());
     });
     for byte in 0..128u8 {

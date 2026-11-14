@@ -27,6 +27,8 @@ pub enum Terminal {
     UpstreamError,
     StorageExhausted,
     Gone,
+    /// The writer was dropped without a terminal, e.g. its producer task aborted or panicked.
+    ProducerLost,
 }
 
 impl Terminal {
@@ -36,6 +38,7 @@ impl Terminal {
         match self {
             Self::StorageExhausted => Some("stream.storage_exhausted"),
             Self::Gone => Some("stream.gone"),
+            Self::ProducerLost => Some("stream.producer_lost"),
             Self::Done | Self::Cancelled | Self::Shutdown | Self::UpstreamError => None,
         }
     }
@@ -45,7 +48,7 @@ impl Terminal {
         match self {
             Self::Cancelled => Some("client_cancel"),
             Self::Shutdown => Some("shutdown"),
-            Self::Done | Self::UpstreamError | Self::StorageExhausted | Self::Gone => None,
+            Self::Done | Self::UpstreamError | Self::StorageExhausted | Self::Gone | Self::ProducerLost => None,
         }
     }
 }

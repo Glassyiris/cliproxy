@@ -258,6 +258,7 @@ impl Drop for Stream {
 }
 
 /// Exclusive stream producer. A disconnect must drop a reader, not this producer.
+/// Dropping it before a terminal publishes `ProducerLost`.
 pub struct Writer {
     inner: Arc<Inner>,
     stream: Arc<Stream>,
@@ -499,7 +500,8 @@ impl Writer {
 
 impl Drop for Writer {
     fn drop(&mut self) {
-        self.stream.finish(Terminal::Cancelled);
+        // A producer that ends without a terminal is lost, never a client cancel.
+        self.stream.finish(Terminal::ProducerLost);
     }
 }
 

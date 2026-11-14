@@ -157,7 +157,7 @@ fn scratch_outlives_writer_and_store_without_reusing_mapping() {
     let source = scratch(&mut writer, 2, 6);
     let mut reader = store.reader(writer.id(), 0).unwrap();
     drop(writer);
-    terminal(&mut reader, Terminal::Cancelled);
+    terminal(&mut reader, Terminal::ProducerLost);
     store.shutdown().unwrap();
     drop((reader, store));
     assert_eq!(source.chunk(0).unwrap(), &[6; FRAME_BYTES]);
