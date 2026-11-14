@@ -491,7 +491,10 @@ mod tests {
         for _ in 0..30 {
             expiring.append(&[1; FRAME_BYTES]).unwrap();
         }
-        // The background thread may run the one-shot hook first; either way it panics once.
+        // Stop the background thread so every tick below runs synchronously on this thread.
+        *store.stop.0.lock().unwrap() = true;
+        store.stop.1.notify_all();
+        store.worker.take().unwrap().join().unwrap();
         *store.inner.tick_hook.lock() = Some(Box::new(|| panic!("injected maintenance panic")));
         store.inner.maintain();
         assert_eq!(
