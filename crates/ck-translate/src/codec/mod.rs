@@ -59,7 +59,7 @@ pub mod media;
 pub mod provenance;
 pub mod source;
 pub mod sse;
-mod table;
+pub(crate) mod table;
 pub mod usage;
 
 use ck_stream::{ScratchLease, Writer};
