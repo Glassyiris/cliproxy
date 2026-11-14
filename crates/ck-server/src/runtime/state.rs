@@ -4045,7 +4045,7 @@ type LockedFile = (std::fs::File, Map<String, Value>);
 /// Go `refreshLocked`'s read: the Codex credential file under its lock, which the
 /// returned file holds. A file that is gone, or that is not a non-empty JSON object,
 /// fails before anything refreshes. The wait for the lock gives up at `shutdown`.
-pub(crate) async fn read_locked_codex_file(
+async fn read_locked_codex_file(
     path: &Path,
     shutdown: &tokio_util::sync::CancellationToken,
     backend: Arc<crate::store::credential_store::CredentialDb>,
@@ -4062,6 +4062,16 @@ pub(crate) async fn read_locked_codex_file(
         Ok(Value::Object(disk)) if !disk.is_empty() => Ok((lock, disk)),
         _ => Err(format!("invalid credential JSON in {}", path.display())),
     }
+}
+
+/// [`read_locked_codex_file`] for tests outside this module.
+#[cfg(test)]
+pub(crate) async fn test_read_locked_codex_file(
+    path: &Path,
+    shutdown: &tokio_util::sync::CancellationToken,
+    backend: Arc<crate::store::credential_store::CredentialDb>,
+) -> Result<LockedFile, String> {
+    read_locked_codex_file(path, shutdown, backend).await
 }
 
 /// Go `CredentialsChanged`: the tokens or API key differ.

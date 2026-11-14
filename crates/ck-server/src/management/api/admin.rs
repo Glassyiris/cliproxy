@@ -1084,7 +1084,7 @@ mod tests {
         tokio::time::timeout(bounded, parked_rx).await.unwrap().unwrap();
         let reading = tokio::spawn({
             let (path, db, shutdown) = (path.clone(), db.clone(), shutdown.clone());
-            async move { crate::runtime::state::read_locked_codex_file(&path, &shutdown, db).await }
+            async move { crate::runtime::state::test_read_locked_codex_file(&path, &shutdown, db).await }
         });
         // Let the refresh take the free lock and reach its read before the batch commits.
         let held = ck_exec::codex_siwc_bind::open_lock_file(&path).unwrap();
