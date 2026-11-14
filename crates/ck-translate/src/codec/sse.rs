@@ -14,14 +14,33 @@ pub struct Field {
 
 /// A complete external SSE record. Spans refer to the supplied `Source`.
 /// Multiple data lines are joined with LF by `write_data`; no heap body is built.
-#[derive(Clone, Debug)]
 pub struct Event {
     source_id: u64,
+    stream_id: u64,
+    _metadata: Option<ck_stream::MetadataPermit>,
     pub span: Span,
-    pub fields: Vec<Field>,
+    fields: Vec<Field>,
 }
 
 impl Event {
+    pub fn fields(&self) -> &[Field] {
+        &self.fields
+    }
+    pub fn try_clone(&self, owner: &mut ck_stream::Writer) -> Result<Self> {
+        if owner.id() != self.stream_id {
+            return Err(Error::Position);
+        }
+        let mut metadata = owner.reserve_metadata(self.fields.len() * std::mem::size_of::<Field>())?;
+        let fields = self.fields.clone();
+        metadata.resize(fields.capacity() * std::mem::size_of::<Field>())?;
+        Ok(Self {
+            source_id: self.source_id,
+            stream_id: self.stream_id,
+            _metadata: Some(metadata),
+            span: self.span,
+            fields,
+        })
+    }
     fn validate_source(&self, source: &Source) -> Result<()> {
         if self.source_id != source.id() {
             return Err(Error::Position);
@@ -96,15 +115,15 @@ pub struct Scanner {
     pending_cr: bool,
     fields: Vec<Field>,
     max_event: u64,
-    max_metadata: usize,
+    metadata: ck_stream::MetadataPermit,
     utf8: Utf8,
     failed: bool,
     finished: bool,
 }
 
 impl Scanner {
-    pub fn new(max_event: u64, max_metadata: usize) -> Self {
-        Self {
+    pub fn new(owner: &mut ck_stream::Writer, max_event: u64) -> Result<Self> {
+        Ok(Self {
             offset: 0,
             source_id: None,
             line: 0,
@@ -113,11 +132,15 @@ impl Scanner {
             pending_cr: false,
             fields: Vec::new(),
             max_event,
-            max_metadata,
+            metadata: owner.reserve_metadata(0)?,
             utf8: Utf8::default(),
             failed: false,
             finished: false,
-        }
+        })
+    }
+
+    pub fn consumed(&self) -> u64 {
+        self.event
     }
 
     pub fn advance(&mut self, source: &Source, mut event: impl FnMut(&Event) -> Result<()>) -> Result<()> {
@@ -132,7 +155,7 @@ impl Scanner {
     }
 
     fn scan(&mut self, source: &Source, emit: &mut impl FnMut(&Event) -> Result<()>) -> Result<()> {
-        if self.source_id.is_some_and(|id| id != source.id()) {
+        if source.stream_id() != self.metadata.stream_id() || self.source_id.is_some_and(|id| id != source.id()) {
             return Err(Error::Position);
         }
         self.source_id = Some(source.id());
@@ -184,6 +207,8 @@ impl Scanner {
             self.event = self.offset;
             let mut event = Event {
                 source_id: source.id(),
+                stream_id: source.stream_id(),
+                _metadata: None,
                 span,
                 fields,
             };
@@ -194,12 +219,13 @@ impl Scanner {
         } else {
             if self.fields.len() == self.fields.capacity() {
                 let capacity = self.fields.capacity().max(4).checked_mul(2).ok_or(Error::Limit)?;
-                if capacity.checked_mul(std::mem::size_of::<Field>()).ok_or(Error::Limit)? > self.max_metadata {
-                    return Err(Error::Limit);
-                }
+                self.metadata
+                    .resize(capacity.checked_mul(std::mem::size_of::<Field>()).ok_or(Error::Limit)?)?;
                 self.fields
                     .try_reserve_exact(capacity - self.fields.len())
                     .map_err(|_| Error::Limit)?;
+                self.metadata
+                    .resize(self.fields.capacity() * std::mem::size_of::<Field>())?;
             }
             let comment = self.colon == Some(self.line);
             let name = Span {

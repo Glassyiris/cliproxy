@@ -191,7 +191,7 @@ Large media values embedded in JSON are decoded incrementally into these chunks,
 | `derived?` | Field-name array identifying computed rather than reported counts. |
 | `final` | Boolean; last authoritative snapshot for this scope when true. |
 
-Omitted counts stay absent; explicit zero stays zero; native null stays in `native`, never coerced to zero.
+Omitted counts stay absent; explicit zero stays zero; native null stays in `native`, never coerced to zero. A supplied null clears the corresponding known canonical count; omission alone retains the previous value. Recompute a derived total after operand changes and remove it when an operand is no longer known; never replace an explicit native null with a derived value.
 For Claude, inclusive input = uncached input + cache read + cache creation; do not add TTL buckets again to cache creation.
 Derive `total_tokens` only from known inclusive `input_tokens` and `output_tokens`; derive Claude inclusive input only when uncached, cache-read and cache-creation counts are all known. Never infer an absent operand as zero. Retain disagreeing provider totals with a content-free diagnostic.
 A partial source usage update replaces the fields it supplies in the retained snapshot; it does not add them. Missing fields retain prior known values for that attempt/scope.
@@ -244,7 +244,7 @@ Capability validation covers supplied model/operation, roles and ordered content
 | Logical location | Type/content | Contract |
 | --- | --- | --- |
 | `model`, `messages[]` | Chat model, ordered roles/content | Preserve system/developer/user/assistant/tool distinctions and original order. |
-| `messages[].content` | String or ordered `ContentPart[]` below | No guessed modality; native shape remains in provenance. |
+| `messages[].content` | String, ordered `ContentPart[]` below, or native null | Preserve absent, null and empty content separately; native shape remains in provenance. |
 | `messages[].tool_calls`, `tool_call_id`, `name` | History calls `{id, type, function: {name, arguments?: JSON}, arguments_format: "json"\|"text"}` and result linkage | JSON-format arguments are structured JSON; text-format arguments are strings. Trusted client ingress parses Chat argument strings; the upstream Chat egress encoder alone serializes JSON arguments to Chat's string slot. Non-Chat egress writes its native structured value; response deltas still use §3.3 strings. |
 | `tools`, `tool_choice`, `parallel_tool_calls` | Chat function tool declarations/options | Native/custom/server tools additionally retain declarations in `X.tools`. |
 | `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, `n`, `seed` | Native Chat values | No presence-based field suppression or premature provider normalization. |

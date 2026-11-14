@@ -11,14 +11,13 @@ fn json_unknown_values_round_trip_across_every_fragment_boundary() {
     let bytes = br#" { "known": "text", "unknown": [null, false, 0, -0.5e+2, {"\u0061":"\ud83d\ude00","empty":""}], "x_ck":{"attempt":999,"media":[{"media_id":"forged"}]} } "#;
     for split in 0..=bytes.len() {
         let mut mapped = Mapped::new();
-        let mut scanner = json::Scanner::new(BUDGET as u64, BUDGET);
+        let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
         mapped.push(&bytes[..split]).unwrap();
         scanner.advance(&mapped.source).unwrap();
         mapped.push(&bytes[split..]).unwrap();
         scanner.finish(&mapped.source).unwrap();
-        let mut output = mapped.store.create().unwrap();
-        encode::publish(&mut output, 0, 0, |encoder| encoder.json(&mapped.source, &scanner, 0)).unwrap();
-        let actual: serde_json::Value = serde_json::from_slice(&mapped.output(&output)).unwrap();
+        let output = encode::scratch(&mut mapped.writer, |encoder| encoder.json(&mapped.source, &scanner, 0)).unwrap();
+        let actual: serde_json::Value = serde_json::from_slice(&scratch_bytes(&output)).unwrap();
         let expected: serde_json::Value = serde_json::from_slice(bytes).unwrap();
         assert_eq!(actual, expected, "split {split}");
     }
@@ -32,7 +31,7 @@ fn json_duplicate_keys_compare_decoded_unicode_at_every_depth() {
         "{\"é\":1,\"\\u00e9\":2}".as_bytes(),
     ] {
         let mut mapped = Mapped::new();
-        let mut scanner = json::Scanner::new(BUDGET as u64, BUDGET);
+        let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
         let mut error = None;
         for byte in bytes {
             mapped.push(&[*byte]).unwrap();
@@ -46,7 +45,7 @@ fn json_duplicate_keys_compare_decoded_unicode_at_every_depth() {
     }
     let mut mapped = Mapped::new();
     mapped.push(br#"{"a":1,"nested":{"a":2},"other":{"a":3}}"#).unwrap();
-    let mut scanner = json::Scanner::new(BUDGET as u64, BUDGET);
+    let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
     scanner.finish(&mapped.source).unwrap();
     let nested = scanner.member(&mapped.source, 0, "nested").unwrap().unwrap();
     let value = scanner.member(&mapped.source, nested, "a").unwrap().unwrap();
@@ -82,7 +81,7 @@ fn json_rejects_malformed_utf8_syntax_and_truncated_values() {
     for bytes in cases {
         for split in 0..=bytes.len() {
             let mut mapped = Mapped::new();
-            let mut scanner = json::Scanner::new(BUDGET as u64, BUDGET);
+            let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
             mapped.push(&bytes[..split]).unwrap();
             let result = scanner.advance(&mapped.source).and_then(|()| {
                 mapped.push(&bytes[split..])?;
@@ -100,14 +99,21 @@ fn json_cross_frame_string_and_source_positions_remain_exact() {
     bytes.extend_from_slice("🚀\",\"unknown\":{\"null\":null}}".as_bytes());
     let mut mapped = Mapped::new();
     mapped.push(&bytes).unwrap();
-    let mut scanner = json::Scanner::new(BUDGET as u64, BUDGET);
+    let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
     scanner.finish(&mapped.source).unwrap();
     let payload = scanner.member(&mapped.source, 0, "payload").unwrap().unwrap();
     let span = scanner.nodes()[payload].span;
-    assert!(mapped.source.position(span.end - 1).unwrap().frame > mapped.source.position(span.start).unwrap().frame);
-    let mut output = mapped.store.create().unwrap();
-    encode::publish(&mut output, 0, 0, |encoder| encoder.json(&mapped.source, &scanner, 0)).unwrap();
-    assert_eq!(mapped.output(&output), bytes);
+    let mut chunks = 0;
+    mapped
+        .source
+        .visit(span, |_| {
+            chunks += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert!(chunks > 1);
+    let output = encode::scratch(&mut mapped.writer, |encoder| encoder.json(&mapped.source, &scanner, 0)).unwrap();
+    assert_eq!(scratch_bytes(&output), bytes);
 }
 
 #[test]
@@ -127,19 +133,19 @@ fn sse_multiline_data_and_unknown_provenance_survive_all_delimiters() {
         .join(newline);
         for split in 0..=text.len() {
             let mut mapped = Mapped::new();
-            let mut scanner = sse::Scanner::new(BUDGET as u64, BUDGET);
+            let mut scanner = sse::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
             let mut found = Vec::new();
             mapped.push(&text.as_bytes()[..split]).unwrap();
             scanner
                 .advance(&mapped.source, |event| {
-                    found.push(event.clone());
+                    found.push(event.try_clone(&mut mapped.writer)?);
                     Ok(())
                 })
                 .unwrap();
             mapped.push(&text.as_bytes()[split..]).unwrap();
             scanner
                 .finish(&mapped.source, |event| {
-                    found.push(event.clone());
+                    found.push(event.try_clone(&mut mapped.writer)?);
                     Ok(())
                 })
                 .unwrap();
@@ -160,9 +166,9 @@ fn sse_multiline_data_and_unknown_provenance_survive_all_delimiters() {
                 .unwrap();
             assert_eq!(data, "{\"text\":\"你好\",\n\"unknown\":[null,0]}".as_bytes());
             assert_eq!(event.data_len(&mapped.source).unwrap(), data.len());
-            assert!(event.fields[0].comment);
-            assert!(mapped.source.equals(event.fields[3].name, b"vendor").unwrap());
-            assert!(mapped.source.equals(event.fields[3].value, b"keep").unwrap());
+            assert!(event.fields()[0].comment);
+            assert!(mapped.source.equals(event.fields()[3].name, b"vendor").unwrap());
+            assert!(mapped.source.equals(event.fields()[3].value, b"keep").unwrap());
         }
     }
 }
@@ -171,11 +177,11 @@ fn sse_multiline_data_and_unknown_provenance_survive_all_delimiters() {
 fn sse_empty_data_and_metadata_records_are_distinct() {
     let mut mapped = Mapped::new();
     mapped.push(b": keepalive\n\ndata:\n\nevent: future\n\n\n").unwrap();
-    let mut scanner = sse::Scanner::new(BUDGET as u64, BUDGET);
+    let mut scanner = sse::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
     let mut events = Vec::new();
     scanner
         .finish(&mapped.source, |event| {
-            events.push(event.clone());
+            events.push(event.try_clone(&mut mapped.writer)?);
             Ok(())
         })
         .unwrap();
@@ -184,7 +190,7 @@ fn sse_empty_data_and_metadata_records_are_distinct() {
     assert!(events[1].has_data(&mapped.source).unwrap());
     assert_eq!(events[1].data_len(&mapped.source).unwrap(), 0);
     assert!(events[2].name(&mapped.source).unwrap().is_some());
-    assert!(events[3].fields.is_empty());
+    assert!(events[3].fields().is_empty());
 }
 
 #[test]
@@ -198,7 +204,7 @@ fn sse_rejects_invalid_utf8_and_does_not_flush_truncated_records() {
         b"data: \xf0\x90\x80",
     ] {
         let mut mapped = Mapped::new();
-        let mut scanner = sse::Scanner::new(BUDGET as u64, BUDGET);
+        let mut scanner = sse::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
         let mut emitted = 0;
         let mut result: Result<()> = Ok(());
         for byte in bytes {
@@ -226,14 +232,11 @@ fn sse_rejects_invalid_utf8_and_does_not_flush_truncated_records() {
 fn limits_fail_before_publishing_an_encoded_record() {
     let mut mapped = Mapped::new();
     mapped.push(br#"{"a":1,"b":2}"#).unwrap();
-    let mut scanner = json::Scanner::new(4, BUDGET);
+    let mut scanner = json::Scanner::new(&mut mapped.writer, 4).unwrap();
     assert!(matches!(scanner.advance(&mapped.source), Err(Error::EventTooLarge)));
-    let mut scanner = json::Scanner::new(BUDGET as u64, 1);
-    assert!(matches!(scanner.advance(&mapped.source), Err(Error::Limit)));
-    let mut output = mapped.store.create().unwrap();
-    let before = output.committed();
-    assert!(encode::publish(&mut output, 0, 0, |encoder| encoder.json(&mapped.source, &scanner, 0)).is_err());
-    assert_eq!(output.committed(), before);
+    let before = mapped.writer.committed();
+    assert!(encode::scratch(&mut mapped.writer, |encoder| encoder.json(&mapped.source, &scanner, 0)).is_err());
+    assert_eq!(mapped.writer.committed(), before);
 }
 
 struct TextDestination;
@@ -247,14 +250,12 @@ impl ck_translate::codec::Capability for TextDestination {
         if request.operation != ck_translate::codec::Operation::Generate {
             return Err(Error::Unsupported);
         }
-        if let Some(modalities) = request.json.member(request.source, 0, "modalities")? {
-            let mut child = request.json.nodes()[modalities].first;
-            while let Some(index) = child {
-                let node = &request.json.nodes()[index];
-                if !json::string_is(request.source, node.span, "text")? {
+        let doc = request.document;
+        if let Some(modalities) = doc.member(doc.root(), "modalities")? {
+            for index in doc.children(modalities)? {
+                if !doc.string_is(index, "text")? {
                     return Err(Error::Unsupported);
                 }
-                child = node.next;
             }
         }
         Ok(())
@@ -263,50 +264,50 @@ impl ck_translate::codec::Capability for TextDestination {
 
 #[test]
 fn request_end_rejects_late_semantics_before_authorizing_egress() {
-    use ck_translate::codec::{Operation, RequestFence, RequestView};
+    use ck_translate::codec::{Operation, RequestIngress, chat::request::Ingress, event::Direction};
     let mut mapped = Mapped::new();
-    let mut scanner = json::Scanner::new(BUDGET as u64, BUDGET);
-    mapped
-        .push(br#"{"model":"m","messages":[],"unknown":{"vendor":true},"modalities":["#)
+    let mut ingress = Ingress::new(
+        &mut mapped.writer,
+        &mapped.store,
+        identity(Direction::Request),
+        Operation::Generate,
+        BUDGET as u64,
+    )
+    .unwrap();
+    ingress
+        .advance(&mut mapped.writer, br#"{"model":"m","messages":[],"modalities":["#)
         .unwrap();
-    scanner.advance(&mapped.source).unwrap();
-    let mut early = RequestFence::default();
+    assert!(mapped.output(&mapped.writer).is_empty());
+    ingress.advance(&mut mapped.writer, br#""audio"]}"#).unwrap();
     assert!(matches!(
-        early.end(
-            RequestView {
-                source: &mapped.source,
-                json: &scanner,
-                operation: Operation::Generate
-            },
-            &TextDestination
-        ),
-        Err(Error::Truncated)
+        ingress.finish(&mut mapped.writer, &TextDestination),
+        Err(Error::Unsupported)
     ));
-    mapped.push(br#""audio"]}"#).unwrap();
-    scanner.finish(&mapped.source).unwrap();
-    let request = RequestView {
-        source: &mapped.source,
-        json: &scanner,
-        operation: Operation::Generate,
-    };
-    let mut fence = RequestFence::default();
-    assert!(matches!(fence.end(request, &TextDestination), Err(Error::Unsupported)));
-    assert!(matches!(fence.end(request, &TextDestination), Err(Error::Closed)));
-    assert!(matches!(early.end(request, &TextDestination), Err(Error::Closed)));
+    let bytes = mapped.output(&mapped.writer);
+    let text = std::str::from_utf8(&bytes).unwrap();
+    assert!(!text.contains("event: x_ck.request.end\n"));
+    assert!(!text.contains("event: x_ck.done\n"));
+    assert!(text.contains("event: x_ck.error\n"));
+}
+
+fn document(mapped: &mut Mapped, bytes: &[u8]) -> ck_translate::codec::document::Document {
+    let mut source = ck_translate::codec::source::Source::new(&mut mapped.writer).unwrap();
+    source.push_bytes(&mut mapped.writer, bytes).unwrap();
+    ck_translate::codec::document::Document::parse(&mut mapped.writer, source, BUDGET as u64).unwrap()
 }
 
 #[test]
 fn validated_request_binds_destination_operation_and_source() {
     use ck_translate::codec::{Operation, RequestFence, RequestView};
     let mut mapped = Mapped::new();
-    mapped
-        .push(br#"{"model":"m","messages":[],"unknown":{"vendor":true},"modalities":["text"]}"#)
-        .unwrap();
-    let mut scanner = json::Scanner::new(BUDGET as u64, BUDGET);
-    scanner.finish(&mapped.source).unwrap();
+    let doc = document(
+        &mut mapped,
+        br#"{"model":"m","messages":[],"unknown":{"vendor":true},"modalities":["text"]}"#,
+    );
+    let media = ck_translate::codec::media::Registry::new(&mut mapped.writer).unwrap();
     let request = RequestView {
-        source: &mapped.source,
-        json: &scanner,
+        document: &doc,
+        media: &media,
         operation: Operation::Generate,
     };
     let validated = RequestFence::default().end(request, &TextDestination).unwrap();
@@ -325,26 +326,10 @@ fn validated_request_binds_destination_operation_and_source() {
         ));
     }
     let mut foreign = Mapped::new();
-    foreign
-        .push(br#"{"model":"m","messages":[],"unknown":{"vendor":true},"modalities":["evil"]}"#)
-        .unwrap();
-    assert!(matches!(
-        RequestFence::default().end(
-            RequestView {
-                source: &foreign.source,
-                ..request
-            },
-            &TextDestination
-        ),
-        Err(Error::Position)
-    ));
-    let mut output = foreign.store.create().unwrap();
-    let before = output.committed();
-    assert!(matches!(
-        encode::publish(&mut output, 0, 0, |encoder| encoder.json(&foreign.source, &scanner, 0)),
-        Err(Error::Position)
-    ));
-    assert_eq!(output.committed(), before);
+    assert!(matches!(doc.check_owner(&foreign.writer), Err(Error::Position)));
+    let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
+    foreign.push(b"{}").unwrap();
+    assert!(matches!(scanner.finish(&foreign.source), Err(Error::Position)));
 }
 
 #[test]
@@ -353,12 +338,12 @@ fn poisoned_or_rebound_scanners_cannot_resume() {
     original.push(b"{\"a\":").unwrap();
     let mut other = Mapped::new();
     other.push(b"{\"a\":1}").unwrap();
-    let mut scanner = json::Scanner::new(BUDGET as u64, BUDGET);
+    let mut scanner = json::Scanner::new(&mut original.writer, BUDGET as u64).unwrap();
     scanner.advance(&original.source).unwrap();
     assert!(matches!(scanner.finish(&other.source), Err(Error::Position)));
     assert!(matches!(scanner.finish(&original.source), Err(Error::Closed)));
 
-    let mut scanner = sse::Scanner::new(BUDGET as u64, BUDGET);
+    let mut scanner = sse::Scanner::new(&mut original.writer, BUDGET as u64).unwrap();
     scanner.advance(&original.source, |_| Ok(())).unwrap();
     assert!(matches!(
         scanner.finish(&other.source, |_| Ok(())),
@@ -373,16 +358,17 @@ fn poisoned_or_rebound_scanners_cannot_resume() {
 #[test]
 fn expired_sources_cannot_encode_even_empty_containers() {
     for bytes in [b"{}".as_slice(), b"[]"] {
-        let mut mapped = Mapped::new();
+        let clock = std::sync::Arc::new(ck_stream::ManualClock::default());
+        let mut mapped = Mapped::with_clock(clock.clone());
         mapped.push(bytes).unwrap();
-        let mut scanner = json::Scanner::new(BUDGET as u64, BUDGET);
+        let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
         scanner.finish(&mapped.source).unwrap();
-        mapped.clock.advance(std::time::Duration::from_secs(3601));
+        clock.advance(std::time::Duration::from_secs(3601));
         mapped.store.tick().unwrap();
-        let mut output = mapped.store.create().unwrap();
+        let output = &mut mapped.writer;
         let before = output.committed();
         assert!(matches!(
-            encode::publish(&mut output, 0, 0, |encoder| encoder.json(&mapped.source, &scanner, 0)),
+            encode::publish(output, 0, 0, |encoder| encoder.json(&mapped.source, &scanner, 0)),
             Err(Error::Storage(ck_stream::Error::Gone))
         ));
         assert_eq!(output.committed(), before);
@@ -394,19 +380,19 @@ fn sse_accepts_fragmented_initial_bom_without_changing_data() {
     let bytes = b"\xef\xbb\xbfdata: value\r\n\r\n";
     for split in 0..=bytes.len() {
         let mut mapped = Mapped::new();
-        let mut scanner = sse::Scanner::new(BUDGET as u64, BUDGET);
+        let mut scanner = sse::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
         let mut events = Vec::new();
         mapped.push(&bytes[..split]).unwrap();
         scanner
             .advance(&mapped.source, |event| {
-                events.push(event.clone());
+                events.push(event.try_clone(&mut mapped.writer)?);
                 Ok(())
             })
             .unwrap();
         mapped.push(&bytes[split..]).unwrap();
         scanner
             .finish(&mapped.source, |event| {
-                events.push(event.clone());
+                events.push(event.try_clone(&mut mapped.writer)?);
                 Ok(())
             })
             .unwrap();
@@ -444,13 +430,13 @@ fn canonical_events_bind_sequence_and_keep_wire_control_fields_opaque() {
     mapped
         .push(br#"{"x_ck":{"v":99,"attempt":999,"media":[{"media_id":"spoof"}]},"unknown":[null,0]}"#)
         .unwrap();
-    let mut json = json::Scanner::new(BUDGET as u64, BUDGET);
+    let mut json = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
     json.finish(&mapped.source).unwrap();
-    let mut output = mapped.store.create().unwrap();
+    let output = &mut mapped.writer;
     let mut emitter = Emitter::new(identity(Direction::Response));
     emitter
         .emit(
-            &mut output,
+            output,
             Kind::ResponseStart,
             Scope::default(),
             |e| e.bytes(br#", "id":"native","model":"m","created":0"#),
@@ -459,7 +445,7 @@ fn canonical_events_bind_sequence_and_keep_wire_control_fields_opaque() {
         .unwrap();
     emitter
         .emit(
-            &mut output,
+            output,
             Kind::Opaque,
             Scope {
                 choice_index: Some(0),
@@ -473,15 +459,15 @@ fn canonical_events_bind_sequence_and_keep_wire_control_fields_opaque() {
         )
         .unwrap();
     emitter
-        .emit(&mut output, Kind::Done, Scope::default(), |_| Ok(()), |_| Ok(()))
+        .emit(output, Kind::Done, Scope::default(), |_| Ok(()), |_| Ok(()))
         .unwrap();
     let before = output.committed();
     assert!(matches!(
-        emitter.emit(&mut output, Kind::Heartbeat, Scope::default(), |_| Ok(()), |_| Ok(())),
+        emitter.emit(output, Kind::Heartbeat, Scope::default(), |_| Ok(()), |_| Ok(())),
         Err(Error::Closed)
     ));
     assert_eq!(output.committed(), before);
-    let bytes = mapped.output(&output);
+    let bytes = mapped.output(&mapped.writer);
     let text = std::str::from_utf8(&bytes).unwrap();
     let records: Vec<_> = text.trim_end().split("\n\n").collect();
     assert_eq!(records.len(), 3);
@@ -509,49 +495,47 @@ fn canonical_request_end_requires_its_own_validated_document() {
         event::{Direction, Emitter, Kind, Scope},
     };
     let mut mapped = Mapped::new();
-    mapped.push(b"{\"modalities\":[\"text\"]}").unwrap();
-    let mut json = json::Scanner::new(BUDGET as u64, BUDGET);
-    json.finish(&mapped.source).unwrap();
+    let doc = document(&mut mapped, b"{\"modalities\":[\"text\"]}");
+    let media = ck_translate::codec::media::Registry::new(&mut mapped.writer).unwrap();
     let view = RequestView {
-        source: &mapped.source,
-        json: &json,
+        document: &doc,
+        media: &media,
         operation: Operation::Generate,
     };
-    let mut output = mapped.store.create().unwrap();
+    let output = &mut mapped.writer;
     let mut emitter = Emitter::new(identity(Direction::Request));
-    emitter.request_start(&mut output, view).unwrap();
+    emitter.request_start(output, view).unwrap();
     assert!(matches!(
-        emitter.emit(&mut output, Kind::Done, Scope::default(), |_| Ok(()), |_| Ok(())),
+        emitter.emit(output, Kind::Done, Scope::default(), |_| Ok(()), |_| Ok(())),
         Err(Error::Schema)
     ));
     assert!(matches!(
-        emitter.emit(&mut output, Kind::RequestEnd, Scope::default(), |_| Ok(()), |_| Ok(())),
+        emitter.emit(output, Kind::RequestEnd, Scope::default(), |_| Ok(()), |_| Ok(())),
         Err(Error::Schema)
     ));
     let mut foreign = Mapped::new();
-    foreign.push(b"{}").unwrap();
-    let mut foreign_json = json::Scanner::new(BUDGET as u64, BUDGET);
-    foreign_json.finish(&foreign.source).unwrap();
+    let foreign_doc = document(&mut foreign, b"{}");
+    let foreign_media = ck_translate::codec::media::Registry::new(&mut foreign.writer).unwrap();
     let foreign_ready = RequestFence::default()
         .end(
             RequestView {
-                source: &foreign.source,
-                json: &foreign_json,
+                document: &foreign_doc,
+                media: &foreign_media,
                 operation: Operation::Generate,
             },
             &TextDestination,
         )
         .unwrap();
     assert!(matches!(
-        emitter.request_end(&mut output, &foreign_ready),
+        emitter.request_end(output, &foreign_ready),
         Err(Error::Position)
     ));
     let ready = RequestFence::default().end(view, &TextDestination).unwrap();
-    emitter.request_end(&mut output, &ready).unwrap();
+    emitter.request_end(output, &ready).unwrap();
     emitter
-        .emit(&mut output, Kind::Done, Scope::default(), |_| Ok(()), |_| Ok(()))
+        .emit(output, Kind::Done, Scope::default(), |_| Ok(()), |_| Ok(()))
         .unwrap();
-    let bytes = mapped.output(&output);
+    let bytes = mapped.output(&mapped.writer);
     let text = std::str::from_utf8(&bytes).unwrap();
     assert_eq!(text.matches("event: x_ck.request.end\n").count(), 1);
     assert!(text.ends_with("\n\n"));
@@ -560,12 +544,12 @@ fn canonical_request_end_requires_its_own_validated_document() {
 #[test]
 fn canonical_media_data_fits_one_frame_and_failed_output_is_not_published() {
     use ck_translate::codec::event::{Direction, Emitter, Kind, LocalId, Scope};
-    let mapped = Mapped::new();
-    let mut output = mapped.store.create().unwrap();
+    let mut mapped = Mapped::new();
+    let output = &mut mapped.writer;
     let mut emitter = Emitter::new(identity(Direction::Response));
     emitter
         .emit(
-            &mut output,
+            output,
             Kind::ResponseStart,
             Scope::default(),
             |e| e.bytes(b",\"id\":\"native\",\"model\":\"m\",\"created\":0"),
@@ -578,7 +562,7 @@ fn canonical_media_data_fits_one_frame_and_failed_output_is_not_published() {
     };
     emitter
         .emit(
-            &mut output,
+            output,
             Kind::MediaStart,
             scope,
             |e| e.bytes(b",\"kind\":\"audio\",\"mime\":\"audio/pcm\",\"encoding\":\"base64\""),
@@ -589,7 +573,7 @@ fn canonical_media_data_fits_one_frame_and_failed_output_is_not_published() {
     let too_large = "A".repeat(ck_stream::FRAME_BYTES);
     assert!(matches!(
         emitter.emit(
-            &mut output,
+            output,
             Kind::Data,
             scope,
             |e| {
@@ -604,7 +588,7 @@ fn canonical_media_data_fits_one_frame_and_failed_output_is_not_published() {
     let data = "A".repeat(49_152);
     let record = emitter
         .emit(
-            &mut output,
+            output,
             Kind::Data,
             scope,
             |e| {
@@ -616,7 +600,7 @@ fn canonical_media_data_fits_one_frame_and_failed_output_is_not_published() {
         .unwrap();
     assert_eq!(record.start.offset, 0);
     assert!(record.len() <= ck_stream::FRAME_BYTES as u64);
-    let bytes = mapped.output(&output);
+    let bytes = mapped.output(&mapped.writer);
     let text = std::str::from_utf8(&bytes).unwrap();
     let value: serde_json::Value = serde_json::from_str(
         text.lines()
@@ -633,4 +617,68 @@ fn canonical_media_data_fits_one_frame_and_failed_output_is_not_published() {
             .unwrap(),
         vec![0; 36_864]
     );
+}
+
+fn scratch_bytes(lease: &ck_stream::ScratchLease) -> Vec<u8> {
+    let mut result = Vec::new();
+    while result.len() < lease.len() {
+        result.extend_from_slice(lease.chunk(result.len()).unwrap());
+    }
+    result
+}
+
+#[test]
+fn scratch_input_and_external_output_do_not_publish_or_release_canonical_bytes() {
+    use ck_translate::codec::event::{Direction, Emitter, Kind, Scope};
+    let mut mapped = Mapped::new();
+    mapped.push(b"{\"text\":\"kept\"}").unwrap();
+    assert!(mapped.output(&mapped.writer).is_empty());
+    let mut emitter = Emitter::new(identity(Direction::Response));
+    emitter
+        .emit(
+            &mut mapped.writer,
+            Kind::ResponseStart,
+            Scope::default(),
+            |e| e.bytes(b",\"id\":\"r\",\"model\":\"m\",\"created\":0"),
+            |_| Ok(()),
+        )
+        .unwrap();
+    let before = mapped.output(&mapped.writer);
+    let external = encode::scratch(&mut mapped.writer, |e| e.bytes(b"external")).unwrap();
+    mapped.source.release_before(mapped.source.len()).unwrap();
+    assert_eq!(mapped.output(&mapped.writer), before);
+    assert_eq!(scratch_bytes(&external), b"external");
+}
+
+#[test]
+fn empty_sources_and_scanners_reject_foreign_streams() {
+    let mut own = Mapped::new();
+    let mut foreign = Mapped::new();
+    assert!(matches!(
+        own.source.push_bytes(&mut foreign.writer, b""),
+        Err(Error::Position)
+    ));
+    let mut scanner = json::Scanner::new(&mut own.writer, BUDGET as u64).unwrap();
+    foreign.push(b"{}").unwrap();
+    assert!(matches!(scanner.finish(&foreign.source), Err(Error::Position)));
+}
+
+#[test]
+fn scanner_metadata_competes_with_other_permits_and_releases_on_drop() {
+    let mut mapped = Mapped::new();
+    mapped.push(b"{\"a\":1,\"b\":2}").unwrap();
+    let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
+    scanner.finish(&mapped.source).unwrap();
+    drop(scanner);
+    let permit = mapped.writer.reserve_metadata(4 * 1024 * 1024 - 4096).unwrap();
+    let mut scanner = json::Scanner::new(&mut mapped.writer, BUDGET as u64).unwrap();
+    // Hundreds of tiny members exhaust shared bookkeeping before payload storage.
+    let input = format!("[{}]", std::iter::repeat_n("0", 500).collect::<Vec<_>>().join(","));
+    let mut source = ck_translate::codec::source::Source::new(&mut mapped.writer).unwrap();
+    source.push_bytes(&mut mapped.writer, input.as_bytes()).unwrap();
+    assert!(matches!(
+        scanner.finish(&source),
+        Err(Error::Storage(ck_stream::Error::StorageExhausted))
+    ));
+    drop(permit);
 }

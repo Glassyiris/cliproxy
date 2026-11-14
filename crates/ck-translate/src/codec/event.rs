@@ -176,6 +176,7 @@ impl Emitter {
     }
 
     pub fn request_start(&mut self, output: &mut Writer, request: super::RequestView<'_>) -> Result<Record> {
+        request.document.check_owner(output)?;
         let record = self.publish(
             output,
             Kind::RequestStart,
@@ -190,14 +191,14 @@ impl Emitter {
             },
             |_| Ok(()),
         )?;
-        self.request = Some((request.source.id(), request.operation));
+        self.request = Some((request.document.id(), request.operation));
         Ok(record)
     }
 
     /// Only a successful capability fence can publish request.end.
     pub fn request_end(&mut self, output: &mut Writer, request: &ValidatedRequest<'_>) -> Result<Record> {
-        request.view().json.validate_source(request.view().source)?;
-        if self.request != Some((request.view().source.id(), request.view().operation)) {
+        request.view().document.check_owner(output)?;
+        if self.request != Some((request.view().document.id(), request.view().operation)) {
             return Err(Error::Position);
         }
         self.publish(output, Kind::RequestEnd, Scope::default(), |_| Ok(()), |_| Ok(()))
@@ -247,31 +248,7 @@ impl Emitter {
         }
         let next = self.sequence.checked_add(1).ok_or(Error::Limit)?;
         let record = encode::publish_record(output, kind as u32, 0, kind == Kind::Data, |encoder| {
-            if let Some(name) = kind.name() {
-                encoder.bytes(b"event: ")?;
-                encoder.bytes(name.as_bytes())?;
-                encoder.bytes(b"\n")?;
-            }
-            encoder.bytes(b"id: ")?;
-            encoder.unsigned(self.sequence)?;
-            encoder.bytes(b"\ndata: {\"x_ck\":{\"v\":1,\"request_id\":")?;
-            encoder.string(self.identity.request_id.as_str())?;
-            encoder.bytes(b",\"stream_id\":")?;
-            encoder.string(self.identity.stream_id.as_str())?;
-            encoder.bytes(b",\"attempt\":")?;
-            encoder.unsigned(self.identity.attempt)?;
-            encoder.bytes(b",\"seq\":")?;
-            encoder.unsigned(self.sequence)?;
-            encoder.bytes(b",\"direction\":")?;
-            encoder.string(match self.identity.direction {
-                Direction::Request => "request",
-                Direction::Response => "response",
-            })?;
-            write_scope(encoder, scope)?;
-            provenance(encoder)?;
-            encoder.bytes(b"}")?;
-            payload(encoder)?;
-            encoder.bytes(b"}\n\n")
+            self.encode_event(encoder, kind, scope, &payload, &provenance)
         })?;
         self.sequence = next;
         self.end = Some(record.end);
@@ -279,6 +256,67 @@ impl Emitter {
         self.request_ended |= kind == Kind::RequestEnd;
         self.terminal = kind.terminal();
         Ok(record)
+    }
+
+    pub(crate) fn data_capacity(&self, scope: Scope, index: u64, offset: u64) -> Result<usize> {
+        let framing = encode::measure(|e| {
+            self.encode_event(
+                e,
+                Kind::Data,
+                scope,
+                &|e| {
+                    e.bytes(b",\"index\":")?;
+                    e.unsigned(index)?;
+                    e.bytes(b",\"offset\":")?;
+                    e.unsigned(offset)?;
+                    e.bytes(b",\"bytes\":\"\"")
+                },
+                &|_| Ok(()),
+            )
+        })?;
+        let available = ck_stream::FRAME_BYTES
+            .checked_sub(framing)
+            .ok_or(Error::EventTooLarge)?;
+        let decoded = (available / 4 * 3).min(36_864);
+        if decoded == 0 {
+            return Err(Error::EventTooLarge);
+        }
+        Ok(decoded)
+    }
+
+    fn encode_event(
+        &self,
+        encoder: &mut Encoder<'_, '_>,
+        kind: Kind,
+        scope: Scope,
+        payload: &impl Fn(&mut Encoder<'_, '_>) -> Result<()>,
+        provenance: &impl Fn(&mut Encoder<'_, '_>) -> Result<()>,
+    ) -> Result<()> {
+        if let Some(name) = kind.name() {
+            encoder.bytes(b"event: ")?;
+            encoder.bytes(name.as_bytes())?;
+            encoder.bytes(b"\n")?;
+        }
+        encoder.bytes(b"id: ")?;
+        encoder.unsigned(self.sequence)?;
+        encoder.bytes(b"\ndata: {\"x_ck\":{\"v\":1,\"request_id\":")?;
+        encoder.string(self.identity.request_id.as_str())?;
+        encoder.bytes(b",\"stream_id\":")?;
+        encoder.string(self.identity.stream_id.as_str())?;
+        encoder.bytes(b",\"attempt\":")?;
+        encoder.unsigned(self.identity.attempt)?;
+        encoder.bytes(b",\"seq\":")?;
+        encoder.unsigned(self.sequence)?;
+        encoder.bytes(b",\"direction\":")?;
+        encoder.string(match self.identity.direction {
+            Direction::Request => "request",
+            Direction::Response => "response",
+        })?;
+        write_scope(encoder, scope)?;
+        provenance(encoder)?;
+        encoder.bytes(b"}")?;
+        payload(encoder)?;
+        encoder.bytes(b"}\n\n")
     }
 }
 
