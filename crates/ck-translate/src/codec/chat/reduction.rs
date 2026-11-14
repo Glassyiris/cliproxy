@@ -38,6 +38,44 @@ impl Reduction {
         self.media.iter().any(|entry| entry.is_open())
     }
 
+    /// Refresh the metadata-only streaming state without retaining delta payloads.
+    pub(super) fn refresh_metadata(&mut self, owner: &mut Writer, incoming: &Document) -> Result<()> {
+        let current = self.document.as_ref().ok_or(Error::Schema)?;
+        const FIELDS: [&str; 5] = ["id", "model", "created", "system_fingerprint", "service_tier"];
+        let mut changed = false;
+        for key in FIELDS {
+            if let Some(value) = incoming.member(incoming.root(), key)? {
+                changed |= match current.member(current.root(), key)? {
+                    None => true,
+                    Some(old) => match (current.node(old)?.value, incoming.node(value)?.value) {
+                        (Value::Null, Value::Null) => false,
+                        (Value::Null, _) | (_, Value::Null) => true,
+                        _ if key == "created" => current.unsigned(old)? != incoming.unsigned(value)?,
+                        _ => !super::response::equal(current, old, incoming, value)?,
+                    },
+                };
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+        self.document = Some(mapped_document(owner, |e| {
+            e.bytes(b"{\"object\":\"chat.completion\",\"choices\":[]")?;
+            for key in FIELDS {
+                let supplied = incoming.member(incoming.root(), key)?.map(|value| (incoming, value));
+                let retained = current.member(current.root(), key)?.map(|value| (current, value));
+                if let Some((doc, value)) = supplied.or(retained) {
+                    e.bytes(b",")?;
+                    e.string(key)?;
+                    e.bytes(b":")?;
+                    doc.write(value, e)?;
+                }
+            }
+            e.bytes(b"}")
+        })?);
+        Ok(())
+    }
+
     /// Returns a native delta and whether provenance had no surviving parent.
     pub(super) fn project(
         &mut self,

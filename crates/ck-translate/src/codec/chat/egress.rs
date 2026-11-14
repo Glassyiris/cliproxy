@@ -88,6 +88,9 @@ impl Egress {
             | Kind::MediaEnd
             | Kind::Annotation => {
                 let deliverable = if kind == Kind::Chunk {
+                    if self.mode == BodyMode::Streaming {
+                        self.reduction.refresh_metadata(owner, &doc)?;
+                    }
                     chunk_deliverable(&doc)?
                 } else if kind == Kind::Usage {
                     let usage = doc.required(root, "usage")?;
@@ -141,7 +144,14 @@ impl Egress {
                         e.bytes(b"data: ")?;
                         let value = doc.required(root, "value")?;
                         if doc.string_is(doc.required(root, "format")?, "text")? {
-                            raw_string(&doc, value, e)?;
+                            let mut chars = doc.chars(value)?;
+                            while let Some(c) = chars.next_scalar()? {
+                                if c == '\n' {
+                                    e.bytes(b"\ndata: ")?;
+                                } else {
+                                    e.bytes(c.encode_utf8(&mut [0; 4]).as_bytes())?;
+                                }
+                            }
                         } else {
                             doc.write(value, e)?;
                         }

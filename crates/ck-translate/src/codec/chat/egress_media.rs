@@ -39,7 +39,22 @@ impl Projection {
     pub(super) fn start(owner: &mut Writer, mut doc: Document, x: usize) -> Result<Self> {
         let id = id(&doc, x)?;
         let choice = doc.unsigned(doc.required(x, "choice_index")?)?;
-        let attributes = doc.required(doc.root(), "attributes")?;
+        let Some(attributes) = doc.member(doc.root(), "attributes")? else {
+            // Retain only the lifetime counters after deletion of the entire carrier.
+            return Ok(Self {
+                id,
+                document: None,
+                value: 0,
+                data: 0,
+                field: "content",
+                choice,
+                next: 0,
+                offset: 0,
+                live: true,
+                reachable: false,
+                ended: false,
+            });
+        };
         let name = doc.required(attributes, "field")?;
         let field = if doc.string_is(name, "audio")? {
             "audio"
@@ -108,10 +123,12 @@ impl Projection {
             doc.replace(data, Value::Base64Fragments)?;
             data
         } else {
-            let mime = doc.required(doc.root(), "mime")?;
+            let mime = doc.member(doc.root(), "mime")?;
             let prefix = encode::scratch(owner, |e| {
                 e.bytes(b"\"data:")?;
-                doc.write_contents(mime, e)?;
+                if let Some(mime) = mime {
+                    doc.write_contents(mime, e)?;
+                }
                 e.bytes(b";base64,\"")
             })?;
             let prefix = doc.import_json(owner, prefix)?;
@@ -278,10 +295,10 @@ impl Projection {
         if !self.live {
             return Ok(None);
         }
-        let mut doc = self.document.take().ok_or(Error::Closed)?;
         if !self.reachable || self.field != "audio" {
             return Ok(None);
         }
+        let mut doc = self.document.take().ok_or(Error::Closed)?;
         doc.remove(self.value, "data")?;
         if doc.node(self.value)?.first.is_none() {
             return Ok(None);

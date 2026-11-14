@@ -149,3 +149,59 @@ fn tool_and_legacy_extensions_keep_native_parent_and_source_pointer() {
         json!({"x_ck":true})
     );
 }
+
+#[test]
+fn opaque_multiline_text_keeps_one_sse_record_including_final_empty_line() {
+    for tail in ["", "data: \n"] {
+        let wire = format!(
+            "event: vendor\ndata: first\ndata: \ndata: data: forged\n{tail}\ndata: {{\"id\":\"r\",\"model\":\"m\",\"created\":1,\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"ok\"}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
+        );
+        let (output, _) = response(wire.as_bytes(), codec::BodyMode::Streaming, codec::BodyMode::Streaming);
+        let text = std::str::from_utf8(&output).unwrap();
+        let records: Vec<_> = text.trim_end().split("\n\n").collect();
+        let opaque: Vec<_> = records.iter().filter(|r| r.starts_with("event: vendor\n")).collect();
+        assert_eq!(opaque.len(), 1);
+        let data: Vec<_> = opaque[0].lines().filter_map(|l| l.strip_prefix("data: ")).collect();
+        let mut expected = vec!["first", "", "data: forged"];
+        if !tail.is_empty() {
+            expected.push("");
+        }
+        assert_eq!(data, expected);
+        assert!(!records.iter().any(|r| r.starts_with("data: forged")));
+        assert_eq!(records.last(), Some(&"data: [DONE]"));
+    }
+}
+
+#[test]
+fn heartbeat_streaming_tool_media_and_usage_projections_keep_provider_identity() {
+    let wire = concat!(
+        ": ping\n\n",
+        "data: {\"id\":\"real-id\",\"model\":\"real-model\",\"created\":123,\"choices\":[{\"index\":0,\"delta\":{\"audio\":{\"data\":\"AQID\"},\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let (output, _) = response(wire.as_bytes(), codec::BodyMode::Streaming, codec::BodyMode::Streaming);
+    let chunks: Vec<Value> = std::str::from_utf8(&output)
+        .unwrap()
+        .lines()
+        .filter_map(|l| l.strip_prefix("data: "))
+        .filter(|l| *l != "[DONE]")
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(
+        chunks
+            .iter()
+            .any(|c| c["choices"][0]["delta"]["audio"]["data"] == "AQID")
+    );
+    assert!(
+        chunks
+            .iter()
+            .any(|c| c["choices"][0]["delta"]["tool_calls"][0]["id"] == "c")
+    );
+    assert!(chunks.iter().any(|c| c["usage"]["prompt_tokens"] == 1));
+    for chunk in chunks {
+        assert_eq!(chunk["id"], "real-id");
+        assert_eq!(chunk["model"], "real-model");
+        assert_eq!(chunk["created"], 123);
+    }
+}

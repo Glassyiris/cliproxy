@@ -778,3 +778,25 @@ fn poisoned_scanner_cannot_publish_previously_completed_subtrees() {
         Err(Error::Closed)
     ));
 }
+
+#[test]
+fn trusted_decoder_rejects_truncated_media_records_before_projection() {
+    use ck_translate::codec::{event::Kind, internal};
+    use std::task::Poll;
+    let valid = b"event: x_ck.data\nid: 0\ndata: {\"x_ck\":{\"v\":1,\"seq\":0,\"media_id\":\"m0\"},\"index\":0,\"offset\":0,\"bytes\":\"AQID\"}\n\n";
+    for removed in [1, 2, 3, 8] {
+        let mut mapped = Mapped::new();
+        encode::publish(&mut mapped.writer, Kind::Data as u32, 0, |e| {
+            e.bytes(&valid[..valid.len() - removed])
+        })
+        .unwrap();
+        let mut reader = mapped.store.reader(mapped.writer.id(), 0).unwrap();
+        let Poll::Ready(Some(ck_stream::Read::Record(lease))) = reader.try_next() else {
+            panic!("missing trusted record")
+        };
+        assert!(matches!(
+            internal::decode(&mut mapped.writer, lease),
+            Err(Error::Truncated | Error::Schema)
+        ));
+    }
+}

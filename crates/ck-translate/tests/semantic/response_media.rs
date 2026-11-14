@@ -163,7 +163,24 @@ fn native_audio_fragments_reassemble_across_every_base64_boundary() {
         let end = json!({"id":"r","choices":[{"index":0,"delta":{"audio":{"data":second,"transcript":"lo","expires_at":99}},"finish_reason":"stop"}]});
         let wire = format!("data: {start}\n\ndata: {end}\n\ndata: [DONE]\n\n");
         for downstream in [codec::BodyMode::Buffered, codec::BodyMode::Streaming] {
-            let (output, _) = response(wire.as_bytes(), codec::BodyMode::Streaming, downstream);
+            let (output, events) = response(wire.as_bytes(), codec::BodyMode::Streaming, downstream);
+            let starts: Vec<_> = events.iter().filter(|event| event["encoding"] == "base64").collect();
+            assert_eq!(starts.len(), 1, "{first}/{second}/{downstream:?}");
+            let id = &starts[0]["x_ck"]["media_id"];
+            let records: Vec<_> = events.iter().filter(|event| &event["x_ck"]["media_id"] == id).collect();
+            let mut offset = 0;
+            for (index, data) in records.iter().filter(|event| event["bytes"].is_string()).enumerate() {
+                assert_eq!(data["index"], index);
+                assert_eq!(data["offset"], offset);
+                offset += base64::engine::general_purpose::STANDARD
+                    .decode(data["bytes"].as_str().unwrap())
+                    .unwrap()
+                    .len();
+            }
+            assert_eq!(offset, 4);
+            let ends: Vec<_> = records.iter().filter(|event| event["status"] == "completed").collect();
+            assert_eq!(ends.len(), 1);
+            assert_eq!(ends[0]["bytes"], 4);
             let messages = messages(&output, downstream);
             let mut bytes = Vec::new();
             let mut transcript = String::new();

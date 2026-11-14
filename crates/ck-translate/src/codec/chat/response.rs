@@ -971,7 +971,7 @@ fn sse_provenance(source: &Source, event: &sse::Event, e: &mut Encoder<'_, '_>) 
     }
     e.bytes(b"]}")
 }
-fn equal(a: &Document, ai: usize, b: &Document, bi: usize) -> Result<bool> {
+pub(super) fn equal(a: &Document, ai: usize, b: &Document, bi: usize) -> Result<bool> {
     let mut a = a.chars(ai)?;
     let mut b = b.chars(bi)?;
     loop {

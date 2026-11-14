@@ -320,3 +320,87 @@ fn collision_mutation(replace: bool) {
         assert_eq!(output["messages"][0]["content"], json!([part("c"), part("d")]));
     }
 }
+
+#[test]
+fn trusted_ingress_source_kind_replacement_changes_native_carrier_in_both_modes() {
+    use super::{ChatCapability, Egress, Operation, RequestEgress, bytes, codec};
+    use codec::{RequestFence, RequestView, document::Value, media::Registry};
+    use serde_json::json;
+    let input = json!({"model":"m","messages":[{"role":"user","content":[
+        {"type":"image_url","image_url":{"url":"https://example.invalid/old","vendor":false}},
+        {"type":"file","file":{"file_id":"old-id","filename":"old.pdf","vendor":[null,2]}},
+        {"type":"image_url","image_url":{"url":"data:image/png;base64,AQID"}},
+        {"type":"file","file":{"file_data":"data:application/pdf;base64,BAUG","filename":"old-data.pdf"}}
+    ]}]});
+    let (mut mapped, mut doc) = super::request_controls::canonical(&input, &ChatCapability);
+    let registry = Registry::new(&mut mapped.writer).unwrap();
+    let messages = doc.required(doc.root(), "messages").unwrap();
+    let message = doc.children(messages).unwrap().next().unwrap();
+    let content = doc.required(message, "content").unwrap();
+    let parts: Vec<_> = doc.children(content).unwrap().collect();
+    let source = doc.required(parts[0], "source").unwrap();
+    doc.set(parts[0], "type", Value::Text("document")).unwrap();
+    doc.set(source, "kind", Value::Text("file")).unwrap();
+    doc.remove(source, "uri").unwrap();
+    doc.set(source, "file_id", Value::Text("new-id")).unwrap();
+    doc.set(parts[0], "filename", Value::Text("new.pdf")).unwrap();
+    let source = doc.required(parts[1], "source").unwrap();
+    doc.set(parts[1], "type", Value::Text("image")).unwrap();
+    doc.set(source, "kind", Value::Text("uri")).unwrap();
+    doc.remove(source, "file_id").unwrap();
+    doc.remove(parts[1], "filename").unwrap();
+    doc.set(source, "uri", Value::Text("https://example.invalid/new"))
+        .unwrap();
+    for (index, kind, key, replacement) in [
+        (2, "uri", "uri", "https://example.invalid/replaced"),
+        (3, "file", "file_id", "replaced-file"),
+    ] {
+        let source = doc.required(parts[index], "source").unwrap();
+        doc.remove(source, "ref").unwrap().expect("trusted embedded reference");
+        doc.set(source, "kind", Value::Text(kind)).unwrap();
+        doc.set(source, key, Value::Text(replacement)).unwrap();
+        doc.remove(parts[index], "mime").unwrap();
+        doc.remove(parts[index], "filename").unwrap();
+    }
+    let retained = String::from_utf8(mapped.output(&mapped.writer)).unwrap();
+    assert!(retained.contains("AQID") && retained.contains("BAUG"));
+    for upstream_stream in [false, true] {
+        let ready = RequestFence::default()
+            .end(
+                RequestView {
+                    document: &doc,
+                    media: &registry,
+                    operation: Operation::Generate,
+                },
+                &ChatCapability,
+            )
+            .unwrap();
+        let output = Egress {
+            destination: "chat",
+            upstream_stream,
+        }
+        .encode(&ready, &mut mapped.writer)
+        .unwrap();
+        let raw = bytes(&output);
+        let mut source = codec::source::Source::new(&mut mapped.writer).unwrap();
+        source.push_bytes(&mut mapped.writer, &raw).unwrap();
+        codec::document::Document::parse(&mut mapped.writer, source, 1_000_000).expect("duplicate output key");
+        let output: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        let parts = output["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(parts[0]["type"], "file");
+        assert_eq!(parts[0]["file"]["file_id"], "new-id");
+        assert_eq!(parts[0]["file"]["filename"], "new.pdf");
+        assert!(parts[0].get("image_url").is_none());
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "https://example.invalid/new");
+        assert!(parts[1].get("file").is_none());
+        assert_eq!(
+            parts[2],
+            json!({"type":"image_url","image_url":{"url":"https://example.invalid/replaced"}})
+        );
+        assert_eq!(parts[3], json!({"type":"file","file":{"file_id":"replaced-file"}}));
+        assert!(!String::from_utf8_lossy(&raw).contains("AQID"));
+        assert!(!String::from_utf8_lossy(&raw).contains("BAUG"));
+        assert!(!String::from_utf8_lossy(&raw).contains("old"));
+    }
+}
