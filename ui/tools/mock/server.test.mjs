@@ -389,3 +389,54 @@ test(
     }
   },
 );
+
+test("mock configuration and CORS match management responses", { timeout: 15_000 }, async (t) => {
+  const { child, base } = await startMock();
+  try {
+    await t.test("effective config omits the removed OAuth auth directory", async () => {
+      const response = await fetch(`${base}/admin/v1/effective/config`, {
+        headers: { Authorization: "Bearer mock" },
+      });
+      assert.equal(response.status, 200);
+      const config = await response.json();
+      assert.equal(Object.hasOwn(config.oauth, "auth-dir"), false);
+    });
+    await t.test("preflight and regular responses expose management headers", async () => {
+      const exposed = [
+        "X-Ck-Trace-Id",
+        "X-Ck-Version",
+        "X-Ck-Commit",
+        "X-Ck-Build-Date",
+        "X-SERVER-VERSION",
+        "X-SERVER-BUILD-DATE",
+        "Location",
+        "Retry-After",
+        "ETag",
+        "X-Request-Id",
+        "OpenAI-Request-Id",
+      ];
+      for (const [path, extra] of [
+        ["/v8/management/credentials", []],
+        ["/admin/v1/effective/config", ["X-Ck-Revision", "X-Ck-Published-Revision"]],
+      ]) {
+        for (const method of ["OPTIONS", "GET"]) {
+          const response = await fetch(`${base}${path}`, {
+            method,
+            headers: { Authorization: "Bearer mock", Origin: "http://dashboard.example.invalid" },
+          });
+          assert.equal(response.status, method === "OPTIONS" ? 204 : 200);
+          assert.equal(response.headers.get("access-control-allow-origin"), "*");
+          assert.deepEqual(
+            response.headers.get("access-control-expose-headers")?.split(/,\s*/),
+            method === "OPTIONS" ? exposed : [...exposed, ...extra],
+          );
+          await response.arrayBuffer();
+        }
+      }
+    });
+  } finally {
+    const exited = once(child, "exit");
+    child.kill();
+    await exited;
+  }
+});

@@ -147,7 +147,8 @@ try {
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "Add client key" });
   await appears(dialog, "the Add client key dialog");
-  await appears(dialog.locator(":focus"), "focus inside the Add client key dialog");
+  // The dialog title can receive focus before the key field; typing at the title loses the key.
+  await appears(dialog.locator("input:focus"), "focus in the Add client key field");
   await page.keyboard.type(key);
   await page.keyboard.press("Enter");
   await dialog.waitFor({ state: "detached" });
