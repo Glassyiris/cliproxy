@@ -133,8 +133,17 @@ semantic test suites' responsibility.
 `results.jsonl`, `summary.json`, per-scenario `server.log`, `upstream.json` and
 `response-*.body` retain the observations. Resume identity headers are not
 recorded. Set `FLOW_BUILD_PROVENANCE` to the gateway's revision, compiler,
-profile, features and build flags; omission is recorded as unverified provenance,
-not evidence for performance acceptance.
+profile, features and build flags.
+
+`summary.json` records the §9.2 flow-limit metrics. The driver measures consumer
+lag (upstream minus client bytes during the slow-reader stall), blocked-read
+duration (the longest upstream write interval during that stall), resume
+attaches, `410 Gone` responses and cancelled-stream cleanup (seconds from the
+storage error to the upstream's end). The gateway exposes no cache bytes, time
+since last read, evictions, expiries, allocation failures or outstanding leases,
+so those stay `null`. Run acceptance with `--acceptance`: it exits nonzero when
+`FLOW_BUILD_PROVENANCE` is unset or any flow metric is missing, so this gate
+cannot pass acceptance until the gateway reports the internal counters.
 
 ### Container startup
 

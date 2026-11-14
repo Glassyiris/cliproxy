@@ -612,5 +612,29 @@ class StreamLimitChecks(unittest.TestCase):
             self.attempt(10, cancel=True)
 
 
+class FlowSummaryChecks(unittest.TestCase):
+    def results(self):
+        observed = {"consumer_lag_bytes": 9, "blocked_read_s": 0.01, "resumes": 3, "stream_gone": 2,
+                    "cancelled_stream_cleanup_s": 0.1}
+        return [{"scenario": "slow-downstream", "status": "pass", "flow": observed}]
+
+    def test_development_run_records_missing_gateway_metrics(self):
+        flow, failures = driver.summarize(self.results(), None, acceptance=False)
+        self.assertEqual(failures, [])
+        self.assertEqual(flow["resumes"], 3)
+        self.assertIsNone(flow["evictions"])
+
+    def test_acceptance_rejects_unverified_provenance_and_missing_metrics(self):
+        for provenance in (None, "", driver.UNVERIFIED):
+            _, failures = driver.summarize(self.results(), provenance, acceptance=True)
+            self.assertIn("FLOW_BUILD_PROVENANCE is unset; acceptance needs verified build provenance", failures)
+        _, failures = driver.summarize(self.results(), "rev abc; rustc 1.99", acceptance=True)
+        self.assertEqual(failures, [f"missing flow metric {name}" for name in driver.GATEWAY_ONLY_METRICS])
+
+    def test_failed_scenario_fails_the_run(self):
+        failed = [{"scenario": "stream-limit", "status": "fail", "error": "boom"}]
+        self.assertEqual(driver.summarize(failed, None, acceptance=False)[1], ["stream-limit: boom"])
+
+
 if __name__ == "__main__":
     unittest.main()
