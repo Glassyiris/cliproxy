@@ -281,11 +281,28 @@ impl Registry {
             }
             e.bytes(b";base64,")?;
         }
-        match &entry.chunks {
-            Some(chunks) => write_encoded_chunks(doc, chunks.iter().copied(), e)?,
-            None => write_payload(doc, media, e)?,
-        }
+        Self::write_bytes(entry, doc, media, e)?;
         e.bytes(b"\"")
+    }
+
+    /// Writes a registered payload as one plain base64 JSON string, whatever its original form:
+    /// a data URI loses its prefix and text is encoded from its UTF-8 bytes. Protocol encoders
+    /// whose carrier names the media type in a separate field call this.
+    pub fn write_base64(&self, doc: &Document, node: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
+        let media = self.get(doc, node)?.ok_or(Error::Position)?;
+        let entry = &self.entries[*self.active.get(&node).ok_or(Error::Position)?];
+        e.bytes(b"\"")?;
+        Self::write_bytes(entry, doc, media, e)?;
+        e.bytes(b"\"")
+    }
+
+    /// Writes the payload's bytes as base64 without quotes, from retained records when the
+    /// payload has them and from its string otherwise.
+    fn write_bytes(entry: &Entry, doc: &Document, media: Media, e: &mut Encoder<'_, '_>) -> Result<()> {
+        match &entry.chunks {
+            Some(chunks) => write_encoded_chunks(doc, chunks.iter().copied(), e),
+            None => write_payload(doc, media, e),
+        }
     }
 }
 

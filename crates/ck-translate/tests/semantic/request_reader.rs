@@ -247,3 +247,66 @@ fn rebuilt_request_rejects_media_end_that_does_not_complete_its_data() {
     });
     assert!(result.is_err(), "data offset");
 }
+
+/// Registers `literal` (a JSON string) as the payload of `part`'s source with `encoding`.
+fn register_payload(
+    mapped: &mut Mapped,
+    doc: &mut Document,
+    media: &mut Registry,
+    part: usize,
+    literal: &str,
+    (encoding, mime): (Encoding, &'static str),
+) {
+    let mut source = codec::source::Source::new(&mut mapped.writer).unwrap();
+    source.push_bytes(&mut mapped.writer, literal.as_bytes()).unwrap();
+    let parsed = Document::parse(&mut mapped.writer, source, literal.len() as u64).unwrap();
+    let string = doc.absorb(parsed).unwrap();
+    let Value::String(text) = doc.node(string).unwrap().value else {
+        panic!("payload is not a string");
+    };
+    let source = doc.required(part, "source").unwrap();
+    doc.remove(source, "ref").unwrap().unwrap();
+    let reference = doc.set(source, "ref", Value::Null).unwrap();
+    let mime = doc.set(part, "mime", Value::Text(mime)).unwrap();
+    media
+        .register(doc, reference, text, encoding, "image", Some(mime))
+        .unwrap();
+}
+
+#[test]
+fn registered_payloads_write_as_plain_base64_in_every_original_form() {
+    let (mut mapped, mut doc, mut media) = rebuilt(&input());
+    let parts = parts(&doc);
+    // Retained records: data URI image, data URI file, plain file and audio.
+    let mut expected: Vec<_> = [(1, "AQID"), (3, "BwgJ"), (4, "CgsM"), (5, "DQ4P")]
+        .into_iter()
+        .map(|(index, data)| (parts[index], data))
+        .collect();
+    // A complete string registered as a data URI.
+    register_payload(
+        &mut mapped,
+        &mut doc,
+        &mut media,
+        parts[2],
+        "\"data:image/gif;base64,R0lG\"",
+        (Encoding::DataUri { skip: 22 }, "image/gif"),
+    );
+    expected.push((parts[2], "R0lG"));
+    let mut references: Vec<_> = expected
+        .into_iter()
+        .map(|(part, data)| {
+            let source = doc.required(part, "source").unwrap();
+            (doc.required(source, "ref").unwrap(), data.to_owned())
+        })
+        .collect();
+    // Text is encoded from its UTF-8 bytes.
+    use base64::Engine;
+    references.push((
+        doc.required(parts[0], "text").unwrap(),
+        base64::engine::general_purpose::STANDARD.encode("t".repeat(3000)),
+    ));
+    for (reference, data) in references {
+        let lease = codec::encode::scratch(&mut mapped.writer, |e| media.write_base64(&doc, reference, e)).unwrap();
+        assert_eq!(serde_json::from_slice::<Json>(&bytes(&lease)).unwrap(), json!(data));
+    }
+}
