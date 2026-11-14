@@ -1,4 +1,3 @@
-use super::request_content::normalize_part;
 use crate::codec::{
     self, Capability, Error, Operation, RequestFence, RequestView, Result, ValidatedRequest,
     document::{Document, Name, Value},
@@ -26,6 +25,9 @@ use publish::{Component, field, fields};
 
 #[path = "request_tree.rs"]
 mod tree;
+
+#[path = "request_messages.rs"]
+mod messages;
 
 pub struct Ingress {
     owner: u64,
@@ -299,139 +301,6 @@ impl Ingress {
         Ok(())
     }
 
-    fn consume_messages(&mut self, owner: &mut Writer) -> Result<()> {
-        loop {
-            let pending = self.messages.as_ref().ok_or(Error::Schema)?;
-            let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
-            let next = match pending.last {
-                Some(last) => scanner.pending_node(self.document.input(), last)?.next,
-                None => scanner.pending_node(self.document.input(), pending.wire)?.first,
-            };
-            let Some(index) = next else { break };
-            let wire = scanner.pending_node(self.document.input(), index)?;
-            if wire.kind != json::Kind::Object {
-                return Err(Error::Schema);
-            }
-            let message_index = pending.index;
-            let mut path = [None; 128];
-            path[0] = Some(Component::Name(Name::Static("messages")));
-            path[1] = Some(Component::Index(message_index));
-            if self.current_message.is_none() {
-                let node = self.document.add(None, Value::Object)?;
-                self.document.append(pending.node, node)?;
-                field(
-                    &mut self.document,
-                    &self.media,
-                    node,
-                    &path[..2],
-                    &mut self.emitter,
-                    owner,
-                    &mut self.reader,
-                )?;
-                self.current_message = Some(PendingMessage {
-                    wire: index,
-                    node,
-                    last: None,
-                });
-            }
-            loop {
-                let current = self.current_message.as_ref().ok_or(Error::Schema)?;
-                let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
-                let next = match current.last {
-                    Some(last) => scanner.pending_node(self.document.input(), last)?.next,
-                    None => scanner.pending_node(self.document.input(), current.wire)?.first,
-                };
-                let Some(child) = next else { break };
-                let value = scanner.pending_node(self.document.input(), child)?;
-                let key = value.key.ok_or(Error::Schema)?;
-                let existing = self
-                    .string
-                    .as_ref()
-                    .filter(|s| s.wire == child)
-                    .map(|s| s.node)
-                    .or_else(|| self.trees.get(child).and_then(|s| s.map(|s| s.node)));
-                let name = existing
-                    .map(|node| self.document.node(node).map(|n| n.name))
-                    .transpose()?
-                    .flatten()
-                    .unwrap_or(Name::Mapped(codec::document::Text { source: 0, span: key }));
-                path[2] = Some(Component::Name(name));
-                if self.string.as_ref().is_some_and(|s| s.wire == child)
-                    || (value.kind == json::Kind::String
-                        && value.span.end == 0
-                        && value.validated_end - value.span.start > 1024)
-                {
-                    if !self.stream_string(owner, child, current.node, &path[..3], true)?.1 {
-                        return Ok(());
-                    }
-                } else {
-                    if value.span.end == 0 || self.trees.get(child).is_some_and(Option::is_some) {
-                        let deferred = self.document.name_is(name, "tool_calls")?
-                            || self.document.name_is(name, "function_call")?
-                            || (self.document.name_is(name, "content")? && value.kind == json::Kind::Array);
-                        if !self.consume_tree(owner, child, current.node, &mut path, 3, !deferred)? {
-                            return Ok(());
-                        }
-                        self.current_message.as_mut().ok_or(Error::Schema)?.last = Some(child);
-                        continue;
-                    }
-                    if value.span.end == 0 {
-                        return Ok(());
-                    }
-                    let node = self.document.import_completed(scanner, child)?;
-                    self.document.append(current.node, node)?;
-                    let deferred = self.document.name_is(name, "tool_calls")?
-                        || self.document.name_is(name, "function_call")?
-                        || (self.document.name_is(name, "content")? && value.kind == json::Kind::Array);
-                    if !deferred {
-                        fields(
-                            &mut self.document,
-                            &self.media,
-                            node,
-                            (&mut path, 3),
-                            &mut self.emitter,
-                            owner,
-                            &mut self.reader,
-                        )?;
-                    }
-                }
-                self.current_message.as_mut().ok_or(Error::Schema)?.last = Some(child);
-            }
-            if wire.span.end == 0 {
-                break;
-            }
-            let current = self.current_message.take().ok_or(Error::Schema)?;
-            self.media.validate_registrations(&self.document)?;
-            normalize_message(&mut self.document, current.node, message_index, &mut self.media, owner)?;
-            self.media.relocate_ingress(&self.document)?;
-            fields(
-                &mut self.document,
-                &self.media,
-                current.node,
-                (&mut path, 2),
-                &mut self.emitter,
-                owner,
-                &mut self.reader,
-            )?;
-            while self.published_media < self.media.len() {
-                let index = self.published_media;
-                media::publish(
-                    &self.document,
-                    self.media.at(index),
-                    &mut self.emitter,
-                    owner,
-                    Scope::default(),
-                )?;
-                self.media.retain(&mut self.document, index, owner, &mut self.reader)?;
-                self.published_media += 1;
-            }
-            let pending = self.messages.as_mut().ok_or(Error::Schema)?;
-            pending.last = Some(index);
-            pending.index += 1;
-        }
-        Ok(())
-    }
-
     fn prepare(&mut self, owner: &mut Writer) -> Result<()> {
         self.scanner
             .as_mut()
@@ -440,7 +309,7 @@ impl Ingress {
         self.consume(owner)?;
         super::request_controls::declarations(&mut self.document, owner)?;
         super::provenance::bindings(&mut self.document, owner)?;
-        validate(&self.document)?;
+        messages::validate(&self.document)?;
         super::request_schema::validate(&self.document, &self.media)?;
         let x = self.document.required(self.document.root(), "x_ck")?;
         let mut path = [None; 128];
@@ -550,7 +419,7 @@ impl Capability for ChatCapability {
         if view.operation != Operation::Generate {
             return Err(Error::Unsupported);
         }
-        validate(view.document)?;
+        messages::validate(view.document)?;
         super::request_schema::validate(view.document, view.media)?;
         super::request_controls::destination(view.document)
     }
@@ -572,86 +441,6 @@ fn require_array(doc: &Document, node: usize) -> Result<()> {
     } else {
         Err(Error::Schema)
     }
-}
-
-fn validate(doc: &Document) -> Result<()> {
-    let root = doc.root();
-    require_string(doc, doc.required(root, "model")?)?;
-    let messages = doc.required(root, "messages")?;
-    require_array(doc, messages)?;
-    for message in doc.children(messages)? {
-        let role = doc.required(message, "role")?;
-        let mut accepted = false;
-        for value in ["system", "developer", "user", "assistant", "tool", "function"] {
-            accepted |= doc.string_is(role, value)?;
-        }
-        if !accepted {
-            return Err(Error::Unsupported);
-        }
-        if let Some(content) = doc.member(message, "content")? {
-            match doc.node(content)?.value {
-                Value::String(_) | Value::Text(_) | Value::Utf8Media | Value::Null => (),
-                Value::Array => {
-                    for part in doc.children(content)? {
-                        let kind = doc.required(part, "type")?;
-                        let mut supported = false;
-                        for name in [
-                            "text",
-                            "reasoning",
-                            "reasoning_summary",
-                            "refusal",
-                            "image",
-                            "audio",
-                            "video",
-                            "document",
-                            "tool_result",
-                            "opaque",
-                            "redacted",
-                            "encrypted",
-                        ] {
-                            supported |= doc.string_is(kind, name)?;
-                        }
-                        if !supported {
-                            return Err(Error::Unsupported);
-                        }
-                    }
-                }
-                _ => return Err(Error::Schema),
-            }
-        }
-        if let Some(calls) = doc.member(message, "tool_calls")? {
-            require_array(doc, calls)?;
-            for call in doc.children(calls)? {
-                require_string(doc, doc.required(call, "id")?)?;
-                let function = doc.required(call, "function")?;
-                require_string(doc, doc.required(function, "name")?)?;
-                let format = doc.required(call, "arguments_format")?;
-                if !doc.string_is(format, "json")? && !doc.string_is(format, "text")? {
-                    return Err(Error::Schema);
-                }
-            }
-        }
-        if doc.string_is(role, "tool")? {
-            let result_id = doc.required(message, "tool_call_id")?;
-            let mut found = false;
-            for prior in doc.children(messages)? {
-                if prior == message {
-                    break;
-                }
-                if let Some(calls) = doc.member(prior, "tool_calls")? {
-                    for call in doc.children(calls)? {
-                        if doc.equal_strings(result_id, doc.required(call, "id")?)? {
-                            found = true;
-                        }
-                    }
-                }
-            }
-            if !found {
-                return Err(Error::Schema);
-            }
-        }
-    }
-    Ok(())
 }
 
 fn initialize(doc: &mut Document) -> Result<()> {
@@ -714,83 +503,6 @@ fn normalize_options(doc: &mut Document) -> Result<()> {
             doc.append(choice, function)?;
         }
         doc.set(x, "chat_legacy_choice", Value::Bool(true))?;
-    }
-    Ok(())
-}
-
-fn normalize_message(
-    doc: &mut Document,
-    m: usize,
-    current_message: u64,
-    registry: &mut Registry,
-    owner: &mut Writer,
-) -> Result<()> {
-    let x = doc.required(doc.root(), "x_ck")?;
-    super::request_controls::message(doc, owner, m, current_message)?;
-    if let Some(content) = doc.member(m, "content")?
-        && matches!(doc.node(content)?.value, Value::Array)
-    {
-        let mut part = doc.node(content)?.first;
-        while let Some(p) = part {
-            part = doc.node(p)?.next;
-            normalize_part(doc, registry, owner, p)?;
-        }
-    }
-    if let Some(function) = doc.remove(m, "function_call")? {
-        if doc.member(m, "tool_calls")?.is_some() {
-            return Err(Error::Schema);
-        }
-        let calls = doc.set(m, "tool_calls", Value::Array)?;
-        let call = doc.add(None, Value::Object)?;
-        doc.append(calls, call)?;
-        doc.set(call, "id", Value::Id(media::local_id(b'l', m as u64)?))?;
-        doc.set(call, "type", Value::Text("function"))?;
-        doc.rename(function, "function")?;
-        doc.append(call, function)?;
-        let legacy = match doc.member(x, "chat_legacy_calls")? {
-            Some(n) => n,
-            None => doc.set(x, "chat_legacy_calls", Value::Array)?,
-        };
-        let entry = doc.add(None, Value::Object)?;
-        doc.append(legacy, entry)?;
-        doc.set(entry, "message_index", Value::Unsigned(current_message))?;
-        doc.bind_origin(entry, m, None)?;
-    }
-    if let Some(calls) = doc.member(m, "tool_calls")? {
-        require_array(doc, calls)?;
-        let mut call = doc.node(calls)?.first;
-        while let Some(c) = call {
-            call = doc.node(c)?.next;
-            let kind = doc.required(c, "type")?;
-            let custom = doc.string_is(kind, "custom")?;
-            let function = if custom {
-                let custom = doc.remove(c, "custom")?.ok_or(Error::Schema)?;
-                doc.rename(custom, "function")?;
-                doc.append(c, custom)?;
-                if let Some(input) = doc.remove(custom, "input")? {
-                    doc.rename(input, "arguments")?;
-                    doc.append(custom, input)?;
-                }
-                custom
-            } else {
-                doc.required(c, "function")?
-            };
-            doc.set(c, "arguments_format", Value::Text(if custom { "text" } else { "json" }))?;
-            if let Some(arguments) = doc.member(function, "arguments")? {
-                require_string(doc, arguments)?;
-                if !custom {
-                    let lease = encode::scratch(owner, |e| {
-                        let mut decoded = doc.chars(arguments)?;
-                        while let Some(c) = decoded.next_scalar()? {
-                            e.bytes(c.encode_utf8(&mut [0; 4]).as_bytes())?;
-                        }
-                        Ok(())
-                    })?;
-                    let parsed = doc.import_json(owner, lease)?;
-                    doc.transplant(arguments, parsed)?;
-                }
-            }
-        }
     }
     Ok(())
 }
