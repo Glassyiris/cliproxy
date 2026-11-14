@@ -159,6 +159,7 @@ fn unfinished_native_audio_cannot_publish_successful_choice_finish() {
     let mut mapped = Mapped::new();
     let mut ingress = codec::chat::response::Ingress::new(
         &mut mapped.writer,
+        &mapped.store,
         identity(Direction::Response),
         Operation::Generate,
         codec::BodyMode::Streaming,

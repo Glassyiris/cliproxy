@@ -12,6 +12,8 @@ mod request_media;
 mod provenance;
 #[path = "semantic/response_media.rs"]
 mod response_media;
+#[path = "semantic/snapshots.rs"]
+mod snapshots;
 #[path = "semantic/terminal.rs"]
 mod terminal;
 #[path = "semantic/usage.rs"]
@@ -177,6 +179,7 @@ fn response_fragmented(
     let mut mapped = Mapped::new();
     let mut ingress = codec::chat::response::Ingress::new(
         &mut mapped.writer,
+        &mapped.store,
         identity(Direction::Response),
         Operation::Generate,
         upstream,
@@ -268,6 +271,7 @@ fn tool_arguments_are_published_before_finish_and_truncation_never_succeeds() {
     let mut mapped = Mapped::new();
     let mut ingress = codec::chat::response::Ingress::new(
         &mut mapped.writer,
+        &mapped.store,
         identity(Direction::Response),
         Operation::Generate,
         codec::BodyMode::Streaming,
@@ -431,6 +435,7 @@ fn codecs_reject_foreign_owners_without_publishing_errors() {
     .unwrap();
     let mut response = codec::chat::response::Ingress::new(
         &mut mapped.writer,
+        &mapped.store,
         identity(Direction::Response),
         Operation::Generate,
         codec::BodyMode::Streaming,
@@ -464,6 +469,7 @@ fn codecs_reject_foreign_owners_without_publishing_errors() {
     let mut reader = mapped.store.reader(other.id(), 0).unwrap();
     let mut foreign = codec::chat::response::Ingress::new(
         &mut other,
+        &mapped.store,
         identity(Direction::Response),
         Operation::Generate,
         codec::BodyMode::Streaming,

@@ -14,6 +14,8 @@ use ck_stream::Writer;
 mod buffered;
 #[path = "response_media.rs"]
 mod media_events;
+#[path = "response_snapshot.rs"]
+mod snapshot;
 
 pub struct Ingress {
     owner: u64,
@@ -27,6 +29,7 @@ pub struct Ingress {
 impl Ingress {
     pub fn new(
         owner: &mut Writer,
+        store: &ck_stream::Store,
         identity: Identity,
         operation: Operation,
         mode: BodyMode,
@@ -61,6 +64,8 @@ impl Ingress {
                 identity,
                 serial: 0,
                 published: Table::new(owner)?,
+                reader: store.reader(owner.id(), 0)?,
+                reduction: super::reduction::Reduction::new(owner)?,
             },
 
             failed: false,
@@ -159,6 +164,8 @@ struct State {
     identity: Identity,
     serial: u64,
     published: Table<buffered::Published>,
+    reader: ck_stream::Reader,
+    reduction: super::reduction::Reduction,
 }
 
 pub(super) fn mapped_document(
@@ -232,11 +239,11 @@ impl State {
             return Ok(());
         }
         let length = data.len();
-        let doc = Document::parse(owner, data, length)?;
+        let mut doc = Document::parse(owner, data, length)?;
         if error_event || doc.member(doc.root(), "error")?.is_some() {
             return Err(Error::Schema);
         }
-        self.document(owner, &doc, false, Some((source, event)))
+        self.document(owner, &mut doc, false, Some((source, event)))
     }
 
     fn ensure_start(&mut self, owner: &mut Writer, doc: Option<&Document>) -> Result<()> {
@@ -316,7 +323,7 @@ impl State {
     fn document(
         &mut self,
         owner: &mut Writer,
-        doc: &Document,
+        doc: &mut Document,
         buffered: bool,
         wire: Option<(&Source, &sse::Event)>,
     ) -> Result<()> {
@@ -362,17 +369,29 @@ impl State {
         if !matches!(doc.node(choices)?.value, Value::Array) {
             return Err(Error::Schema);
         }
+        if !buffered {
+            // All deltas precede validation; no snapshot suffix or close may escape a
+            // contradiction in a later choice in this same source record.
+            for choice in doc.children(choices)? {
+                let index = doc.unsigned(doc.required(choice, "index")?)?;
+                let position = self.choice(owner, index)?;
+                if self.choices[position].finished {
+                    return Err(Error::Schema);
+                }
+                if let Some(delta) = doc.member(choice, "delta")? {
+                    self.delta(owner, doc, choice, delta, position, false)?;
+                }
+            }
+            self.reconcile(owner, doc, choices)?;
+        }
         for choice in doc.children(choices)? {
             let index = doc.unsigned(doc.required(choice, "index")?)?;
             let position = self.choice(owner, index)?;
             if self.choices[position].finished {
                 return Err(Error::Schema);
             }
-            let body = doc.member(choice, if buffered { "message" } else { "delta" })?;
-            if let Some(body) = body {
+            if let Some(body) = doc.member(choice, "message")? {
                 self.delta(owner, doc, choice, body, position, buffered)?;
-            } else if !buffered && doc.member(choice, "message")?.is_some() {
-                return Err(Error::Schema);
             }
             if let Some(logprobs) = doc.member(choice, "logprobs")? {
                 let scope = self.scope(position);
@@ -509,6 +528,9 @@ impl State {
             if doc.name_is(name, "tool_calls")? {
                 if !matches!(doc.node(field)?.value, Value::Array) {
                     return Err(Error::Schema);
+                }
+                if doc.node(field)?.first.is_none() {
+                    self.empty_array(owner, position, "tool_calls")?;
                 }
                 for (index, call) in doc.children(field)?.enumerate() {
                     self.tool(

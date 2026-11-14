@@ -279,6 +279,7 @@ fn buffered_response_collects_unfinished_media_without_premature_success() {
         let mut mapped = Mapped::new();
         let mut ingress = codec::chat::response::Ingress::new(
             &mut mapped.writer,
+            &mapped.store,
             identity(Direction::Response),
             Operation::Generate,
             BodyMode::Buffered,
@@ -356,6 +357,7 @@ fn buffered_media_malformed_tail_never_closes_successfully() {
     let mut mapped = Mapped::new();
     let mut ingress = codec::chat::response::Ingress::new(
         &mut mapped.writer,
+        &mapped.store,
         identity(Direction::Response),
         Operation::Generate,
         BodyMode::Buffered,

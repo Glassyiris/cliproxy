@@ -450,6 +450,12 @@ impl Document {
             Value::String(t) => Ok(Characters::Mapped(json::Decoded::new(self.source(*t)?, t.span)?)),
             Value::Text(s) => Ok(Characters::Static(s.chars())),
             Value::Id(id) => Ok(Characters::Static(id.as_str().chars())),
+            Value::Fragments => Ok(Characters::Fragments(FragmentCharacters {
+                doc: self,
+                root: index,
+                next: self.nodes[index].first,
+                leaf: FragmentLeaf::Empty,
+            })),
             Value::Utf8Media => Ok(Characters::Encoded(EncodedCharacters {
                 doc: self,
                 next: self.nodes[index].first,
@@ -460,6 +466,33 @@ impl Document {
             })),
             _ => Err(Error::Schema),
         }
+    }
+
+    pub(crate) fn decoded_bytes(&self, index: usize) -> Result<EncodedCharacters<'_>> {
+        self.decoded_bytes_after(index, 0)
+    }
+
+    pub(crate) fn decoded_bytes_after(&self, index: usize, skip: usize) -> Result<EncodedCharacters<'_>> {
+        let node = self.node(index)?;
+        let (next, decoded) = match node.value {
+            Value::Base64Fragments | Value::Utf8Media if skip == 0 => (node.first, None),
+            Value::String(text) => {
+                let mut decoded = json::Decoded::new(self.source(text)?, text.span)?;
+                for _ in 0..skip {
+                    decoded.next_scalar()?.ok_or(Error::Schema)?;
+                }
+                (None, Some(decoded))
+            }
+            _ => return Err(Error::Schema),
+        };
+        Ok(EncodedCharacters {
+            doc: self,
+            next,
+            decoded,
+            bytes: [0; 3],
+            used: 0,
+            length: 0,
+        })
     }
     pub fn equal_strings(&self, left: usize, right: usize) -> Result<bool> {
         let mut left = self.chars(left)?;
@@ -769,6 +802,7 @@ pub enum Characters<'a> {
     Pointer(json::Decoded<'a>),
     Static(std::str::Chars<'a>),
     Encoded(EncodedCharacters<'a>),
+    Fragments(FragmentCharacters<'a>),
 }
 impl Characters<'_> {
     pub fn next_scalar(&mut self) -> Result<Option<char>> {
@@ -776,6 +810,7 @@ impl Characters<'_> {
             Self::Mapped(d) => d.next_scalar(),
             Self::Static(s) => Ok(s.next()),
             Self::Encoded(s) => s.next_scalar(),
+            Self::Fragments(s) => s.next_scalar(),
             Self::Pointer(d) => match d.next_scalar()? {
                 Some('~') => match d.next_scalar()? {
                     Some('0') => Ok(Some('~')),
@@ -799,7 +834,7 @@ pub struct EncodedCharacters<'a> {
 }
 
 impl EncodedCharacters<'_> {
-    fn next_byte(&mut self) -> Result<Option<u8>> {
+    pub(crate) fn next_byte(&mut self) -> Result<Option<u8>> {
         use base64::Engine;
         loop {
             if self.used < self.length {
@@ -863,5 +898,62 @@ impl EncodedCharacters<'_> {
                 .next()
                 .ok_or(Error::Utf8)?,
         ))
+    }
+}
+
+#[derive(Clone)]
+pub struct FragmentCharacters<'a> {
+    doc: &'a Document,
+    root: usize,
+    next: Option<usize>,
+    leaf: FragmentLeaf<'a>,
+}
+
+#[derive(Clone)]
+enum FragmentLeaf<'a> {
+    Empty,
+    Mapped(json::Decoded<'a>),
+    Static(std::str::Chars<'a>),
+    Encoded(EncodedCharacters<'a>),
+}
+
+impl FragmentCharacters<'_> {
+    fn next_scalar(&mut self) -> Result<Option<char>> {
+        loop {
+            let value = match &mut self.leaf {
+                FragmentLeaf::Empty => None,
+                FragmentLeaf::Mapped(chars) => chars.next_scalar()?,
+                FragmentLeaf::Static(chars) => chars.next(),
+                FragmentLeaf::Encoded(chars) => chars.next_scalar()?,
+            };
+            if value.is_some() {
+                return Ok(value);
+            }
+            let Some(index) = self.next else { return Ok(None) };
+            let node = self.doc.node(index)?;
+            if matches!(node.value, Value::Fragments) && node.first.is_some() {
+                self.next = node.first;
+                continue;
+            }
+            self.leaf = match node.value {
+                Value::String(text) => FragmentLeaf::Mapped(json::Decoded::new(self.doc.source(text)?, text.span)?),
+                Value::Text(text) => FragmentLeaf::Static(text.chars()),
+                Value::Id(_) => return Err(Error::Schema),
+                Value::Utf8Media => FragmentLeaf::Encoded(self.doc.decoded_bytes(index)?),
+                Value::Fragments => FragmentLeaf::Empty,
+                _ => return Err(Error::Schema),
+            };
+            let mut cursor = index;
+            self.next = loop {
+                let node = self.doc.node(cursor)?;
+                if node.next.is_some() {
+                    break node.next;
+                }
+                cursor = node.parent.ok_or(Error::Schema)?;
+                if cursor == self.root {
+                    break None;
+                }
+            };
+        }
     }
 }

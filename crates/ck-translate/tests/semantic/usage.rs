@@ -114,6 +114,7 @@ fn failed_usage_update_finalizes_prior_snapshot_without_wrapping_or_partial_muta
     let mut mapped = super::Mapped::new();
     let mut ingress = codec::chat::response::Ingress::new(
         &mut mapped.writer,
+        &mapped.store,
         super::identity(super::Direction::Response),
         codec::Operation::Generate,
         codec::BodyMode::Streaming,
@@ -146,6 +147,7 @@ fn replaying_canonical_response_does_not_publish_an_accounting_observation() {
     let id = super::identity(super::Direction::Response);
     let mut ingress = codec::chat::response::Ingress::new(
         &mut mapped.writer,
+        &mapped.store,
         id,
         codec::Operation::Generate,
         codec::BodyMode::Streaming,

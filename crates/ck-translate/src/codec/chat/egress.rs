@@ -1,16 +1,12 @@
-use super::aggregate::aggregate_chunk;
-use super::response::mapped_document;
+use super::reduction::Reduction;
 use crate::codec::{
     self, BodyMode, Error, Operation, Result,
     document::{Document, Value},
     encode::{self, Encoder},
     event::{Identity, Kind},
     internal,
-    table::Table,
 };
 use ck_stream::{Lease, ScratchLease, Writer};
-#[path = "egress_media.rs"]
-mod media_events;
 
 pub struct Diagnostic {
     pub identity: Identity,
@@ -19,12 +15,6 @@ pub struct Diagnostic {
     pub reason: &'static str,
 }
 
-struct Tool {
-    choice: u64,
-    index: u64,
-    custom: bool,
-    legacy: bool,
-}
 pub struct Egress {
     owner: u64,
     mode: BodyMode,
@@ -32,9 +22,7 @@ pub struct Egress {
     sequence: u64,
     terminal: bool,
     failed: bool,
-    document: Option<Document>,
-    tools: Table<Tool>,
-    media: Table<media_events::Projection>,
+    reduction: Reduction,
     include_usage: bool,
     diagnostic: fn(Diagnostic),
 }
@@ -57,9 +45,7 @@ impl Egress {
             sequence: 0,
             terminal: false,
             failed: false,
-            document: None,
-            tools: Table::new(owner)?,
-            media: Table::new(owner)?,
+            reduction: Reduction::new(owner)?,
             include_usage,
             diagnostic,
         })
@@ -76,7 +62,7 @@ impl Egress {
         if self.terminal || self.failed {
             return Err(Error::Closed);
         }
-        let (kind, mut doc) = internal::decode(owner, input)?;
+        let (kind, doc) = internal::decode(owner, input)?;
         let root = doc.root();
         let x = doc.required(root, "x_ck")?;
         if doc.unsigned(doc.required(x, "seq")?)? != self.sequence
@@ -88,25 +74,29 @@ impl Egress {
             return Err(Error::Schema);
         }
         self.sequence = self.sequence.checked_add(1).ok_or(Error::Limit)?;
-        if self.document.is_none() && !matches!(kind, Kind::ResponseStart | Kind::Error | Kind::Cancelled) {
+        if self.reduction.document.is_none() && !matches!(kind, Kind::ResponseStart | Kind::Error | Kind::Cancelled) {
             return Err(Error::Schema);
         }
         match kind {
-            Kind::ResponseStart => {
-                if self.document.is_some() {
-                    return Err(Error::Schema);
-                }
-                doc.remove(root, "x_ck")?;
-                if self.mode == BodyMode::Buffered {
-                    doc.set(root, "object", Value::Text("chat.completion"))?;
-                    doc.set(root, "choices", Value::Array)?;
-                }
-                self.document = Some(doc);
-            }
-            Kind::Chunk => {
-                let deliverable = chunk_deliverable(&doc)?;
-                doc.remove(root, "x_ck")?;
-                if !super::provenance::restore(&mut doc, x)? {
+            Kind::ResponseStart
+            | Kind::Chunk
+            | Kind::ToolStart
+            | Kind::Usage
+            | Kind::MediaStart
+            | Kind::Data
+            | Kind::MediaTranscript
+            | Kind::MediaEnd
+            | Kind::Annotation => {
+                let deliverable = if kind == Kind::Chunk {
+                    chunk_deliverable(&doc)?
+                } else if kind == Kind::Usage {
+                    let usage = doc.required(root, "usage")?;
+                    self.include_usage && matches!(doc.node(doc.required(usage, "final")?)?.value, Value::Bool(true))
+                } else {
+                    true
+                };
+                let (projection, lost) = self.reduction.project(owner, kind, doc)?;
+                if lost {
                     (self.diagnostic)(Diagnostic {
                         identity: self.identity,
                         kind,
@@ -114,143 +104,19 @@ impl Egress {
                         reason: "source field has no surviving native parent",
                     });
                 }
-                self.project_tools(&mut doc, x)?;
-                if self.mode == BodyMode::Streaming {
-                    if deliverable {
+                if let Some(projection) = projection {
+                    if self.mode == BodyMode::Buffered {
+                        self.reduction.fold(projection)?;
+                    } else if deliverable {
                         output(encode::scratch(owner, |e| {
-                            source_fields(&doc, x, e)?;
+                            if kind == Kind::Chunk {
+                                source_fields(&projection, x, e)?;
+                            }
                             e.bytes(b"data: ")?;
-                            write_object(&doc, root, e, &[])?;
+                            projection.write(projection.root(), e)?;
                             e.bytes(b"\n\n")
                         })?)?;
                     }
-                } else {
-                    let aggregate = self.document.as_mut().ok_or(Error::Schema)?;
-                    let incoming = aggregate.absorb(doc)?;
-                    aggregate_chunk(aggregate, incoming)?;
-                }
-            }
-            Kind::ToolStart => {
-                let choice = doc.unsigned(doc.required(x, "choice_index")?)?;
-                let index = doc.unsigned(doc.required(x, "tool_index")?)?;
-                if self
-                    .tools
-                    .iter()
-                    .any(|tool| tool.choice == choice && tool.index == index)
-                {
-                    return Err(Error::Schema);
-                }
-                let custom = doc.string_is(doc.required(root, "arguments_format")?, "text")?;
-                let legacy = doc.member(x, "chat_legacy")?.is_some();
-                self.tools.push(Tool {
-                    choice,
-                    index,
-                    custom,
-                    legacy,
-                })?;
-                let source = doc.required(x, "source")?;
-                let ids = doc.required(source, "ids")?;
-                let id = doc.required(ids, "id")?;
-                let name = doc.required(root, "name")?;
-                let projected = mapped_document(owner, |e| {
-                    e.bytes(b"{")?;
-                    chunk_base(self.document.as_ref().ok_or(Error::Schema)?, e)?;
-                    e.bytes(b",\"choices\":[{\"index\":")?;
-                    e.unsigned(choice)?;
-                    if legacy {
-                        e.bytes(b",\"delta\":{\"function_call\":{\"name\":")?;
-                        doc.write(name, e)?;
-                        e.bytes(b"}},\"finish_reason\":null}]")?;
-                    } else {
-                        e.bytes(b",\"delta\":{\"tool_calls\":[{\"index\":")?;
-                        e.unsigned(index)?;
-                        e.bytes(b",\"id\":")?;
-                        doc.write(id, e)?;
-                        e.bytes(b",\"type\":")?;
-                        e.string(if custom { "custom" } else { "function" })?;
-                        e.bytes(b",")?;
-                        e.string(if custom { "custom" } else { "function" })?;
-                        e.bytes(b":{\"name\":")?;
-                        doc.write(name, e)?;
-                        e.bytes(b"}}]},\"finish_reason\":null}]")?;
-                    }
-                    e.bytes(b"}")
-                })?;
-                if self.mode == BodyMode::Streaming {
-                    output(encode::scratch(owner, |e| {
-                        e.bytes(b"data: ")?;
-                        projected.write(projected.root(), e)?;
-                        e.bytes(b"\n\n")
-                    })?)?;
-                } else {
-                    let aggregate = self.document.as_mut().ok_or(Error::Schema)?;
-                    let incoming = aggregate.absorb(projected)?;
-                    aggregate_chunk(aggregate, incoming)?;
-                }
-            }
-            Kind::Usage => {
-                let usage = doc.required(root, "usage")?;
-                let native = doc.required(usage, "native")?;
-                let value = doc.required(native, "value")?;
-                for (canonical, wire) in [
-                    ("input_tokens", "prompt_tokens"),
-                    ("output_tokens", "completion_tokens"),
-                    ("total_tokens", "total_tokens"),
-                ] {
-                    if !matches!(doc.node(value)?.value, Value::Null)
-                        && doc.member(value, wire)?.is_none()
-                        && let Some(n) = doc.member(usage, canonical)?
-                    {
-                        doc.set(value, wire, Value::Unsigned(doc.unsigned(n)?))?;
-                    }
-                }
-                if let Some(choice) = doc.member(x, "choice_index")? {
-                    let final_snapshot = matches!(doc.node(doc.required(usage, "final")?)?.value, Value::Bool(true));
-                    let projection = mapped_document(owner, |e| {
-                        e.bytes(b"{")?;
-                        chunk_base(self.document.as_ref().ok_or(Error::Schema)?, e)?;
-                        e.bytes(b",\"choices\":[{\"index\":")?;
-                        doc.write(choice, e)?;
-                        e.bytes(b",\"delta\":{},\"finish_reason\":null,\"usage\":")?;
-                        doc.write(value, e)?;
-                        e.bytes(b"}]}")
-                    })?;
-                    if self.mode == BodyMode::Streaming {
-                        if self.include_usage && final_snapshot {
-                            output(encode::scratch(owner, |e| {
-                                e.bytes(b"data: ")?;
-                                projection.write(projection.root(), e)?;
-                                e.bytes(b"\n\n")
-                            })?)?;
-                        }
-                    } else {
-                        let aggregate = self.document.as_mut().ok_or(Error::Schema)?;
-                        let incoming = aggregate.absorb(projection)?;
-                        aggregate_chunk(aggregate, incoming)?;
-                    }
-                    return Ok(());
-                }
-                if self.mode == BodyMode::Streaming {
-                    let final_snapshot = matches!(doc.node(doc.required(usage, "final")?)?.value, Value::Bool(true));
-                    if self.include_usage && final_snapshot {
-                        output(encode::scratch(owner, |e| {
-                            e.bytes(b"data: {")?;
-                            chunk_base(self.document.as_ref().ok_or(Error::Schema)?, e)?;
-                            e.bytes(b",\"choices\":[],\"usage\":")?;
-                            doc.write(value, e)?;
-                            e.bytes(b"}\n\n")
-                        })?)?;
-                    }
-                } else {
-                    let aggregate = self.document.as_mut().ok_or(Error::Schema)?;
-                    let incoming = aggregate.absorb(doc)?;
-                    let usage = aggregate.required(incoming, "usage")?;
-                    let native = aggregate.required(usage, "native")?;
-                    let value = aggregate.required(native, "value")?;
-                    aggregate.detach(native, value)?;
-                    aggregate.rename(value, "usage")?;
-                    aggregate.remove(aggregate.root(), "usage")?;
-                    aggregate.append(aggregate.root(), value)?;
                 }
             }
             Kind::Opaque => {
@@ -258,13 +124,7 @@ impl Egress {
                     && let Some(name) = doc.member(root, "name")?
                     && doc.string_is(name, "chat.media.attributes")?
                 {
-                    let id = media_events::id(&doc, x)?;
-                    let projection = self
-                        .media
-                        .iter_mut()
-                        .find(|entry| entry.id == id)
-                        .ok_or(Error::Schema)?;
-                    projection.attributes(doc)?;
+                    self.reduction.project(owner, kind, doc)?;
                 } else if self.mode == BodyMode::Streaming {
                     output(encode::scratch(owner, |e| {
                         source_fields(&doc, x, e)?;
@@ -286,48 +146,15 @@ impl Egress {
                     });
                 }
             }
-            Kind::MediaStart => {
-                let projection = media_events::Projection::start(owner, doc, x)?;
-                if self.media.iter().any(|entry| entry.id == projection.id) {
-                    return Err(Error::Schema);
-                }
-                self.media.push(projection)?;
-            }
-            Kind::Data | Kind::MediaTranscript | Kind::MediaEnd => {
-                let id = media_events::id(&doc, x)?;
-                let position = self
-                    .media
-                    .iter()
-                    .position(|entry| entry.id == id)
-                    .ok_or(Error::Schema)?;
-                if kind == Kind::Data {
-                    self.media[position].data(doc)?;
-                } else if kind == Kind::MediaTranscript {
-                    self.media[position].transcript(doc)?;
-                } else {
-                    let (native, value, field, choice) = self.media[position].end(&doc)?;
-                    let projection = self.native_field(owner, native, value, field, choice)?;
-                    self.project(owner, projection, &mut output)?;
-                }
-            }
-            Kind::Annotation => {
-                if !doc.string_is(doc.required(root, "kind")?, "chat")? {
-                    return Err(Error::Unsupported);
-                }
-                let choice = doc.unsigned(doc.required(x, "choice_index")?)?;
-                let value = doc.required(root, "value")?;
-                let projection = self.native_field(owner, doc, value, "annotations", choice)?;
-                self.project(owner, projection, &mut output)?;
-            }
             Kind::Done => {
-                if self.media.iter().any(|media| media.is_open()) {
+                if self.reduction.has_open_media() {
                     return Err(Error::Truncated);
                 }
                 self.terminal = true;
                 if self.mode == BodyMode::Streaming {
                     output(encode::scratch(owner, |e| e.bytes(b"data: [DONE]\n\n"))?)?;
                 } else {
-                    let aggregate = self.document.as_mut().ok_or(Error::Schema)?;
+                    let aggregate = self.reduction.document.as_mut().ok_or(Error::Schema)?;
                     let choices = aggregate.required(aggregate.root(), "choices")?;
                     let mut choice = aggregate.node(choices)?.first;
                     while let Some(c) = choice {
@@ -394,43 +221,6 @@ impl Egress {
         }
         Ok(())
     }
-    fn project_tools(&self, doc: &mut Document, x: usize) -> Result<()> {
-        let Some(choice_node) = doc.member(x, "choice_index")? else {
-            return Ok(());
-        };
-        let Some(tool_node) = doc.member(x, "tool_index")? else {
-            return Ok(());
-        };
-        let choice_index = doc.unsigned(choice_node)?;
-        let tool_index = doc.unsigned(tool_node)?;
-        let tool = self
-            .tools
-            .iter()
-            .find(|t| t.choice == choice_index && t.index == tool_index)
-            .ok_or(Error::Schema)?;
-        let choices = doc.required(doc.root(), "choices")?;
-        let choice = doc.node(choices)?.first.ok_or(Error::Schema)?;
-        let delta = doc.required(choice, "delta")?;
-        let Some(calls) = doc.member(delta, "tool_calls")? else {
-            return Ok(());
-        };
-        let call = doc.node(calls)?.first.ok_or(Error::Schema)?;
-        let Some(function) = doc.member(call, "function")? else {
-            return Ok(());
-        };
-        if tool.legacy {
-            doc.remove(delta, "tool_calls")?;
-            doc.detach(call, function)?;
-            doc.rename(function, "function_call")?;
-            doc.append(delta, function)?;
-        } else if tool.custom {
-            doc.rename(function, "custom")?;
-            if let Some(arguments) = doc.member(function, "arguments")? {
-                doc.rename(arguments, "input")?;
-            }
-        }
-        Ok(())
-    }
 }
 impl codec::ResponseEgress for Egress {
     fn advance(
@@ -454,43 +244,6 @@ impl codec::ResponseEgress for Egress {
     }
 }
 
-fn chunk_base(doc: &Document, e: &mut Encoder<'_, '_>) -> Result<()> {
-    let mut first = true;
-    for key in ["id", "model", "created", "system_fingerprint", "service_tier"] {
-        if let Some(value) = doc.member(doc.root(), key)? {
-            if !first {
-                e.bytes(b",")?;
-            }
-            first = false;
-            e.string(key)?;
-            e.bytes(b":")?;
-            doc.write(value, e)?;
-        }
-    }
-    e.bytes(b",\"object\":\"chat.completion.chunk\"")
-}
-fn write_object(doc: &Document, object: usize, e: &mut Encoder<'_, '_>, skip: &[&str]) -> Result<()> {
-    e.bytes(b"{")?;
-    let mut first = true;
-    for field in doc.children(object)? {
-        let name = doc.node(field)?.name.ok_or(Error::Schema)?;
-        let mut omitted = false;
-        for key in skip {
-            omitted |= doc.name_is(name, key)?;
-        }
-        if omitted {
-            continue;
-        }
-        if !first {
-            e.bytes(b",")?;
-        }
-        first = false;
-        doc.write_name(name, e)?;
-        e.bytes(b":")?;
-        doc.write(field, e)?;
-    }
-    e.bytes(b"}")
-}
 fn raw_string(doc: &Document, node: usize, e: &mut Encoder<'_, '_>) -> Result<()> {
     let mut chars = doc.chars(node)?;
     while let Some(c) = chars.next_scalar()? {

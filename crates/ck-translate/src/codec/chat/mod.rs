@@ -3,6 +3,7 @@ mod accounting;
 mod aggregate;
 pub mod egress;
 mod provenance;
+mod reduction;
 pub mod request;
 mod request_content;
 mod request_controls;

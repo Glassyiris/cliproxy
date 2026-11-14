@@ -742,6 +742,32 @@ impl Base64Fragments {
         self.count == 0
     }
 
+    pub(crate) fn validate_snapshot(&self, doc: &Document, data: usize, published: u64) -> Result<()> {
+        use base64::Engine;
+        if self.complete() {
+            return Ok(());
+        }
+        let mut bytes = doc.decoded_bytes(data)?;
+        for _ in 0..published {
+            bytes.next_byte()?.ok_or(Error::Schema)?;
+        }
+        let mut block = [0; 3];
+        let mut len = 0;
+        for slot in &mut block {
+            let Some(byte) = bytes.next_byte()? else { break };
+            *slot = byte;
+            len += 1;
+        }
+        let mut encoded = [0; 4];
+        let length = base64::engine::general_purpose::STANDARD
+            .encode_slice(&block[..len], &mut encoded)
+            .map_err(|_| Error::Schema)?;
+        if length < self.count || encoded[..self.count] != self.quartet[..self.count] {
+            return Err(Error::Schema);
+        }
+        Ok(())
+    }
+
     fn push(&mut self, doc: &Document, text: Text, mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
         use base64::Engine;
         let mut decoded = Decoded::new(doc.source(text)?, text.span)?;
