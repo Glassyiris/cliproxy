@@ -19,7 +19,8 @@ import uuid
 
 RUNTIME = "/run/cooker-runtime"
 # Logged by cooker's shutdown_signal() when the stop signal arrives (crates/cooker/src/main.rs).
-SIGNAL_LINE = "shutdown signal received: SIGTERM"
+SIGNAL_PREFIX = "shutdown signal received: "
+SIGNAL_LINE = SIGNAL_PREFIX + "SIGTERM"
 TMPFS = f"{RUNTIME}:rw,noexec,nosuid,size=512m,mode=0700,uid=10001,gid=10001"
 POOL_BYTES = 6_400_000
 POOL_FRAMES = POOL_BYTES // 50_000
@@ -445,10 +446,13 @@ class Gate:
             row["errors"].append(str(exc))
         finally:
             stopped = False
+            prior_signals = 0
             try:
                 state = self.state(container)
                 stopped = state["Running"]
                 if stopped:
+                    before = self.docker.run("logs", container, check=False)
+                    prior_signals = (before.stdout + before.stderr).count(SIGNAL_PREFIX)
                     self.docker.run("container", "stop", "--time", "10", container, timeout=15)
                     state = self.state(container)
                     row["shutdown_state"] = state
@@ -468,10 +472,18 @@ class Gate:
                 (self.out / f"{name}.log").write_text(logs.stdout + logs.stderr)
                 # Graceful SIGTERM shutdown and a server that exits 0 on its own between
                 # the last inspect and the stop look alike; only the server's own log line
-                # shows that the stop signal arrived before the exit.
-                if stopped and row["checks"].get("clean_shutdown") and SIGNAL_LINE not in logs.stdout + logs.stderr:
+                # shows that the stop signal arrived before the exit. A line logged before
+                # the stop belongs to another signal that was already draining the server,
+                # so the gate requires none before the stop and exactly one SIGTERM line after.
+                text = logs.stdout + logs.stderr
+                if stopped and row["checks"].get("clean_shutdown") and prior_signals:
                     row["checks"]["clean_shutdown"] = False
-                    row["errors"].append(f"server exited without logging {SIGNAL_LINE!r}; "
+                    row["errors"].append(f"server logged {SIGNAL_PREFIX.strip()!r} before the gate's stop; "
+                                         "it was already shutting down")
+                elif stopped and row["checks"].get("clean_shutdown") and not (
+                        text.count(SIGNAL_PREFIX) == text.count(SIGNAL_LINE) == 1):
+                    row["checks"]["clean_shutdown"] = False
+                    row["errors"].append(f"server exited without logging {SIGNAL_LINE!r} exactly once; "
                                          "it did not stop on the gate's SIGTERM")
             except GateError as exc:
                 row["errors"].append(f"logs: {exc}")

@@ -69,19 +69,23 @@ class FakeDocker:
             container["running"] = container["name"] not in ("missing-xdg", "unsafe-directory", "invalid-max-frames")
             if self.defect == "early-exit" and container["name"] == "default":
                 container["running"] = False
+            # prior-signal: an earlier SIGTERM is already draining the server, which then
+            # exits 0 on its own before the gate's stop reaches it.
+            container["prior_signal"] = self.defect == "prior-signal" and container["name"] == "default"
         elif args[:2] == ("container", "stop"):
             container = self.containers[args[-1]]
             # exit-before-stop: the server exited 0 after the last inspect, so the stop
             # signal never reached it; stopping a stopped container still succeeds.
-            signalled = not (self.defect == "exit-before-stop" and container["name"] == "default")
+            signalled = not (self.defect in ("exit-before-stop", "prior-signal") and container["name"] == "default")
             container.update(running=False, stopped=True, signalled=signalled)
         elif args[0] == "logs":
             scenario = self.containers[args[-1]]["name"]
             output = {"missing-xdg": "XDG_RUNTIME_DIR missing: configure stream.pool_directory",
                       "unsafe-directory": "/run/cooker-unsafe must be private mode 0700",
                       "invalid-max-frames": "stream.max_frames exceeds pool_frames 128"}.get(scenario, "started")
-            if self.containers[args[-1]].get("signalled"):
-                output += "\n[info] " + gate.SIGNAL_LINE
+            for flag in ("prior_signal", "signalled"):
+                if self.containers[args[-1]].get(flag):
+                    output += "\n[info] " + gate.SIGNAL_LINE
         elif args[0] == "exec":
             if "sha256sum" in args:
                 output = "a" * 64 + "  /proc/1/exe\n"
@@ -193,10 +197,24 @@ class DriverControls(unittest.TestCase):
         result, summary, fake, _ = self.run_control("exit-before-stop")
         self.assertEqual(result, 1)
         default = summary["scenarios"][0]
-        self.assertIn(f"server exited without logging {gate.SIGNAL_LINE!r}; it did not stop on the gate's SIGTERM",
-                      default["errors"])
+        self.assertIn(f"server exited without logging {gate.SIGNAL_LINE!r} exactly once; "
+                      "it did not stop on the gate's SIGTERM", default["errors"])
         self.assertFalse(default["checks"]["clean_shutdown"])
         self.assertEqual(default["shutdown_state"]["ExitCode"], 0)
+        self.assertTrue(all(row["passed"] for row in summary["scenarios"][1:]))
+
+    def test_signal_logged_before_the_gate_stop_fails(self):
+        # Review repro: an earlier SIGTERM line, no gate signal delivered, exit 0.
+        result, summary, fake, _ = self.run_control("prior-signal")
+        self.assertEqual(result, 1)
+        default = summary["scenarios"][0]
+        self.assertEqual(default["errors"], ["server logged 'shutdown signal received:' before the gate's stop; "
+                                             "it was already shutting down"])
+        self.assertFalse(default["checks"]["clean_shutdown"])
+        self.assertEqual(default["shutdown_state"]["ExitCode"], 0)
+        name = next(name for name, value in fake.containers.items() if value["name"] == "default")
+        stop = fake.commands.index(("container", "stop", "--time", "10", name))
+        self.assertIn(("logs", name), fake.commands[:stop])
         self.assertTrue(all(row["passed"] for row in summary["scenarios"][1:]))
 
     def test_interruption_stops_new_scenarios_and_cleans_own_resources(self):
