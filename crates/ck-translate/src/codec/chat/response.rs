@@ -18,6 +18,8 @@ mod delta;
 mod finish;
 #[path = "response_media.rs"]
 mod media_events;
+#[path = "response_reasoning.rs"]
+mod reasoning;
 #[path = "response_snapshot.rs"]
 mod snapshot;
 #[path = "response_tool.rs"]
@@ -378,6 +380,7 @@ impl State {
         if !matches!(doc.node(choices)?.value, Value::Array) {
             return Err(Error::Schema);
         }
+        reasoning::normalize_choices(doc, choices, |node| self.published_scope(node).is_some())?;
         if !buffered {
             // All deltas precede validation; no snapshot suffix or close may escape a
             // contradiction in a later choice in this same source record.

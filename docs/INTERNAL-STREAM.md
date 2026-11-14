@@ -340,7 +340,7 @@ For request destinations unable to express a supplied semantic field in §4's ca
 | Wire fields | Internal location | Notes |
 | --- | --- | --- |
 | `id/object/created/model/system_fingerprint/service_tier` | C base; source metadata | Buffered `chat.completion` decomposes into chunk events. |
-| `choices[].index`, `delta` or `message`, role/content/refusal/reasoning | Same C fields + item/block lifecycle | Separate choice state; preserve empty strings versus absent fields. |
+| `choices[].index`, `delta` or `message`, role/content/refusal/reasoning | Same C fields + item/block lifecycle | Separate choice state; preserve empty strings versus absent fields. The first of `reasoning_content`, `reasoning` and `reasoning_details` that yields text (a string, a string `text` member, or those forms nested in arrays) becomes `reasoning_content`; that alias is consumed and unselected aliases stay unknown data. |
 | Tool index/id/type/function name/arguments, custom-tool content | `tool.start`, C arguments, `tool.end` | A validated finish supplies tool end if Chat has no separate marker. |
 | `choices[].logprobs`, content/refusal token arrays/top alternatives/bytes | C `choices[].logprobs` | No empty replacement arrays or dropped logprobs-only chunks. |
 | Audio id/data/transcript/expiry; images/annotations | Media events, `annotation`, X original | Preserve source identity and timing; do not store media twice. |

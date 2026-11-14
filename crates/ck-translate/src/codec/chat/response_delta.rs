@@ -124,7 +124,10 @@ impl State {
         let mut scope = self.scope(position);
         for (block, key) in ["content", "reasoning_content", "refusal"].iter().enumerate() {
             if doc.name_is(name, key)? && !matches!(doc.node(field)?.value, Value::Null) {
-                if !matches!(doc.node(field)?.value, Value::String(_) | Value::Text(_)) {
+                if !matches!(
+                    doc.node(field)?.value,
+                    Value::String(_) | Value::Text(_) | Value::Fragments
+                ) {
                     return Err(Error::Schema);
                 }
                 scope.block_index = Some(block as u64);

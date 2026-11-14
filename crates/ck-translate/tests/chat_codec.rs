@@ -16,6 +16,8 @@ mod request_media;
 
 #[path = "semantic/provenance.rs"]
 mod provenance;
+#[path = "semantic/reasoning.rs"]
+mod reasoning;
 #[path = "semantic/response_media.rs"]
 mod response_media;
 #[path = "semantic/snapshots.rs"]
