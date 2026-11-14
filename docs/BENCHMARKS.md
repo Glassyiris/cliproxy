@@ -4,6 +4,133 @@
 
 Binary size, memory and throughput of cook-router and CLIProxyAPI on the same configuration, with a local fake upstream. The numbers come from one small machine and a synthetic load, so use them to compare the two servers with each other. They say little about how much traffic either one can carry on bigger hardware.
 
+## S1 acceptance drivers
+
+These drivers implement the codec, flow and container interfaces in
+`docs/INTERNAL-STREAM.md` §9. They do not replace the storage gate or the existing
+size, idle, request-heap and end-to-end pipeline measurements. Missing S1 server
+features fail their scenarios; an old gateway is not expected to pass resume or
+upstream-independence checks.
+
+Run from the repository root on Linux. Use separate old/new release executables
+and a new external output directory on a no-snapshot filesystem. The flow driver
+uses Python 3's standard library; container checks also need rootless Docker,
+`nsenter` and `iptables` for an outbound firewall confined to each test container.
+Do not run benchmarks concurrently with other benchmarks. On the maintainer's
+workstation:
+
+```sh
+flock /tmp/cooker-bench.lock taskset -c 0-7,16-23 \
+  bench/codec-gate.sh "$OLD_CODEC" "$NEW_CODEC" "$OUT/codecs"
+flock /tmp/cooker-bench.lock taskset -c 0-7,16-23 \
+  bench/flow-gate.sh "$NEW" "$OUT/flow"
+flock /tmp/cooker-bench.lock taskset -c 0-7,16-23 \
+  bench/container-start.sh cooker:ci "$OUT/container-start"
+```
+
+Build separately on CPUs `8-15,24-31`, with `CARGO_BUILD_JOBS=4` and
+`CARGO_TARGET_DIR=/scratch/ssd/bench-target`. The wrapper's affinity is inherited
+by the gateway, mocks and clients; these drivers do not reset it to CPUs 0 and 1.
+
+### Codec comparison
+
+`codec-gate.sh` drives the same external fixtures through two standalone codec
+harnesses. See the [harness contract](../bench/codec/CONTRACT.md) for the CLI,
+driver-owned workloads, instrumentation and diagnostic resource components.
+The captured old gateway and latency binary are not codec harnesses. Keep the
+baseline harness separate from the new implementation; do not benchmark an
+adapter between their internal APIs.
+
+Build the old harness from a fresh detached checkout at
+`b518060ea1e43ef4b266591986ca92321e6289b5`, not from either captured executable:
+
+```sh
+bench/codec/build-baseline.sh "$BASELINE_SOURCE" "$OUT/baseline-build"
+OLD_CODEC="$OUT/baseline-build/baseline-harness"
+```
+
+The builder uses the separate build CPUs and external target directory above.
+Running that harness requires private cgroup v2 memory accounting and
+passwordless `sudo` for its own disposable groups. It refuses unavailable
+accounting instead of substituting host-wide charges or invented zeros.
+
+The gate retains three old/new rounds and compares matching per-workload metric
+medians, never an average across protocols. The 2026-11-14 owner ruling supersedes
+the provisional zero-regression codec/pipeline table in the specification:
+each codec/pipeline cost or latency may rise by at most 5%; throughput may fall
+by at most 5%. Comparable heap, RSS/PSS and charged-resource totals allow no
+regression. Backend-specific splits are diagnostics; mapped/tmpfs costs still
+contribute to the charged totals. A zero old cost requires a zero new cost;
+throughput retains its higher-is-better rule. Encoded/decoded byte counts are
+diagnostics, not byte-exact goldens; decoded media and opaque signatures remain
+exact. The storage gate's separate seven/101-run rules are unchanged.
+
+### Flow semantics and backpressure
+
+`flow-gate.sh` starts a fresh actual gateway and a private loopback HTTP upstream
+for each scenario. Each run uses a new config database and private runtime
+directory. Provider URLs point only at the local mock; remote model downloads
+are disabled and proxy variables point non-loopback traffic at a closed port.
+This is not a network-namespace isolation claim.
+
+The driver checks interleaved choices, logprobs-only events, incremental tool
+arguments, fragmented opaque signatures, redacted/encrypted thinking, terminal
+Responses snapshots and an exact 8 MiB binary audio body. The slow-reader case
+reads one SSE record, stops reading, and requires the upstream to finish an
+80 MiB response during the stall. It rejects a workload that fits the host's
+TCP-buffer bound; delaying the upstream does not count as throttling downstream.
+After the stall, every content byte and the single usage snapshot must survive.
+The capacity case sends more than 256 MiB and requires a visible
+`stream.storage_exhausted` error, no successful terminal, no upstream retry and a
+surviving gateway. Raw media records first-delivery delay; an external HTTP clock
+does not directly prove the internal 100 ms collection bound.
+
+Live and completed SSE resume use only the `X-Ck-Stream-Id` header and positional
+`v1.e.*` cursors. They check content without gaps/repeats, consecutive cursors,
+terminal EOF, a future cursor's 400, a foreign identity's 410, and exactly one
+upstream request. Binary resume uses a `v1.b.*` byte suffix and checks the
+reconstructed media. A missing header, cursor, route or retained response fails.
+No resume performance baseline is invented for the old server.
+Expiry/eviction with a test clock, authoritative usage settlement, internal
+publication/leases and duplex/WebRTC acceptance remain the production semantic
+test suites' responsibility; this HTTP driver does not claim those proofs.
+
+`results.jsonl`, `summary.json`, per-scenario `server.log`, `upstream.json` and
+`response-*.body` retain the observations. Resume identity headers are not
+recorded. Set `FLOW_BUILD_PROVENANCE` to the gateway's revision, compiler,
+profile, features and build flags; omission is recorded as unverified provenance,
+not evidence for performance acceptance.
+
+### Container startup
+
+`container-start.sh` starts the actual image with its default configuration, a
+private `/data` volume, an isolated network, a loopback port mapping and:
+
+```text
+--tmpfs /run/cooker-runtime:rw,noexec,nosuid,size=512m,mode=0700,uid=10001,gid=10001
+```
+
+The image must provide `XDG_RUNTIME_DIR=/run/cooker-runtime` and run as uid/gid
+10001. Health means `/healthz` returned `{"status":"ok"}`, not merely that a
+container was created or `--version` worked. The gate checks the private pool
+directory and the pool inode, including an unlinked inode, before shutdown.
+It also exercises missing XDG, unsafe-directory refusal, explicit-directory
+startup without XDG, and capped-pool configuration. Early exit and timeout are
+failures. Cleanup removes only resources created by that invocation.
+Docker's internal bridge blocks initial outbound traffic. Because rootless
+Docker 29 does not publish internal-bridge ports, the driver pauses its own
+container, installs a namespace-local outbound `DROP` policy with established
+response allowance, attaches its private IPv4 port bridge, then resumes it.
+It does not change the host firewall or another container's namespace.
+
+Driver controls, from the repository root:
+
+```sh
+python3 -B -I bench/flow/test_driver.py
+python3 -B -I bench/container-test.py "$OUT/container-controls"
+```
+
+
 ## Field memory
 
 On 2026-10-05, a personal install in daily use ran at 75 to 101 MB RSS. That reading was unscripted; sample timing, workload and the exact build were not recorded.
