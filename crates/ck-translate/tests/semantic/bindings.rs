@@ -126,3 +126,60 @@ fn unsupported_binding_carrier_is_rejected_on_reconstruction() {
     });
     assert!(matches!(result, Err(codec::Error::Schema)));
 }
+
+#[test]
+fn repeated_request_fields_replace_object_members_once_indexed() {
+    let mut mapped = Mapped::new();
+    let mut source = Source::new(&mut mapped.writer).unwrap();
+    source.push_bytes(&mut mapped.writer, b"{}").unwrap();
+    let doc = Document::parse(&mut mapped.writer, source, 2).unwrap();
+    let media = Registry::new(&mut mapped.writer).unwrap();
+    let view = RequestView {
+        document: &doc,
+        media: &media,
+        operation: Operation::Generate,
+    };
+    let mut emitter = Emitter::new(identity(Direction::Request));
+    emitter.request_start(&mut mapped.writer, view).unwrap();
+    // Members arrive inside a value, as new fields, as replacements, and again after their
+    // object's value is replaced.
+    for (pointer, value) in [
+        ("", r#"{"x_ck":{},"metadata":{"a":1}}"#),
+        ("/metadata/b", "2"),
+        ("/metadata/a", "3"),
+        ("/metadata/b", "4"),
+        ("/metadata", r#"{"c":7}"#),
+        ("/metadata/c", "8"),
+        ("/metadata/d", "9"),
+        ("/metadata/d", "10"),
+        ("/metadata/a", "11"),
+    ] {
+        emitter
+            .emit(
+                &mut mapped.writer,
+                Kind::RequestField,
+                Scope::default(),
+                |e| {
+                    e.bytes(b",\"pointer\":")?;
+                    e.string(pointer)?;
+                    e.bytes(b",\"value\":")?;
+                    e.bytes(value.as_bytes())
+                },
+                |_| Ok(()),
+            )
+            .unwrap();
+    }
+    let ready = RequestFence::default().end(view, &Any).unwrap();
+    emitter.request_end(&mut mapped.writer, &ready).unwrap();
+    drop(doc);
+    let mut reader = mapped.store.reader(mapped.writer.id(), 0).unwrap();
+    let (restored, _) = codec::chat::request::read_request(&mut mapped.writer, &mut reader).unwrap();
+    let metadata = restored.required(restored.root(), "metadata").unwrap();
+    let members: Vec<_> = restored.children(metadata).unwrap().collect();
+    assert_eq!(members.len(), 3);
+    for (member, (name, value)) in members.into_iter().zip([("c", 8), ("d", 10), ("a", 11)]) {
+        let node = restored.node(member).unwrap();
+        assert!(restored.name_is(node.name.unwrap(), name).unwrap());
+        assert_eq!(restored.unsigned(member).unwrap(), value);
+    }
+}

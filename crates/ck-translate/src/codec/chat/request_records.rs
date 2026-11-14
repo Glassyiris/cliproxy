@@ -30,6 +30,9 @@ pub fn read_request(owner: &mut Writer, reader: &mut Reader) -> Result<(Document
     let mut references: Table<(LocalId, usize)> = Table::new(owner)?;
     let mut counts = Counts {
         children: HashMap::new(),
+        objects: HashMap::new(),
+        members: HashMap::new(),
+        builds: 0,
         permit: owner.reserve_metadata(0)?,
     };
     let mut started = false;
@@ -90,25 +93,120 @@ pub fn read_request(owner: &mut Writer, reader: &mut Reader) -> Result<(Document
     }
 }
 
-/// Child count and last child of the arrays that fields fill. Fields arrive in order, so the
-/// array element a field appends or descends into is nearly always the last one.
+/// Indexes of the containers that fields fill, so placing a field never walks earlier siblings.
+/// An array keeps its child count and last child: fields arrive in order, so the element a field
+/// appends or descends into is nearly always the last one. An object maps the hash of each
+/// member name to the member, under the build that indexed it; a field whose hash is absent
+/// names a new member, and a hash collision falls back to a scan.
 struct Counts {
     children: HashMap<usize, (usize, Option<usize>)>,
+    /// The current build of each indexed object. Replacing an object's value drops its build,
+    /// so the next field rebuilds the index and entries of earlier builds are never read.
+    objects: HashMap<usize, u32>,
+    members: HashMap<(usize, u32, u64), usize>,
+    builds: u32,
     permit: MetadataPermit,
 }
 
+/// Grows a full map before an insertion, so its capacity can be charged first.
+fn grow<K: Eq + std::hash::Hash, V>(map: &mut HashMap<K, V>) -> Result<()> {
+    if map.len() == map.capacity() {
+        map.try_reserve(map.capacity().max(4)).map_err(|_| Error::Limit)?;
+    }
+    Ok(())
+}
+
+/// Hashes decoded name characters; equal names, as `Segment::matches` compares them, hash equal.
+fn name_hash(mut next: impl FnMut() -> Result<Option<char>>) -> Result<u64> {
+    use std::hash::Hasher;
+    let mut hasher = std::hash::DefaultHasher::new();
+    while let Some(c) = next()? {
+        hasher.write_u32(c as u32);
+    }
+    Ok(hasher.finish())
+}
+
 impl Counts {
+    /// Charges the capacity of every index map; a hash table slot holds the key, the value and
+    /// one control byte.
+    fn charge(&mut self) -> Result<()> {
+        let bytes = [
+            (
+                self.children.capacity(),
+                std::mem::size_of::<(usize, (usize, Option<usize>))>(),
+            ),
+            (self.objects.capacity(), std::mem::size_of::<(usize, u32)>()),
+            (
+                self.members.capacity(),
+                std::mem::size_of::<((usize, u32, u64), usize)>(),
+            ),
+        ]
+        .into_iter()
+        .try_fold(0usize, |sum, (capacity, slot)| {
+            capacity.checked_mul(slot + 1).and_then(|bytes| sum.checked_add(bytes))
+        })
+        .ok_or(Error::Limit)?;
+        self.permit.resize(bytes)?;
+        Ok(())
+    }
+
+    /// Forgets the indexes of a container whose value a field replaced.
+    fn replaced(&mut self, node: usize) {
+        self.children.remove(&node);
+        self.objects.remove(&node);
+    }
+
+    /// Indexes one member under its object's current build. The first member with a name keeps
+    /// the entry, as a scan would find it first.
+    fn index_member(&mut self, doc: &Document, object: usize, build: u32, child: usize) -> Result<()> {
+        let mut chars = doc.name_chars(doc.node(child)?.name.ok_or(Error::Schema)?)?;
+        let key = (object, build, name_hash(|| chars.next_scalar())?);
+        if !self.members.contains_key(&key) {
+            grow(&mut self.members)?;
+            self.charge()?;
+            self.members.insert(key, child);
+        }
+        Ok(())
+    }
+
+    /// The build of an object's member index, indexing every member on first use.
+    fn build(&mut self, doc: &Document, object: usize) -> Result<u32> {
+        if let Some(&build) = self.objects.get(&object) {
+            return Ok(build);
+        }
+        self.builds = self.builds.checked_add(1).ok_or(Error::Limit)?;
+        let build = self.builds;
+        grow(&mut self.objects)?;
+        self.charge()?;
+        self.objects.insert(object, build);
+        for child in doc.children(object)? {
+            self.index_member(doc, object, build, child)?;
+        }
+        Ok(build)
+    }
+
+    /// The member of `object` that `name` names.
+    fn member(&mut self, doc: &Document, object: usize, name: &provenance::Segment) -> Result<Option<usize>> {
+        let build = self.build(doc, object)?;
+        let mut chars = name.clone();
+        let Some(&child) = self.members.get(&(object, build, name_hash(|| chars.next())?)) else {
+            return Ok(None);
+        };
+        if name.matches(doc, doc.node(child)?.name.ok_or(Error::Schema)?)? {
+            return Ok(Some(child));
+        }
+        for child in doc.children(object)? {
+            if name.matches(doc, doc.node(child)?.name.ok_or(Error::Schema)?)? {
+                return Ok(Some(child));
+            }
+        }
+        Ok(None)
+    }
+
     fn get(&mut self, doc: &Document, array: usize) -> Result<&mut (usize, Option<usize>)> {
         if !self.children.contains_key(&array) {
-            if self.children.len() == self.children.capacity() {
-                self.children
-                    .try_reserve(self.children.capacity().max(4))
-                    .map_err(|_| Error::Limit)?;
-                // A hash table slot holds the key, the value and one control byte.
-                let slot = std::mem::size_of::<(usize, (usize, Option<usize>))>() + 1;
-                self.permit
-                    .resize(self.children.capacity().checked_mul(slot).ok_or(Error::Limit)?)?;
-            }
+            grow(&mut self.children)?;
+            self.charge()?;
             let (mut count, mut last) = (0, None);
             for child in doc.children(array)? {
                 count += 1;
@@ -127,7 +225,7 @@ fn field(doc: &mut Document, counts: &mut Counts, event: Document) -> Result<usi
     let value = doc.required(root, "value")?;
     if doc.string_is(pointer, "")? {
         doc.transplant(doc.root(), value)?;
-        counts.children.remove(&doc.root());
+        counts.replaced(doc.root());
         return Ok(doc.root());
     }
     let parent = provenance::resolve_parent_indexed(doc, pointer, &mut |array, index| {
@@ -148,18 +246,11 @@ fn field(doc: &mut Document, counts: &mut Counts, event: Document) -> Result<usi
             doc.children(parent)?.nth(index)
         }
     } else {
-        let mut target = None;
-        for child in doc.children(parent)? {
-            if name.matches(doc, doc.node(child)?.name.ok_or(Error::Schema)?)? {
-                target = Some(child);
-                break;
-            }
-        }
-        target
+        counts.member(doc, parent, &name)?
     };
     if let Some(target) = target {
         doc.transplant(target, value)?;
-        counts.children.remove(&target);
+        counts.replaced(target);
         return Ok(target);
     }
     let Value::String(pointer) = doc.node(pointer)?.value else {
@@ -179,6 +270,9 @@ fn field(doc: &mut Document, counts: &mut Counts, event: Document) -> Result<usi
     if let Some((count, last)) = counts.children.get_mut(&parent) {
         *count += 1;
         *last = Some(node);
+    }
+    if let Some(&build) = counts.objects.get(&parent) {
+        counts.index_member(doc, parent, build, node)?;
     }
     Ok(node)
 }
