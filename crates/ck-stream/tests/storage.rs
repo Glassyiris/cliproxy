@@ -441,8 +441,26 @@ fn invalid_record_parameters_do_not_terminate_a_valid_prefix() {
     terminal(&mut reader, Terminal::Done);
 }
 
-/// Fill the private tmpfs holding `directory`; the tmpfs tests below need it as `TMPDIR`.
-/// Run them inside `unshare -rm` with a private 8 MiB tmpfs mounted there.
+/// A directory on the private tmpfs the tests below fill. Any other `TMPDIR`, including a
+/// run with `--include-ignored` on the host, is refused before anything is written.
+fn private_tmpfs() -> tempfile::TempDir {
+    use std::os::unix::ffi::OsStrExt;
+    let root = std::env::temp_dir();
+    let path = std::ffi::CString::new(root.as_os_str().as_bytes()).unwrap();
+    let mut stat = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: path is NUL-terminated and stat is writable output storage.
+    assert_eq!(unsafe { libc::statfs(path.as_ptr(), stat.as_mut_ptr()) }, 0);
+    // SAFETY: successful statfs initialized the fields.
+    let stat = unsafe { stat.assume_init() };
+    assert!(
+        stat.f_type == libc::TMPFS_MAGIC && stat.f_blocks * stat.f_bsize as u64 <= 8 << 20,
+        "refusing to fill {}: run inside `unshare -rm` with a private tmpfs of at most 8 MiB as TMPDIR",
+        root.display()
+    );
+    tempfile::tempdir().unwrap()
+}
+
+/// Fill the tmpfs holding `directory`, which `private_tmpfs` created.
 fn fill(directory: &std::path::Path) -> std::fs::File {
     use std::io::Write;
     let mut filler = std::fs::File::create(directory.join("filler")).unwrap();
@@ -455,7 +473,7 @@ fn fill(directory: &std::path::Path) -> std::fs::File {
 #[test]
 #[ignore = "requires a disposable private 8 MiB tmpfs supplied as TMPDIR"]
 fn tmpfs_enospc_evicts_once_then_reports_the_os_error() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private_tmpfs();
     let mut config = Config::new(dir.path().join("pool"));
     config.pool_bytes = Some(80 * FRAME_BYTES);
     config.max_event_bytes = FRAME_BYTES;
@@ -485,7 +503,7 @@ fn tmpfs_enospc_evicts_once_then_reports_the_os_error() {
 #[test]
 #[ignore = "requires a disposable private 8 MiB tmpfs supplied as TMPDIR"]
 fn tmpfs_cold_prefault_failure_evicts_once_then_reports_the_os_error() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private_tmpfs();
     let mut config = Config::new(dir.path().join("pool"));
     config.pool_bytes = Some(80 * FRAME_BYTES);
     config.max_event_bytes = FRAME_BYTES;
