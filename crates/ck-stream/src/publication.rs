@@ -447,10 +447,19 @@ impl Writer {
         if Stream::metadata(&state) > self.inner.limits.max_metadata_bytes {
             return Err(Error::StorageExhausted);
         }
+        // A record continuing the last frame may reach pages that frame never needed yet.
+        // The locked owner prefaults them; eviction cannot help, as it punches nothing.
+        let first_new = (state.base_frame + old_count as u64) * FRAME_BYTES as u64;
+        if start < first_new {
+            let frame = state.frames.back().and_then(|frame| frame.pool).ok_or(Error::Gone)?;
+            let needed = end.min(first_new) - (first_new - FRAME_BYTES as u64);
+            self.inner.pool.prefault(frame, needed as usize).map_err(Error::Io)?;
+        }
         for taken in 0..extra {
+            let needed = (end - first_new - taken as u64 * FRAME_BYTES as u64).min(FRAME_BYTES as u64) as usize;
             // Allocation may evict another stream. Never enter cache ownership with metadata locked.
             drop(state);
-            let frame = match self.inner.allocate(self.id(), extra - taken) {
+            let frame = match self.inner.allocate(self.id(), extra - taken, needed) {
                 Ok(frame) => frame,
                 Err(error) => {
                     self.rollback(old_count);

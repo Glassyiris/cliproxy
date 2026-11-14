@@ -72,6 +72,9 @@ pub(crate) struct Pool {
     free_slots: Mutex<Vec<u32>>,
     /// References per frame: the owner's plus one per reader lease. Zero means free.
     refs: Box<[AtomicU32]>,
+    /// Bytes from each frame's start whose pages are populated, so writing them cannot
+    /// fault on tmpfs exhaustion. Only the frame's current owner changes it.
+    ready: Box<[AtomicU32]>,
     shards: Box<[Padded<Mutex<FreeList>>]>,
     slow: Padded<Mutex<Slow>>,
     used: Padded<AtomicU32>,
@@ -98,6 +101,15 @@ fn zeroed_counters(len: usize) -> Box<[AtomicU32]> {
     let counters = Box::into_raw(vec![0u32; len].into_boxed_slice()) as *mut [AtomicU32];
     // SAFETY: AtomicU32 has the same size, alignment and bit validity as u32.
     unsafe { Box::from_raw(counters) }
+}
+
+/// Counters for `len` frames with the first `populated` marked wholly populated.
+fn populated_counters(len: usize, populated: u32) -> Box<[AtomicU32]> {
+    let counters = zeroed_counters(len);
+    for counter in &counters[..populated as usize] {
+        counter.store(FRAME_BYTES as u32, Ordering::Relaxed);
+    }
+    counters
 }
 
 fn round_up(value: usize, page: usize) -> io::Result<usize> {
@@ -189,6 +201,7 @@ impl Pool {
             slots,
             free_slots: Mutex::new((0..slots).rev().collect()),
             refs: zeroed_counters(frames as usize),
+            ready: populated_counters(frames as usize, initial),
             shards: shards.into_boxed_slice(),
             slow: Padded(Mutex::new(Slow {
                 backed: initial,
@@ -220,22 +233,29 @@ impl Pool {
         None
     }
 
-    pub(crate) fn allocate(&self) -> io::Result<u32> {
+    /// Take a free frame whose first `needed` bytes are populated.
+    pub(crate) fn allocate(&self, needed: usize) -> io::Result<u32> {
         let local = self.shard();
         let frame = if let Some(frame) = self.resident(local) {
+            if let Err(error) = self.prefault(frame, needed) {
+                // A warm frame populated only for smaller records; eviction may free better ones.
+                lock(&self.slow.0).cold.push(frame);
+                return Err(error);
+            }
             frame
         } else {
             // The reclaimer holds this lock until every candidate is on the cold
             // list and its punch completes: allocation cannot see missing capacity.
             let mut slow = lock(&self.slow.0);
             if let Some(frame) = self.resident(local) {
+                if let Err(error) = self.prefault(frame, needed) {
+                    slow.cold.push(frame);
+                    return Err(error);
+                }
                 frame
             } else if let Some(&frame) = slow.cold.last() {
-                let start = self.frame_start(frame);
-                let page_start = start / self.page * self.page;
-                let end = round_up(start + FRAME_BYTES, self.page)?;
                 // Failure leaves ownership on the cold list; no writer sees holes.
-                os::populate(self.address(page_start), end - page_start)?;
+                self.prefault(frame, needed)?;
                 slow.cold.pop();
                 frame
             } else {
@@ -251,6 +271,9 @@ impl Pool {
                 let new_end = round_up(self.header_bytes + new as usize * FRAME_BYTES, self.page)?;
                 self.file.grow(old_end, new_end - old_end)?;
                 os::populate(self.address(old_end), new_end - old_end)?;
+                for frame in old..new {
+                    self.ready[frame as usize].store(FRAME_BYTES as u32, Ordering::Relaxed);
+                }
                 slow.backed = new;
                 self.backed.0.store(new, Ordering::Release);
                 let mut free = lock(&self.shards[local].0);
@@ -261,6 +284,23 @@ impl Pool {
         self.refs[frame as usize].store(1, Ordering::Relaxed);
         self.used.0.fetch_add(1, Ordering::Relaxed);
         Ok(frame)
+    }
+
+    /// Populate the pages under the first `needed` bytes of a frame the caller owns. Pages
+    /// that are already populated cost nothing; a refusal (tmpfs full) leaves them unwritten.
+    pub(crate) fn prefault(&self, frame: u32, needed: usize) -> io::Result<()> {
+        let ready = self.ready[frame as usize].load(Ordering::Relaxed) as usize;
+        if needed <= ready {
+            return Ok(());
+        }
+        assert!(frame < self.backed_frames() && needed <= FRAME_BYTES);
+        let start = self.frame_start(frame);
+        let from = (start + ready) / self.page * self.page;
+        let to = round_up(start + needed, self.page)?;
+        os::populate(self.address(from), to - from)?;
+        let ready = (to - start).min(FRAME_BYTES) as u32;
+        self.ready[frame as usize].store(ready, Ordering::Relaxed);
+        Ok(())
     }
 
     pub(crate) fn references(&self, frame: u32) -> u32 {
@@ -368,6 +408,9 @@ impl Pool {
             // The startup prefix stays backed even while free; punch only the excess.
             candidates.extend(free.frames.extract_if(..count, |frame| *frame >= self.reserve_frames));
             free.low_water = free.frames.len();
+        }
+        for &frame in candidates.iter() {
+            self.ready[frame as usize].store(0, Ordering::Relaxed);
         }
         candidates.sort_unstable();
         // Publish cold ownership before any destructive syscall, even if a later

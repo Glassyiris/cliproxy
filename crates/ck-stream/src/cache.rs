@@ -295,11 +295,12 @@ impl Inner {
         maintenance.first_error.get_or_insert(error);
     }
 
-    /// Allocate one of the `remaining` frames a pending reservation still needs.
-    pub(crate) fn allocate(&self, exclude: u64, remaining: usize) -> Result<u32, Error> {
+    /// Allocate one of the `remaining` frames a pending reservation still needs, with its
+    /// first `needed` bytes populated.
+    pub(crate) fn allocate(&self, exclude: u64, remaining: usize, needed: usize) -> Result<u32, Error> {
         let mut evicted_for_tmpfs = false;
         loop {
-            match self.pool.allocate() {
+            match self.pool.allocate(needed) {
                 Ok(frame) => return Ok(frame),
                 Err(error) if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() => {
                     if !self.evict(Some(exclude), remaining, Stream::reclaimable) {

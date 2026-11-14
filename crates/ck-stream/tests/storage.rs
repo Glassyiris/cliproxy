@@ -446,8 +446,22 @@ fn invalid_record_parameters_do_not_terminate_a_valid_prefix() {
 
 /// A directory on the private tmpfs the tests below fill. Any other `TMPDIR`, including a
 /// run with `--include-ignored` on the host, is refused before anything is written.
-fn private_tmpfs() -> tempfile::TempDir {
+/// A directory on the private tmpfs. Each test fills that tmpfs, so they run one at a time.
+struct PrivateTmpfs {
+    dir: tempfile::TempDir,
+    _serial: std::sync::MutexGuard<'static, ()>,
+}
+
+impl PrivateTmpfs {
+    fn path(&self) -> &std::path::Path {
+        self.dir.path()
+    }
+}
+
+fn private_tmpfs() -> PrivateTmpfs {
     use std::os::unix::ffi::OsStrExt;
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let serial = SERIAL.lock().unwrap_or_else(|poison| poison.into_inner());
     let root = std::env::temp_dir();
     let path = std::ffi::CString::new(root.as_os_str().as_bytes()).unwrap();
     let mut stat = std::mem::MaybeUninit::<libc::statfs>::uninit();
@@ -460,7 +474,10 @@ fn private_tmpfs() -> tempfile::TempDir {
         "refusing to fill {}: run inside `unshare -rm` with a private tmpfs of at most 8 MiB as TMPDIR",
         root.display()
     );
-    tempfile::tempdir().unwrap()
+    PrivateTmpfs {
+        dir: tempfile::tempdir().unwrap(),
+        _serial: serial,
+    }
 }
 
 /// Fill the tmpfs holding `directory`, which `private_tmpfs` created.
@@ -540,4 +557,42 @@ fn tmpfs_cold_prefault_failure_evicts_once_then_reports_the_os_error() {
     assert!(matches!(store.reader(old.id(), 0), Err(Error::Gone)));
     let error = new.append(&[6; FRAME_BYTES]).unwrap_err();
     assert!(matches!(error, Error::Io(ref error) if error.raw_os_error() == Some(libc::EFAULT)));
+}
+
+#[test]
+#[ignore = "requires a disposable private 8 MiB tmpfs supplied as TMPDIR"]
+fn tmpfs_refusal_while_continuing_a_cold_frame_is_an_error_not_a_fault() {
+    let dir = private_tmpfs();
+    let mut config = Config::new(dir.path().join("pool"));
+    config.pool_bytes = Some(80 * FRAME_BYTES);
+    config.max_event_bytes = FRAME_BYTES;
+    config.workers = 1;
+    let clock = Arc::new(ManualClock::default());
+    let store = Store::with_clock(config, clock.clone()).unwrap();
+    let mut expired = store.create().unwrap();
+    for _ in 0..30 {
+        expired.append(&[4; FRAME_BYTES]).unwrap();
+    }
+    clock.advance(Duration::from_secs(3601));
+    // Expiry frees 30 frames; the second decay punches all but the eight warm ones.
+    for _ in 0..2 {
+        store.tick().unwrap();
+    }
+    let mut new = store.create().unwrap();
+    let mut reader = store.reader(new.id(), 0).unwrap();
+    for _ in 0..8 {
+        new.append(&[5; FRAME_BYTES]).unwrap();
+    }
+    // The ninth frame is cold: this record populates only the pages under its own bytes.
+    new.append(&[6; 100]).unwrap();
+    let _filler = fill(dir.path());
+    let error = new.append(&[7; 20_000]).unwrap_err();
+    assert!(matches!(error, Error::Io(ref error) if error.raw_os_error() == Some(libc::EFAULT)));
+    for _ in 0..9 {
+        lease(&mut reader);
+    }
+    assert!(matches!(
+        reader.try_next(),
+        Poll::Ready(Some(Read::Terminal(Terminal::StorageExhausted)))
+    ));
 }
