@@ -95,34 +95,57 @@ fn write_encoded_chunks_checked(
     texts: impl Iterator<Item = Result<Text>>,
     e: &mut Encoder<'_, '_>,
 ) -> Result<()> {
-    use base64::Engine;
-    let mut carry = [0; 3];
-    let mut used = 0;
+    let mut encoder = Reencoder::default();
     for text in texts {
-        decode_base64(doc, text?, |bytes| {
-            for &byte in bytes {
-                carry[used] = byte;
-                used += 1;
-                if used == 3 {
-                    let mut encoded = [0; 4];
-                    base64::engine::general_purpose::STANDARD
-                        .encode_slice(carry, &mut encoded)
-                        .map_err(|_| Error::Schema)?;
-                    e.bytes(&encoded)?;
-                    used = 0;
-                }
+        decode_base64(doc, text?, |bytes| encoder.push(bytes, e))?;
+    }
+    encoder.finish(e)
+}
+
+/// Re-encodes a registered string payload as plain base64 from its mapped span, dropping any
+/// data URI prefix so the caller can write the current media type.
+pub(super) fn write_payload(doc: &Document, media: Media, e: &mut Encoder<'_, '_>) -> Result<()> {
+    let mut encoder = Reencoder::default();
+    bytes(doc, media, |bytes| encoder.push(bytes, e))?;
+    encoder.finish(e)
+}
+
+/// Writes decoded bytes as one contiguous base64 string, three bytes at a time.
+#[derive(Default)]
+struct Reencoder {
+    carry: [u8; 3],
+    used: usize,
+}
+
+impl Reencoder {
+    fn push(&mut self, bytes: &[u8], e: &mut Encoder<'_, '_>) -> Result<()> {
+        use base64::Engine;
+        for &byte in bytes {
+            self.carry[self.used] = byte;
+            self.used += 1;
+            if self.used == 3 {
+                let mut encoded = [0; 4];
+                base64::engine::general_purpose::STANDARD
+                    .encode_slice(self.carry, &mut encoded)
+                    .map_err(|_| Error::Schema)?;
+                e.bytes(&encoded)?;
+                self.used = 0;
             }
-            Ok(())
-        })?;
+        }
+        Ok(())
     }
-    if used != 0 {
-        let mut encoded = [0; 4];
-        base64::engine::general_purpose::STANDARD
-            .encode_slice(&carry[..used], &mut encoded)
-            .map_err(|_| Error::Schema)?;
-        e.bytes(&encoded)?;
+
+    fn finish(self, e: &mut Encoder<'_, '_>) -> Result<()> {
+        use base64::Engine;
+        if self.used != 0 {
+            let mut encoded = [0; 4];
+            base64::engine::general_purpose::STANDARD
+                .encode_slice(&self.carry[..self.used], &mut encoded)
+                .map_err(|_| Error::Schema)?;
+            e.bytes(&encoded)?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 pub(crate) struct InputDecoder {

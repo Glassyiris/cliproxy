@@ -327,7 +327,7 @@ fn write_image(view: RequestView<'_>, part: usize, e: &mut Encoder<'_, '_>) -> R
     let source_kind = doc.required(source, "kind")?;
     if doc.string_is(source_kind, "data")? {
         view.media
-            .write_value(doc, doc.required(source, "ref")?, doc.member(part, "mime")?, e)?;
+            .write_value(doc, doc.required(source, "ref")?, (doc.member(part, "mime")?, true), e)?;
     } else if doc.string_is(source_kind, "uri")? {
         doc.write(doc.required(source, "uri")?, e)?;
     } else {
@@ -374,7 +374,9 @@ fn write_source_part(view: RequestView<'_>, part: usize, audio: bool, e: &mut En
         let reference = doc.required(source, "ref")?;
         e.string(if audio { "data" } else { "file_data" })?;
         e.bytes(b":")?;
-        view.media.write_value(doc, reference, doc.member(part, "mime")?, e)?;
+        // Audio names its media type in `format`; `file_data` carries it as a data URI.
+        view.media
+            .write_value(doc, reference, (doc.member(part, "mime")?, !audio), e)?;
     } else if !audio && doc.string_is(source_kind, "file")? {
         e.bytes(b"\"file_id\":")?;
         doc.write(doc.required(source, "file_id")?, e)?;

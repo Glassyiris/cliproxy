@@ -12,7 +12,7 @@ use super::{
     json::Decoded,
 };
 use ck_stream::{MetadataPermit, Writer};
-use decode::write_encoded_chunks;
+use decode::{write_encoded_chunks, write_payload};
 
 #[derive(Clone, Copy)]
 pub enum Encoding {
@@ -232,38 +232,48 @@ impl Registry {
         Ok(kind)
     }
 
-    /// Writes a registered payload. A retained data URI takes its media type from `mime`, the
-    /// part's current MIME member; without one the media type is empty.
-    pub fn write_value(&self, doc: &Document, node: usize, mime: Option<usize>, e: &mut Encoder<'_, '_>) -> Result<()> {
-        self.get(doc, node)?.ok_or(Error::Position)?;
+    /// Writes a registered payload in the form its current semantics select. A data URI payload
+    /// takes its media type from `mime`, the part's current MIME member; without one the media
+    /// type is empty. A plain base64 payload becomes a data URI when `uri_carrier` allows one and
+    /// the part has a MIME, so a supplied media type is never dropped.
+    pub fn write_value(
+        &self,
+        doc: &Document,
+        node: usize,
+        (mime, uri_carrier): (Option<usize>, bool),
+        e: &mut Encoder<'_, '_>,
+    ) -> Result<()> {
+        let media = self.get(doc, node)?.ok_or(Error::Position)?;
         let entry = self
             .entries
             .iter()
             .find(|entry| entry.media.node == node)
             .ok_or(Error::Position)?;
-        if let Some(chunks) = &entry.chunks {
-            if matches!(entry.media.encoding, Encoding::Utf8) {
-                return e.quoted_json(|e| {
-                    for text in chunks.iter() {
-                        decode_base64(doc, *text, |bytes| e.bytes(bytes))?;
-                    }
-                    Ok(())
-                });
-            }
-            e.bytes(b"\"")?;
-            if matches!(entry.media.encoding, Encoding::DataUri { .. }) {
-                e.bytes(b"data:")?;
-                if let Some(mime) = mime {
-                    doc.write_contents(mime, e)?;
+        if matches!(media.encoding, Encoding::Utf8) {
+            let Some(chunks) = &entry.chunks else {
+                let text = media.data.ok_or(Error::Position)?;
+                return e.span(doc.source(text)?, text.span);
+            };
+            return e.quoted_json(|e| {
+                for text in chunks.iter() {
+                    decode_base64(doc, *text, |bytes| e.bytes(bytes))?;
                 }
-                e.bytes(b";base64,")?;
-            }
-            write_encoded_chunks(doc, chunks.iter().copied(), e)?;
-            e.bytes(b"\"")
-        } else {
-            let text = entry.media.data.ok_or(Error::Position)?;
-            e.span(doc.source(text)?, text.span)
+                Ok(())
+            });
         }
+        e.bytes(b"\"")?;
+        if matches!(media.encoding, Encoding::DataUri { .. }) || (uri_carrier && mime.is_some()) {
+            e.bytes(b"data:")?;
+            if let Some(mime) = mime {
+                doc.write_contents(mime, e)?;
+            }
+            e.bytes(b";base64,")?;
+        }
+        match &entry.chunks {
+            Some(chunks) => write_encoded_chunks(doc, chunks.iter().copied(), e)?,
+            None => write_payload(doc, media, e)?,
+        }
+        e.bytes(b"\"")
     }
 }
 

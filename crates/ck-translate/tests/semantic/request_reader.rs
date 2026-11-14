@@ -119,7 +119,7 @@ fn replaced_request_payload_is_registered_and_old_bytes_stay_unreachable() {
             &mut doc,
             reference,
             text,
-            Encoding::DataUri { skip: 15 },
+            Encoding::DataUri { skip: 22 },
             "image",
             Some(mime),
         )
@@ -133,5 +133,53 @@ fn replaced_request_payload_is_registered_and_old_bytes_stay_unreachable() {
         );
         assert_eq!(content[2]["image_url"]["url"], "data:image/png;base64,BAUG");
         assert!(!output.to_string().contains("AQID"));
+    }
+}
+
+#[test]
+fn complete_string_payload_egress_uses_the_current_mime() {
+    let (mut mapped, mut doc, mut media) = rebuilt(&input());
+    let replacement = "\"data:image/png;base64,AQID\"";
+    let mut source = codec::source::Source::new(&mut mapped.writer).unwrap();
+    source.push_bytes(&mut mapped.writer, replacement.as_bytes()).unwrap();
+    let parsed = Document::parse(&mut mapped.writer, source, replacement.len() as u64).unwrap();
+    let string = doc.absorb(parsed).unwrap();
+    let Value::String(text) = doc.node(string).unwrap().value else {
+        panic!("replacement is not a string");
+    };
+    let part = parts(&doc)[2];
+    let source = doc.required(part, "source").unwrap();
+    doc.remove(source, "ref").unwrap().unwrap();
+    let reference = doc.set(source, "ref", Value::Null).unwrap();
+    let mime = doc.set(part, "mime", Value::Text("image/png")).unwrap();
+    media
+        .register(
+            &mut doc,
+            reference,
+            text,
+            Encoding::DataUri { skip: 22 },
+            "image",
+            Some(mime),
+        )
+        .unwrap();
+    doc.set(part, "mime", Value::Text("image/jpeg")).unwrap();
+    for upstream_stream in [false, true] {
+        let output = encode(&mut mapped, &doc, &media, upstream_stream);
+        let url = &output["messages"][0]["content"][2]["image_url"]["url"];
+        assert_eq!(url, "data:image/jpeg;base64,AQID");
+    }
+}
+
+#[test]
+fn plain_base64_file_data_carries_a_supplied_mime() {
+    let (mut mapped, mut doc, media) = rebuilt(&input());
+    let parts = parts(&doc);
+    doc.set(parts[4], "mime", Value::Text("application/pdf")).unwrap();
+    for upstream_stream in [false, true] {
+        let output = encode(&mut mapped, &doc, &media, upstream_stream);
+        let content = &output["messages"][0]["content"];
+        assert_eq!(content[4]["file"]["file_data"], "data:application/pdf;base64,CgsM");
+        // Audio carries its media type in `format`, never in the payload.
+        assert_eq!(content[5]["input_audio"]["data"], "DQ4P");
     }
 }
