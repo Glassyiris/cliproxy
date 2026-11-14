@@ -52,6 +52,48 @@ struct Mapping {
     len: usize,
 }
 
+impl Mapping {
+    /// Map `len` bytes of the file, populate the first `populated` and initialize the
+    /// header slots at the start.
+    fn new(file: &os::Backing, len: usize, populated: usize, slots: u32) -> io::Result<Self> {
+        // SAFETY: fd owns a writable regular file. The entire VA range is reserved
+        // once; only fallocate-backed extents are accessed before later growth.
+        let base = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                file.fd(),
+                0,
+            )
+        };
+        if base == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        let mapping = Mapping {
+            base: NonNull::new(base.cast()).ok_or_else(invalid)?,
+            len,
+        };
+        os::populate(mapping.base.as_ptr(), populated)?;
+        // SAFETY: fallocate/populate succeeded; the page-aligned header is private
+        // during construction. Initialize atomic objects, not references to zero bytes.
+        unsafe {
+            for slot in 0..slots {
+                mapping
+                    .base
+                    .as_ptr()
+                    .add(slot as usize * 128)
+                    .cast::<Header>()
+                    .write(Header {
+                        committed: AtomicU64::new(0),
+                    });
+            }
+        }
+        Ok(mapping)
+    }
+}
+
 impl Drop for Mapping {
     fn drop(&mut self) {
         // SAFETY: this object owns the sole mapping; Pool's last owner has ended.
@@ -148,40 +190,7 @@ impl Pool {
         let initial = frames.min(EXTENT).max(reserve_frames);
         let initial_bytes = round_up(header_bytes + initial as usize * FRAME_BYTES, page)?;
         file.grow(0, initial_bytes)?;
-        // SAFETY: fd owns a writable regular file. The entire VA range is reserved
-        // once; only fallocate-backed extents are accessed before later growth.
-        let base = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                len,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED,
-                file.fd(),
-                0,
-            )
-        };
-        if base == libc::MAP_FAILED {
-            return Err(io::Error::last_os_error());
-        }
-        let mapping = Mapping {
-            base: NonNull::new(base.cast()).ok_or_else(invalid)?,
-            len,
-        };
-        os::populate(mapping.base.as_ptr(), initial_bytes)?;
-        // SAFETY: fallocate/populate succeeded; the page-aligned header is private
-        // during construction. Initialize atomic objects, not references to zero bytes.
-        unsafe {
-            for slot in 0..slots {
-                mapping
-                    .base
-                    .as_ptr()
-                    .add(slot as usize * 128)
-                    .cast::<Header>()
-                    .write(Header {
-                        committed: AtomicU64::new(0),
-                    });
-            }
-        }
+        let mapping = Mapping::new(&file, len, initial_bytes, slots)?;
         let mut shards = Vec::with_capacity(workers);
         for _ in 0..workers {
             shards.push(Padded(Mutex::new(FreeList {

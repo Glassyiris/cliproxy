@@ -131,22 +131,43 @@ impl Writer {
         };
         let extends = state.records.back().is_some_and(|last| last.extends(&index));
         let records = state.records.len() + usize::from(!extends);
+        self.grow_tables(&mut state, needed, records)?;
+        let state = self.take_frames(state, old_count, extra, start, end)?;
+        Ok((record, index, old_count, state))
+    }
+
+    /// Grow the frame table and run index to `frames` and `records` entries within the
+    /// stream's metadata ceiling.
+    fn grow_tables(&self, state: &mut State, frames: usize, records: usize) -> Result<(), Error> {
         let reader_bytes = state.readers * READER_BYTES + state.external_metadata;
         let frame_budget = self
             .inner
             .limits
             .max_metadata_bytes
             .saturating_sub(state.records.capacity().max(records) * std::mem::size_of::<Index>() + reader_bytes);
-        reserve_metadata(&mut state.frames, needed, frame_budget)?;
+        reserve_metadata(&mut state.frames, frames, frame_budget)?;
         let record_budget = self
             .inner
             .limits
             .max_metadata_bytes
             .saturating_sub(state.frames.capacity() * std::mem::size_of::<Frame>() + reader_bytes);
         reserve_metadata(&mut state.records, records, record_budget)?;
-        if Stream::metadata(&state) > self.inner.limits.max_metadata_bytes {
+        if Stream::metadata(state) > self.inner.limits.max_metadata_bytes {
             return Err(Error::StorageExhausted);
         }
+        Ok(())
+    }
+
+    /// Back the bytes `start..end` of a reservation: prefault the pages it reaches in the
+    /// last frame and append `extra` frames after the `old_count` the table held.
+    fn take_frames<'a>(
+        &'a self,
+        mut state: MutexGuard<'a, State>,
+        old_count: usize,
+        extra: usize,
+        start: u64,
+        end: u64,
+    ) -> Result<MutexGuard<'a, State>, Error> {
         // A record continuing the last frame may reach pages that frame never needed yet.
         // The locked owner prefaults them; eviction cannot help, as it punches nothing.
         let first_new = (state.base_frame + old_count as u64) * FRAME_BYTES as u64;
@@ -175,7 +196,7 @@ impl Writer {
             }
             state.frames.push_back(Frame { pool: Some(frame) });
         }
-        Ok((record, index, old_count, state))
+        Ok(state)
     }
 
     fn rollback(&self, old_count: usize) {
