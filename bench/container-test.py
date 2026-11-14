@@ -5,6 +5,7 @@ Usage: python3 -I bench/container-test.py EXTERNAL_ARTIFACT_DIRECTORY
 These tests are not evidence that a runtime image implements the pool.
 """
 
+import datetime
 import importlib.util
 import json
 import mmap
@@ -70,8 +71,14 @@ class FakeDocker:
             if self.defect == "early-exit" and container["name"] == "default":
                 container["running"] = False
         elif args[:2] == ("container", "stop"):
-            self.containers[args[-1]]["running"] = False
-            self.containers[args[-1]]["stopped"] = True
+            container = self.containers[args[-1]]
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if self.defect == "exit-before-stop" and container["name"] == "default":
+                # Exited 0 after the last inspect; stopping a stopped container succeeds.
+                container["finished"] = now - datetime.timedelta(milliseconds=5)
+            else:
+                container.update(stopped=True, finished=now)
+            container["running"] = False
         elif args[0] == "logs":
             scenario = self.containers[args[-1]]["name"]
             output = {"missing-xdg": "XDG_RUNTIME_DIR missing: configure stream.pool_directory",
@@ -107,10 +114,13 @@ class FakeDocker:
             return {"8317/tcp": [{"HostIp": "127.0.0.1", "HostPort": "12345"}]}
         if "{{json .State}}" in args:
             container = self.containers[args[-1]]
+            finished = container.get("finished")
             return {"Running": container["running"], "OOMKilled": False, "Pid": 1234,
+                    "FinishedAt": finished.strftime("%Y-%m-%dT%H:%M:%S.%f") + "123Z" if finished
+                    else "0001-01-01T00:00:00Z",
                     "ExitCode": 139 if container.get("crashed")
                     else 137 if self.defect == "forced-kill" and container.get("stopped")
-                    else 0 if container.get("stopped") or container["running"] else 2}
+                    else 0 if container.get("stopped") or container["running"] or finished else 2}
         raise AssertionError(args)
 
 
@@ -183,6 +193,15 @@ class DriverControls(unittest.TestCase):
         self.assertIn("server exited before shutdown, ExitCode 139", default["errors"])
         self.assertFalse(default["checks"]["clean_shutdown"])
         self.assertEqual(fake.scenarios, list(gate.SCENARIOS))
+
+    def test_server_exit_between_inspect_and_stop_fails(self):
+        result, summary, fake, _ = self.run_control("exit-before-stop")
+        self.assertEqual(result, 1)
+        default = summary["scenarios"][0]
+        self.assertTrue(any(error.startswith("server exited before shutdown at ") for error in default["errors"]))
+        self.assertFalse(default["checks"]["clean_shutdown"])
+        self.assertEqual(default["shutdown_state"]["ExitCode"], 0)
+        self.assertTrue(all(row["passed"] for row in summary["scenarios"][1:]))
 
     def test_interruption_stops_new_scenarios_and_cleans_own_resources(self):
         out = Path(tempfile.mkdtemp(prefix="interrupt-", dir=ARTIFACTS))

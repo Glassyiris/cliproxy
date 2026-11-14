@@ -206,6 +206,16 @@ def refusal_errors(name, state, logs):
     return [] if valid else ["exit lacks the required actionable configuration diagnostic"]
 
 
+def docker_time(value):
+    """Parse Docker's RFC 3339 time, whose nanoseconds exceed datetime's precision."""
+    match = re.fullmatch(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)", value)
+    if not match:
+        raise ValueError(f"unparseable Docker time: {value!r}")
+    fraction = (match[2] or "")[:6].ljust(6, "0")
+    zone = "+00:00" if match[3] == "Z" else match[3]
+    return datetime.datetime.fromisoformat(f"{match[1]}.{fraction}{zone}")
+
+
 class Gate:
     def __init__(self, image, out, docker=None, health=None, startup_timeout=30):
         self.image = image
@@ -445,12 +455,22 @@ class Gate:
             try:
                 state = self.state(container)
                 if state["Running"]:
+                    # SIGTERM shutdown also exits 0, so only the exit time shows whether the
+                    # server stopped on its own between this inspect and the stop request.
+                    # The rootless daemon shares this host's realtime clock.
+                    stop_issued = datetime.datetime.now(datetime.timezone.utc)
                     self.docker.run("container", "stop", "--time", "10", container, timeout=15)
                     state = self.state(container)
                     row["shutdown_state"] = state
+                    row["stop_issued"] = stop_issued.isoformat()
+                    self_exit = not state["Running"] and docker_time(state["FinishedAt"]) < stop_issued
                     row["checks"]["clean_shutdown"] = (
-                        not state["Running"] and state["ExitCode"] == 0 and not state.get("OOMKilled"))
-                    if state["Running"] or state["ExitCode"] != 0 or state.get("OOMKilled"):
+                        not state["Running"] and state["ExitCode"] == 0 and not state.get("OOMKilled")
+                        and not self_exit)
+                    if self_exit:
+                        row["errors"].append(f"server exited before shutdown at {state['FinishedAt']}, "
+                                             f"before stop at {stop_issued.isoformat()}, ExitCode {state['ExitCode']}")
+                    elif state["Running"] or state["ExitCode"] != 0 or state.get("OOMKilled"):
                         row["errors"].append("shutdown was not clean (exit 0 without OOM/forced kill required)")
                 elif not negative:
                     # A server must still be running when the gate stops it; exiting on its own is a crash.
