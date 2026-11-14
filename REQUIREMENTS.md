@@ -76,18 +76,19 @@ Historical source evidence: `bench/budgets.txt` records dated compiler/runner me
 
 ## Deploy-only stream settings
 
-S1 Phase A fixes this configuration contract; the stream settings are not implemented in this tree. All six values are read and validated at startup. Every change requires a restart. Configured overrides remain supported within the validation and owner ceilings in `docs/INTERNAL-STREAM.md`, §6.4. Schema declarations must mark these values deploy-only; runtime configuration publication must not hot-apply them.
+S1 fixes this configuration contract; `ck-stream::Config` implements it for the store, while production bootstrap integration remains part of the S1 execution cutover. All seven values are read and validated at startup. Every change requires a restart. Configured overrides remain supported within the validation and owner ceilings in `docs/INTERNAL-STREAM.md`, §6.4. Schema declarations must mark these values deploy-only; runtime configuration publication must not hot-apply them.
 
 | Setting | Classification | Contract reference |
 | --- | --- | --- |
 | `stream.pool_directory` | Deploy-only; restart required | Private directory and file lifecycle, §6.3 |
 | `stream.pool_bytes` | Deploy-only; restart required | Startup tmpfs/cgroup caps and total ceiling, §6.4 |
+| `stream.startup_reserve_bytes` | Deploy-only; restart required | Prebacked warm frames within the pool cap, preserved by decay, §6.4–6.5 |
 | `stream.max_frames` | Deploy-only; restart required | Derived capped-pool default and combined exchange quota, §6.4 |
 | `stream.max_event_bytes` | Deploy-only; restart required | Provisional event limit and startup validation, §6.4 |
 | `stream.max_metadata_bytes` | Deploy-only; restart required | Provisional metadata limit and checked capacity validation, §6.4 |
 | `stream.cache_ttl` | Deploy-only; restart required | Last-read expiry, §6.4 |
 
-These values need no live-editable admin page or page exception under `crates/AGENTS.md`, Admin panel. Later hot-change support must include its admin page in the same change. Codec/pipeline tolerances in `docs/INTERNAL-STREAM.md`, §9.2, remain PROPOSED and need owner approval; they do not change the existing budgets above or the §9.3 storage gate.
+These values need no live-editable admin page or page exception under `crates/AGENTS.md`, Admin panel. Later hot-change support must include its admin page in the same change. Owner-approved codec/pipeline tolerances in `docs/INTERNAL-STREAM.md`, §9.2, allow at most 5% regression per metric and 0% for memory/storage (2026-11-14 morning, option B); they do not change the existing budgets above or the §9.3 storage gate.
 
 ## Enforcement
 

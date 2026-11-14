@@ -7,6 +7,7 @@ Read `docs/STATE-AND-CONCURRENCY.md` for changes to ownership, persistence, publ
 
 Current crate responsibilities:
 
+- `crates/ck-stream`: shared mmap pool, positions, publication, reader leases and cache retention. No workspace dependencies or transport/provider work.
 - `crates/ck-core`: legacy config import, runtime projection and credential formats. No networking.
 - `crates/ck-wire`: provider-neutral, Go-exact helpers shared by translators and executors.
 - `crates/ck-translate`: format translation between the Anthropic, OpenAI and Gemini APIs.
@@ -16,9 +17,9 @@ Current crate responsibilities:
 
 A workspace reorganization updates this list in the same PR.
 
-S1 Phase A freezes the next responsibility boundary in `docs/INTERNAL-STREAM.md`, §2.1. The planned `ck-stream` crate owns grammar views, positions, the mmap pool, publication, leases, cache and bounded semantic state. It has no workspace dependencies and owns no HTTP, credentials, provider dispatch or durable state. `ck-core` keeps configuration, credential and model types; `ck-wire` keeps boundary helpers. Codecs and capability validation belong in `ck-translate`; execution envelopes and provider transports belong in `ck-exec`. Client boundaries, scheduling, resume authorization and runtime-owned producers belong in `ck-server`; `cooker` remains bootstrap.
+S1 freezes the responsibility boundary in `docs/INTERNAL-STREAM.md`, §2.1. `ck-stream` owns storage and position-backed views; it owns no HTTP, credentials, provider dispatch or durable state. `ck-core` keeps configuration, credential and model types; `ck-wire` keeps boundary helpers. Codecs and capability validation belong in `ck-translate`; execution envelopes and provider transports belong in `ck-exec`. Client boundaries, scheduling, resume authorization and runtime-owned producers belong in `ck-server`; `cooker` remains bootstrap.
 
-Phase B adds `ck-stream` and its dependency-table row in the same change. It also permits `ck-translate`, `ck-exec` and `ck-server` to depend on `ck-stream`. Do not add an empty crate or table row in Phase A. Add it to the binary's allowed dependencies only if the binary uses it directly. Keep the existing table parser and exact-membership checks.
+Phase B installs `ck-stream` without production callers. Later cutover phases add each consuming crate's allowed dependency together with its actual use. Add it to the binary's allowed dependencies only if the binary uses it directly. Keep the existing table parser and exact-membership checks.
 
 ### APIs and modularity
 
@@ -110,6 +111,7 @@ Money clauses apply only where billing or a ledger exists.
 
    | Crate | May depend on |
    | --- | --- |
+   | `ck-stream` | none |
    | `ck-core` | none |
    | `ck-wire` | `ck-core` |
    | `ck-translate` | `ck-core`, `ck-wire` |
