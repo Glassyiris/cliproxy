@@ -47,8 +47,7 @@ impl State {
         scope.tool_index = Some(index);
         scope.tool_call_id = Some(tool.id);
         let custom = tool.custom;
-        let function = doc.member(call, if custom { "custom" } else { "function" })?;
-        same_identity(doc, call, function, tool)?;
+        let function = same_identity(doc, call, tool)?;
         if let Some(function) = function {
             if let Some(arguments) = doc.member(function, if custom { "input" } else { "arguments" })? {
                 self.tool_arguments(owner, doc, arguments, scope, (position, tool_position))?;
@@ -234,8 +233,9 @@ impl State {
     }
 }
 
-/// Rejects a later delta whose id, type or name differs from the call's first delta.
-fn same_identity(doc: &Document, call: usize, function: Option<usize>, tool: &Tool) -> Result<()> {
+/// Rejects a later delta whose id, type or name differs from the call's first delta, checking
+/// id and type before reading its function or custom member, which it returns.
+fn same_identity(doc: &Document, call: usize, tool: &Tool) -> Result<Option<usize>> {
     if let Some(id) = doc.member(call, "id")?
         && !equal(
             doc,
@@ -251,6 +251,7 @@ fn same_identity(doc: &Document, call: usize, function: Option<usize>, tool: &To
     {
         return Err(Error::Schema);
     }
+    let function = doc.member(call, if tool.custom { "custom" } else { "function" })?;
     if let Some(function) = function
         && let Some(name) = doc.member(function, "name")?
         && !equal(
@@ -262,7 +263,7 @@ fn same_identity(doc: &Document, call: usize, function: Option<usize>, tool: &To
     {
         return Err(Error::Schema);
     }
-    Ok(())
+    Ok(function)
 }
 
 fn preserved_tool_field(
