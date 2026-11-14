@@ -18,28 +18,7 @@ pub(super) fn validate_message(owner: &mut Writer, doc: &Document, message: usiz
                 doc.chars(field)?;
             }
         } else if doc.name_is(name, "tool_calls")? {
-            if !matches!(doc.node(field)?.value, Value::Array) {
-                return Err(Error::Schema);
-            }
-            for call in doc.children(field)? {
-                if let Some(index) = doc.member(call, "index")? {
-                    doc.unsigned(index)?;
-                }
-                if let Some(id) = doc.member(call, "id")? {
-                    doc.chars(id)?;
-                }
-                if let Some(kind) = doc.member(call, "type")?
-                    && !doc.string_is(kind, "function")?
-                    && !doc.string_is(kind, "custom")?
-                {
-                    return Err(Error::Schema);
-                }
-                for key in ["function", "custom"] {
-                    if let Some(function) = doc.member(call, key)? {
-                        validate_function(doc, function)?;
-                    }
-                }
-            }
+            validate_tool_calls(doc, field)?;
         } else if doc.name_is(name, "function_call")? {
             validate_function(doc, field)?;
         } else if doc.name_is(name, "audio")? && matches!(doc.node(field)?.value, Value::Object) {
@@ -83,6 +62,32 @@ pub(super) fn validate_message(owner: &mut Writer, doc: &Document, message: usiz
                         |_| Ok(()),
                     )?;
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_tool_calls(doc: &Document, calls: usize) -> Result<()> {
+    if !matches!(doc.node(calls)?.value, Value::Array) {
+        return Err(Error::Schema);
+    }
+    for call in doc.children(calls)? {
+        if let Some(index) = doc.member(call, "index")? {
+            doc.unsigned(index)?;
+        }
+        if let Some(id) = doc.member(call, "id")? {
+            doc.chars(id)?;
+        }
+        if let Some(kind) = doc.member(call, "type")?
+            && !doc.string_is(kind, "function")?
+            && !doc.string_is(kind, "custom")?
+        {
+            return Err(Error::Schema);
+        }
+        for key in ["function", "custom"] {
+            if let Some(function) = doc.member(call, key)? {
+                validate_function(doc, function)?;
             }
         }
     }
