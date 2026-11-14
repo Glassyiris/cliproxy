@@ -7,6 +7,9 @@ pub(super) struct Projection {
     value: usize,
     data: usize,
     field: &'static str,
+    /// The media kind is a document, so the payload is `file.file_data` rather than
+    /// `image_url.url`, whatever other members the part carries.
+    document_kind: bool,
     choice: u64,
     next: u64,
     offset: u64,
@@ -57,13 +60,13 @@ fn source(doc: &Document, value: usize, field: &str, scalar: bool, document_kind
     })
 }
 
-/// The member of a part value that holds its payload: audio `data`, file `file_data` or image
-/// `url`.
-fn payload_member(doc: &Document, value: usize, field: &str) -> Result<usize> {
+/// The member of a part value that holds its payload: audio `data`, document `file_data` or
+/// image `url`.
+fn payload_member(doc: &Document, value: usize, field: &str, document_kind: bool) -> Result<usize> {
     if field == "audio" {
         doc.required(value, "data")
-    } else if let Some(file) = doc.member(value, "file")? {
-        doc.required(file, "file_data")
+    } else if document_kind {
+        doc.required(doc.required(value, "file")?, "file_data")
     } else {
         doc.required(doc.required(value, "image_url")?, "url")
     }
@@ -87,13 +90,17 @@ fn media_field(doc: &Document, name: usize) -> Result<&'static str> {
 }
 
 /// Moves a part's carrier to the native member for its media kind (file for a document,
-/// image_url otherwise) and sets the part type to match.
+/// image_url otherwise) and sets the part type to match. A part that already has its native
+/// carrier keeps the other member as an unknown field.
 fn native_carrier(doc: &mut Document, value: usize, document_kind: bool) -> Result<()> {
     let (old, new, old_data, new_data, native_type) = if document_kind {
         ("image_url", "file", "url", "file_data", "file")
     } else {
         ("file", "image_url", "file_data", "url", "image_url")
     };
+    if doc.member(value, new)?.is_some() {
+        return Ok(());
+    }
     if let Some(carrier) = doc.remove(value, old)? {
         doc.rename(carrier, new)?;
         if let Some(data) = doc.member(carrier, old_data)? {
@@ -157,6 +164,7 @@ impl Projection {
                 value: 0,
                 data: 0,
                 field: "content",
+                document_kind: false,
                 choice,
                 next: 0,
                 offset: 0,
@@ -198,6 +206,7 @@ impl Projection {
             value,
             data: binary,
             field,
+            document_kind,
             choice,
             next: 0,
             offset: 0,
@@ -302,10 +311,10 @@ impl Projection {
             return Ok(Some((incoming, value, self.field, self.choice)));
         }
         let doc = self.document.as_mut().ok_or(Error::Closed)?;
-        let old_data = payload_member(doc, self.value, self.field)?;
+        let old_data = payload_member(doc, self.value, self.field, self.document_kind)?;
         let root = incoming.root();
         let value = doc.absorb(incoming)? - root + value;
-        let data = payload_member(doc, value, self.field)?;
+        let data = payload_member(doc, value, self.field, self.document_kind)?;
         if !matches!(doc.node(data)?.value, Value::Null) {
             return Err(Error::Schema);
         }

@@ -64,7 +64,7 @@ impl Buffered {
         let Some((value, field, scalar, index)) = media_target(doc, data, &scanned)? else {
             return Ok(());
         };
-        let file = !scalar && field == "content" && doc.member(value, "file")?.is_some();
+        let file = !scalar && field == "content" && super::media_events::file_part(doc, value)?;
         let Some((encoding, mime)) = payload_encoding(owner, doc, &scanned, (field, scalar, file))? else {
             return Ok(());
         };

@@ -235,3 +235,32 @@ fn nullable_audio_transcript_stays_native_null() {
         );
     }
 }
+
+#[test]
+fn image_part_with_unknown_file_member_keeps_its_image_carrier() {
+    let url = format!("data:image/png;base64,{}", "AAEC".repeat(2048));
+    let parts = [
+        json!({"type":"image_url","image_url":{"url":url},"file":{"vendor":1}}),
+        json!({"type":"image_url","file":{"vendor":1},"image_url":{"url":url}}),
+    ];
+    for part in parts {
+        for upstream in [codec::BodyMode::Buffered, codec::BodyMode::Streaming] {
+            let native = json!({"id":"r","model":"m","created":1,"choices":[{"index":0,if upstream == codec::BodyMode::Buffered { "message" } else { "delta" }:{"role":"assistant","content":[part.clone()]},"finish_reason":"stop"}]});
+            let input = if upstream == codec::BodyMode::Buffered {
+                native.to_string()
+            } else {
+                format!("data: {native}\n\ndata: [DONE]\n\n")
+            };
+            for downstream in [codec::BodyMode::Buffered, codec::BodyMode::Streaming] {
+                let (output, events) = response_fragmented(input.as_bytes(), upstream, downstream, 4096);
+                assert!(events.iter().any(|event| event["kind"] == "image"), "{upstream:?}");
+                let parts: Vec<_> = messages(&output, downstream)
+                    .iter()
+                    .filter_map(|message| message.get("content"))
+                    .flat_map(|array| array.as_array().unwrap().clone())
+                    .collect();
+                assert_eq!(parts, std::slice::from_ref(&part), "{upstream:?}/{downstream:?}");
+            }
+        }
+    }
+}

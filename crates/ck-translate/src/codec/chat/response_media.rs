@@ -23,6 +23,15 @@ impl Audio {
     }
 }
 
+/// Whether a media part is a document: its type names a file. Another carrier member, such as
+/// an unknown `file` beside an image URL, does not change the kind.
+pub(super) fn file_part(doc: &Document, value: usize) -> Result<bool> {
+    match doc.member(value, "type")? {
+        Some(kind) => doc.string_is(kind, "file"),
+        None => Ok(false),
+    }
+}
+
 impl State {
     pub(super) fn media_value(
         &mut self,
@@ -39,7 +48,7 @@ impl State {
             self.audio_fragment(owner, input, value, scope)?;
             return Ok(true);
         }
-        let (carrier, data_key, kind) = if input.member(value, "file")?.is_some() {
+        let (carrier, data_key, kind) = if file_part(input, value)? {
             ("file", "file_data", "document")
         } else {
             ("image_url", "url", "image")
