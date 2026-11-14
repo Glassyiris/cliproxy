@@ -61,65 +61,9 @@ impl Buffered {
         let scanned = self.input.scanner.pending_node(self.input.document.input(), wire)?;
         let data = self.input.node(wire)?;
         let doc = &self.input.document;
-        let Some(parent) = doc.node(data)?.parent else {
+        let Some((value, field, scalar, index)) = media_target(doc, data, &scanned)? else {
             return Ok(());
         };
-        let name = doc.node(data)?.name.ok_or(Error::Schema)?;
-        let mut target = None;
-        if let Some(parent_name) = doc.node(parent)?.name {
-            if doc.name_is(parent_name, "message")? {
-                for field in ["content", "refusal", "reasoning_content"] {
-                    if doc.name_is(name, field)? && scanned.validated_end - scanned.span.start > 1024 {
-                        target = Some((data, parent, field, true));
-                    }
-                }
-            } else if doc.name_is(parent_name, "audio")? && doc.name_is(name, "data")? {
-                if let Some(message) = doc.node(parent)?.parent {
-                    target = Some((parent, message, "audio", false));
-                }
-            } else if doc.name_is(parent_name, "image_url")?
-                && doc.name_is(name, "url")?
-                && let Some(part) = doc.node(parent)?.parent
-                && let Some(array) = doc.node(part)?.parent
-                && matches!(doc.node(array)?.value, Value::Array)
-                && let Some(array_name) = doc.node(array)?.name
-                && let Some(message) = doc.node(array)?.parent
-            {
-                if doc.name_is(array_name, "images")? {
-                    target = Some((part, message, "images", false));
-                } else if doc.name_is(array_name, "content")?
-                    && let Some(kind) = doc.member(part, "type")?
-                    && doc.string_is(kind, "image_url")?
-                {
-                    target = Some((part, message, "content", false));
-                }
-            }
-        }
-        let Some((value, message, field, scalar)) = target else {
-            return Ok(());
-        };
-        let Some(message_name) = doc.node(message)?.name else {
-            return Ok(());
-        };
-        if !doc.name_is(message_name, "message")? {
-            return Ok(());
-        }
-        let Some(choice) = doc.node(message)?.parent else {
-            return Ok(());
-        };
-        let Some(choices) = doc.node(choice)?.parent else {
-            return Ok(());
-        };
-        if doc.node(choices)?.parent != Some(doc.root()) || !matches!(doc.node(choices)?.value, Value::Array) {
-            return Ok(());
-        }
-        if !doc.name_is(doc.node(choices)?.name.ok_or(Error::Schema)?, "choices")? {
-            return Ok(());
-        }
-        let Some(index) = doc.member(choice, "index")? else {
-            return Ok(());
-        };
-        let index = doc.unsigned(index)?;
         let (encoding, mime) = if scalar {
             (Encoding::Utf8, None)
         } else if field == "audio" {
@@ -144,35 +88,7 @@ impl Buffered {
         state.ensure_start(owner, Some(doc))?;
         let position = state.choice(owner, index)?;
         let mut scope = state.scope(position);
-        if scalar {
-            let block = match field {
-                "content" => 0,
-                "reasoning_content" => 1,
-                _ => 2,
-            };
-            scope.block_index = Some(block as u64);
-            state.emitter.emit(
-                owner,
-                Kind::BlockStart,
-                scope,
-                |e| {
-                    e.bytes(b",\"kind\":")?;
-                    e.string(["text", "thinking", "refusal"][block])
-                },
-                |_| Ok(()),
-            )?;
-            state.choices[position].blocks[block] = true;
-        } else if field != "audio" {
-            scope.block_index = Some(state.choices[position].next_block);
-            state.choices[position].next_block += 1;
-            state.emitter.emit(
-                owner,
-                Kind::BlockStart,
-                scope,
-                |e| e.bytes(b",\"kind\":\"content\""),
-                |_| Ok(()),
-            )?;
-        }
+        state.open_media_block(owner, position, &mut scope, field, scalar)?;
         scope.media_id = Some(media::local_id(b'm', state.serial)?);
         state.serial = state.serial.checked_add(1).ok_or(Error::Limit)?;
         let publisher = Publisher::start(&mut state.emitter, owner, scope, |e| {
@@ -263,7 +179,113 @@ impl Buffered {
     }
 }
 
+/// Finds the choice member that the pending string `data` publishes as media: a message text
+/// field over 1024 bytes, audio data or an image URL. Returns the published value, its field,
+/// whether it is a scalar text field, and the choice index.
+fn media_target(doc: &Document, data: usize, scanned: &json::Node) -> Result<Option<(usize, &'static str, bool, u64)>> {
+    let Some(parent) = doc.node(data)?.parent else {
+        return Ok(None);
+    };
+    let name = doc.node(data)?.name.ok_or(Error::Schema)?;
+    let mut target = None;
+    if let Some(parent_name) = doc.node(parent)?.name {
+        if doc.name_is(parent_name, "message")? {
+            for field in ["content", "refusal", "reasoning_content"] {
+                if doc.name_is(name, field)? && scanned.validated_end - scanned.span.start > 1024 {
+                    target = Some((data, parent, field, true));
+                }
+            }
+        } else if doc.name_is(parent_name, "audio")? && doc.name_is(name, "data")? {
+            if let Some(message) = doc.node(parent)?.parent {
+                target = Some((parent, message, "audio", false));
+            }
+        } else if doc.name_is(parent_name, "image_url")?
+            && doc.name_is(name, "url")?
+            && let Some(part) = doc.node(parent)?.parent
+            && let Some(array) = doc.node(part)?.parent
+            && matches!(doc.node(array)?.value, Value::Array)
+            && let Some(array_name) = doc.node(array)?.name
+            && let Some(message) = doc.node(array)?.parent
+        {
+            if doc.name_is(array_name, "images")? {
+                target = Some((part, message, "images", false));
+            } else if doc.name_is(array_name, "content")?
+                && let Some(kind) = doc.member(part, "type")?
+                && doc.string_is(kind, "image_url")?
+            {
+                target = Some((part, message, "content", false));
+            }
+        }
+    }
+    let Some((value, message, field, scalar)) = target else {
+        return Ok(None);
+    };
+    let Some(message_name) = doc.node(message)?.name else {
+        return Ok(None);
+    };
+    if !doc.name_is(message_name, "message")? {
+        return Ok(None);
+    }
+    let Some(choice) = doc.node(message)?.parent else {
+        return Ok(None);
+    };
+    let Some(choices) = doc.node(choice)?.parent else {
+        return Ok(None);
+    };
+    if doc.node(choices)?.parent != Some(doc.root()) || !matches!(doc.node(choices)?.value, Value::Array) {
+        return Ok(None);
+    }
+    if !doc.name_is(doc.node(choices)?.name.ok_or(Error::Schema)?, "choices")? {
+        return Ok(None);
+    }
+    let Some(index) = doc.member(choice, "index")? else {
+        return Ok(None);
+    };
+    let index = doc.unsigned(index)?;
+    Ok(Some((value, field, scalar, index)))
+}
+
 impl State {
+    /// Opens the block that a published text field or image part streams into; audio has none.
+    fn open_media_block(
+        &mut self,
+        owner: &mut Writer,
+        position: usize,
+        scope: &mut Scope,
+        field: &'static str,
+        scalar: bool,
+    ) -> Result<()> {
+        if scalar {
+            let block = match field {
+                "content" => 0,
+                "reasoning_content" => 1,
+                _ => 2,
+            };
+            scope.block_index = Some(block as u64);
+            self.emitter.emit(
+                owner,
+                Kind::BlockStart,
+                *scope,
+                |e| {
+                    e.bytes(b",\"kind\":")?;
+                    e.string(["text", "thinking", "refusal"][block])
+                },
+                |_| Ok(()),
+            )?;
+            self.choices[position].blocks[block] = true;
+        } else if field != "audio" {
+            scope.block_index = Some(self.choices[position].next_block);
+            self.choices[position].next_block += 1;
+            self.emitter.emit(
+                owner,
+                Kind::BlockStart,
+                *scope,
+                |e| e.bytes(b",\"kind\":\"content\""),
+                |_| Ok(()),
+            )?;
+        }
+        Ok(())
+    }
     pub(super) fn published_scope(&self, value: usize) -> Option<Scope> {
         self.published
             .iter()
