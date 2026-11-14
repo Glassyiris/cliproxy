@@ -599,6 +599,12 @@ fn credential_batch_attempt(
         }
         ck_exec::codex_siwc_bind::unlock(&lock).map_err(|_| AdminError::store(state))?;
     }
+    #[cfg(test)]
+    crate::testing::installation_effects::run(
+        &db.auth_dir(),
+        crate::testing::installation_effects::Stage::CredentialBatchProbed,
+    )
+    .map_err(|_| AdminError::store(state))?;
     let mut prepared = Vec::with_capacity(documents.len());
     for (document, path, bytes) in documents {
         let (target, _, synthesized, _) =
@@ -1018,4 +1024,91 @@ pub(crate) async fn import(
         Ok(answer(state, &done, restart, None, query.dry_run))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::installation_effects::{self, Stage};
+    use std::time::Duration;
+
+    /// The probe releases each document lock before the batch commits. A refresh that
+    /// takes the lock in that window must read the batch's bytes, never the source they
+    /// replace: its restore waits for the store command the batch still holds.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn refresh_locking_after_the_batch_probe_reads_the_batch() {
+        let root = std::env::temp_dir().join(format!("cooker-batch-probe-{}", uuid::Uuid::new_v4()));
+        let config = Arc::new(crate::testing::config_store(&root.join("cooker.db")).unwrap());
+        let db = crate::store::credential_store::CredentialDb::initialize(config.clone()).unwrap();
+        let path = db.auth_dir().join("probed.json");
+        let seed = br#"{"type":"claude","access_token":"probe-seed-fixture"}"#;
+        let batch = br#"{"type":"claude","access_token":"probe-batch-fixture"}"#;
+        db.save(&path, seed).unwrap();
+        let mut cfg = config.load().unwrap().config;
+        cfg.auth_dir = db.auth_dir();
+        let rt = Arc::new(crate::testing::runtime_with_db(
+            cfg,
+            Vec::new(),
+            ck_exec::Executors {
+                claude: ck_exec::claude::ClaudeExecutor::new("http://127.0.0.1:9").unwrap(),
+                codex: Default::default(),
+                devices: Default::default(),
+                openai: Default::default(),
+                google: Default::default(),
+            },
+            db.clone(),
+        ));
+        let state = Management::new(rt, config);
+
+        let (parked_tx, parked_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let _parked = installation_effects::once(&db.auth_dir(), Stage::CredentialBatchProbed, move || {
+            parked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(())
+        });
+        let document = CredentialDocument {
+            name: "probed.json".into(),
+            data: base64::engine::general_purpose::STANDARD.encode(batch),
+            if_match: None,
+            if_none_match: false,
+        };
+        let parts: CredentialBatchParts = (vec![(document, path.clone(), batch.to_vec())], Vec::new());
+        let committing = std::thread::spawn({
+            let state = state.clone();
+            move || matches!(credential_batch_attempt(&state, &parts), Ok(BatchAttempt::Done(_)))
+        });
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        // The timeouts only bound a deadlock's failure.
+        let bounded = Duration::from_secs(10);
+        tokio::time::timeout(bounded, parked_rx).await.unwrap().unwrap();
+        let reading = tokio::spawn({
+            let (path, db, shutdown) = (path.clone(), db.clone(), shutdown.clone());
+            async move { crate::runtime::state::test_read_locked_codex_file(&path, &shutdown, db).await }
+        });
+        // Let the refresh take the free lock and reach its read before the batch commits.
+        let held = ck_exec::codex_siwc_bind::open_lock_file(&path).unwrap();
+        tokio::time::timeout(bounded, async {
+            while ck_exec::codex_siwc_bind::try_lock(&held).unwrap() {
+                ck_exec::codex_siwc_bind::unlock(&held).unwrap();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the refresh takes the probed lock");
+        drop(held);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        release_tx.send(()).unwrap();
+        let (lock, read) = tokio::time::timeout(bounded, reading).await.unwrap().unwrap().unwrap();
+        assert!(committing.join().unwrap(), "the batch commits");
+        assert_eq!(
+            Json::Object(read),
+            serde_json::from_slice::<Json>(batch).unwrap(),
+            "a refresh locking after the probe read the replaced source"
+        );
+        assert_eq!(db.read(&path).unwrap().unwrap(), batch);
+        drop(lock);
+        drop((state, db));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
