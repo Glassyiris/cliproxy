@@ -25,32 +25,7 @@ impl State {
         if let Some(audio) = &mut self.choices[position].audio_output {
             audio.finish(&mut self.emitter, owner)?;
         }
-        for tool in self.choices[position].tools.iter_mut() {
-            let mut tool_scope = scope;
-            tool_scope.tool_index = Some(tool.index);
-            tool_scope.tool_call_id = Some(tool.id);
-            let valid = tool.parser.as_ref().map(|parser| parser.is_finished());
-            self.emitter.emit(
-                owner,
-                Kind::ToolEnd,
-                tool_scope,
-                |e| {
-                    e.bytes(if incomplete {
-                        b",\"status\":\"incomplete\""
-                    } else {
-                        b",\"status\":\"completed\""
-                    })?;
-                    if let Some(valid) = valid {
-                        e.bytes(b",\"valid_json\":")?;
-                        e.bytes(if valid { b"true" } else { b"false" })?;
-                    }
-                    Ok(())
-                },
-                |_| Ok(()),
-            )?;
-            tool.arguments = None;
-            tool.parser = None;
-        }
+        self.close_tools(owner, position, scope, incomplete)?;
         for (block, opened) in self.choices[position].blocks.iter_mut().enumerate() {
             if *opened {
                 let mut block_scope = scope;
@@ -91,6 +66,36 @@ impl State {
             },
         )?;
         self.choices[position].finished = true;
+        Ok(())
+    }
+    /// Publishes ToolEnd for every call of a finishing choice and drops its argument parsers.
+    fn close_tools(&mut self, owner: &mut Writer, position: usize, scope: Scope, incomplete: bool) -> Result<()> {
+        for tool in self.choices[position].tools.iter_mut() {
+            let mut tool_scope = scope;
+            tool_scope.tool_index = Some(tool.index);
+            tool_scope.tool_call_id = Some(tool.id);
+            let valid = tool.parser.as_ref().map(|parser| parser.is_finished());
+            self.emitter.emit(
+                owner,
+                Kind::ToolEnd,
+                tool_scope,
+                |e| {
+                    e.bytes(if incomplete {
+                        b",\"status\":\"incomplete\""
+                    } else {
+                        b",\"status\":\"completed\""
+                    })?;
+                    if let Some(valid) = valid {
+                        e.bytes(b",\"valid_json\":")?;
+                        e.bytes(if valid { b"true" } else { b"false" })?;
+                    }
+                    Ok(())
+                },
+                |_| Ok(()),
+            )?;
+            tool.arguments = None;
+            tool.parser = None;
+        }
         Ok(())
     }
     pub(super) fn emit_usage(&mut self, owner: &mut Writer, final_snapshot: bool) -> Result<()> {
