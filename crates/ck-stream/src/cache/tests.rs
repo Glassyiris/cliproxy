@@ -145,3 +145,23 @@ fn maintenance_keeps_the_first_error_and_counts_later_ones() {
     store.inner.record_failure(io::Error::other("fourth"), false);
     assert_eq!(store.take_reclaim_error().unwrap().to_string(), "fourth");
 }
+
+#[test]
+fn refused_admission_counts_as_an_allocation_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::new(dir.path().join("pool"));
+    config.pool_bytes = Some(4 * FRAME_BYTES);
+    config.max_event_bytes = FRAME_BYTES;
+    config.header_slots = 1;
+    config.workers = 1;
+    let store = Store::open(config).unwrap();
+    // A racing admission holds the only slot and has not entered the cache yet.
+    let slot = store.inner.pool.claim_slot().unwrap();
+    assert!(matches!(store.create(), Err(Error::StorageExhausted)));
+    let stats = store.stats();
+    assert_eq!(
+        (stats.allocation_failures, stats.last_storage_exhausted_frames),
+        (1, None)
+    );
+    store.inner.pool.release_slot(slot);
+}

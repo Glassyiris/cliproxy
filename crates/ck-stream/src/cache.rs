@@ -20,6 +20,10 @@ use crate::{
     publication::{State, Stream},
 };
 
+mod stats;
+use stats::Failures;
+pub use stats::StoreStats;
+
 /// Monotonic elapsed time. Implementations must never move backwards.
 pub trait Clock: Send + Sync + 'static {
     /// Must not panic: reads and lease drops call it after taking frame references and
@@ -106,6 +110,8 @@ impl Hasher for IdHasher {
 pub(crate) struct Cache {
     streams: HashMap<u64, Arc<Stream>, BuildHasherDefault<IdHasher>>,
     order: BTreeSet<(Duration, u64)>,
+    evictions: u64,
+    expiries: u64,
 }
 
 #[repr(align(128))]
@@ -128,6 +134,7 @@ pub(crate) struct Retention {
     clock: Arc<dyn Clock>,
     fence: RwLock<()>,
     active: AtomicBool,
+    pub(crate) failures: Failures,
 }
 
 impl Retention {
@@ -232,6 +239,7 @@ impl Inner {
         if let Some(hook) = self.evict_hook.lock().take() {
             hook();
         }
+        cache.evictions += victims.len() as u64;
         for key in victims {
             let stream = cache.streams.remove(&key.1).unwrap();
             cache.order.remove(&key);
@@ -262,6 +270,7 @@ impl Inner {
                     continue;
                 }
                 cache.streams.remove(&id);
+                cache.expiries += 1;
                 stream.invalidate_locked(&mut state);
             }
         }
@@ -354,6 +363,7 @@ impl Store {
                 clock,
                 fence: RwLock::new(()),
                 active: AtomicBool::new(false),
+                failures: Failures::default(),
             }),
             closed: AtomicBool::new(false),
             maintenance: parking_lot::Mutex::new(Maintenance::default()),
@@ -416,6 +426,7 @@ impl Store {
                 break slot;
             }
             if !self.inner.evict(None, 1, State::slot_count) {
+                self.inner.retention.failures.record(None);
                 return Err(Error::StorageExhausted);
             }
         };
