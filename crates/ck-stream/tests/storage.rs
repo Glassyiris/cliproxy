@@ -141,14 +141,13 @@ fn pressure_evicts_oldest_read_not_oldest_created_and_never_reuses_a_lease() {
     lease(&mut first_reader).acknowledge();
     let mut allocating = store.create().unwrap();
     allocating.append(&vec![3; 3 * FRAME_BYTES]).unwrap();
-    // second is invalidated first but its lease prevents reuse, so first must also be evicted.
-    terminal(&mut second_reader, Terminal::Gone);
-    assert_eq!(borrowed, vec![2; FRAME_BYTES]);
-    assert!(matches!(pinned.chunk(pinned.record().start), Err(Error::Gone)));
-    assert_eq!(store.used_frames(), 4);
-    drop(pinned);
-    assert_eq!(store.used_frames(), 3);
+    // second was read least recently, but its lease means eviction would return nothing.
     assert!(matches!(store.reader(first.id(), 0), Err(Error::Gone)));
+    assert_eq!(borrowed, vec![2; FRAME_BYTES]);
+    assert_eq!(pinned.chunk(pinned.record().start).unwrap(), borrowed);
+    drop(pinned);
+    assert!(matches!(second_reader.try_next(), Poll::Pending));
+    assert_eq!(store.used_frames(), 4);
 }
 
 #[test]
@@ -163,11 +162,13 @@ fn pinned_capacity_fails_visibly_without_overwrite_and_keeps_prefix() {
     let mut failed_reader = store.reader(second.id(), 0).unwrap();
     assert!(matches!(second.append(b"cannot fit"), Err(Error::StorageExhausted)));
     terminal(&mut failed_reader, Terminal::StorageExhausted);
-    terminal(&mut reader, Terminal::Gone);
+    // The pinned stream would return no frame, so pressure leaves it readable.
+    assert!(matches!(reader.try_next(), Poll::Pending));
     assert_eq!(bytes, vec![9; FRAME_BYTES]);
-    assert_eq!(store.used_frames(), 4);
     drop(pinned);
-    assert_eq!(store.used_frames(), 0);
+    assert_eq!(store.used_frames(), 4);
+    first.finish(Terminal::Done);
+    terminal(&mut reader, Terminal::Done);
 }
 
 #[test]
@@ -186,6 +187,59 @@ fn per_stream_quota_does_not_evict_others_and_error_follows_prefix() {
     .unwrap();
     assert_eq!(count, 4 * FRAME_BYTES);
     terminal(&mut reader, Terminal::StorageExhausted);
+}
+
+#[test]
+fn pressure_never_invalidates_streams_that_free_nothing() {
+    let (_dir, store, _) = store(4);
+    let mut owner = store.create().unwrap();
+    let scratch = owner.begin_scratch(4 * FRAME_BYTES).unwrap();
+    let mut waiting = store.create().unwrap();
+    let mut allocating = store.create().unwrap();
+    assert!(matches!(allocating.append(&[1; 10]), Err(Error::StorageExhausted)));
+    assert!(store.reader(owner.id(), 0).is_ok());
+    assert!(store.reader(waiting.id(), 0).is_ok());
+    drop(scratch);
+    waiting.append(&[2; 10]).unwrap();
+}
+
+#[test]
+fn pressure_skips_leased_victims_until_their_frames_can_return() {
+    let (_dir, store, _) = store(4);
+    let mut pinned = store.create().unwrap();
+    for _ in 0..4 {
+        pinned.append(&[7; FRAME_BYTES]).unwrap();
+    }
+    let mut reader = store.reader(pinned.id(), 0).unwrap();
+    let leases: Vec<_> = (0..4).map(|_| lease(&mut reader)).collect();
+    let mut waiting = store.create().unwrap();
+    let mut allocating = store.create().unwrap();
+    assert!(matches!(allocating.append(&[1; 10]), Err(Error::StorageExhausted)));
+    assert!(store.reader(waiting.id(), 0).is_ok());
+    assert_eq!(leases[3].chunk(leases[3].record().start).unwrap(), &[7; FRAME_BYTES]);
+    drop(leases);
+    // Without leases the least recently read stream returns its frames and is evicted.
+    waiting.append(&[2; 10]).unwrap();
+    terminal(&mut reader, Terminal::Gone);
+}
+
+#[test]
+fn pressure_fails_without_eviction_when_victims_cannot_cover_the_reservation() {
+    let (_dir, store, _) = store(4);
+    let mut pinned = store.create().unwrap();
+    pinned.append(&[7; 3 * FRAME_BYTES]).unwrap();
+    let mut reader = store.reader(pinned.id(), 0).unwrap();
+    let pin = lease(&mut reader);
+    let mut small = store.create().unwrap();
+    small.append(&[8; 10]).unwrap();
+    let mut allocating = store.create().unwrap();
+    assert!(matches!(
+        allocating.begin_scratch(2 * FRAME_BYTES),
+        Err(Error::StorageExhausted)
+    ));
+    assert!(store.reader(small.id(), 0).is_ok());
+    assert!(pin.chunk(pin.record().start).is_ok());
+    assert_eq!(store.used_frames(), 4);
 }
 
 #[tokio::test]

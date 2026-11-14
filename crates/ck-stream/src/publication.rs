@@ -199,6 +199,15 @@ impl Stream {
         self.stopped.notify_waiters();
     }
 
+    /// Frames that invalidation would return to the pool now: owned and unleased.
+    pub(crate) fn reclaimable(&self, state: &State) -> usize {
+        state
+            .frames
+            .iter()
+            .filter(|frame| frame.pool.is_some() && frame.leases == 0)
+            .count()
+    }
+
     pub(crate) fn invalidate(&self) {
         self.invalidate_locked(&mut self.state.lock());
     }
@@ -384,10 +393,10 @@ impl Writer {
         if Stream::metadata(&state) > self.inner.limits.max_metadata_bytes {
             return Err(Error::StorageExhausted);
         }
-        for _ in 0..extra {
+        for taken in 0..extra {
             // Allocation may evict another stream. Never enter cache ownership with metadata locked.
             drop(state);
-            let frame = match self.inner.allocate(self.id()) {
+            let frame = match self.inner.allocate(self.id(), extra - taken) {
                 Ok(frame) => frame,
                 Err(error) => {
                     self.rollback(old_count);

@@ -1,6 +1,7 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     io,
+    ops::Bound::{Excluded, Unbounded},
     sync::{
         Arc, Condvar, Mutex, RwLock, RwLockWriteGuard, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -124,48 +125,54 @@ impl Drop for RetentionGuard<'_> {
 }
 
 impl Inner {
-    pub(crate) fn evict_one(&self, exclude: u64) -> bool {
+    /// Invalidate the least recently read streams that together return `frames` unleased
+    /// frames now. Streams that would return none stay cached; if every candidate together
+    /// cannot cover the request, nothing is invalidated and this returns false.
+    pub(crate) fn evict(&self, exclude: u64, frames: usize) -> bool {
         let _retention = self.retention.retain();
         let mut cache = self.cache.lock();
-        let mut stale = 0;
-        let pass = cache.streams.len() - usize::from(cache.streams.contains_key(&exclude));
-        while let Some(key) = cache.order.iter().find(|(_, id)| *id != exclude).copied() {
-            let stream = cache.streams[&key.1].clone();
-            let mut state = stream.state.lock();
-            cache.order.remove(&key);
-            // Queue timestamps are lower bounds. The fence stops new refreshes; a reader
-            // already past its flag check can refresh once. After one stale pass, scan
-            // real timestamps: each observed stream is then stable under the fence.
-            if state.last_read != key.0 {
-                cache.order.insert((state.last_read, key.1));
-                stale += 1;
-                if stale < pass {
-                    continue;
-                }
-                drop(state);
+        let mut victims = Vec::new();
+        let mut found = 0;
+        let mut refreshed = HashSet::new();
+        let mut cursor = None;
+        while found < frames {
+            let next = match cursor {
+                None => cache.order.first(),
+                Some(key) => cache.order.range((Excluded(key), Unbounded)).next(),
+            };
+            let Some(&key) = next else {
                 break;
+            };
+            cursor = Some(key);
+            if key.1 == exclude {
+                continue;
             }
-            cache.streams.remove(&key.1);
-            if stream.invalidate_locked(&mut state) > 0 {
-                return true;
+            let stream = cache.streams[&key.1].clone();
+            let state = stream.state.lock();
+            // Queue timestamps are lower bounds. Once maintenance has observed a stream, the
+            // fence keeps its timestamp stable, so one requeue at the real value is exact.
+            if state.last_read != key.0 && refreshed.insert(key.1) {
+                let real = (state.last_read, key.1);
+                drop(state);
+                cache.order.remove(&key);
+                cache.order.insert(real);
+                continue;
+            }
+            let reclaimable = stream.reclaimable(&state);
+            if reclaimable > 0 {
+                found += reclaimable;
+                victims.push(key);
             }
         }
-        // Every fallback iteration removes a stream, even if leases pin all its frames.
-        while let Some(id) = cache
-            .streams
-            .iter()
-            .filter(|(id, _)| **id != exclude)
-            .min_by_key(|(id, stream)| (stream.state.lock().last_read, **id))
-            .map(|(id, _)| *id)
-        {
-            let stream = cache.streams.remove(&id).unwrap();
-            let mut state = stream.state.lock();
-            cache.order.retain(|(_, entry)| *entry != id);
-            if stream.invalidate_locked(&mut state) > 0 {
-                return true;
-            }
+        if found < frames {
+            return false;
         }
-        false
+        for key in victims {
+            let stream = cache.streams.remove(&key.1).unwrap();
+            cache.order.remove(&key);
+            stream.invalidate_locked(&mut stream.state.lock());
+        }
+        true
     }
 
     fn tick(&self) -> io::Result<()> {
@@ -195,12 +202,13 @@ impl Inner {
         self.pool.decay()
     }
 
-    pub(crate) fn allocate(&self, exclude: u64) -> Result<u32, Error> {
+    /// Allocate one of the `remaining` frames a pending reservation still needs.
+    pub(crate) fn allocate(&self, exclude: u64, remaining: usize) -> Result<u32, Error> {
         loop {
             match self.pool.allocate() {
                 Ok(frame) => return Ok(frame),
                 Err(error) if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() => {
-                    if !self.evict_one(exclude) {
+                    if !self.evict(exclude, remaining) {
                         return Err(Error::StorageExhausted);
                     }
                 }

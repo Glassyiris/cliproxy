@@ -148,9 +148,9 @@ impl Writer {
             reserved_frames: count,
             len,
         };
-        for _ in 0..count {
+        for taken in 0..count {
             // Cache eviction may lock stream state. The quota is reserved, but no lock is held.
-            let frame = self.inner.allocate(self.id())?;
+            let frame = self.inner.allocate(self.id(), count - taken)?;
             lease.frames.push(frame);
             let state = self.stream.state.lock();
             if self.stream.invalidated.load(Ordering::Acquire) {

@@ -177,10 +177,10 @@ fn scratch_partial_pool_failure_rolls_back_and_reports_terminal() {
         writer.begin_scratch(2 * FRAME_BYTES),
         Err(Error::StorageExhausted)
     ));
-    // One free frame was acquired before pool pressure invalidated the pinned victim.
+    // The one free frame was rolled back; the scratch-held owner returns nothing to evict.
     assert_eq!(store.used_frames(), 3);
     assert_eq!(borrowed, &[2; FRAME_BYTES]);
-    assert!(matches!(pinned.chunk(0), Err(Error::Gone)));
+    assert_eq!(pinned.chunk(0).unwrap(), borrowed);
     terminal(&mut reader, Terminal::StorageExhausted);
     drop(pinned);
     assert_eq!(store.used_frames(), 0);
