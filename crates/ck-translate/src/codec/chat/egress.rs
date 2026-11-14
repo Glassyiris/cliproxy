@@ -254,7 +254,18 @@ impl Egress {
                 }
             }
             Kind::Opaque => {
-                if self.mode == BodyMode::Streaming {
+                if doc.member(x, "media_id")?.is_some()
+                    && let Some(name) = doc.member(root, "name")?
+                    && doc.string_is(name, "chat.media.attributes")?
+                {
+                    let id = media_events::id(&doc, x)?;
+                    let projection = self
+                        .media
+                        .iter_mut()
+                        .find(|entry| entry.id == id)
+                        .ok_or(Error::Schema)?;
+                    projection.attributes(doc)?;
+                } else if self.mode == BodyMode::Streaming {
                     output(encode::scratch(owner, |e| {
                         source_fields(&doc, x, e)?;
                         e.bytes(b"data: ")?;

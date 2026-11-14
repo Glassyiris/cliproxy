@@ -7,6 +7,7 @@ use crate::codec::{
 
 pub(super) fn validate(doc: &Document, media: &Registry) -> Result<()> {
     media.validate_document(doc)?;
+    media.validate_registrations(doc)?;
     let root = doc.root();
     for key in ["temperature", "top_p", "presence_penalty", "frequency_penalty"] {
         optional(doc, root, key, number)?;

@@ -10,6 +10,8 @@ use crate::codec::{
     table::Table,
 };
 use ck_stream::Writer;
+#[path = "response_buffered.rs"]
+mod buffered;
 #[path = "response_media.rs"]
 mod media_events;
 
@@ -17,7 +19,7 @@ pub struct Ingress {
     owner: u64,
     source: Option<Source>,
     sse: Option<sse::Scanner>,
-    json: Option<json::Scanner>,
+    buffered: Option<buffered::Buffered>,
     state: State,
     failed: bool,
 }
@@ -35,14 +37,18 @@ impl Ingress {
         }
         Ok(Self {
             owner: owner.id(),
-            source: Some(Source::new(owner)?),
+            source: if mode == BodyMode::Streaming {
+                Some(Source::new(owner)?)
+            } else {
+                None
+            },
             sse: if mode == BodyMode::Streaming {
                 Some(sse::Scanner::new(owner, limit)?)
             } else {
                 None
             },
-            json: if mode == BodyMode::Buffered {
-                Some(json::Scanner::new(owner, limit)?)
+            buffered: if mode == BodyMode::Buffered {
+                Some(buffered::Buffered::new(owner, limit)?)
             } else {
                 None
             },
@@ -54,7 +60,9 @@ impl Ingress {
                 terminal: false,
                 identity,
                 serial: 0,
+                published: Table::new(owner)?,
             },
+
             failed: false,
         })
     }
@@ -68,14 +76,15 @@ impl codec::ResponseIngress for Ingress {
             return Err(Error::Closed);
         }
         let result = (|| {
-            let source = self.source.as_mut().ok_or(Error::Closed)?;
-            source.push_bytes(owner, bytes)?;
-            if let Some(scanner) = &mut self.sse {
+            if let Some(buffered) = &mut self.buffered {
+                buffered.advance(owner, &mut self.state, bytes)?;
+            } else {
+                let source = self.source.as_mut().ok_or(Error::Closed)?;
+                source.push_bytes(owner, bytes)?;
+                let scanner = self.sse.as_mut().ok_or(Error::Closed)?;
                 let state = &mut self.state;
                 scanner.advance(source, |event| state.event(owner, source, event))?;
                 source.release_before(scanner.consumed())?;
-            } else {
-                self.json.as_mut().ok_or(Error::Closed)?.advance(source)?;
             }
             Ok(())
         })();
@@ -97,12 +106,10 @@ impl codec::ResponseIngress for Ingress {
                     return Err(Error::Truncated);
                 }
             } else {
-                let source = self.source.take().ok_or(Error::Closed)?;
-                let mut scanner = self.json.take().ok_or(Error::Closed)?;
-                scanner.finish(&source)?;
-                let doc = Document::from_scanned(owner, source, scanner)?;
-                self.state.document(owner, &doc, true, None)?;
-                self.state.done(owner)?;
+                self.buffered
+                    .take()
+                    .ok_or(Error::Closed)?
+                    .finish(owner, &mut self.state)?;
             }
             Ok(())
         })();
@@ -151,6 +158,7 @@ struct State {
     terminal: bool,
     identity: Identity,
     serial: u64,
+    published: Table<buffered::Published>,
 }
 
 pub(super) fn mapped_document(
@@ -473,6 +481,9 @@ impl State {
             return Err(Error::Schema);
         }
         for field in doc.children(body)? {
+            if buffered && self.finish_published(owner, doc, field)? {
+                continue;
+            }
             let name = doc.node(field)?.name.ok_or(Error::Schema)?;
             if doc.name_is(name, "audio")?
                 && matches!(doc.node(field)?.value, Value::Object)

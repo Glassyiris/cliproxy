@@ -4,10 +4,13 @@ use crate::codec::{
     document::{Document, Name, Value},
     encode::{self, Encoder},
     event::{Emitter, Identity, Kind, Scope},
-    json::{self, Decoded},
+    json,
     media::{self, Registry},
 };
 use ck_stream::{ScratchLease, Writer};
+
+#[path = "request_string.rs"]
+mod string;
 
 pub struct Ingress {
     owner: u64,
@@ -16,6 +19,9 @@ pub struct Ingress {
     started: bool,
     last_field: Option<usize>,
     messages: Option<PendingMessages>,
+    current_message: Option<PendingMessage>,
+    string: Option<PendingString>,
+    trees: codec::table::Table<Option<PendingTree>>,
     published_media: usize,
     media: Registry,
     emitter: Emitter,
@@ -30,6 +36,28 @@ struct PendingMessages {
     node: usize,
     last: Option<usize>,
     index: u64,
+}
+
+struct PendingMessage {
+    wire: usize,
+    node: usize,
+    last: Option<usize>,
+}
+struct PendingString {
+    wire: usize,
+    node: usize,
+    media: usize,
+    offset: u64,
+    publisher: media::Publisher,
+    decoder: media::InputDecoder,
+}
+
+#[derive(Clone, Copy)]
+struct PendingTree {
+    node: usize,
+    last: Option<usize>,
+    index: u64,
+    done: bool,
 }
 
 impl Ingress {
@@ -52,6 +80,9 @@ impl Ingress {
             started: false,
             last_field: None,
             messages: None,
+            current_message: None,
+            string: None,
+            trees: codec::table::Table::new(owner)?,
             published_media: 0,
             media: Registry::new(owner)?,
             emitter: Emitter::new(identity),
@@ -105,11 +136,17 @@ impl Ingress {
             let Some(index) = next else { break };
             let wire = scanner.pending_node(self.document.input(), index)?;
             let key = wire.key.ok_or(Error::Schema)?;
-            if json::string_is(self.document.input(), key, "messages")? {
+            if self.messages.as_ref().is_some_and(|m| m.wire == index)
+                || scanner.key_is(&self.document, key, "messages")?
+            {
                 if wire.kind != json::Kind::Array {
                     return Err(Error::Schema);
                 }
                 if self.messages.is_none() {
+                    self.scanner
+                        .as_mut()
+                        .ok_or(Error::Closed)?
+                        .bind_key(key, Name::Static("messages"));
                     let node = self.document.set(self.document.root(), "messages", Value::Array)?;
                     field(
                         &mut self.document,
@@ -133,11 +170,65 @@ impl Ingress {
                     break;
                 }
             } else {
+                if self.string.as_ref().is_some_and(|s| s.wire == index)
+                    || (wire.kind == json::Kind::String
+                        && wire.span.end == 0
+                        && wire.validated_end - wire.span.start > 1024
+                        && !json::string_is(self.document.input(), key, "reasoning_effort")?
+                        && !json::string_is(self.document.input(), key, "function_call")?
+                        && !json::string_is(self.document.input(), key, "x_ck")?)
+                {
+                    let name = self
+                        .string
+                        .as_ref()
+                        .map(|s| self.document.node(s.node).map(|n| n.name))
+                        .transpose()?
+                        .flatten()
+                        .unwrap_or(Name::Mapped(codec::document::Text { source: 0, span: key }));
+                    if !self
+                        .stream_string(owner, index, self.document.root(), &[Some(Component::Name(name))], true)?
+                        .1
+                    {
+                        break;
+                    }
+                    self.last_field = Some(index);
+                    continue;
+                }
+                let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
+                if !scanner.key_is(&self.document, key, "x_ck")?
+                    && !scanner.key_is(&self.document, key, "functions")?
+                    && !scanner.key_is(&self.document, key, "function_call")?
+                    && !scanner.key_is(&self.document, key, "reasoning")?
+                    && !scanner.key_is(&self.document, key, "reasoning_effort")?
+                    && (wire.span.end == 0 || self.trees.get(index).is_some_and(Option::is_some))
+                {
+                    let name = if let Some(state) = self.trees.get(index).and_then(|s| *s) {
+                        self.document.node(state.node)?.name.ok_or(Error::Schema)?
+                    } else {
+                        Name::Mapped(codec::document::Text { source: 0, span: key })
+                    };
+                    let mut path = [None; 128];
+                    path[0] = Some(Component::Name(name));
+                    if !self.consume_tree(owner, index, self.document.root(), &mut path, 1, true)? {
+                        break;
+                    }
+                    self.last_field = Some(index);
+                    continue;
+                }
+                let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
                 if scanner.completed_node(self.document.input(), index)?.is_none() {
                     break;
                 }
                 let node = self.document.import_completed(scanner, index)?;
                 let name = self.document.node(node)?.name.ok_or(Error::Schema)?;
+                for alias in ["x_ck", "functions", "function_call", "reasoning", "reasoning_effort"] {
+                    if self.document.name_is(name, alias)? {
+                        self.scanner
+                            .as_mut()
+                            .ok_or(Error::Closed)?
+                            .bind_key(key, Name::Static(alias));
+                    }
+                }
                 if self.document.name_is(name, "x_ck")? {
                     let x = self.document.required(self.document.root(), "x_ck")?;
                     let original = self.document.required(x, "original")?;
@@ -185,27 +276,114 @@ impl Ingress {
     }
 
     fn consume_messages(&mut self, owner: &mut Writer) -> Result<()> {
-        let pending = self.messages.as_mut().ok_or(Error::Schema)?;
-        let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
         loop {
+            let pending = self.messages.as_ref().ok_or(Error::Schema)?;
+            let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
             let next = match pending.last {
                 Some(last) => scanner.pending_node(self.document.input(), last)?.next,
                 None => scanner.pending_node(self.document.input(), pending.wire)?.first,
             };
             let Some(index) = next else { break };
-            if scanner.completed_node(self.document.input(), index)?.is_none() {
-                break;
+            let wire = scanner.pending_node(self.document.input(), index)?;
+            if wire.kind != json::Kind::Object {
+                return Err(Error::Schema);
             }
-            let message = self.document.import_completed(scanner, index)?;
-            self.document.append(pending.node, message)?;
-            normalize_message(&mut self.document, message, pending.index, &mut self.media, owner)?;
+            let message_index = pending.index;
             let mut path = [None; 128];
             path[0] = Some(Component::Name(Name::Static("messages")));
-            path[1] = Some(Component::Index(pending.index));
+            path[1] = Some(Component::Index(message_index));
+            if self.current_message.is_none() {
+                let node = self.document.add(None, Value::Object)?;
+                self.document.append(pending.node, node)?;
+                field(
+                    &mut self.document,
+                    &self.media,
+                    node,
+                    &path[..2],
+                    &mut self.emitter,
+                    owner,
+                    &mut self.reader,
+                )?;
+                self.current_message = Some(PendingMessage {
+                    wire: index,
+                    node,
+                    last: None,
+                });
+            }
+            loop {
+                let current = self.current_message.as_ref().ok_or(Error::Schema)?;
+                let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
+                let next = match current.last {
+                    Some(last) => scanner.pending_node(self.document.input(), last)?.next,
+                    None => scanner.pending_node(self.document.input(), current.wire)?.first,
+                };
+                let Some(child) = next else { break };
+                let value = scanner.pending_node(self.document.input(), child)?;
+                let key = value.key.ok_or(Error::Schema)?;
+                let existing = self
+                    .string
+                    .as_ref()
+                    .filter(|s| s.wire == child)
+                    .map(|s| s.node)
+                    .or_else(|| self.trees.get(child).and_then(|s| s.map(|s| s.node)));
+                let name = existing
+                    .map(|node| self.document.node(node).map(|n| n.name))
+                    .transpose()?
+                    .flatten()
+                    .unwrap_or(Name::Mapped(codec::document::Text { source: 0, span: key }));
+                path[2] = Some(Component::Name(name));
+                if self.string.as_ref().is_some_and(|s| s.wire == child)
+                    || (value.kind == json::Kind::String
+                        && value.span.end == 0
+                        && value.validated_end - value.span.start > 1024)
+                {
+                    if !self.stream_string(owner, child, current.node, &path[..3], true)?.1 {
+                        return Ok(());
+                    }
+                } else {
+                    if value.span.end == 0 || self.trees.get(child).is_some_and(Option::is_some) {
+                        let deferred = self.document.name_is(name, "tool_calls")?
+                            || self.document.name_is(name, "function_call")?
+                            || (self.document.name_is(name, "content")? && value.kind == json::Kind::Array);
+                        if !self.consume_tree(owner, child, current.node, &mut path, 3, !deferred)? {
+                            return Ok(());
+                        }
+                        self.current_message.as_mut().ok_or(Error::Schema)?.last = Some(child);
+                        continue;
+                    }
+                    if value.span.end == 0 {
+                        return Ok(());
+                    }
+                    let node = self.document.import_completed(scanner, child)?;
+                    self.document.append(current.node, node)?;
+                    let deferred = self.document.name_is(name, "tool_calls")?
+                        || self.document.name_is(name, "function_call")?
+                        || (self.document.name_is(name, "content")? && value.kind == json::Kind::Array);
+                    if !deferred {
+                        fields(
+                            &mut self.document,
+                            &self.media,
+                            node,
+                            (&mut path, 3),
+                            &mut self.emitter,
+                            owner,
+                            &mut self.reader,
+                        )?;
+                    }
+                }
+                self.current_message.as_mut().ok_or(Error::Schema)?.last = Some(child);
+            }
+            if wire.span.end == 0 {
+                break;
+            }
+            let current = self.current_message.take().ok_or(Error::Schema)?;
+            self.media.validate_registrations(&self.document)?;
+            normalize_message(&mut self.document, current.node, message_index, &mut self.media, owner)?;
+            self.media.relocate_ingress(&self.document)?;
             fields(
                 &mut self.document,
                 &self.media,
-                message,
+                current.node,
                 (&mut path, 2),
                 &mut self.emitter,
                 owner,
@@ -223,10 +401,253 @@ impl Ingress {
                 self.media.retain(&mut self.document, index, owner, &mut self.reader)?;
                 self.published_media += 1;
             }
+            let pending = self.messages.as_mut().ok_or(Error::Schema)?;
             pending.last = Some(index);
             pending.index += 1;
         }
         Ok(())
+    }
+
+    fn stream_string(
+        &mut self,
+        owner: &mut Writer,
+        wire_index: usize,
+        parent: usize,
+        path: &[Option<Component>],
+        publish: bool,
+    ) -> Result<(Option<usize>, bool)> {
+        let wire = self
+            .scanner
+            .as_ref()
+            .ok_or(Error::Closed)?
+            .pending_node(self.document.input(), wire_index)?;
+        if self.string.is_none() {
+            let Some((encoding, kind, mime)) = self.string_format(owner, parent, wire)? else {
+                return Ok((None, false));
+            };
+            let text = codec::document::Text {
+                source: 0,
+                span: wire.span,
+            };
+            let node = self.document.add(
+                wire.key
+                    .map(|span| Name::Mapped(codec::document::Text { source: 0, span })),
+                Value::String(text),
+            )?;
+            self.document.append(parent, node)?;
+            let media_index = self.media.len();
+            let media = self
+                .media
+                .register(&mut self.document, node, text, encoding, kind, mime)?;
+            if publish {
+                field(
+                    &mut self.document,
+                    &self.media,
+                    node,
+                    path,
+                    &mut self.emitter,
+                    owner,
+                    &mut self.reader,
+                )?;
+            }
+            let publisher = media::Publisher::begin(&self.document, media, &mut self.emitter, owner)?;
+            self.media
+                .retain_record(&mut self.document, media_index, owner, &mut self.reader)?;
+            self.published_media += 1;
+            self.string = Some(PendingString {
+                wire: wire_index,
+                node,
+                media: media_index,
+                offset: wire.span.start + 1,
+                publisher,
+                decoder: media::InputDecoder::new(encoding),
+            });
+        }
+        let pending = self.string.as_mut().ok_or(Error::Schema)?;
+        if pending.wire != wire_index {
+            return Err(Error::Schema);
+        }
+        let mut cursor = self.document.input().cursor(codec::source::Span {
+            start: pending.offset,
+            end: wire.validated_end,
+        })?;
+        let mut decoder = json::StringDecoder::default();
+        let mut chunk = [0; 36_864];
+        let mut used = 0;
+        while let Some(byte) = cursor.next_byte()? {
+            if let Some(c) = decoder.push(byte)? {
+                pending.decoder.push(c, |bytes| {
+                    if used + bytes.len() > chunk.len() {
+                        return Err(Error::Limit);
+                    }
+                    chunk[used..used + bytes.len()].copy_from_slice(bytes);
+                    used += bytes.len();
+                    Ok(())
+                })?;
+            }
+        }
+        if !decoder.complete() {
+            return Err(Error::Json);
+        }
+        pending.offset = wire.validated_end;
+        if used != 0 {
+            pending.publisher.append(&chunk[..used], &mut self.emitter, owner)?;
+            self.media
+                .retain_record(&mut self.document, pending.media, owner, &mut self.reader)?;
+        }
+        if wire.span.end != 0 {
+            if !pending.decoder.complete() {
+                return Err(Error::Schema);
+            }
+            pending.publisher.end(&mut self.emitter, owner)?;
+            self.media
+                .retain_record(&mut self.document, pending.media, owner, &mut self.reader)?;
+        }
+        let scanner = self.scanner.as_mut().ok_or(Error::Closed)?;
+        self.document.rebind_keys(scanner)?;
+        let floor = self
+            .document
+            .raw_floor(self.document.root(), scanner.raw_floor().min(pending.offset))?;
+        self.document.release_input_before(floor)?;
+        self.document.release_input_range(codec::source::Span {
+            start: wire.span.start + 1,
+            end: pending.offset,
+        })?;
+        let node = pending.node;
+        if wire.span.end != 0 {
+            self.string = None;
+            return Ok((Some(node), true));
+        }
+        Ok((Some(node), false))
+    }
+
+    fn consume_tree(
+        &mut self,
+        owner: &mut Writer,
+        wire_index: usize,
+        parent: usize,
+        path: &mut [Option<Component>; 128],
+        depth: usize,
+        publish: bool,
+    ) -> Result<bool> {
+        if depth == path.len() {
+            return Err(Error::Limit);
+        }
+        while self.trees.len() <= wire_index {
+            self.trees.push(None)?;
+        }
+        if self.trees[wire_index].is_some_and(|state| state.done) {
+            return Ok(true);
+        }
+        let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
+        let wire = scanner.pending_node(self.document.input(), wire_index)?;
+        let mut media_carrier = false;
+        if let Some(name) = self.document.node(parent)?.name {
+            for key in ["input_audio", "image_url", "file"] {
+                media_carrier |= self.document.name_is(name, key)?;
+            }
+        }
+        if wire.kind == json::Kind::String
+            && (self.string.as_ref().is_some_and(|s| s.wire == wire_index)
+                || (wire.span.end == 0 && (wire.validated_end - wire.span.start > 1024 || media_carrier)))
+        {
+            let (node, done) = self.stream_string(owner, wire_index, parent, &path[..depth], publish)?;
+            if let Some(node) = node {
+                self.trees[wire_index] = Some(PendingTree {
+                    node,
+                    last: None,
+                    index: 0,
+                    done,
+                });
+            }
+            return Ok(done);
+        }
+        if self.trees[wire_index].is_none() {
+            if !matches!(wire.kind, json::Kind::Object | json::Kind::Array) {
+                if wire.span.end == 0 {
+                    return Ok(false);
+                }
+                let node = self.document.import_completed(scanner, wire_index)?;
+                self.document.append(parent, node)?;
+                if publish {
+                    fields(
+                        &mut self.document,
+                        &self.media,
+                        node,
+                        (path, depth),
+                        &mut self.emitter,
+                        owner,
+                        &mut self.reader,
+                    )?;
+                }
+                self.trees[wire_index] = Some(PendingTree {
+                    node,
+                    last: None,
+                    index: 0,
+                    done: true,
+                });
+                return Ok(true);
+            }
+            let name = wire
+                .key
+                .map(|span| Name::Mapped(codec::document::Text { source: 0, span }));
+            let node = self.document.add(
+                name,
+                if wire.kind == json::Kind::Object {
+                    Value::Object
+                } else {
+                    Value::Array
+                },
+            )?;
+            self.document.append(parent, node)?;
+            if publish {
+                field(
+                    &mut self.document,
+                    &self.media,
+                    node,
+                    &path[..depth],
+                    &mut self.emitter,
+                    owner,
+                    &mut self.reader,
+                )?;
+            }
+            self.trees[wire_index] = Some(PendingTree {
+                node,
+                last: None,
+                index: 0,
+                done: false,
+            });
+        }
+        loop {
+            let state = self.trees[wire_index].ok_or(Error::Schema)?;
+            let scanner = self.scanner.as_ref().ok_or(Error::Closed)?;
+            let next = match state.last {
+                Some(last) => scanner.pending_node(self.document.input(), last)?.next,
+                None => wire.first,
+            };
+            let Some(child) = next else { break };
+            let value = scanner.pending_node(self.document.input(), child)?;
+            path[depth] = Some(if wire.kind == json::Kind::Array {
+                Component::Index(state.index)
+            } else {
+                Component::Name(if let Some(state) = self.trees.get(child).and_then(|s| *s) {
+                    self.document.node(state.node)?.name.ok_or(Error::Schema)?
+                } else {
+                    Name::Mapped(codec::document::Text {
+                        source: 0,
+                        span: value.key.ok_or(Error::Schema)?,
+                    })
+                })
+            });
+            if !self.consume_tree(owner, child, state.node, path, depth + 1, publish)? {
+                return Ok(false);
+            }
+            self.trees[wire_index].as_mut().ok_or(Error::Schema)?.last = Some(child);
+            self.trees[wire_index].as_mut().ok_or(Error::Schema)?.index =
+                state.index.checked_add(1).ok_or(Error::Limit)?;
+        }
+        self.trees[wire_index].as_mut().ok_or(Error::Schema)?.done = wire.span.end != 0;
+        Ok(wire.span.end != 0)
     }
 
     fn prepare(&mut self, owner: &mut Writer) -> Result<()> {
@@ -263,12 +684,15 @@ impl codec::RequestIngress for Ingress {
             return Err(Error::Closed);
         }
         let result = (|| {
-            self.document.push_input(owner, bytes)?;
-            self.scanner
-                .as_mut()
-                .ok_or(Error::Closed)?
-                .advance(self.document.input())?;
-            self.consume(owner)
+            for bytes in bytes.chunks(8192) {
+                self.document.push_input(owner, bytes)?;
+                self.scanner
+                    .as_mut()
+                    .ok_or(Error::Closed)?
+                    .advance_document(&self.document)?;
+                self.consume(owner)?;
+            }
+            Ok(())
         })();
         if let Err(error) = result {
             self.failed = true;
@@ -343,7 +767,10 @@ impl Capability for ChatCapability {
 }
 
 pub(super) fn require_string(doc: &Document, node: usize) -> Result<()> {
-    if matches!(doc.node(node)?.value, Value::String(_) | Value::Text(_) | Value::Id(_)) {
+    if matches!(
+        doc.node(node)?.value,
+        Value::String(_) | Value::Text(_) | Value::Id(_) | Value::Utf8Media
+    ) {
         Ok(())
     } else {
         Err(Error::Schema)
@@ -373,7 +800,7 @@ fn validate(doc: &Document) -> Result<()> {
         }
         if let Some(content) = doc.member(message, "content")? {
             match doc.node(content)?.value {
-                Value::String(_) | Value::Text(_) | Value::Null => (),
+                Value::String(_) | Value::Text(_) | Value::Utf8Media | Value::Null => (),
                 Value::Array => {
                     for part in doc.children(content)? {
                         let kind = doc.required(part, "type")?;
@@ -557,11 +984,8 @@ fn normalize_message(
             if let Some(arguments) = doc.member(function, "arguments")? {
                 require_string(doc, arguments)?;
                 if !custom {
-                    let Value::String(text) = doc.node(arguments)?.value else {
-                        return Err(Error::Schema);
-                    };
                     let lease = encode::scratch(owner, |e| {
-                        let mut decoded = Decoded::new(doc.source(text)?, text.span)?;
+                        let mut decoded = doc.chars(arguments)?;
                         while let Some(c) = decoded.next_scalar()? {
                             e.bytes(c.encode_utf8(&mut [0; 4]).as_bytes())?;
                         }
@@ -623,6 +1047,9 @@ fn field(
     reader: &mut ck_stream::Reader,
 ) -> Result<bool> {
     let registered = media.get(doc, node)?;
+    if doc.published(node)? {
+        return Ok(registered.is_some());
+    }
     emitter.emit(
         owner,
         Kind::RequestField,
@@ -647,6 +1074,7 @@ fn field(
         return Err(Error::Schema);
     }
     doc.bind_field(node, event)?;
+    doc.mark_published(node);
     Ok(registered.is_some())
 }
 
@@ -852,4 +1280,64 @@ fn write_function(doc: &Document, function: usize, custom: bool, e: &mut Encoder
         }
     }
     e.bytes(b"}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codec::{
+        RequestEgress, RequestIngress,
+        event::{Direction, LocalId},
+        source::Span,
+    };
+
+    #[test]
+    fn unfinished_request_retires_raw_positions_before_completion() {
+        let directory = std::env::temp_dir().join(format!("ck-request-retirement-{}", uuid::Uuid::new_v4()));
+        let mut config = ck_stream::Config::new(directory.clone());
+        config.pool_bytes = Some(48 * ck_stream::FRAME_BYTES);
+        config.max_event_bytes = 16 * ck_stream::FRAME_BYTES;
+        config.max_metadata_bytes = 4 * 1024 * 1024;
+        config.header_slots = 8;
+        config.workers = 1;
+        let mut store =
+            ck_stream::Store::with_clock(config, std::sync::Arc::new(ck_stream::ManualClock::default())).unwrap();
+        let mut owner = store.create().unwrap();
+        let identity = Identity {
+            request_id: LocalId::new("request").unwrap(),
+            stream_id: LocalId::new("stream").unwrap(),
+            attempt: 1,
+            direction: Direction::Request,
+        };
+        let mut ingress = Ingress::new(&mut owner, &store, identity, Operation::Generate, 100_000).unwrap();
+        let prefix = format!(
+            r#"{{"model":"m","messages":[{{"role":"user","content":"{}"#,
+            "a".repeat(8192)
+        );
+        ingress.advance(&mut owner, prefix.as_bytes()).unwrap();
+        assert!(matches!(
+            ingress.document.input().equals(Span { start: 2048, end: 2049 }, b"a"),
+            Err(Error::Position)
+        ));
+        assert!(u64::from(store.used_frames()) <= owner.committed().frame + 2);
+        for tail in [b"\\uD83D".as_slice(), b"\\uDE80", b"\xc3", b"\xa9", br#""}]}"#] {
+            ingress.advance(&mut owner, tail).unwrap();
+        }
+        let ready = ingress.finish(&mut owner, &ChatCapability).unwrap();
+        let output = Egress {
+            destination: "chat",
+            upstream_stream: false,
+        }
+        .encode(&ready, &mut owner)
+        .unwrap();
+        let mut bytes = Vec::new();
+        while bytes.len() < output.len() {
+            bytes.extend_from_slice(output.chunk(bytes.len()).unwrap());
+        }
+        let output: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(output["messages"][0]["content"], format!("{}🚀é", "a".repeat(8192)));
+        drop(ingress);
+        store.shutdown().unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
 }

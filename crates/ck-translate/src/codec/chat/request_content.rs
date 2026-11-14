@@ -17,6 +17,15 @@ pub(super) fn normalize_part(
         require_string(doc, doc.required(part, "text")?)?;
         return Ok(());
     }
+    let mut early = None;
+    for (carrier, field) in [("image_url", "url"), ("input_audio", "data"), ("file", "file_data")] {
+        if doc.string_is(kind, carrier)?
+            && let Some(native) = doc.member(part, carrier)?
+            && let Some(data) = doc.member(native, field)?
+        {
+            early = registry.get(doc, data)?;
+        }
+    }
     if doc.string_is(kind, "image_url")? || doc.string_is(kind, "input_audio")? || doc.string_is(kind, "file")? {
         super::provenance::preserve_request_members(
             doc,
@@ -57,10 +66,21 @@ pub(super) fn normalize_part(
     if doc.string_is(kind, "image_url")? {
         let image = doc.remove(part, "image_url")?.ok_or(Error::Schema)?;
         let url = doc.remove(image, "url")?.ok_or(Error::Schema)?;
-        require_string(doc, url)?;
+        if early.is_none_or(|media| matches!(media.encoding, Encoding::Utf8)) {
+            require_string(doc, url)?;
+        }
         doc.replace(kind, Value::Text("image"))?;
         let source = doc.set(part, "source", Value::Object)?;
-        if let Some((encoding, mime)) = data_uri(doc, owner, part, url)? {
+        if let Some(media) = early.filter(|media| !matches!(media.encoding, Encoding::Utf8)) {
+            doc.set(source, "kind", Value::Text("data"))?;
+            doc.rename(url, "ref")?;
+            doc.append(source, url)?;
+            if let Some(mime) = media.mime {
+                let target = doc.set(part, "mime", Value::Null)?;
+                doc.transplant(target, mime)?;
+                registry.update_mime(url, Some(target));
+            }
+        } else if let Some((encoding, mime)) = data_uri(doc, owner, part, url)? {
             let Value::String(text) = doc.node(url)?.value else {
                 return Err(Error::Schema);
             };
@@ -86,8 +106,13 @@ pub(super) fn normalize_part(
     if doc.string_is(kind, "input_audio")? {
         let audio = doc.remove(part, "input_audio")?.ok_or(Error::Schema)?;
         let data = doc.remove(audio, "data")?.ok_or(Error::Schema)?;
-        let Value::String(text) = doc.node(data)?.value else {
-            return Err(Error::Schema);
+        let text = if early.is_some() {
+            None
+        } else {
+            let Value::String(text) = doc.node(data)?.value else {
+                return Err(Error::Schema);
+            };
+            Some(text)
         };
         let format = doc.member(audio, "format")?;
         doc.replace(kind, Value::Text("audio"))?;
@@ -110,7 +135,11 @@ pub(super) fn normalize_part(
             doc.detach(audio, extra)?;
             doc.append(source, extra)?;
         }
-        registry.register(doc, data, text, Encoding::Base64, "audio", mime)?;
+        if let Some(text) = text {
+            registry.register(doc, data, text, Encoding::Base64, "audio", mime)?;
+        } else {
+            registry.update_mime(data, mime);
+        }
         return Ok(());
     }
     if doc.string_is(kind, "file")? {
@@ -125,17 +154,28 @@ pub(super) fn normalize_part(
             doc.set(source, "kind", Value::Text("file"))?;
             doc.append(source, id)?;
         } else if let Some(data) = doc.remove(file, "file_data")? {
-            let Value::String(text) = doc.node(data)?.value else {
-                return Err(Error::Schema);
+            let text = if early.is_some() {
+                None
+            } else {
+                let Value::String(text) = doc.node(data)?.value else {
+                    return Err(Error::Schema);
+                };
+                Some(text)
             };
             doc.set(source, "kind", Value::Text("data"))?;
             doc.rename(data, "ref")?;
             doc.append(source, data)?;
-            let (encoding, mime) = match data_uri(doc, owner, part, data)? {
-                Some((encoding, mime)) => (encoding, Some(mime)),
-                None => (Encoding::Base64, None),
-            };
-            registry.register(doc, data, text, encoding, "document", mime)?;
+            if let Some(text) = text {
+                let (encoding, mime) = match data_uri(doc, owner, part, data)? {
+                    Some((encoding, mime)) => (encoding, Some(mime)),
+                    None => (Encoding::Base64, None),
+                };
+                registry.register(doc, data, text, encoding, "document", mime)?;
+            } else if let Some(mime) = early.and_then(|media| media.mime) {
+                let target = doc.set(part, "mime", Value::Null)?;
+                doc.transplant(target, mime)?;
+                registry.update_mime(data, Some(target));
+            }
         } else {
             return Err(Error::Schema);
         }

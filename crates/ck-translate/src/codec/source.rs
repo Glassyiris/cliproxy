@@ -174,6 +174,18 @@ impl Source {
         Ok(())
     }
 
+    /// Retire consumed payload leases while earlier, still-live names keep their backing.
+    pub(crate) fn release_range(&mut self, span: Span) -> Result<()> {
+        self.check_live()?;
+        if span.start > span.end || span.end > self.len {
+            return Err(Error::Position);
+        }
+        self.segments
+            .retain(|segment| segment.start < span.start || segment.end > span.end);
+        self.base = self.segments.first().map_or(self.len, |segment| segment.start);
+        Ok(())
+    }
+
     pub(crate) fn retire_scratch(&mut self) -> Result<()> {
         if self
             .segments
@@ -229,8 +241,15 @@ impl Source {
     }
 
     fn chunk(&self, offset: u64, end: u64) -> Result<&[u8]> {
-        let index = self.segments.partition_point(|segment| segment.start <= offset) - 1;
+        let index = self
+            .segments
+            .partition_point(|segment| segment.start <= offset)
+            .checked_sub(1)
+            .ok_or(Error::Position)?;
         let segment = &self.segments[index];
+        if offset >= segment.end {
+            return Err(Error::Position);
+        }
         let bytes = match &segment.storage {
             Storage::Canonical { span, lease } => {
                 let position = advance(span.start, offset - segment.start)?;
