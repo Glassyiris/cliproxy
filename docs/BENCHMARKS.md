@@ -57,11 +57,11 @@ passwordless `sudo` for its own disposable groups. It refuses unavailable
 accounting instead of substituting host-wide charges or invented zeros.
 
 The gate retains three old/new rounds and compares matching per-workload metric
-medians, never an average across protocols. The 2026-11-14 owner ruling supersedes
-the provisional zero-regression codec/pipeline table in the specification:
-each codec/pipeline cost or latency may rise by at most 5%; throughput may fall
-by at most 5%. Comparable heap, RSS/PSS and charged-resource totals allow no
-regression. Backend-specific splits are diagnostics; mapped/tmpfs costs still
+medians, never an average across protocols. It applies the specification's
+§9.2 tolerance table, which records the 2026-11-14 owner ruling (option B):
+CPU, allocations and latency may rise by at most 5%; throughput may fall by at
+most 5%. Allocated bytes/event, heap, RSS/PSS and charged-resource totals allow
+no regression. Backend-specific splits are diagnostics; mapped/tmpfs costs still
 contribute to the charged totals. A zero old cost requires a zero new cost;
 throughput retains its higher-is-better rule. Encoded/decoded byte counts are
 diagnostics, not byte-exact goldens; decoded media and opaque signatures remain

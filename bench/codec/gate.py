@@ -21,7 +21,8 @@ BASELINE_REVISION = "b518060ea1e43ef4b266591986ca92321e6289b5"
 METRICS = {
     "cpu_ns_per_event": ("ns/event", "lower", 5),
     "allocations_per_event": ("allocations/event", "lower", 5),
-    "allocated_bytes_per_event": ("B/event", "lower", 5),
+    # INTERNAL-STREAM.md §9.2 tolerances: allocated bytes are memory, 0%.
+    "allocated_bytes_per_event": ("B/event", "lower", 0),
     "encoded_bytes_per_event": ("B/event", "report", None),
     "decoded_bytes_per_event": ("B/event", "report", None),
     "cpu_ns_per_completion": ("ns/completion", "lower", 5),

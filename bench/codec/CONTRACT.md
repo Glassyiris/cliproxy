@@ -105,13 +105,13 @@ Latency samples use monotonic clocks at output-batch availability and operation 
 
 Compare each workload and metric independently using the median of its three old values and median of its three new values. Never pool protocols, roles, modes, event kinds or percentiles.
 
-- CPU, allocations, allocated bytes and all latency percentiles: `new * 100 <= old * 105`.
+- CPU, allocations and all latency percentiles: `new * 100 <= old * 105`.
 - Throughput: `new * 100 >= old * 95`.
-- Comparable memory/resource metrics (`heap_peak`, `heap_retained`, `rss`, `pss`, `cgroup_charge`, `total_charged`): `new <= old`, without a noise allowance.
+- Memory/resource metrics (`allocated_bytes_per_event`, `heap_peak`, `heap_retained`, `rss`, `pss`, `cgroup_charge`, `total_charged`): `new <= old`, without a noise allowance.
 - An old zero requires a new zero for lower-is-better metrics; positive throughput from an old zero remains an improvement.
 - Encoded/decoded bytes, anonymous/shmem/mapped splits, metadata, tmpfs components, pool frames and page faults are report-only diagnostics. Backend components are not comparable aggregates: old zero mmap frames cannot gate a new shared pool. Their cost still contributes to the strictly gated process/cgroup totals. This reporting classification does not waive aggregate resource regressions or change G-storage. Semantic byte preservation is checked separately, not inferred from equal lengths.
 
-The exact boundary passes; a value beyond it fails. Decimal arithmetic avoids float rounding at 5%. The owner ruling in `/home/zakk/code/jev-router/p4/OWNER-RULINGS.md`, 2026-11-14 morning, supersedes the still-proposed 0% codec/pipeline table in INTERNAL-STREAM §9.2. It does not relax the independent G-storage rules.
+The exact boundary passes; a value beyond it fails. Decimal arithmetic avoids float rounding at 5%. These rules are the INTERNAL-STREAM §9.2 "Codec and pipeline tolerances" table, which records the owner's 2026-11-14 option-B ruling: at most 5% for codec/pipeline cost and latency, 0% for memory and storage, with allocated bytes/event in the memory class. They do not relax the independent G-storage rules.
 
 ## Read evidence
 
@@ -143,4 +143,4 @@ CODEC_TEST_ARTIFACTS="$ARTIFACTS/selftest" \
 shellcheck bench/codec-gate.sh bench/codec/build-baseline.sh
 ```
 
-The controls exercise the actual shell entrypoint and complete required matrix: exact-boundary pass with outliers, CPU/throughput/memory regression, missing output, absent old executable, identical executable content and identical source identity. Focused checks cover stream-kind selection, leftover-cgroup diagnostics, each metric's direction, strict memory/storage limits, zero-old values, invalid numbers, missing metrics, wrong units, wrong manifest/round and duplicate/unknown workload IDs. `fake_harness.py` is a synthetic control only, not a production or baseline harness.
+The controls exercise the actual shell entrypoint and complete required matrix: exact-boundary pass with outliers, CPU/throughput/memory regression, missing output, absent old executable, identical executable content and identical source identity. Focused checks cover stream-kind selection, leftover-cgroup diagnostics, each metric's direction, 0% memory/storage limits including allocated bytes, zero-old values, invalid numbers, missing metrics, wrong units, wrong manifest/round and duplicate/unknown workload IDs. `fake_harness.py` is a synthetic control only, not a production or baseline harness.

@@ -34,6 +34,13 @@ class Thresholds(unittest.TestCase):
                 self.assertEqual(gate.acceptable(Decimal(0), Decimal("0.000001"), direction, tolerance),
                                  direction == "higher")
 
+    def test_memory_and_storage_metrics_allow_no_regression(self):
+        # INTERNAL-STREAM.md §9.2: allocated bytes/event, heap, RSS/PSS and charges allow 0%.
+        for name in ("allocated_bytes_per_event", "heap_peak", "heap_retained", "rss", "pss",
+                     "cgroup_charge", "total_charged"):
+            self.assertEqual(gate.METRICS[name][1:], ("lower", 0), name)
+        self.assertFalse(gate.acceptable(Decimal(100), Decimal("104.9"), "lower", 0))
+
     def test_sub_context_precision_regression_fails(self):
         self.assertFalse(gate.acceptable(Decimal(100),
                          Decimal("105.00000000000000000000000000001"), "lower", 5))
