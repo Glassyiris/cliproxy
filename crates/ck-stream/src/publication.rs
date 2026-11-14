@@ -187,6 +187,14 @@ impl Stream {
     fn pin(&self, state: &State, record: Record) -> Result<Pinned, Terminal> {
         let first = (record.start.frame - state.base_frame) as usize;
         let last = (last_frame(record) - state.base_frame) as usize;
+        if first == last {
+            let index = state.frames[first].pool.ok_or(Terminal::Gone)?;
+            if self.pool.saturated(index) {
+                return Err(Terminal::StorageExhausted);
+            }
+            self.pool.retain(index);
+            return Ok(Pinned::One(index));
+        }
         let frames = (first..=last).map(|index| state.frames[index].pool);
         for frame in frames.clone() {
             match frame {
@@ -196,13 +204,9 @@ impl Stream {
             }
         }
         // The stream's own references keep every frame allocated while these are added.
-        let mut frames = frames.flatten();
+        let frames = frames.flatten();
         frames.clone().for_each(|index| self.pool.retain(index));
-        Ok(if first == last {
-            Pinned::One(frames.next().unwrap())
-        } else {
-            Pinned::Many(frames.collect())
-        })
+        Ok(Pinned::Many(frames.collect()))
     }
 
     /// Give up the stream's reference to a frame; leases keep it pinned until they end.

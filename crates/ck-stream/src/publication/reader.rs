@@ -53,10 +53,11 @@ impl Reader {
             return Poll::Ready(None);
         }
         let stream = &self.stream;
-        stream.retention.reading(stream, |state| {
+        // Decide under the lock; build the lease after it, so the critical section moves
+        // only a record and its frames.
+        let step = stream.retention.reading(stream, |state| {
             if stream.invalidated.load(Ordering::Acquire) || self.next < state.base_sequence {
-                self.terminal_seen = true;
-                return (Poll::Ready(Some(Read::Terminal(Terminal::Gone))), false);
+                return (Step::Terminal(Terminal::Gone), false);
             }
             // Cache only a prefix acquired from the mapped publication header under this lock.
             if self.next >= self.available
@@ -72,30 +73,32 @@ impl Reader {
                 .and_then(|run| run.record(stream.id, self.next))
                 && record.end.byte(stream.id).is_ok_and(|end| end <= self.committed)
             {
-                let pinned = match stream.pin(state, record) {
-                    Ok(pinned) => pinned,
-                    Err(terminal) => {
-                        self.terminal_seen = true;
-                        return (Poll::Ready(Some(Read::Terminal(terminal))), false);
-                    }
+                return match stream.pin(state, record) {
+                    Ok(pinned) => (Step::Record(record, pinned), true),
+                    Err(terminal) => (Step::Terminal(terminal), false),
                 };
+            }
+            match state.terminal {
+                Some(terminal) => (Step::Terminal(terminal), false),
+                None => (Step::Pending, true),
+            }
+        });
+        match step {
+            Step::Record(record, pinned) => {
                 self.next += 1;
-                return (
-                    Poll::Ready(Some(Read::Record(Lease {
-                        stream: stream.clone(),
-                        record,
-                        pinned,
-                        acknowledged: false,
-                    }))),
-                    true,
-                );
+                Poll::Ready(Some(Read::Record(Lease {
+                    stream: stream.clone(),
+                    record,
+                    pinned,
+                    acknowledged: false,
+                })))
             }
-            if let Some(terminal) = state.terminal {
+            Step::Terminal(terminal) => {
                 self.terminal_seen = true;
-                return (Poll::Ready(Some(Read::Terminal(terminal))), false);
+                Poll::Ready(Some(Read::Terminal(terminal)))
             }
-            (Poll::Pending, true)
-        })
+            Step::Pending => Poll::Pending,
+        }
     }
 
     pub async fn next(&mut self) -> Option<Read> {
@@ -131,6 +134,13 @@ impl Drop for Reader {
             ((), true)
         });
     }
+}
+
+/// What one locked read step found.
+enum Step {
+    Record(Record, Pinned),
+    Terminal(Terminal),
+    Pending,
 }
 
 /// Pool frames a lease references, in record order. Most records fit one frame.
@@ -180,12 +190,19 @@ impl Lease {
     }
 
     pub fn visit(&self, mut visitor: impl FnMut(&[u8])) -> Result<(), Error> {
-        let mut byte = self.record.start.byte(self.stream.id)?;
-        let end = self.record.end.byte(self.stream.id)?;
-        while byte < end {
-            let chunk = self.chunk(Position::at(self.stream.id, byte))?;
-            visitor(chunk);
-            byte += chunk.len() as u64;
+        // The lease's record and frames were validated when it was pinned, so walk them
+        // directly; invalidation still ends the walk before each chunk, as `chunk` would.
+        let mut offset = self.record.start.offset as usize;
+        let mut remaining = self.record.len() as usize;
+        for &frame in self.pinned.frames() {
+            if self.stream.invalidated.load(Ordering::Acquire) {
+                return Err(Error::Gone);
+            }
+            let len = remaining.min(FRAME_BYTES - offset);
+            // SAFETY: as in `chunk`; the span lies within this pinned frame and the record.
+            visitor(unsafe { self.stream.pool.slice(frame, offset, len) });
+            remaining -= len;
+            offset = 0;
         }
         Ok(())
     }
