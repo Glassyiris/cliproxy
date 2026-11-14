@@ -8,7 +8,7 @@ nothing reaches OpenAI.
   merge, passthrough, prewarm, SSE payload extraction, error payloads, request-fault
   exposure, completion output restoration, pending tool calls, tool-call repair against
   the shared caches, close-reason truncation). Recorded from `6fecc6e`. Replayed by
-  `src/websocket_requests_tests.rs`.
+  `src/realtime/websocket_requests_tests.rs`.
 - `ws_e2e.json`: forty-four scenarios through Go's real `ResponsesWebsocket` handler, auth
   manager, built-in translators and `CodexAutoExecutor`, against a scripted upstream that
   speaks both WebSocket and HTTP SSE. It records the frames and close codes the client
