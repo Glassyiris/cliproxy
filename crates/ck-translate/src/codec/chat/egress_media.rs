@@ -57,20 +57,6 @@ fn source(doc: &Document, value: usize, field: &str, scalar: bool, document_kind
     })
 }
 
-pub(super) fn id(doc: &Document, x: usize) -> Result<LocalId> {
-    let mut chars = doc.chars(doc.required(x, "media_id")?)?;
-    let mut bytes = [0; 64];
-    let mut len = 0;
-    while let Some(c) = chars.next_scalar()? {
-        if !c.is_ascii() || len == bytes.len() {
-            return Err(Error::Schema);
-        }
-        bytes[len] = c as u8;
-        len += 1;
-    }
-    LocalId::new(std::str::from_utf8(&bytes[..len]).map_err(|_| Error::Schema)?)
-}
-
 /// Maps the attributes field name onto the native message member it fills.
 fn media_field(doc: &Document, name: usize) -> Result<&'static str> {
     Ok(if doc.string_is(name, "audio")? {
@@ -149,7 +135,7 @@ impl Projection {
         self.reachable
     }
     pub(super) fn start(owner: &mut Writer, mut doc: Document, x: usize) -> Result<Self> {
-        let id = id(&doc, x)?;
+        let id = media::media_id(&doc, x)?;
         let choice = doc.unsigned(doc.required(x, "choice_index")?)?;
         let Some(attributes) = doc.member(doc.root(), "attributes")? else {
             // Retain only the lifetime counters after deletion of the entire carrier.

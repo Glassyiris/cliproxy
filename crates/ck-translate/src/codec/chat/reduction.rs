@@ -99,7 +99,7 @@ impl Reduction {
             }
             Kind::Chunk => {
                 if doc.member(x, "media_id")?.is_some() {
-                    let id = media_events::id(&doc, x)?;
+                    let id = crate::codec::media::media_id(&doc, x)?;
                     if self.media.iter().any(|media| media.id == id && !media.reachable()) {
                         return Ok((None, false));
                     }
@@ -217,7 +217,7 @@ impl Reduction {
     fn project_media(&mut self, owner: &mut Writer, kind: Kind, doc: Document, x: usize) -> Result<Option<Document>> {
         Ok(match kind {
             Kind::Opaque => {
-                let id = media_events::id(&doc, x)?;
+                let id = crate::codec::media::media_id(&doc, x)?;
                 let native = self
                     .media
                     .iter_mut()
@@ -240,7 +240,7 @@ impl Reduction {
                     .transpose()?
             }
             _ => {
-                let id = media_events::id(&doc, x)?;
+                let id = crate::codec::media::media_id(&doc, x)?;
                 let position = self
                     .media
                     .iter()

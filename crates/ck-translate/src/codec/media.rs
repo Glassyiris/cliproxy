@@ -275,6 +275,21 @@ fn lineage(doc: &Document, node: usize) -> Result<[Option<(usize, u64)>; 128]> {
     Ok(result)
 }
 
+/// Reads the media ID of a canonical record's `x_ck` correlation.
+pub(crate) fn media_id(doc: &Document, x: usize) -> Result<LocalId> {
+    let mut chars = doc.chars(doc.required(x, "media_id")?)?;
+    let mut bytes = [0; 64];
+    let mut len = 0;
+    while let Some(c) = chars.next_scalar()? {
+        if !c.is_ascii() || len == bytes.len() {
+            return Err(Error::Schema);
+        }
+        bytes[len] = c as u8;
+        len += 1;
+    }
+    LocalId::new(std::str::from_utf8(&bytes[..len]).map_err(|_| Error::Schema)?)
+}
+
 pub fn local_id(prefix: u8, mut index: u64) -> Result<LocalId> {
     let mut bytes = [0u8; 21];
     let mut start = bytes.len();
