@@ -77,6 +77,53 @@ impl Document {
         Ok(doc)
     }
 
+    pub(crate) fn streaming(owner: &mut Writer) -> Result<Self> {
+        let mut doc = Self {
+            sources: Vec::new(),
+            nodes: Vec::new(),
+            metadata: owner.reserve_metadata(0)?,
+            root: 0,
+        };
+        doc.reserve(1, 1)?;
+        doc.sources.push(Source::new(owner)?);
+        doc.add(None, Value::Object)?;
+        Ok(doc)
+    }
+
+    pub(crate) fn input(&self) -> &Source {
+        &self.sources[0]
+    }
+
+    pub(crate) fn push_input(&mut self, owner: &mut Writer, bytes: &[u8]) -> Result<()> {
+        self.sources[0].push_bytes(owner, bytes)?;
+        Ok(())
+    }
+
+    /// Import only a completed subtree; the input lease remains owned by this document.
+    pub(crate) fn import_completed(&mut self, scanner: &json::Scanner, index: usize) -> Result<usize> {
+        let node = scanner.completed_node(self.input(), index)?.ok_or(Error::Truncated)?;
+        let text = Text {
+            source: 0,
+            span: node.span,
+        };
+        let value = match node.kind {
+            json::Kind::Object => Value::Object,
+            json::Kind::Array => Value::Array,
+            json::Kind::String => Value::String(text),
+            json::Kind::Number => Value::Number(text),
+            json::Kind::Bool => Value::Bool(self.input().equals(node.span, b"true")?),
+            json::Kind::Null => Value::Null,
+        };
+        let target = self.add(node.key.map(|span| Name::Mapped(Text { source: 0, span })), value)?;
+        let mut child = node.first;
+        while let Some(index) = child {
+            child = scanner.pending_node(self.input(), index)?.next;
+            let imported = self.import_completed(scanner, index)?;
+            self.append(target, imported)?;
+        }
+        Ok(target)
+    }
+
     fn reserve(&mut self, nodes: usize, sources: usize) -> Result<()> {
         let n = (self.nodes.len() + nodes)
             .max(self.nodes.capacity())
