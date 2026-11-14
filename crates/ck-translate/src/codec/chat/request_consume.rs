@@ -30,9 +30,24 @@ impl Alias {
         }
     }
 
-    /// Classifies a wire key; `key_is` reads a retained key from the document, not the input.
-    fn of_key(scanner: &json::Scanner, doc: &Document, key: codec::source::Span) -> Result<Option<Self>> {
-        for alias in Self::ALL {
+    /// The order in which the long-string streaming exclusion compares wire keys.
+    const STRING_ORDER: [Self; 5] = [
+        Self::ReasoningEffort,
+        Self::Reasoning,
+        Self::Functions,
+        Self::FunctionCall,
+        Self::XCk,
+    ];
+
+    /// Classifies a wire key against `candidates` in order; `key_is` reads a retained key from
+    /// the document, not the input.
+    fn of_key(
+        scanner: &json::Scanner,
+        doc: &Document,
+        key: codec::source::Span,
+        candidates: [Self; 5],
+    ) -> Result<Option<Self>> {
+        for alias in candidates {
             if scanner.key_is(doc, key, alias.name())? {
                 return Ok(Some(alias));
             }
@@ -168,7 +183,7 @@ impl Ingress {
             || (wire.kind == json::Kind::String
                 && wire.span.end == 0
                 && wire.validated_end - wire.span.start > 1024
-                && Alias::of_key(scanner, &self.document, key)?.is_none())
+                && Alias::of_key(scanner, &self.document, key, Alias::STRING_ORDER)?.is_none())
         {
             let name = self
                 .string
@@ -182,7 +197,7 @@ impl Ingress {
                 self.stream_string(owner, index, self.document.root(), &path, true)?.1,
             ));
         }
-        if Alias::of_key(scanner, &self.document, key)?.is_none()
+        if Alias::of_key(scanner, &self.document, key, Alias::ALL)?.is_none()
             && (wire.span.end == 0 || self.trees.get(index).is_some_and(Option::is_some))
         {
             let name = if let Some(state) = self.trees.get(index).and_then(|s| *s) {
