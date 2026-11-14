@@ -174,6 +174,9 @@ pub(crate) struct Inner {
     retention: Arc<Retention>,
     closed: AtomicBool,
     maintenance: parking_lot::Mutex<Maintenance>,
+    /// Serializes `Store::stats`, which takes `Cache::orphans` out while it walks them, so
+    /// that no scrape misses the retired streams another scrape holds.
+    scrape: parking_lot::Mutex<()>,
     /// Runs once between planning victims and invalidating them.
     #[cfg(test)]
     evict_hook: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -428,6 +431,7 @@ impl Store {
             }),
             closed: AtomicBool::new(false),
             maintenance: parking_lot::Mutex::new(Maintenance::default()),
+            scrape: parking_lot::Mutex::new(()),
             #[cfg(test)]
             evict_hook: parking_lot::Mutex::new(None),
             #[cfg(test)]

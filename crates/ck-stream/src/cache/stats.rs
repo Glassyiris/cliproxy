@@ -66,10 +66,12 @@ impl Store {
     /// Read the flow metrics. The cache lock is held only to copy the cached streams' handles
     /// (at most `header_slots`, plus streams whose writers are ending them with `Gone`) and to
     /// swap out the retired-stream list. Each stream's state is then locked on its own, so
-    /// admission and attachment never wait behind a busy stream. Each stream costs one walk of
-    /// its frame table: call this from operator scrapes, never per request.
+    /// admission and attachment never wait behind a busy stream; concurrent scrapes wait for
+    /// each other. Each stream costs one walk of its frame table: call this from operator
+    /// scrapes, never per request.
     pub fn stats(&self) -> StoreStats {
         let inner = &self.inner;
+        let _scrape = inner.scrape.lock();
         let now = inner.retention.now();
         let mut cache = inner.cache.lock();
         let cached: Vec<_> = cache.streams.values().map(|entry| entry.stream.clone()).collect();

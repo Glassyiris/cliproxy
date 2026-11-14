@@ -253,3 +253,38 @@ fn stats_waits_for_a_stream_without_holding_the_cache_lock() {
     assert_eq!(store.stats().leased_frames, 1);
     drop(lease);
 }
+
+#[test]
+fn overlapping_scrapes_all_see_leases_on_forgotten_streams() {
+    const STREAMS: u64 = 32;
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::new(dir.path().join("pool"));
+    config.pool_bytes = Some(2 * STREAMS as usize * FRAME_BYTES);
+    config.max_event_bytes = FRAME_BYTES;
+    config.header_slots = STREAMS as u32;
+    config.workers = 1;
+    let store = Store::open(config).unwrap();
+    // One single-frame lease per stream, held after its writer ends it `Gone`.
+    let leases: Vec<_> = (0..STREAMS)
+        .map(|_| {
+            let mut writer = store.create().unwrap();
+            writer.append(b"leased").unwrap();
+            let Poll::Ready(Some(Read::Record(lease))) = store.reader(writer.id(), 0).unwrap().try_next() else {
+                panic!("expected a record");
+            };
+            writer.finish(Terminal::Gone);
+            lease
+        })
+        .collect();
+    assert_eq!(store.stats().cached_streams, 0);
+    // No lease changes hands while the scrapes run, so every snapshot must count them all.
+    let wrong: usize = std::thread::scope(|scope| {
+        let scrapes: Vec<_> = (0..8)
+            .map(|_| scope.spawn(|| (0..500).filter(|_| store.stats().leased_frames != STREAMS).count()))
+            .collect();
+        scrapes.into_iter().map(|scrape| scrape.join().unwrap()).sum()
+    });
+    assert_eq!(wrong, 0, "{wrong} of 4000 overlapping snapshots missed retired leases");
+    drop(leases);
+    assert_eq!(store.stats().leased_frames, 0);
+}
