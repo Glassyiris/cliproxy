@@ -210,3 +210,33 @@ fn cancellation_publishes_the_cancelled_error_code() {
         assert_eq!(String::from_utf8(output).unwrap(), expected);
     }
 }
+
+const TOOL: &str = concat!(
+    "data: {\"id\":\"r\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+    "data: [DONE]\n\n",
+);
+
+#[test]
+fn done_requires_every_started_tool_ended_in_both_modes() {
+    for mode in [BodyMode::Streaming, BodyMode::Buffered] {
+        transformed(TOOL, mode, |_| {}, |_, _| 1).1.unwrap();
+        for (case, tool_start, tool_end) in [("missing end", 1, 0), ("repeated start", 2, 1), ("repeated end", 1, 2)] {
+            let (output, result) = transformed(
+                TOOL,
+                mode,
+                |_| {},
+                |kind, _| match kind {
+                    Kind::ToolStart => tool_start,
+                    Kind::ToolEnd => tool_end,
+                    _ => 1,
+                },
+            );
+            assert!(result.is_err(), "{mode:?} {case}");
+            assert!(
+                !String::from_utf8(output).unwrap().contains("[DONE]"),
+                "{mode:?} {case}"
+            );
+        }
+    }
+}

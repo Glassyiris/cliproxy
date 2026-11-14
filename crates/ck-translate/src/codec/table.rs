@@ -28,6 +28,10 @@ impl<T> Table<T> {
         self.values.push(value);
         Ok(index)
     }
+    /// Removes one value in O(1), moving the last value into its place; capacity stays charged.
+    pub fn swap_remove(&mut self, index: usize) -> T {
+        self.values.swap_remove(index)
+    }
 }
 impl<T> std::ops::Deref for Table<T> {
     type Target = [T];

@@ -26,6 +26,8 @@ pub struct Egress {
     reduction: Reduction,
     /// Streamed choice indexes and whether each delivered its finish.
     finishes: Table<(u64, bool)>,
+    /// Choice and tool indexes of every started tool call without its end.
+    open_tools: Table<(u64, u64)>,
     include_usage: bool,
     diagnostic: fn(Diagnostic),
 }
@@ -50,6 +52,7 @@ impl Egress {
             failed: false,
             reduction: Reduction::new(owner)?,
             finishes: Table::new(owner)?,
+            open_tools: Table::new(owner)?,
             include_usage,
             diagnostic,
         })
@@ -80,6 +83,9 @@ impl Egress {
         self.sequence = self.sequence.checked_add(1).ok_or(Error::Limit)?;
         if self.reduction.document.is_none() && !matches!(kind, Kind::ResponseStart | Kind::Error | Kind::Cancelled) {
             return Err(Error::Schema);
+        }
+        if matches!(kind, Kind::ToolStart | Kind::ToolEnd) {
+            track_tool(&mut self.open_tools, kind, &doc, x)?;
         }
         match kind {
             Kind::ResponseStart
@@ -218,7 +224,7 @@ impl Egress {
         if self.reduction.has_open_media() {
             return Err(Error::Truncated);
         }
-        if self.finishes.iter().any(|(_, finished)| !finished) {
+        if self.finishes.iter().any(|(_, finished)| !finished) || !self.open_tools.is_empty() {
             return Err(Error::Truncated);
         }
         self.terminal = true;
@@ -369,6 +375,26 @@ fn chunk_deliverable(doc: &Document) -> Result<bool> {
         return Ok(doc.node(fields)?.first.is_some());
     }
     Ok(false)
+}
+
+/// Opens a tool call on its start and closes it on its end; a duplicate start or an end
+/// without a start is a lifecycle violation.
+fn track_tool(open: &mut Table<(u64, u64)>, kind: Kind, doc: &Document, x: usize) -> Result<()> {
+    let key = (
+        doc.unsigned(doc.required(x, "choice_index")?)?,
+        doc.unsigned(doc.required(x, "tool_index")?)?,
+    );
+    let position = open.iter().position(|tool| *tool == key);
+    match (kind, position) {
+        (Kind::ToolStart, None) => {
+            open.push(key)?;
+        }
+        (Kind::ToolEnd, Some(position)) => {
+            open.swap_remove(position);
+        }
+        _ => return Err(Error::Schema),
+    }
+    Ok(())
 }
 
 /// Records each choice of a streamed projection and whether it carries a finish, so that Done
