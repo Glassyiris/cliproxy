@@ -64,22 +64,9 @@ impl Buffered {
         let Some((value, field, scalar, index)) = media_target(doc, data, &scanned)? else {
             return Ok(());
         };
-        let (encoding, mime) = if scalar {
-            (Encoding::Utf8, None)
-        } else if field == "audio" {
-            (Encoding::Base64, None)
-        } else {
-            match media::data_uri_prefix(
-                owner,
-                doc.input(),
-                Span {
-                    start: scanned.span.start + 1,
-                    end: scanned.validated_end,
-                },
-            )? {
-                media::DataUriPrefix::Incomplete | media::DataUriPrefix::Plain => return Ok(()),
-                media::DataUriPrefix::Encoded { encoding, mime } => (encoding, Some(mime)),
-            }
+        let file = !scalar && field == "content" && doc.member(value, "file")?.is_some();
+        let Some((encoding, mime)) = payload_encoding(owner, doc, &scanned, (field, scalar, file))? else {
+            return Ok(());
         };
         let mime = mime
             .map(|lease| self.input.document.import_json(owner, lease))
@@ -97,6 +84,8 @@ impl Buffered {
                 "text"
             } else if field == "audio" {
                 "audio"
+            } else if file {
+                "document"
             } else {
                 "image"
             })?;
@@ -114,6 +103,8 @@ impl Buffered {
                 e.bytes(b",\"scalar\":true,\"value\":null}")
             } else if field == "audio" {
                 e.bytes(b",\"value\":{\"data\":null}}")
+            } else if file {
+                e.bytes(b",\"value\":{\"file\":{\"file_data\":null}}}")
             } else {
                 e.bytes(b",\"value\":{\"image_url\":{\"url\":null}}}")
             }
@@ -179,8 +170,35 @@ impl Buffered {
     }
 }
 
+/// Selects how a pending payload string decodes, with its data URI media type. None waits for
+/// more of a data URI prefix, or leaves an image URL that is not a data URI unpublished.
+fn payload_encoding(
+    owner: &mut Writer,
+    doc: &Document,
+    scanned: &json::Node,
+    (field, scalar, file): (&'static str, bool, bool),
+) -> Result<Option<(Encoding, Option<ck_stream::ScratchLease>)>> {
+    if scalar {
+        return Ok(Some((Encoding::Utf8, None)));
+    }
+    if field == "audio" {
+        return Ok(Some((Encoding::Base64, None)));
+    }
+    let span = Span {
+        start: scanned.span.start + 1,
+        end: scanned.validated_end,
+    };
+    Ok(match media::data_uri_prefix(owner, doc.input(), span)? {
+        media::DataUriPrefix::Incomplete => None,
+        // Plain base64 is valid file data; an image URL must be a data URI.
+        media::DataUriPrefix::Plain if file => Some((Encoding::Base64, None)),
+        media::DataUriPrefix::Plain => None,
+        media::DataUriPrefix::Encoded { encoding, mime } => Some((encoding, Some(mime))),
+    })
+}
+
 /// Finds the choice member that the pending string `data` publishes as media: a message text
-/// field over 1024 bytes, audio data or an image URL. Returns the published value, its field,
+/// field over 1024 bytes, audio data, an image URL or file data. Returns the published value, its field,
 /// whether it is a scalar text field, and the choice index.
 fn media_target(doc: &Document, data: usize, scanned: &json::Node) -> Result<Option<(usize, &'static str, bool, u64)>> {
     let Some(parent) = doc.node(data)?.parent else {
@@ -215,6 +233,18 @@ fn media_target(doc: &Document, data: usize, scanned: &json::Node) -> Result<Opt
             {
                 target = Some((part, message, "content", false));
             }
+        } else if doc.name_is(parent_name, "file")?
+            && doc.name_is(name, "file_data")?
+            && let Some(part) = doc.node(parent)?.parent
+            && let Some(array) = doc.node(part)?.parent
+            && matches!(doc.node(array)?.value, Value::Array)
+            && let Some(array_name) = doc.node(array)?.name
+            && doc.name_is(array_name, "content")?
+            && let Some(kind) = doc.member(part, "type")?
+            && doc.string_is(kind, "file")?
+            && let Some(message) = doc.node(array)?.parent
+        {
+            target = Some((part, message, "content", false));
         }
     }
     let Some((value, message, field, scalar)) = target else {

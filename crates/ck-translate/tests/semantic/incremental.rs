@@ -258,8 +258,6 @@ fn unfinished_nested_strings_remain_logical_and_arguments_are_structured() {
 
 #[test]
 fn buffered_response_collects_unfinished_media_without_premature_success() {
-    use codec::{BodyMode, ResponseEgress, ResponseIngress};
-    use std::task::Poll;
     for (opening, payload, closing, pointer, expected) in [
         (
             r#"{"audio":{"data":""#,
@@ -283,68 +281,7 @@ fn buffered_response_collects_unfinished_media_without_premature_success() {
             "a".repeat(8192),
         ),
     ] {
-        let mut mapped = Mapped::new();
-        let mut ingress = codec::chat::response::Ingress::new(
-            &mut mapped.writer,
-            &mapped.store,
-            identity(Direction::Response),
-            Operation::Generate,
-            BodyMode::Buffered,
-            100_000,
-        )
-        .unwrap();
-        let mut reader = mapped.store.reader(mapped.writer.id(), 0).unwrap();
-        let mut egress = codec::chat::egress::Egress::new(
-            &mut mapped.writer,
-            identity(Direction::Response),
-            Operation::Generate,
-            BodyMode::Buffered,
-            true,
-            |_| panic!("lost metadata"),
-        )
-        .unwrap();
-        let prefix = format!(r#"{{"id":"r","model":"m","choices":[{{"index":0,"message":{opening}{payload}"#);
-        let begin = std::time::Instant::now();
-        ingress.advance(&mut mapped.writer, prefix.as_bytes()).unwrap();
-        assert!(begin.elapsed() < std::time::Duration::from_millis(100));
-        assert!(
-            canonical_values(&mapped)
-                .iter()
-                .any(|e| e.get("bytes").is_some_and(serde_json::Value::is_string))
-        );
-        let mut output = Vec::new();
-        while let Poll::Ready(Some(ck_stream::Read::Record(lease))) = reader.try_next() {
-            egress
-                .advance(&mut mapped.writer, lease, |lease| {
-                    output.extend(bytes(&lease));
-                    Ok(())
-                })
-                .unwrap();
-        }
-        assert!(output.is_empty());
-        ingress
-            .advance(
-                &mut mapped.writer,
-                format!(r#"{closing},"finish_reason":"stop"}}]}}"#).as_bytes(),
-            )
-            .unwrap();
-        assert!(
-            !String::from_utf8(mapped.output(&mapped.writer))
-                .unwrap()
-                .contains("event: x_ck.done\n")
-        );
-        ingress.finish(&mut mapped.writer).unwrap();
-        while let Poll::Ready(Some(ck_stream::Read::Record(lease))) = reader.try_next() {
-            egress
-                .advance(&mut mapped.writer, lease, |lease| {
-                    output.extend(bytes(&lease));
-                    Ok(())
-                })
-                .unwrap();
-        }
-        egress.finish().unwrap();
-        let output: serde_json::Value = serde_json::from_slice(&output).unwrap();
-        assert_eq!(output.pointer(pointer).unwrap(), &serde_json::json!(expected));
+        let (output, _) = buffered_unfinished_media(opening, &payload, closing, pointer, &expected);
         if pointer.ends_with("/data") {
             assert_eq!(output["choices"][0]["message"]["audio"]["transcript"], "spoken");
             assert_eq!(output["choices"][0]["message"]["audio"]["unknown"], 7);
@@ -355,6 +292,105 @@ fn buffered_response_collects_unfinished_media_without_premature_success() {
                 "literal"
             );
         }
+    }
+}
+
+#[test]
+fn buffered_response_collects_unfinished_file_data() {
+    let payload = "AAEC".repeat(2048);
+    for (opening, expected) in [
+        (
+            r#"{"content":[{"type":"file","file":{"file_data":"data:application/pdf;base64,"#,
+            format!("data:application/pdf;base64,{payload}"),
+        ),
+        (r#"{"content":[{"type":"file","file":{"file_data":""#, payload.clone()),
+    ] {
+        let pointer = "/choices/0/message/content/0/file/file_data";
+        let closing = r#"","filename":"a.pdf"},"vendor":1}]}"#;
+        let (output, prefix) = buffered_unfinished_media(opening, &payload, closing, pointer, &expected);
+        assert!(
+            prefix.iter().any(|e| e["kind"] == "document"
+                && e["attributes"]["value"] == serde_json::json!({"file":{"file_data":null}}))
+        );
+        let part = &output["choices"][0]["message"]["content"][0];
+        assert_eq!(part["file"]["filename"], "a.pdf");
+        assert_eq!(part["vendor"], 1);
+    }
+}
+
+/// Feeds a buffered response whose message stops inside a media payload, checks that the
+/// payload's data is published before the body ends and that nothing succeeds early, then
+/// completes the body. Returns the buffered output and the canonical records of the prefix.
+fn buffered_unfinished_media(
+    opening: &str,
+    payload: &str,
+    closing: &str,
+    pointer: &str,
+    expected: &str,
+) -> (serde_json::Value, Vec<serde_json::Value>) {
+    use codec::{BodyMode, ResponseIngress};
+    let mut mapped = Mapped::new();
+    let mut ingress = codec::chat::response::Ingress::new(
+        &mut mapped.writer,
+        &mapped.store,
+        identity(Direction::Response),
+        Operation::Generate,
+        BodyMode::Buffered,
+        100_000,
+    )
+    .unwrap();
+    let mut reader = mapped.store.reader(mapped.writer.id(), 0).unwrap();
+    let mut egress = codec::chat::egress::Egress::new(
+        &mut mapped.writer,
+        identity(Direction::Response),
+        Operation::Generate,
+        BodyMode::Buffered,
+        true,
+        |_| panic!("lost metadata"),
+    )
+    .unwrap();
+    let prefix = format!(r#"{{"id":"r","model":"m","choices":[{{"index":0,"message":{opening}{payload}"#);
+    let begin = std::time::Instant::now();
+    ingress.advance(&mut mapped.writer, prefix.as_bytes()).unwrap();
+    assert!(begin.elapsed() < std::time::Duration::from_millis(100));
+    let published = canonical_values(&mapped);
+    assert!(
+        published
+            .iter()
+            .any(|e| e.get("bytes").is_some_and(serde_json::Value::is_string))
+    );
+    let mut output = Vec::new();
+    drain(&mut mapped, &mut reader, &mut egress, &mut output);
+    assert!(output.is_empty());
+    let suffix = format!(r#"{closing},"finish_reason":"stop"}}]}}"#);
+    ingress.advance(&mut mapped.writer, suffix.as_bytes()).unwrap();
+    assert!(
+        !String::from_utf8(mapped.output(&mapped.writer))
+            .unwrap()
+            .contains("event: x_ck.done\n")
+    );
+    ingress.finish(&mut mapped.writer).unwrap();
+    drain(&mut mapped, &mut reader, &mut egress, &mut output);
+    codec::ResponseEgress::finish(&mut egress).unwrap();
+    let output: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(output.pointer(pointer).unwrap(), &serde_json::json!(expected));
+    (output, published)
+}
+
+fn drain(
+    mapped: &mut Mapped,
+    reader: &mut ck_stream::Reader,
+    egress: &mut codec::chat::egress::Egress,
+    output: &mut Vec<u8>,
+) {
+    use codec::ResponseEgress;
+    while let std::task::Poll::Ready(Some(ck_stream::Read::Record(lease))) = reader.try_next() {
+        egress
+            .advance(&mut mapped.writer, lease, |lease| {
+                output.extend(bytes(&lease));
+                Ok(())
+            })
+            .unwrap();
     }
 }
 

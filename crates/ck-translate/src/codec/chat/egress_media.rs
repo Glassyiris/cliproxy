@@ -57,6 +57,18 @@ fn source(doc: &Document, value: usize, field: &str, scalar: bool, document_kind
     })
 }
 
+/// The member of a part value that holds its payload: audio `data`, file `file_data` or image
+/// `url`.
+fn payload_member(doc: &Document, value: usize, field: &str) -> Result<usize> {
+    if field == "audio" {
+        doc.required(value, "data")
+    } else if let Some(file) = doc.member(value, "file")? {
+        doc.required(file, "file_data")
+    } else {
+        doc.required(doc.required(value, "image_url")?, "url")
+    }
+}
+
 /// Maps the attributes field name onto the native message member it fills.
 fn media_field(doc: &Document, name: usize) -> Result<&'static str> {
     Ok(if doc.string_is(name, "audio")? {
@@ -290,18 +302,10 @@ impl Projection {
             return Ok(Some((incoming, value, self.field, self.choice)));
         }
         let doc = self.document.as_mut().ok_or(Error::Closed)?;
-        let old_data = if self.field == "audio" {
-            doc.required(self.value, "data")?
-        } else {
-            doc.required(doc.required(self.value, "image_url")?, "url")?
-        };
+        let old_data = payload_member(doc, self.value, self.field)?;
         let root = incoming.root();
         let value = doc.absorb(incoming)? - root + value;
-        let data = if self.field == "audio" {
-            doc.required(value, "data")?
-        } else {
-            doc.required(doc.required(value, "image_url")?, "url")?
-        };
+        let data = payload_member(doc, value, self.field)?;
         if !matches!(doc.node(data)?.value, Value::Null) {
             return Err(Error::Schema);
         }
