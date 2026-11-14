@@ -22,6 +22,8 @@ use crate::{
 
 /// Monotonic elapsed time. Implementations must never move backwards.
 pub trait Clock: Send + Sync + 'static {
+    /// Must not panic: reads and lease drops call it after taking frame references and
+    /// metadata charges, and an unwind there strands both.
     fn now(&self) -> Duration;
 }
 
