@@ -794,10 +794,15 @@ fn logrus_level(level: &Level) -> &'static str {
 /// share a file name stay distinguishable (`management/api.rs`, not `api.rs`). A path
 /// with no `src/` component is returned as given.
 fn caller_path(file: &str) -> std::borrow::Cow<'_, str> {
-    let normalized = file.replace('\\', "/");
-    match normalized.rfind("/src/") {
-        Some(at) => std::borrow::Cow::Owned(normalized[at + "/src/".len()..].to_owned()),
-        None => std::borrow::Cow::Borrowed(file),
+    let start = [file.rfind("/src/"), file.rfind("\\src\\")]
+        .into_iter()
+        .flatten()
+        .max()
+        .map_or(0, |at| at + "/src/".len());
+    let path = &file[start..];
+    match path.contains('\\') {
+        true => std::borrow::Cow::Owned(path.replace('\\', "/")),
+        false => std::borrow::Cow::Borrowed(path),
     }
 }
 
