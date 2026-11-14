@@ -240,6 +240,8 @@ fn field(doc: &mut Document, counts: &mut Counts, event: Document) -> Result<usi
             return Err(Error::Schema);
         }
         // Fields arrive in order, so a new element is the common case; replacing one walks.
+        // ponytail: the grammar forbids that replacement and Chat ingress never emits it; index
+        // elements if a producer starts to (docs/DEFERRED-OPTIONS.md).
         if index == count {
             None
         } else {

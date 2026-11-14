@@ -96,6 +96,9 @@ impl Ingress {
         let pending = self.string.as_mut().ok_or(Error::Schema)?;
         // Keys and topology stay fixed while one string streams, and the string node's own span
         // bounds the floor, so the whole-document floor is computed once per string.
+        // ponytail: each streamed string still walks the whole document, which the default
+        // metadata quota bounds to 19 us; index key spans and floors if that quota grows
+        // (docs/DEFERRED-OPTIONS.md).
         if opened {
             let scanner = self.scanner.as_mut().ok_or(Error::Closed)?;
             self.document.rebind_keys(scanner)?;

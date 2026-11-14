@@ -40,6 +40,9 @@ pub fn pointer(doc: &Document, mut node: usize, e: &mut Encoder<'_, '_>) -> Resu
         let (parent, node) = entry.ok_or(Error::Schema)?;
         e.bytes(b"/")?;
         if matches!(doc.node(parent)?.value, Value::Array) {
+            // ponytail: walks the array per pointer, quadratic in elements with preserved
+            // fields; the default metadata quota bounds it to 0.14 ms. Index positions if that
+            // quota grows (docs/DEFERRED-OPTIONS.md).
             let index = doc
                 .children(parent)?
                 .position(|child| child == node)
@@ -206,6 +209,9 @@ fn resolve_to(
         }
         parent = match doc.node(parent)?.value {
             Value::Object => {
+                // ponytail: scans members; `read_request` indexes them only for placement, so
+                // descents stay quadratic, bounded by the default metadata quota to about 0.3 ms
+                // (docs/DEFERRED-OPTIONS.md).
                 let mut found = None;
                 for child in doc.children(parent)? {
                     if name.matches(doc, doc.node(child)?.name.ok_or(Error::Schema)?)? {
@@ -217,6 +223,9 @@ fn resolve_to(
             }
             Value::Array => {
                 let index = name.index()?;
+                // ponytail: an element other than the indexed last one is reached by walking;
+                // binding restore pays this per entry, bounded by the default metadata
+                // quota to 0.06 ms (docs/DEFERRED-OPTIONS.md).
                 match element(parent, index)? {
                     Some(child) => child,
                     None => doc.children(parent)?.nth(index).ok_or(Error::Schema)?,
