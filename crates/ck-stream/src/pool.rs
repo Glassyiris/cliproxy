@@ -3,6 +3,7 @@
 use crate::FRAME_BYTES;
 use std::cell::Cell;
 use std::io;
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
@@ -38,6 +39,61 @@ impl FreeList {
         let frame = self.frames.pop();
         self.low_water = self.low_water.min(self.frames.len());
         frame
+    }
+}
+
+/// One worker's free list. `len` mirrors its length so that allocation can pass over
+/// empty lists without locking them; every change goes through `ShardGuard`.
+struct Shard {
+    free: Mutex<FreeList>,
+    len: AtomicUsize,
+}
+
+impl Shard {
+    fn new() -> Self {
+        Self {
+            free: Mutex::new(FreeList {
+                frames: Vec::new(),
+                low_water: 0,
+            }),
+            len: AtomicUsize::new(0),
+        }
+    }
+
+    fn lock(&self) -> ShardGuard<'_> {
+        ShardGuard {
+            free: lock(&self.free),
+            len: &self.len,
+        }
+    }
+
+    /// A stale answer costs one lock, or one cold frame taken while a warm one waited.
+    fn occupied(&self) -> bool {
+        self.len.load(Ordering::Relaxed) != 0
+    }
+}
+
+struct ShardGuard<'a> {
+    free: MutexGuard<'a, FreeList>,
+    len: &'a AtomicUsize,
+}
+
+impl Deref for ShardGuard<'_> {
+    type Target = FreeList;
+    fn deref(&self) -> &FreeList {
+        &self.free
+    }
+}
+
+impl DerefMut for ShardGuard<'_> {
+    fn deref_mut(&mut self) -> &mut FreeList {
+        &mut self.free
+    }
+}
+
+impl Drop for ShardGuard<'_> {
+    fn drop(&mut self) {
+        self.len.store(self.free.frames.len(), Ordering::Relaxed);
     }
 }
 
@@ -117,7 +173,7 @@ pub(crate) struct Pool {
     /// Bytes from each frame's start whose pages are populated, so writing them cannot
     /// fault on tmpfs exhaustion. Only the frame's current owner changes it.
     ready: Box<[AtomicU32]>,
-    shards: Box<[Padded<Mutex<FreeList>>]>,
+    shards: Box<[Padded<Shard>]>,
     slow: Padded<Mutex<Slow>>,
     used: Padded<AtomicU32>,
     backed: Padded<AtomicU32>,
@@ -193,13 +249,10 @@ impl Pool {
         let mapping = Mapping::new(&file, len, initial_bytes, slots)?;
         let mut shards = Vec::with_capacity(workers);
         for _ in 0..workers {
-            shards.push(Padded(Mutex::new(FreeList {
-                frames: Vec::new(),
-                low_water: 0,
-            })));
+            shards.push(Padded(Shard::new()));
         }
         // Frames are distributed lazily; a worker steals resident frames before cold ones.
-        lock(&shards[0].0).frames.extend((0..initial).rev());
+        shards[0].0.lock().frames.extend((0..initial).rev());
         Ok(Self {
             mapping,
             file,
@@ -233,9 +286,14 @@ impl Pool {
         })
     }
 
-    fn resident(&self, local: usize) -> Option<u32> {
+    /// Pop a resident frame, this worker's list first. Unless `every`, lists that look empty
+    /// are passed over unlocked.
+    fn resident(&self, local: usize, every: bool) -> Option<u32> {
         for step in 0..self.shards.len() {
-            if let Some(frame) = lock(&self.shards[(local + step) % self.shards.len()].0).pop() {
+            let shard = &self.shards[(local + step) % self.shards.len()].0;
+            if (every || shard.occupied())
+                && let Some(frame) = shard.lock().pop()
+            {
                 return Some(frame);
             }
         }
@@ -245,54 +303,52 @@ impl Pool {
     /// Take a free frame whose first `needed` bytes are populated.
     pub(crate) fn allocate(&self, needed: usize) -> io::Result<u32> {
         let local = self.shard();
-        let frame = if let Some(frame) = self.resident(local) {
-            if let Err(error) = self.prefault(frame, needed) {
-                // A warm frame populated only for smaller records; eviction may free better ones.
-                lock(&self.slow.0).cold.push(frame);
-                return Err(error);
-            }
-            frame
-        } else {
-            // The reclaimer holds this lock until every candidate is on the cold
-            // list and its punch completes: allocation cannot see missing capacity.
-            let mut slow = lock(&self.slow.0);
-            if let Some(frame) = self.resident(local) {
-                if let Err(error) = self.prefault(frame, needed) {
-                    slow.cold.push(frame);
-                    return Err(error);
-                }
-                frame
-            } else if let Some(&frame) = slow.cold.last() {
-                // Failure leaves ownership on the cold list; no writer sees holes.
-                self.prefault(frame, needed)?;
-                slow.cold.pop();
-                frame
-            } else {
-                if slow.backed == self.capacity {
-                    return Err(io::Error::new(
-                        io::ErrorKind::OutOfMemory,
-                        "stream pool capacity exhausted",
-                    ));
-                }
-                let old = slow.backed;
-                let new = old.saturating_add(EXTENT).min(self.capacity);
-                let old_end = round_up(self.header_bytes + old as usize * FRAME_BYTES, self.page)?;
-                let new_end = round_up(self.header_bytes + new as usize * FRAME_BYTES, self.page)?;
-                self.file.grow(old_end, new_end - old_end)?;
-                os::populate(self.address(old_end), new_end - old_end)?;
-                for frame in old..new {
-                    self.ready[frame as usize].store(FRAME_BYTES as u32, Ordering::Relaxed);
-                }
-                slow.backed = new;
-                self.backed.0.store(new, Ordering::Release);
-                let mut free = lock(&self.shards[local].0);
-                free.frames.extend((old + 1..new).rev());
-                old
-            }
+        let frame = match self.resident(local, false) {
+            Some(frame) => frame,
+            None => self.reclaim(local)?,
         };
+        // Populate outside every lock: the frame is this caller's alone. A resident frame may
+        // be populated only for smaller records, a cold one not at all; on refusal it joins
+        // the cold list, and eviction may free better ones.
+        if let Err(error) = self.prefault(frame, needed) {
+            lock(&self.slow.0).cold.push(frame);
+            return Err(error);
+        }
         self.refs[frame as usize].store(1, Ordering::Relaxed);
         self.used.0.fetch_add(1, Ordering::Relaxed);
         Ok(frame)
+    }
+
+    /// A frame for an allocation that found no resident one: cold, resident after all, or
+    /// grown. The reclaimer holds this lock until every candidate is on the cold list and
+    /// its punch completes, so allocation cannot see missing capacity.
+    fn reclaim(&self, local: usize) -> io::Result<u32> {
+        let mut slow = lock(&self.slow.0);
+        if let Some(frame) = slow.cold.pop() {
+            return Ok(frame);
+        }
+        if let Some(frame) = self.resident(local, true) {
+            return Ok(frame);
+        }
+        if slow.backed == self.capacity {
+            return Err(io::Error::new(
+                io::ErrorKind::OutOfMemory,
+                "stream pool capacity exhausted",
+            ));
+        }
+        let old = slow.backed;
+        let new = old.saturating_add(EXTENT).min(self.capacity);
+        let old_end = round_up(self.header_bytes + old as usize * FRAME_BYTES, self.page)?;
+        let new_end = round_up(self.header_bytes + new as usize * FRAME_BYTES, self.page)?;
+        self.file.grow(old_end, new_end - old_end)?;
+        os::populate(self.address(old_end), new_end - old_end)?;
+        for frame in old..new {
+            self.ready[frame as usize].store(FRAME_BYTES as u32, Ordering::Relaxed);
+        }
+        slow.backed = new;
+        self.backed.0.store(new, Ordering::Release);
+        self.shards[local].0.lock().frames.extend((old + 1..new).rev());
+        Ok(old)
     }
 
     /// Whether the first `needed` bytes of a frame the caller owns are populated.
@@ -356,7 +412,7 @@ impl Pool {
         // Every earlier holder's reads happen before the frame is reused.
         fence(Ordering::Acquire);
         self.used.0.fetch_sub(1, Ordering::Relaxed);
-        lock(&self.shards[self.shard()].0).frames.push(frame);
+        self.shards[self.shard()].0.lock().frames.push(frame);
         true
     }
 
@@ -425,7 +481,7 @@ impl Pool {
         // which steals resident frames before taking cold ones.
         let mut warm = WARM * self.shards.len();
         for shard in &self.shards {
-            let mut free = lock(&shard.0);
+            let mut free = shard.0.lock();
             let idle = free.low_water.min(free.frames.len());
             let kept = idle.min(warm);
             warm -= kept;

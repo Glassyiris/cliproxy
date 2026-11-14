@@ -130,7 +130,7 @@ fn decay_preserves_a_leased_neighbor_and_prefaults_reuse() {
     );
     pool.decay().unwrap();
     assert!(blocks(&pool.file) < before);
-    assert_eq!(lock(&pool.shards[0].0).frames.len(), WARM);
+    assert_eq!(pool.shards[0].0.lock().frames.len(), WARM);
     assert_eq!(bytes, &[0x5a; FRAME_BYTES]);
     let mut reused = Vec::new();
     for _ in 0..63 {
@@ -163,7 +163,7 @@ fn the_warm_budget_is_pool_wide() {
     }
     pool.decay().unwrap();
     pool.decay().unwrap();
-    let kept: usize = pool.shards.iter().map(|shard| lock(&shard.0).frames.len()).sum();
+    let kept: usize = pool.shards.iter().map(|shard| shard.0.lock().frames.len()).sum();
     assert_eq!(kept, 2 * WARM);
 }
 
@@ -204,7 +204,7 @@ fn reused_lifo_frames_wait_a_whole_interval() {
     pool.release(frame);
     pool.decay().unwrap();
     // One popped frame and eight warm frames cannot have been reclaimed.
-    assert_eq!(lock(&pool.shards[0].0).frames.len(), WARM + 1);
+    assert_eq!(pool.shards[0].0.lock().frames.len(), WARM + 1);
     assert_eq!(pool.allocate(FRAME_BYTES).unwrap(), frame);
     pool.release(frame);
 }
@@ -220,10 +220,25 @@ fn resident_stealing_precedes_cold_prefault() {
     // Empty the calling shard, leaving resident frames only on its neighbor.
     let local = pool.shard();
     let other = (local + 1) % 2;
-    let moved = std::mem::take(&mut lock(&pool.shards[local].0).frames);
-    lock(&pool.shards[other].0).frames.extend(moved);
+    let moved = std::mem::take(&mut pool.shards[local].0.lock().frames);
+    pool.shards[other].0.lock().frames.extend(moved);
     let frame = pool.allocate(FRAME_BYTES).unwrap();
     assert_eq!(lock(&pool.slow.0).cold.len(), cold);
+    pool.release(frame);
+}
+
+#[test]
+fn allocation_finds_resident_frames_a_stale_length_hid_before_growing() {
+    let directory = Directory::new();
+    let pool = Pool::open(&directory.0, 42, 1, 2, 0).unwrap();
+    // Every frame sits on the neighbor whose length mirror reads empty; nothing is cold.
+    let local = pool.shard();
+    let other = (local + 1) % 2;
+    let moved = std::mem::take(&mut pool.shards[local].0.lock().frames);
+    pool.shards[other].0.lock().frames.extend(moved);
+    pool.shards[other].0.len.store(0, Ordering::Relaxed);
+    let frame = pool.allocate(FRAME_BYTES).unwrap();
+    assert_eq!(pool.backed_frames(), 21);
     pool.release(frame);
 }
 
