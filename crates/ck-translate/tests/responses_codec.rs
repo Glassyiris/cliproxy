@@ -1,5 +1,7 @@
 #[path = "responses/golden.rs"]
 mod golden;
+#[path = "responses/incremental.rs"]
+mod incremental;
 #[path = "responses/recordings.rs"]
 mod recordings;
 // The framework owner adds the library declaration at integration.
