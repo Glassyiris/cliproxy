@@ -8,8 +8,12 @@ From the repository root on Linux, install Python 3, Bash, util-linux (`findmnt`
 
 ```sh
 flock /tmp/cooker-bench.lock taskset -c 0-7,16-23 \
+  bench/codec-gate.sh --calibrate "$OLD_CODEC" "$BAND_OUT"
+CODEC_NOISE_BAND="$BAND_OUT/noise-band.json" flock /tmp/cooker-bench.lock taskset -c 0-7,16-23 \
   bench/codec-gate.sh "$OLD_CODEC" "$NEW_CODEC" "$OUT"
 ```
+
+Calibrate once per baseline build, host and kernel, and again after 30 days; see "Calibrate the memory noise band".
 
 The driver runs old-1, new-1, old-2, new-2, old-3, new-3 as separate processes. The enclosing invocation owns serialization; the driver does not acquire another lock. Both harnesses inherit that CPU affinity. Do not run builds during measurements. The baseline builder defaults to `BUILD_CPUS=8-15,24-31`, `CARGO_BUILD_JOBS=4` and `CARGO_TARGET_DIR=/scratch/ssd/bench-target`. Override any of these environment variables for another build host; provenance records all three effective values.
 
@@ -99,7 +103,7 @@ If that exact cgroup already exists, the launcher exits 2 and reports its absolu
 
 RSS/PSS report the maximum observed setup/post-operation/post-release smaps sample, not a continuously sampled RSS peak, minus a snapshot taken after the workload's inputs are prepared and before its warmup. The subtraction keeps each harness's own binary, libraries, startup and inputs out of the 0% comparison, so a larger harness executable does not fail every workload; codec code and data touched during warmup and measurement still count. In three 2026-11-14 baseline rounds that snapshot was a median 3,004 KiB, 72% of the absolute RSS.
 
-Open limitation, pending an owner ruling: these OS counters are not repeatable at the 0% boundary. Between two warm baseline rounds of identical code, per-workload RSS/PSS moved a median 80 KiB (up to 508 KiB) and `cgroup_charge`/`total_charged` a median 168 KiB (up to 1,272 KiB), up and down about equally; a cold first round ran about 380 KiB lower RSS than warm rounds. Old against old would therefore fail roughly half the workloads on each of these metrics. Heap peak/retained were identical across rounds. The gate keeps the 0% rule; it does not add a noise floor. Anonymous, shmem and mapped components use `Anonymous`, `Pss_Shmem` and `Pss_File + Pss_Shmem`; the latter two are proportional-residency diagnostics. Page faults come from `getrusage`. The old backend has no pool, pool metadata or tmpfs stream files, so those structurally absent diagnostics are zero. Its heap peak/retained values subtract pre-workload input/instrumentation allocation. Cgroup totals count only charges after the worker joined its private group.
+These OS counters are not repeatable at the 0% boundary. Between two warm baseline rounds of identical code, per-workload RSS/PSS moved a median 80 KiB (up to 508 KiB) and `cgroup_charge`/`total_charged` a median 168 KiB (up to 1,272 KiB), up and down about equally; a cold first round ran about 380 KiB lower RSS than warm rounds. Old against old would fail about half the workloads on each. Heap peak/retained were identical across rounds. The calibrated noise band below covers these four counters only. Anonymous, shmem and mapped components use `Anonymous`, `Pss_Shmem` and `Pss_File + Pss_Shmem`; the latter two are proportional-residency diagnostics. Page faults come from `getrusage`. The old backend has no pool, pool metadata or tmpfs stream files, so those structurally absent diagnostics are zero. Its heap peak/retained values subtract pre-workload input/instrumentation allocation. Cgroup totals count only charges after the worker joined its private group.
 
 Latency samples use monotonic clocks at output-batch availability and operation completion. Chunks returned together have zero inter-output delay. Operations producing no deliverable output record a structural zero for first-deliverable latency and increment the `no_output_completions` metric. A workload with no output pairs has structural zero inter-event percentiles. These are absent output observations, not invented delivery timestamps or unavailable instrumentation.
 
@@ -110,12 +114,21 @@ Compare each workload and metric independently using the median of its three old
 
 - CPU, allocations and all latency percentiles: `new * 100 <= old * 105`.
 - Throughput: `new * 100 >= old * 95`.
-- Memory/resource metrics (`allocated_bytes_per_event`, `heap_peak`, `heap_retained`, `rss`, `pss`, `cgroup_charge`, `total_charged`): `new <= old`, without a noise allowance.
+- Heap and allocation metrics (`allocated_bytes_per_event`, `heap_peak`, `heap_retained`): `new <= old`, without a noise allowance.
+- OS memory counters (`rss`, `pss`, `cgroup_charge`, `total_charged`): `new - old <= band`, where `band` is that workload's calibrated noise band; beyond it the 0% rule holds.
 - Output presence: `encoded_bytes_per_event` and `output_chunks` fail when old is above zero and new is zero, and `no_output_completions` must satisfy `new <= old`. A harness that emits nothing has structural zero latencies, so without these rules it would pass every latency metric. They check presence, not equal output; semantic equivalence stays with the semantic suites.
 - An old zero requires a new zero for lower-is-better metrics; positive throughput from an old zero remains an improvement.
 - Decoded bytes, anonymous/shmem/mapped splits, metadata, tmpfs components, pool frames and page faults are report-only diagnostics. Backend components are not comparable aggregates: old zero mmap frames cannot gate a new shared pool. Their cost still contributes to the strictly gated process/cgroup totals. This reporting classification does not waive aggregate resource regressions or change G-storage. Semantic byte preservation is checked separately, not inferred from equal lengths.
 
 The exact boundary passes; a value beyond it fails. Decimal arithmetic avoids float rounding at 5%. These rules are the INTERNAL-STREAM §9.2 "Codec and pipeline tolerances" table, which records the owner's 2026-11-14 option-B ruling: at most 5% for codec/pipeline cost and latency, 0% for memory and storage, with allocated bytes/event in the memory class. They do not relax the independent G-storage rules.
+
+## Calibrate the memory noise band
+
+Owner ruling 2026-11-14 (「都可以捏」, item 2): RSS, PSS, `cgroup_charge` and `total_charged` may exceed old by a noise band measured from old-against-old runs; heap and allocation metrics stay exact.
+
+`bench/codec-gate.sh --calibrate OLD_CODEC OUT` runs the baseline harness over the full manifest 11 times and writes `OUT/noise-band.json`. The first round is discarded because it runs with a cold page cache; the gate's medians of three discard such a round too. For each counter and workload the band is `ceil(3 × max(pooled σ, workload σ))` over the ten warm rounds. The pooled σ uses all 3,710 samples per counter and dominates where the noise comes from absolute effects such as file fault-around and memcg charge batching. The workload's own σ, from ten samples, widens the band only where that workload is noisier. Ten warm rounds take about ten minutes and estimate a single workload's σ to about ±24%.
+
+The band file records the rule, the multiplier, the baseline revision, source and executable checksums, the manifest checksum, hostname, kernel, affinity, load before and after, round counts, pooled σ, and each workload's σ and band. It is host evidence, not a versioned repository file: keep it with external evidence and pass its path in `CODEC_NOISE_BAND`. The gate returns exit 2 before measuring when that variable is unset, or when the file's rule, multiplier, revision, source checksum, manifest, hostname or kernel differs from the current run, or when it is older than 30 days.
 
 ## Read evidence
 
@@ -147,4 +160,4 @@ CODEC_TEST_ARTIFACTS="$ARTIFACTS/selftest" \
 shellcheck bench/codec-gate.sh bench/codec/build-baseline.sh
 ```
 
-The controls exercise the actual shell entrypoint and complete required matrix: exact-boundary pass with outliers, CPU/throughput/memory regression, a new harness that emits no output, missing output, absent old executable, identical executable content, identical source identity and a new harness at the baseline revision. Focused checks cover stream-kind selection, leftover-cgroup diagnostics, each metric's direction, 0% memory/storage limits including allocated bytes, zero-old values, invalid numbers, missing metrics, wrong units, wrong manifest/round and duplicate/unknown workload IDs. `fake_harness.py` is a synthetic control only, not a production or baseline harness.
+The controls exercise the actual shell entrypoint and complete required matrix: exact-boundary pass with outliers, CPU/throughput/memory regression, a new harness that emits no output, a missing, stale or other-revision noise band, a calibration with the synthetic harness, missing output, absent old executable, identical executable content, identical source identity and a new harness at the baseline revision. Focused checks cover stream-kind selection, leftover-cgroup diagnostics, each metric's direction, 0% memory/storage limits including allocated bytes, counters inside and beyond the noise band, heap metrics that ignore the band, zero-old values, invalid numbers, missing metrics, wrong units, wrong manifest/round and duplicate/unknown workload IDs. `fake_harness.py` is a synthetic control only, not a production or baseline harness.

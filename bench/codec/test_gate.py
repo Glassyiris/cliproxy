@@ -2,6 +2,7 @@
 """Run under the benchmark lock; all evidence stays in the supplied directory."""
 
 import copy
+import datetime
 from decimal import Decimal
 import json
 import os
@@ -45,6 +46,27 @@ class Thresholds(unittest.TestCase):
                      "cgroup_charge", "total_charged"):
             self.assertEqual(gate.METRICS[name][1:], ("lower", 0), name)
         self.assertFalse(gate.acceptable(Decimal(100), Decimal("104.9"), "lower", 0))
+
+    def rounds(self, old=None, new=None):
+        base = {name: Decimal(100) for name in gate.METRICS}
+        return {"old": [{"w": {**base, **(old or {})}}] * 3, "new": [{"w": {**base, **(new or {})}}] * 3}
+
+    def band(self, value):
+        return {"workloads": {"w": {metric: {"band": value} for metric in gate.BANDED_METRICS}}}
+
+    def test_memory_counters_pass_inside_noise_band_and_fail_beyond(self):
+        for metric in gate.BANDED_METRICS:
+            with self.subTest(metric=metric):
+                inside = gate.compare([{"id": "w"}], self.rounds(new={metric: Decimal(4196)}), self.band(4096))
+                self.assertTrue(all(row["pass"] for row in inside))
+                beyond = gate.compare([{"id": "w"}], self.rounds(new={metric: Decimal(4197)}), self.band(4096))
+                self.assertEqual([row["metric"] for row in beyond if not row["pass"]], [metric])
+
+    def test_heap_and_allocation_metrics_ignore_the_noise_band(self):
+        for metric in ("heap_peak", "heap_retained", "allocated_bytes_per_event"):
+            with self.subTest(metric=metric):
+                rows = gate.compare([{"id": "w"}], self.rounds(new={metric: Decimal(101)}), self.band(10**9))
+                self.assertEqual([row["metric"] for row in rows if not row["pass"]], [metric])
 
     def test_sub_context_precision_regression_fails(self):
         self.assertFalse(gate.acceptable(Decimal(100),
@@ -120,15 +142,22 @@ class GateControls(unittest.TestCase):
         for side, path in (("old", cls.old), ("new", cls.new)):
             path.write_text(f'#!/usr/bin/env bash\nexport CODEC_FAKE_SIDE={side}\nexec python3 -B "{fake}" "$@"\n')
             path.chmod(0o700)
+        process = subprocess.run([str(gate.HERE.parent / "codec-gate.sh"), "--calibrate", str(cls.old),
+                                  str(ARTIFACTS / "calibration")],
+                                 env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "CODEC_FAKE_STORAGE": str(ARTIFACTS)},
+                                 capture_output=True, text=True, timeout=600)
+        assert process.returncode == 0, process.stdout + process.stderr
+        cls.band = ARTIFACTS / "calibration/noise-band.json"
 
-    def control(self, mode, expected):
+    def control(self, mode, expected, band=None):
         out = ARTIFACTS / mode
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "CODEC_FAKE_MODE": mode,
+               "CODEC_FAKE_STORAGE": str(ARTIFACTS), "CODEC_NOISE_BAND": str(band or self.band)}
+        if band == "":
+            del env["CODEC_NOISE_BAND"]
         process = subprocess.run([str(gate.HERE.parent / "codec-gate.sh"),
                                   str(self.old), str(self.new), str(out)],
-                                 env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
-                                      "CODEC_FAKE_MODE": mode,
-                                      "CODEC_FAKE_STORAGE": str(ARTIFACTS)},
-                                 capture_output=True, text=True, timeout=180)
+                                 env=env, capture_output=True, text=True, timeout=180)
         (ARTIFACTS / f"{mode}.stdout").write_text(process.stdout)
         (ARTIFACTS / f"{mode}.stderr").write_text(process.stderr)
         self.assertEqual(process.returncode, expected, process.stderr + process.stdout)
@@ -166,6 +195,32 @@ class GateControls(unittest.TestCase):
         summary, _ = self.control("baseline-revision", 2)
         self.assertIn("new source must not be the baseline revision", summary["error"])
         self.assertEqual(summary["rounds"], [])
+
+    def test_calibration_writes_a_band_for_every_workload(self):
+        band = json.loads(self.band.read_text())
+        self.assertEqual((band["rounds"], band["discarded_warmup_rounds"], band["sigma_multiplier"]), (11, 1, 3))
+        self.assertEqual(band["revision"], gate.BASELINE_REVISION)
+        self.assertEqual(len(band["workloads"]), len(gate.manifest()["workloads"]))
+        # The synthetic old harness repeats its values exactly, so its band is zero.
+        self.assertEqual({row[metric]["band"] for row in band["workloads"].values() for metric in gate.BANDED_METRICS},
+                         {0})
+
+    def test_missing_band_is_error(self):
+        summary, _ = self.control("pass-without-band", 2, band="")
+        self.assertIn("CODEC_NOISE_BAND is unset", summary["error"])
+        self.assertEqual(summary["rounds"], [])
+
+    def test_band_for_another_revision_host_or_month_is_error(self):
+        band = json.loads(self.band.read_text())
+        old = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=gate.BAND_MAX_AGE_DAYS + 1)
+        for field, value in (("revision", "c" * 40), ("hostname", "elsewhere"), ("created_utc", old.isoformat()),
+                             ("manifest_sha256", "0" * 64)):
+            with self.subTest(field=field):
+                path = ARTIFACTS / f"band-{field}.json"
+                path.write_text(json.dumps({**band, field: value}))
+                summary, _ = self.control(f"band-{field}", 2, band=path)
+                self.assertIn("noise band", summary["error"])
+                self.assertEqual(summary["rounds"], [])
 
     def test_missing_empty_matrix_output(self):
         summary, _ = self.control("missing", 2)

@@ -60,8 +60,12 @@ The gate retains three old/new rounds and compares matching per-workload metric
 medians, never an average across protocols. It applies the specification's
 §9.2 tolerance table, which records the 2026-11-14 owner ruling (option B):
 CPU, allocations and latency may rise by at most 5%; throughput may fall by at
-most 5%. Allocated bytes/event, heap, RSS/PSS and charged-resource totals allow
-no regression. Backend-specific splits are diagnostics; mapped/tmpfs costs still
+most 5%. Allocated bytes/event and heap metrics allow no regression. RSS, PSS
+and the cgroup charges may exceed old only by a noise band calibrated from
+old-against-old baseline runs (owner ruling 2026-11-14); beyond it the 0% rule
+holds. Calibrate with `bench/codec-gate.sh --calibrate "$OLD_CODEC" "$BAND_OUT"`
+and pass `CODEC_NOISE_BAND="$BAND_OUT/noise-band.json"`; the gate refuses a
+missing, stale or mismatched band. Backend-specific splits are diagnostics; mapped/tmpfs costs still
 contribute to the charged totals. A zero old cost requires a zero new cost;
 throughput retains its higher-is-better rule. Encoded bytes and output chunks are
 not byte-exact goldens, but a new harness must produce output wherever the old
