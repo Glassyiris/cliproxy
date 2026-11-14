@@ -11,6 +11,7 @@ fn chat_tool_completion_closes_synthetic_native_blocks() {
         let mut reader = mapped.store.reader(mapped.writer.id(), 0).unwrap();
         let mut ingress = codec::chat::response::Ingress::new(
             &mut mapped.writer,
+            &mapped.store,
             identity(Direction::Response),
             Operation::Generate,
             BodyMode::Buffered,
