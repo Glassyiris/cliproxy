@@ -122,8 +122,8 @@ fn name_hash(mut next: impl FnMut() -> Result<Option<char>>) -> Result<u64> {
 impl Counts {
     /// Forgets the indexes of a container whose value a field replaced.
     fn replaced(&mut self, node: usize) {
-        self.children.map.remove(&node);
-        self.objects.map.remove(&node);
+        self.children.remove(&node);
+        self.objects.remove(&node);
     }
 
     /// Indexes one member under its object's current build. The first member with a name keeps
@@ -131,7 +131,7 @@ impl Counts {
     fn index_member(&mut self, doc: &Document, object: usize, build: u32, child: usize) -> Result<()> {
         let mut chars = doc.name_chars(doc.node(child)?.name.ok_or(Error::Schema)?)?;
         let key = (object, build, name_hash(|| chars.next_scalar())?);
-        if !self.members.map.contains_key(&key) {
+        if !self.members.contains_key(&key) {
             self.members.insert(&mut self.permit, key, child)?;
         }
         Ok(())
@@ -139,7 +139,7 @@ impl Counts {
 
     /// The build of an object's member index, indexing every member on first use.
     fn build(&mut self, doc: &Document, object: usize) -> Result<u32> {
-        if let Some(&build) = self.objects.map.get(&object) {
+        if let Some(&build) = self.objects.get(&object) {
             return Ok(build);
         }
         self.builds = self.builds.checked_add(1).ok_or(Error::Limit)?;
@@ -155,7 +155,7 @@ impl Counts {
     fn member(&mut self, doc: &Document, object: usize, name: &provenance::Segment) -> Result<Option<usize>> {
         let build = self.build(doc, object)?;
         let mut chars = name.clone();
-        let Some(&child) = self.members.map.get(&(object, build, name_hash(|| chars.next())?)) else {
+        let Some(&child) = self.members.get(&(object, build, name_hash(|| chars.next())?)) else {
             return Ok(None);
         };
         if name.matches(doc, doc.node(child)?.name.ok_or(Error::Schema)?)? {
@@ -170,7 +170,7 @@ impl Counts {
     }
 
     fn get(&mut self, doc: &Document, array: usize) -> Result<&mut (usize, Option<usize>)> {
-        if !self.children.map.contains_key(&array) {
+        if !self.children.contains_key(&array) {
             let (mut count, mut last) = (0, None);
             for child in doc.children(array)? {
                 count += 1;
@@ -178,7 +178,7 @@ impl Counts {
             }
             self.children.insert(&mut self.permit, array, (count, last))?;
         }
-        self.children.map.get_mut(&array).ok_or(Error::Schema)
+        self.children.get_mut(&array).ok_or(Error::Schema)
     }
 }
 
@@ -233,11 +233,11 @@ fn field(doc: &mut Document, counts: &mut Counts, event: Document) -> Result<usi
     )?;
     doc.transplant(node, value)?;
     doc.append(parent, node)?;
-    if let Some((count, last)) = counts.children.map.get_mut(&parent) {
+    if let Some((count, last)) = counts.children.get_mut(&parent) {
         *count += 1;
         *last = Some(node);
     }
-    if let Some(&build) = counts.objects.map.get(&parent) {
+    if let Some(&build) = counts.objects.get(&parent) {
         counts.index_member(doc, parent, build, node)?;
     }
     Ok(node)

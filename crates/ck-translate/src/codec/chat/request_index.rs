@@ -5,7 +5,7 @@ use std::{collections::HashMap, hash::Hash};
 /// A hash map charged at an upper bound of its table's allocation. Growth reserves the new
 /// table's bound on the permit before allocating it, so a quota failure allocates nothing.
 pub struct Index<K, V> {
-    pub map: HashMap<K, V>,
+    map: HashMap<K, V>,
     /// The bound charged for the current table; zero before the first allocation.
     bytes: usize,
 }
@@ -16,6 +16,22 @@ impl<K: Eq + Hash, V> Index<K, V> {
             map: HashMap::new(),
             bytes: 0,
         }
+    }
+
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.map.get(key)
+    }
+
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+        self.map.get_mut(key)
+    }
+
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.map.contains_key(key)
+    }
+
+    pub fn remove(&mut self, key: &K) {
+        self.map.remove(key);
     }
 
     /// Upper bound of the allocation of a fresh table built for `capacity` entries. hashbrown,
@@ -29,14 +45,20 @@ impl<K: Eq + Hash, V> Index<K, V> {
 
     /// Inserts an entry, first moving a full map into a fresh table for twice its entries. The
     /// permit, which holds this index's charge, grows by the new table's bound before the table
-    /// is allocated and drops the old table's bound once that table is freed.
+    /// is allocated and drops the old table's bound once that table is freed. `capacity()` is
+    /// `len` plus the growth room hashbrown has left after tombstones, so `len == capacity` is
+    /// exactly the point where hashbrown would otherwise grow the table itself.
     pub fn insert(&mut self, permit: &mut MetadataPermit, key: K, value: V) -> Result<()> {
         if self.map.len() == self.map.capacity() {
             let capacity = self.map.len().checked_mul(2).ok_or(Error::Limit)?.max(4);
             let bytes = Self::bound(capacity).ok_or(Error::Limit)?;
-            permit.resize(permit.bytes().checked_add(bytes).ok_or(Error::Limit)?)?;
+            let before = permit.bytes();
+            permit.resize(before.checked_add(bytes).ok_or(Error::Limit)?)?;
             let mut map = HashMap::new();
-            map.try_reserve(capacity).map_err(|_| Error::Limit)?;
+            if map.try_reserve(capacity).is_err() {
+                permit.resize(before)?;
+                return Err(Error::Limit);
+            }
             map.extend(self.map.drain());
             self.map = map;
             permit.resize(permit.bytes() - self.bytes)?;
@@ -138,6 +160,31 @@ mod tests {
         charge_covers_allocation(4096, |i| (i, (i, Some(i))));
         charge_covers_allocation(4096, |i| (i, i as u32));
         charge_covers_allocation(4096, |i| ((i, 1u32, i as u64), i));
+    }
+
+    /// Removals can leave tombstones that use growth room without changing `len`; hashbrown
+    /// then resizes a table more than half full. Every table allocated while keys churn in a
+    /// nearly full index must still fit the charged bound.
+    #[test]
+    fn charge_covers_tables_grown_after_removals() {
+        let pool = Pool::new(64 * 1024 * 1024);
+        let mut owner = pool.store.create().unwrap();
+        let mut permit = owner.reserve_metadata(0).unwrap();
+        let mut index: Index<usize, u32> = Index::new();
+        let mut key = 0;
+        while key < 1000 || index.map.len() + 1 < index.map.capacity() {
+            index.insert(&mut permit, key, 0).unwrap();
+            key += 1;
+        }
+        let oldest = key - index.map.len();
+        for step in 0..4096 {
+            let before = allocated();
+            index.remove(&(oldest + step));
+            index.insert(&mut permit, key + step, 0).unwrap();
+            let table = allocated() - before;
+            assert!(table <= index.bytes, "{table} B allocated, {} B charged", index.bytes);
+            assert_eq!(permit.bytes(), index.bytes);
+        }
     }
 
     #[test]
