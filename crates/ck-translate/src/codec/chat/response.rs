@@ -392,72 +392,79 @@ impl State {
             self.reconcile(owner, doc, choices)?;
         }
         for choice in doc.children(choices)? {
-            let index = doc.unsigned(doc.required(choice, "index")?)?;
-            let position = self.choice(owner, index)?;
-            if self.choices[position].finished {
-                return Err(Error::Schema);
-            }
-            if let Some(body) = doc.member(choice, "message")? {
-                self.delta(owner, doc, choice, body, position, buffered)?;
-            }
-            if let Some(logprobs) = doc.member(choice, "logprobs")? {
-                let scope = self.scope(position);
-                self.emitter.emit(
-                    owner,
-                    Kind::Chunk,
-                    scope,
-                    |e| {
-                        base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
-                        e.bytes(b",\"choices\":[{\"index\":")?;
-                        e.unsigned(index)?;
-                        e.bytes(b",\"delta\":{},\"finish_reason\":null,\"logprobs\":")?;
-                        doc.write(logprobs, e)?;
-                        e.bytes(b"}]")
-                    },
-                    |_| Ok(()),
-                )?;
-            }
-            if let Some(usage) = doc.member(choice, "usage")? {
-                let scope = self.scope(position);
-                self.choices[position].usage.update(owner, doc, usage)?;
-                self.choices[position]
-                    .usage
-                    .emit(owner, &mut self.emitter, scope, false)?;
-            }
-            for field in doc.children(choice)? {
-                let name = doc.node(field)?.name.ok_or(Error::Schema)?;
-                let mut known = false;
-                for key in ["index", "delta", "message", "finish_reason", "logprobs", "usage"] {
-                    known |= doc.name_is(name, key)?;
-                }
-                if !known {
-                    self.emitter.emit(
-                        owner,
-                        Kind::Chunk,
-                        self.scope(position),
-                        |e| {
-                            base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
-                            e.bytes(b",\"choices\":[{\"index\":")?;
-                            e.unsigned(index)?;
-                            e.bytes(b",\"delta\":{},\"finish_reason\":null}]")
-                        },
-                        |e| super::provenance::one(doc, field, e),
-                    )?;
-                }
-            }
-            if let Some(finish) = doc.member(choice, "finish_reason")? {
-                if !matches!(doc.node(finish)?.value, Value::Null) {
-                    self.finish_choice(owner, doc, finish, position)?;
-                } else if buffered {
-                    return Err(Error::Truncated);
-                }
-            } else if buffered {
-                return Err(Error::Truncated);
-            }
+            self.record_choice(owner, doc, choice, buffered)?;
         }
         if let Some(usage) = doc.member(doc.root(), "usage")? {
             self.usage.update(owner, doc, usage)?;
             self.usage.emit(owner, &mut self.emitter, Scope::default(), false)?;
+        }
+        Ok(())
+    }
+
+    /// Publishes one choice of a record: its message body, logprobs, usage, unknown members
+    /// and finish, in that order. A buffered record must finish every choice.
+    fn record_choice(&mut self, owner: &mut Writer, doc: &Document, choice: usize, buffered: bool) -> Result<()> {
+        let index = doc.unsigned(doc.required(choice, "index")?)?;
+        let position = self.choice(owner, index)?;
+        if self.choices[position].finished {
+            return Err(Error::Schema);
+        }
+        if let Some(body) = doc.member(choice, "message")? {
+            self.delta(owner, doc, choice, body, position, buffered)?;
+        }
+        if let Some(logprobs) = doc.member(choice, "logprobs")? {
+            let scope = self.scope(position);
+            self.emitter.emit(
+                owner,
+                Kind::Chunk,
+                scope,
+                |e| {
+                    base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
+                    e.bytes(b",\"choices\":[{\"index\":")?;
+                    e.unsigned(index)?;
+                    e.bytes(b",\"delta\":{},\"finish_reason\":null,\"logprobs\":")?;
+                    doc.write(logprobs, e)?;
+                    e.bytes(b"}]")
+                },
+                |_| Ok(()),
+            )?;
+        }
+        if let Some(usage) = doc.member(choice, "usage")? {
+            let scope = self.scope(position);
+            self.choices[position].usage.update(owner, doc, usage)?;
+            self.choices[position]
+                .usage
+                .emit(owner, &mut self.emitter, scope, false)?;
+        }
+        for field in doc.children(choice)? {
+            let name = doc.node(field)?.name.ok_or(Error::Schema)?;
+            let mut known = false;
+            for key in ["index", "delta", "message", "finish_reason", "logprobs", "usage"] {
+                known |= doc.name_is(name, key)?;
+            }
+            if !known {
+                self.emitter.emit(
+                    owner,
+                    Kind::Chunk,
+                    self.scope(position),
+                    |e| {
+                        base(self.base.as_ref().ok_or(Error::Schema)?, e)?;
+                        e.bytes(b",\"choices\":[{\"index\":")?;
+                        e.unsigned(index)?;
+                        e.bytes(b",\"delta\":{},\"finish_reason\":null}]")
+                    },
+                    |e| super::provenance::one(doc, field, e),
+                )?;
+            }
+        }
+        if let Some(finish) = doc.member(choice, "finish_reason")? {
+            if !matches!(doc.node(finish)?.value, Value::Null) {
+                self.finish_choice(owner, doc, finish, position)?;
+            } else if buffered {
+                return Err(Error::Truncated);
+            }
+        } else if buffered {
+            return Err(Error::Truncated);
         }
         Ok(())
     }
