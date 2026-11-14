@@ -190,7 +190,7 @@ fn leased_frames_of_evicted_expired_and_invalidated_streams_still_count() {
     assert_eq!(store.stats().evictions, 1);
     assert!(matches!(store.reader(evicted.id(), 0), Err(Error::Gone)));
     assert_eq!(store.stats().leased_frames, 2);
-    // Expiry removes the invalidated stream from the cache; its leased frame still counts.
+    // Expiry empties the cache; the leased frames of streams that left it still count.
     clock.advance(Duration::from_secs(3601));
     store.tick().unwrap();
     let stats = store.stats();
@@ -275,4 +275,17 @@ fn concurrent_reads_eviction_and_snapshots_neither_deadlock_nor_leak_leases() {
     let stats = store.stats();
     assert!(stats.evictions > 0 && taken.load(Ordering::Relaxed) > 0);
     assert_eq!(stats.leased_frames, 0);
+}
+
+#[test]
+fn streams_ended_gone_leave_the_cache() {
+    let (_dir, store, _) = store(4, 1);
+    for _ in 0..64 {
+        let mut writer = store.create().unwrap();
+        writer.append(b"gone").unwrap();
+        writer.finish(Terminal::Gone);
+    }
+    let stats = store.stats();
+    assert_eq!((stats.cached_streams, stats.used_frames), (0, 0));
+    assert_eq!((stats.evictions, stats.expiries), (0, 0));
 }

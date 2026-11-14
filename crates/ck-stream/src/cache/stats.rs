@@ -1,8 +1,5 @@
 use std::{
-    sync::{
-        Weak,
-        atomic::{AtomicU32, AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU32, AtomicU64, Ordering},
     time::Duration,
 };
 
@@ -66,17 +63,23 @@ impl Failures {
 }
 
 impl Store {
-    /// Read the flow metrics. This holds the cache lock across one state lock per cached
-    /// stream (at most `header_slots`), which blocks admission and attachment meanwhile:
-    /// call it from operator scrapes, never per request.
+    /// Read the flow metrics. The cache lock is held only to copy the cached streams' handles
+    /// (at most `header_slots`, plus streams whose writers are ending them with `Gone`) and to
+    /// swap out the retired-stream list. Each stream's state is then locked on its own, so
+    /// admission and attachment never wait behind a busy stream. Each stream costs one walk of
+    /// its frame table: call this from operator scrapes, never per request.
     pub fn stats(&self) -> StoreStats {
         let inner = &self.inner;
         let now = inner.retention.now();
+        let mut cache = inner.cache.lock();
+        let cached: Vec<_> = cache.streams.values().map(|entry| entry.stream.clone()).collect();
+        let mut orphans = std::mem::take(&mut cache.orphans);
+        let (evictions, expiries) = (cache.evictions, cache.expiries);
+        drop(cache);
+        // A stream retires only after leaving the cache, so the two lists share no stream.
         let mut oldest: Option<Duration> = None;
         let mut leased_frames = 0;
-        let mut cache = inner.cache.lock();
-        // Lock order: cache, then each stream's state, as eviction and expiry take them.
-        for stream in cache.streams.values() {
+        for stream in &cached {
             let state = stream.state.lock();
             leased_frames += stream.leased_frames(&state);
             if stream.is_invalidated() {
@@ -85,12 +88,14 @@ impl Store {
             let read = if state.readers > 0 { now } else { stream.last_read() };
             oldest = Some(oldest.map_or(read, |oldest| oldest.min(read)));
         }
-        cache.orphans.retain(|orphan| orphan.strong_count() > 0);
-        for orphan in cache.orphans.iter().filter_map(Weak::upgrade) {
-            leased_frames += orphan.leased_frames(&orphan.state.lock());
-        }
-        let (cached_streams, evictions, expiries) = (cache.streams.len(), cache.evictions, cache.expiries);
-        drop(cache);
+        orphans.retain(|orphan| {
+            let Some(stream) = orphan.upgrade() else {
+                return false;
+            };
+            leased_frames += stream.leased_frames(&stream.state.lock());
+            true
+        });
+        inner.cache.lock().restore(orphans);
         let failures = &inner.retention.failures;
         let last_frames = failures.last_frames.load(Ordering::Relaxed);
         let used_frames = inner.pool.used();
@@ -99,7 +104,7 @@ impl Store {
             backed_frames: inner.pool.backed_frames(),
             used_frames,
             cache_bytes: u64::from(used_frames) * FRAME_BYTES as u64,
-            cached_streams,
+            cached_streams: cached.len(),
             oldest_read_age: oldest.map(|read| now.saturating_sub(read)),
             evictions,
             expiries,

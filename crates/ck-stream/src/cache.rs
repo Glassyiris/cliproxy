@@ -106,9 +106,15 @@ impl Hasher for IdHasher {
     }
 }
 
+/// A cached stream and its key in `order`, which removal needs: keys lag the last read.
+struct Entry {
+    stream: Arc<Stream>,
+    queued: Duration,
+}
+
 #[derive(Default)]
 pub(crate) struct Cache {
-    streams: HashMap<u64, Arc<Stream>, BuildHasherDefault<IdHasher>>,
+    streams: HashMap<u64, Entry, BuildHasherDefault<IdHasher>>,
     order: BTreeSet<(Duration, u64)>,
     evictions: u64,
     expiries: u64,
@@ -119,6 +125,28 @@ pub(crate) struct Cache {
 }
 
 impl Cache {
+    fn insert(&mut self, stream: Arc<Stream>) {
+        let queued = stream.last_read();
+        self.order.insert((queued, stream.id));
+        self.streams.insert(stream.id, Entry { stream, queued });
+    }
+
+    fn get(&self, id: u64) -> Option<Arc<Stream>> {
+        self.streams.get(&id).map(|entry| entry.stream.clone())
+    }
+
+    fn remove(&mut self, id: u64) -> Option<Arc<Stream>> {
+        let entry = self.streams.remove(&id)?;
+        self.order.remove(&(entry.queued, id));
+        Some(entry.stream)
+    }
+
+    fn requeue(&mut self, key: (Duration, u64), read: Duration) {
+        self.order.remove(&key);
+        self.order.insert((read, key.1));
+        self.streams.get_mut(&key.1).unwrap().queued = read;
+    }
+
     /// Each prune scans at most twice the entries the previous one kept, and as many
     /// retirements pass in between, so retirement is amortized O(1). The length stays below
     /// twice the entries alive at the last prune plus one; capacity keeps its historical peak.
@@ -128,6 +156,13 @@ impl Cache {
             self.prune_at = 2 * self.orphans.len();
         }
         self.orphans.push(Arc::downgrade(stream));
+    }
+
+    /// Put back the retired streams a scrape kept, ahead of those retired meanwhile.
+    fn restore(&mut self, mut kept: Vec<Weak<Stream>>) {
+        self.prune_at = 2 * kept.len();
+        kept.append(&mut self.orphans);
+        self.orphans = kept;
     }
 }
 
@@ -230,17 +265,15 @@ impl Inner {
             if Some(key.1) == exclude {
                 continue;
             }
-            let stream = cache.streams[&key.1].clone();
+            let stream = cache.streams[&key.1].stream.clone();
             let state = stream.state.lock();
             // Queue timestamps are lower bounds. Once maintenance has observed a stream, the
             // fence holds off new leases, so one requeue at the real value is exact except for
             // an acknowledgement racing this pass, which then counts as arriving after it.
             let last_read = stream.last_read();
             if last_read != key.0 && refreshed.insert(key.1) {
-                let real = (last_read, key.1);
                 drop(state);
-                cache.order.remove(&key);
-                cache.order.insert(real);
+                cache.requeue(key, last_read);
                 continue;
             }
             let returned = gain(&stream, &state);
@@ -258,8 +291,7 @@ impl Inner {
         }
         cache.evictions += victims.len() as u64;
         for key in victims {
-            let stream = cache.streams.remove(&key.1).unwrap();
-            cache.order.remove(&key);
+            let stream = cache.remove(key.1).unwrap();
             stream.invalidate_locked(&mut stream.state.lock());
             cache.retire(&stream);
         }
@@ -275,19 +307,18 @@ impl Inner {
                 if now.saturating_sub(read) <= self.limits.cache_ttl {
                     break;
                 }
-                let stream = cache.streams[&id].clone();
+                let stream = cache.streams[&id].stream.clone();
                 let mut state = stream.state.lock();
-                cache.order.remove(&(read, id));
                 // An outstanding wait is a read even without publication or another poll.
                 if state.readers > 0 {
                     stream.touch(now);
                 }
                 let last_read = stream.last_read();
                 if last_read != read {
-                    cache.order.insert((last_read, id));
+                    cache.requeue((read, id), last_read);
                     continue;
                 }
-                cache.streams.remove(&id);
+                cache.remove(id);
                 cache.expiries += 1;
                 stream.invalidate_locked(&mut state);
                 cache.retire(&stream);
@@ -323,6 +354,17 @@ impl Inner {
             maintenance.failures.errors += 1;
         }
         maintenance.first_error.get_or_insert(error);
+    }
+
+    /// Remove a stream its writer ended with `Gone`. Invalidation already freed its slot and
+    /// frames, so neither eviction nor expiry would remove it before the TTL. Called after
+    /// invalidation released the stream's state and the fence, so the lock order holds.
+    pub(crate) fn forget(&self, stream: &Arc<Stream>) {
+        let mut cache = self.cache.lock();
+        // Eviction, expiry or shutdown may have removed it first.
+        if cache.remove(stream.id).is_some() {
+            cache.retire(stream);
+        }
     }
 
     /// Allocate one of the `remaining` frames a pending reservation still needs, with its
@@ -465,14 +507,13 @@ impl Store {
             self.inner.limits,
             now,
         ));
-        cache.order.insert((stream.last_read(), id));
-        cache.streams.insert(id, stream.clone());
+        cache.insert(stream.clone());
         Ok(Writer::new(self.inner.clone(), stream))
     }
 
     /// Attach at the number of complete records already consumed. Authorization belongs to the caller.
     pub fn reader(&self, id: u64, after: u64) -> Result<Reader, Error> {
-        let stream = self.inner.cache.lock().streams.get(&id).cloned().ok_or(Error::Gone)?;
+        let stream = self.inner.cache.lock().get(id).ok_or(Error::Gone)?;
         Reader::new(stream, after)
     }
 
@@ -498,7 +539,7 @@ impl Store {
             let _retention = self.inner.retention.retain();
             let mut cache = self.inner.cache.lock();
             cache.order.clear();
-            for stream in std::mem::take(&mut cache.streams).into_values() {
+            for Entry { stream, .. } in std::mem::take(&mut cache.streams).into_values() {
                 stream.finish(Terminal::Shutdown);
                 cache.retire(&stream);
             }

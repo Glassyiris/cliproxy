@@ -1,5 +1,7 @@
 use super::*;
-use crate::FRAME_BYTES;
+use std::task::Poll;
+
+use crate::{FRAME_BYTES, Read};
 
 fn store() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().unwrap();
@@ -221,4 +223,33 @@ fn orphan_pruning_stays_amortized_when_one_orphan_dies_per_retirement() {
         "{scanned} orphan checks for {retirements} retirements"
     );
     drop(live);
+}
+
+#[test]
+fn stats_waits_for_a_stream_without_holding_the_cache_lock() {
+    let (_dir, store) = store();
+    let writer = store.create().unwrap();
+    let mut ending = store.create().unwrap();
+    ending.append(b"leased").unwrap();
+    let Poll::Ready(Some(Read::Record(lease))) = store.reader(ending.id(), 0).unwrap().try_next() else {
+        panic!("expected a record");
+    };
+    let stream = store.inner.cache.lock().get(writer.id()).unwrap();
+    let state = stream.state.lock();
+    std::thread::scope(|scope| {
+        let scrape = scope.spawn(|| store.stats());
+        std::thread::sleep(Duration::from_millis(100));
+        // Admission and attachment proceed while the scrape waits for one stream's state.
+        let free = store.inner.cache.try_lock_for(Duration::from_secs(1)).is_some();
+        // A stream retired meanwhile joins the retired list the scrape puts back. Ending it
+        // takes the cache lock, so it runs only if the scrape left that lock free.
+        if free {
+            ending.finish(Terminal::Gone);
+        }
+        drop(state);
+        assert_eq!(scrape.join().unwrap().cached_streams, 2);
+        assert!(free, "stats held the cache lock while waiting for stream state");
+    });
+    assert_eq!(store.stats().leased_frames, 1);
+    drop(lease);
 }

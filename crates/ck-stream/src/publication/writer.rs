@@ -284,6 +284,9 @@ impl Writer {
 
     pub fn finish(&mut self, terminal: Terminal) {
         self.stream.finish(terminal);
+        if terminal == Terminal::Gone {
+            self.inner.forget(&self.stream);
+        }
     }
 
     /// Release a non-resumable canonical prefix. Response records must never use this API.
