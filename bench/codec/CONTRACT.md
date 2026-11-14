@@ -15,7 +15,7 @@ The driver runs old-1, new-1, old-2, new-2, old-3, new-3 as separate processes. 
 
 Exit 0 means all required records passed. Exit 1 means at least one median regressed. Exit 2 means a prerequisite, workload, schema or measurement failed. No missing row is skipped. Existing output is refused rather than overwritten. Failures retain available raw stdout/stderr and `summary.json`; a nonexistent executable is an error, not a baseline.
 
-Identical executable SHA-256 values, or an identical pair of source revision and source checksum, return exit 2 before measurement. Distinct wrapper paths are not distinct implementations.
+Identical executable SHA-256 values, or an identical pair of source revision and source checksum, return exit 2 before measurement. A new harness that reports the baseline revision also returns exit 2, whatever its source checksum: a harness built from that revision compares the old code with itself. Distinct wrapper paths are not distinct implementations.
 
 ## Implement the harness CLI
 
@@ -143,4 +143,4 @@ CODEC_TEST_ARTIFACTS="$ARTIFACTS/selftest" \
 shellcheck bench/codec-gate.sh bench/codec/build-baseline.sh
 ```
 
-The controls exercise the actual shell entrypoint and complete required matrix: exact-boundary pass with outliers, CPU/throughput/memory regression, missing output, absent old executable, identical executable content and identical source identity. Focused checks cover stream-kind selection, leftover-cgroup diagnostics, each metric's direction, 0% memory/storage limits including allocated bytes, zero-old values, invalid numbers, missing metrics, wrong units, wrong manifest/round and duplicate/unknown workload IDs. `fake_harness.py` is a synthetic control only, not a production or baseline harness.
+The controls exercise the actual shell entrypoint and complete required matrix: exact-boundary pass with outliers, CPU/throughput/memory regression, missing output, absent old executable, identical executable content, identical source identity and a new harness at the baseline revision. Focused checks cover stream-kind selection, leftover-cgroup diagnostics, each metric's direction, 0% memory/storage limits including allocated bytes, zero-old values, invalid numbers, missing metrics, wrong units, wrong manifest/round and duplicate/unknown workload IDs. `fake_harness.py` is a synthetic control only, not a production or baseline harness.

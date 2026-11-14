@@ -266,6 +266,8 @@ def run(old, new, out):
             raise ValueError("old/new revision and source checksum are identical")
         if descriptions["old"]["revision"] != BASELINE_REVISION:
             raise ValueError(f"old source must be pinned to {BASELINE_REVISION}")
+        if descriptions["new"]["revision"] == BASELINE_REVISION:
+            raise ValueError("new source must not be the baseline revision; that compares old code with itself")
         if descriptions["old"]["config"] != descriptions["new"]["config"]:
             raise ValueError("old/new configuration differs")
         data = manifest()

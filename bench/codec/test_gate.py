@@ -152,6 +152,11 @@ class GateControls(unittest.TestCase):
         failed = {row["metric"] for row in summary["comparisons"] if not row["pass"]}
         self.assertEqual(failed, {"cpu_ns_per_event", "throughput", "heap_retained"})
 
+    def test_new_harness_at_baseline_revision_is_error(self):
+        summary, _ = self.control("baseline-revision", 2)
+        self.assertIn("new source must not be the baseline revision", summary["error"])
+        self.assertEqual(summary["rounds"], [])
+
     def test_missing_empty_matrix_output(self):
         summary, _ = self.control("missing", 2)
         self.assertEqual(summary["status"], "error")
