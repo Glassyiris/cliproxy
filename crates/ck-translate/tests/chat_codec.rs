@@ -6,6 +6,8 @@ mod budget;
 mod depth;
 #[path = "semantic/incremental.rs"]
 mod incremental;
+#[path = "semantic/media_deletion.rs"]
+mod media_deletion;
 #[path = "semantic/media_lifetime.rs"]
 mod media_lifetime;
 #[path = "semantic/request_controls.rs"]
