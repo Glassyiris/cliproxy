@@ -316,8 +316,9 @@ fn isolated_tmpfs_growth_and_cold_prefault_enospc() {
     let warm: Vec<_> = (0..WARM).map(|_| pool.allocate().unwrap()).collect();
     let cold = lock(&pool.slow.0).cold.len();
     let filler = fill_available(&filler_path);
-    assert!(
-        pool.allocate().is_err(),
+    assert_eq!(
+        pool.allocate().unwrap_err().raw_os_error(),
+        Some(libc::EFAULT),
         "cold reservation must fail before any content write"
     );
     assert_eq!(pool.used(), WARM as u32);

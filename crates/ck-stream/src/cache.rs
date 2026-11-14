@@ -1,15 +1,23 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     io,
+    ops::Bound::{Excluded, Unbounded},
+    panic::AssertUnwindSafe,
     sync::{
-        Arc, Condvar, Mutex, RwLock, RwLockWriteGuard, Weak,
+        Arc, Condvar, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
 
-use crate::{Config, Error, Limits, Reader, Terminal, Writer, pool::Pool, publication::Stream};
+use parking_lot::MutexGuard;
+
+use crate::{
+    Config, Error, Limits, Reader, Terminal, Writer,
+    pool::Pool,
+    publication::{State, Stream},
+};
 
 /// Monotonic elapsed time. Implementations must never move backwards.
 pub trait Clock: Send + Sync + 'static {
@@ -56,6 +64,22 @@ fn checked_add(counter: &AtomicU64, increment: u64) -> Option<u64> {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Maintenance failures since the store opened. The crate has no logger: the runtime reads
+/// these counters and the first unread error (`Store::take_reclaim_error`) and logs them.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MaintenanceFailures {
+    /// Ticks whose expiry or decay returned an I/O error.
+    pub errors: u64,
+    /// Ticks that panicked. The maintenance thread contains each panic and keeps running.
+    pub panics: u64,
+}
+
+#[derive(Default)]
+struct Maintenance {
+    failures: MaintenanceFailures,
+    first_error: Option<io::Error>,
+}
+
 #[derive(Default)]
 pub(crate) struct Cache {
     streams: HashMap<u64, Arc<Stream>>,
@@ -69,7 +93,13 @@ pub(crate) struct Inner {
     cache: parking_lot::Mutex<Cache>,
     retention: Arc<Retention>,
     closed: AtomicBool,
-    reclaim_error: Mutex<Option<io::Error>>,
+    maintenance: parking_lot::Mutex<Maintenance>,
+    /// Runs once between planning victims and invalidating them.
+    #[cfg(test)]
+    evict_hook: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Runs once in a tick, after expiry and before decay.
+    #[cfg(test)]
+    tick_hook: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 pub(crate) struct Retention {
@@ -88,22 +118,26 @@ impl Retention {
         }
     }
 
-    pub(crate) fn reading<R>(
-        &self,
-        stream: &Stream,
-        read: impl FnOnce(&mut crate::publication::State) -> (R, bool),
-    ) -> R {
-        let mut state = stream.state.lock();
+    /// Lock stream state once no maintenance pass that has observed this stream is running.
+    /// Reads and every writer transition that lowers a stream's reclaimable frames use this,
+    /// so eviction's counted gain cannot shrink before it invalidates its victims.
+    pub(crate) fn lock_stable<'a>(
+        &'a self,
+        stream: &'a Stream,
+    ) -> (MutexGuard<'a, State>, Option<RwLockReadGuard<'a, ()>>) {
+        let state = stream.state.lock();
         // Maintenance sets the flag before locking stream state. Once it has observed a
-        // stream, that mutex's release/acquire edge makes later readers take the fence.
-        let _retention = if self.active.load(Ordering::Acquire) {
-            drop(state);
-            let guard = self.fence.read().unwrap();
-            state = stream.state.lock();
-            Some(guard)
-        } else {
-            None
-        };
+        // stream, that mutex's release/acquire edge makes later callers take the fence.
+        if !self.active.load(Ordering::Acquire) {
+            return (state, None);
+        }
+        drop(state);
+        let fence = self.fence.read().unwrap();
+        (stream.state.lock(), Some(fence))
+    }
+
+    pub(crate) fn reading<R>(&self, stream: &Stream, read: impl FnOnce(&mut State) -> (R, bool)) -> R {
+        let (mut state, _fence) = self.lock_stable(stream);
         let (result, acquired) = read(&mut state);
         if acquired {
             state.last_read = self.clock.now();
@@ -124,48 +158,58 @@ impl Drop for RetentionGuard<'_> {
 }
 
 impl Inner {
-    pub(crate) fn evict_one(&self, exclude: u64) -> bool {
+    /// Invalidate the least recently read streams whose `gain` (what invalidation returns now)
+    /// together covers `wanted`. Streams that would return nothing stay cached; if every
+    /// candidate together cannot cover the request, nothing is invalidated and this returns false.
+    fn evict(&self, exclude: Option<u64>, wanted: usize, gain: fn(&State) -> usize) -> bool {
         let _retention = self.retention.retain();
         let mut cache = self.cache.lock();
-        let mut stale = 0;
-        let pass = cache.streams.len() - usize::from(cache.streams.contains_key(&exclude));
-        while let Some(key) = cache.order.iter().find(|(_, id)| *id != exclude).copied() {
-            let stream = cache.streams[&key.1].clone();
-            let mut state = stream.state.lock();
-            cache.order.remove(&key);
-            // Queue timestamps are lower bounds. The fence stops new refreshes; a reader
-            // already past its flag check can refresh once. After one stale pass, scan
-            // real timestamps: each observed stream is then stable under the fence.
-            if state.last_read != key.0 {
-                cache.order.insert((state.last_read, key.1));
-                stale += 1;
-                if stale < pass {
-                    continue;
-                }
-                drop(state);
+        let mut victims = Vec::new();
+        let mut found = 0;
+        let mut refreshed = HashSet::new();
+        let mut cursor = None;
+        while found < wanted {
+            let next = match cursor {
+                None => cache.order.first(),
+                Some(key) => cache.order.range((Excluded(key), Unbounded)).next(),
+            };
+            let Some(&key) = next else {
                 break;
+            };
+            cursor = Some(key);
+            if Some(key.1) == exclude {
+                continue;
             }
-            cache.streams.remove(&key.1);
-            if stream.invalidate_locked(&mut state) > 0 {
-                return true;
+            let stream = cache.streams[&key.1].clone();
+            let state = stream.state.lock();
+            // Queue timestamps are lower bounds. Once maintenance has observed a stream, the
+            // fence keeps its timestamp stable, so one requeue at the real value is exact.
+            if state.last_read != key.0 && refreshed.insert(key.1) {
+                let real = (state.last_read, key.1);
+                drop(state);
+                cache.order.remove(&key);
+                cache.order.insert(real);
+                continue;
+            }
+            let returned = gain(&state);
+            if returned > 0 {
+                found += returned;
+                victims.push(key);
             }
         }
-        // Every fallback iteration removes a stream, even if leases pin all its frames.
-        while let Some(id) = cache
-            .streams
-            .iter()
-            .filter(|(id, _)| **id != exclude)
-            .min_by_key(|(id, stream)| (stream.state.lock().last_read, **id))
-            .map(|(id, _)| *id)
-        {
-            let stream = cache.streams.remove(&id).unwrap();
-            let mut state = stream.state.lock();
-            cache.order.retain(|(_, entry)| *entry != id);
-            if stream.invalidate_locked(&mut state) > 0 {
-                return true;
-            }
+        if found < wanted {
+            return false;
         }
-        false
+        #[cfg(test)]
+        if let Some(hook) = self.evict_hook.lock().take() {
+            hook();
+        }
+        for key in victims {
+            let stream = cache.streams.remove(&key.1).unwrap();
+            cache.order.remove(&key);
+            stream.invalidate_locked(&mut stream.state.lock());
+        }
+        true
     }
 
     fn tick(&self) -> io::Result<()> {
@@ -192,17 +236,57 @@ impl Inner {
                 stream.invalidate_locked(&mut state);
             }
         }
+        #[cfg(test)]
+        if let Some(hook) = self.tick_hook.lock().take() {
+            hook();
+        }
         self.pool.decay()
     }
 
-    pub(crate) fn allocate(&self, exclude: u64) -> Result<u32, Error> {
+    /// One maintenance round, with a panicking tick contained, counted and reported.
+    ///
+    /// A panic in the fenced expiry section poisons the retention fence, which §6.4 keeps
+    /// poisoning: every later tick and eviction then panics, so maintenance cannot recover.
+    /// Only a broken internal invariant panics there. A panic after that section, in decay,
+    /// is recoverable: pool locks ignore poisoning, and decay moves frames to the cold list
+    /// before any punch, so the next tick expires and decays normally.
+    fn maintain(&self) {
+        match std::panic::catch_unwind(AssertUnwindSafe(|| self.tick())) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => self.record_failure(error, false),
+            Err(_) => self.record_failure(io::Error::other("stream maintenance tick panicked"), true),
+        }
+    }
+
+    fn record_failure(&self, error: io::Error, panicked: bool) {
+        let mut maintenance = self.maintenance.lock();
+        if panicked {
+            maintenance.failures.panics += 1;
+        } else {
+            maintenance.failures.errors += 1;
+        }
+        maintenance.first_error.get_or_insert(error);
+    }
+
+    /// Allocate one of the `remaining` frames a pending reservation still needs.
+    pub(crate) fn allocate(&self, exclude: u64, remaining: usize) -> Result<u32, Error> {
+        let mut evicted_for_tmpfs = false;
         loop {
             match self.pool.allocate() {
                 Ok(frame) => return Ok(frame),
                 Err(error) if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() => {
-                    if !self.evict_one(exclude) {
+                    if !self.evict(Some(exclude), remaining, State::reclaimable) {
                         return Err(Error::StorageExhausted);
                     }
+                }
+                // tmpfs refused growth (ENOSPC) or a cold prefault (EFAULT). Evicted frames are
+                // already backed, so retry once; a second refusal keeps the OS cause (G7).
+                Err(error)
+                    if !evicted_for_tmpfs
+                        && matches!(error.raw_os_error(), Some(libc::ENOSPC | libc::EFAULT))
+                        && self.evict(Some(exclude), remaining, State::reclaimable) =>
+                {
+                    evicted_for_tmpfs = true;
                 }
                 Err(error) => return Err(Error::Io(error)),
             }
@@ -242,7 +326,11 @@ impl Store {
                 active: AtomicBool::new(false),
             }),
             closed: AtomicBool::new(false),
-            reclaim_error: Mutex::new(None),
+            maintenance: parking_lot::Mutex::new(Maintenance::default()),
+            #[cfg(test)]
+            evict_hook: parking_lot::Mutex::new(None),
+            #[cfg(test)]
+            tick_hook: parking_lot::Mutex::new(None),
         });
         let stop = Arc::new((Mutex::new(false), Condvar::new()));
         let weak: Weak<Inner> = Arc::downgrade(&inner);
@@ -263,9 +351,7 @@ impl Store {
                     let Some(inner) = weak.upgrade() else {
                         break;
                     };
-                    if let Err(error) = inner.tick() {
-                        *inner.reclaim_error.lock().unwrap() = Some(error);
-                    }
+                    inner.maintain();
                 }
             })?;
         Ok(Self {
@@ -290,12 +376,26 @@ impl Store {
 
     /// Admit one exclusive producer. The returned id is an internal generation, not an auth token.
     pub fn create(&self) -> Result<Writer, Error> {
+        // Header slots bound the mapping, not the cache: when none is free, evict the least
+        // recently read stream exactly as under frame pressure. Invalidation frees its slot.
+        let slot = loop {
+            if self.inner.closed.load(Ordering::Acquire) {
+                return Err(Error::Closed);
+            }
+            if let Some(slot) = self.inner.pool.claim_slot() {
+                break slot;
+            }
+            if !self.inner.evict(None, 1, State::slot_count) {
+                return Err(Error::StorageExhausted);
+            }
+        };
         let mut cache = self.inner.cache.lock();
-        if self.inner.closed.load(Ordering::Acquire) {
-            return Err(Error::Closed);
+        let id = if self.inner.closed.load(Ordering::Acquire) {
+            Err(Error::Closed)
+        } else {
+            checked_add(&NEXT_ID, 1).ok_or(Error::StorageExhausted)
         }
-        let id = checked_add(&NEXT_ID, 1).ok_or(Error::StorageExhausted)?;
-        let slot = self.inner.pool.claim_slot().ok_or(Error::StorageExhausted)?;
+        .inspect_err(|_| self.inner.pool.release_slot(slot))?;
         let now = self.inner.retention.clock.now();
         let stream = Arc::new(Stream::new(
             id,
@@ -321,8 +421,13 @@ impl Store {
         self.inner.tick()
     }
 
+    /// The first maintenance failure since the last call; later failures only count.
     pub fn take_reclaim_error(&self) -> Option<io::Error> {
-        self.inner.reclaim_error.lock().unwrap().take()
+        self.inner.maintenance.lock().first_error.take()
+    }
+
+    pub fn maintenance_failures(&self) -> MaintenanceFailures {
+        self.inner.maintenance.lock().failures
     }
 
     /// Stop admission, publish cancellation, join maintenance, then release cache retention.
@@ -351,8 +456,158 @@ impl Store {
 
 impl Drop for Store {
     fn drop(&mut self) {
-        if let Err(error) = self.shutdown() {
-            eprintln!("stream maintenance failed: {error}");
+        // A dropped store has nowhere to report; callers that need the error call shutdown first.
+        let _ = self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::FRAME_BYTES;
+
+    fn store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::new(dir.path().join("pool"));
+        config.pool_bytes = Some(4 * FRAME_BYTES);
+        config.max_event_bytes = 4 * FRAME_BYTES;
+        config.header_slots = 8;
+        config.workers = 1;
+        let store = Store::open(config).unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn a_panicking_tick_is_counted_and_the_next_tick_expires_and_decays() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::new(dir.path().join("pool"));
+        config.pool_bytes = Some(64 * FRAME_BYTES);
+        config.max_event_bytes = FRAME_BYTES;
+        config.header_slots = 4;
+        config.workers = 1;
+        let clock = Arc::new(ManualClock::default());
+        let mut store = Store::with_clock(config, clock.clone()).unwrap();
+        let mut expiring = store.create().unwrap();
+        for _ in 0..30 {
+            expiring.append(&[1; FRAME_BYTES]).unwrap();
         }
+        // Stop the background thread so every tick below runs synchronously on this thread.
+        *store.stop.0.lock().unwrap() = true;
+        store.stop.1.notify_all();
+        store.worker.take().unwrap().join().unwrap();
+        *store.inner.tick_hook.lock() = Some(Box::new(|| panic!("injected maintenance panic")));
+        store.inner.maintain();
+        assert_eq!(
+            store.maintenance_failures(),
+            MaintenanceFailures { errors: 0, panics: 1 }
+        );
+        clock.advance(Duration::from_secs(3601));
+        for _ in 0..3 {
+            store.inner.maintain();
+        }
+        assert!(matches!(store.reader(expiring.id(), 0), Err(Error::Gone)));
+        assert!(store.inner.pool.cold_frames() > 0, "decay ran after the panic");
+        assert_eq!(
+            store.maintenance_failures(),
+            MaintenanceFailures { errors: 0, panics: 1 }
+        );
+        let error = store.shutdown().unwrap_err();
+        assert_eq!(error.to_string(), "stream maintenance tick panicked");
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Transition {
+        Rollback,
+        ReleasePrefix,
+        Invalidate,
+    }
+
+    /// Victims are `victim` (2 frames) and `canonical` (1 frame). While eviction sits between
+    /// counting and invalidating, the victim's writer returns its frames to the pool and, if
+    /// eviction is still planning, `taker` retakes them as scratch.
+    fn interleave(transition: Transition) {
+        let (_dir, store) = store();
+        let planning = Arc::new(AtomicBool::new(false));
+        let (planned, planned_signal) = std::sync::mpsc::channel();
+        let (moved, moved_signal) = std::sync::mpsc::channel::<()>();
+        let hook_planning = planning.clone();
+        *store.inner.evict_hook.lock() = Some(Box::new(move || {
+            hook_planning.store(true, Ordering::Release);
+            planned.send(()).unwrap();
+            let _ = moved_signal.recv_timeout(Duration::from_millis(500));
+            hook_planning.store(false, Ordering::Release);
+        }));
+        let mut victim = store.create().unwrap();
+        let mut canonical = store.create().unwrap();
+        canonical.append(&[2; 10]).unwrap();
+        let mut scratch_owner = store.create().unwrap();
+        let _scratch = scratch_owner.begin_scratch(FRAME_BYTES).unwrap();
+        let mut allocating = store.create().unwrap();
+        let mut taker = store.create().unwrap();
+        let victim_id = victim.id();
+        std::thread::scope(|scope| {
+            let (ready, ready_signal) = std::sync::mpsc::channel();
+            let writer = scope.spawn(move || {
+                let wait = || {
+                    ready.send(()).unwrap();
+                    planned_signal.recv().unwrap();
+                };
+                match transition {
+                    Transition::Rollback => {
+                        let reservation = victim.begin_record(2 * FRAME_BYTES, false, 0, 0).unwrap();
+                        wait();
+                        drop(reservation);
+                    }
+                    Transition::ReleasePrefix => {
+                        let end = victim.append(&[1; 2 * FRAME_BYTES]).unwrap().end;
+                        wait();
+                        victim.release_before(end).unwrap();
+                    }
+                    Transition::Invalidate => {
+                        victim.append(&[1; 2 * FRAME_BYTES]).unwrap();
+                        wait();
+                        victim.finish(Terminal::Gone);
+                    }
+                }
+                // Holding the scratch keeps any frames it took away from the allocation.
+                let taken = planning
+                    .load(Ordering::Acquire)
+                    .then(|| taker.begin_scratch(2 * FRAME_BYTES).unwrap());
+                let _ = moved.send(());
+                taken
+            });
+            ready_signal.recv().unwrap();
+            assert!(
+                allocating.append(&[3; 3 * FRAME_BYTES]).is_ok(),
+                "{transition:?} moved counted frames during eviction"
+            );
+            assert!(writer.join().unwrap().is_none(), "{transition:?} ran inside eviction");
+        });
+        assert!(matches!(store.reader(victim_id, 0), Err(Error::Gone)));
+        assert!(matches!(store.reader(canonical.id(), 0), Err(Error::Gone)));
+        assert_eq!(store.used_frames(), 4);
+    }
+
+    #[test]
+    fn victims_cannot_move_frames_between_count_and_invalidation() {
+        for transition in [Transition::Rollback, Transition::ReleasePrefix, Transition::Invalidate] {
+            interleave(transition);
+        }
+    }
+
+    #[test]
+    fn maintenance_keeps_the_first_error_and_counts_later_ones() {
+        let (_dir, store) = store();
+        store.inner.record_failure(io::Error::other("first"), false);
+        store.inner.record_failure(io::Error::other("second"), false);
+        store.inner.record_failure(io::Error::other("third"), true);
+        assert_eq!(
+            store.maintenance_failures(),
+            MaintenanceFailures { errors: 2, panics: 1 }
+        );
+        assert_eq!(store.take_reclaim_error().unwrap().to_string(), "first");
+        assert!(store.take_reclaim_error().is_none());
+        store.inner.record_failure(io::Error::other("fourth"), false);
+        assert_eq!(store.take_reclaim_error().unwrap().to_string(), "fourth");
     }
 }

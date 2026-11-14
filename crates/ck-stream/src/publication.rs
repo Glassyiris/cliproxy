@@ -97,12 +97,28 @@ pub(crate) struct State {
     scratch_frames: usize,
     external_metadata: usize,
     pub last_read: Duration,
+    // Taken at invalidation, so an evicted stream frees its header before its last handle drops.
+    slot: Option<u32>,
+}
+
+impl State {
+    /// Frames that invalidation would return to the pool now: owned and unleased.
+    pub(crate) fn reclaimable(&self) -> usize {
+        self.frames
+            .iter()
+            .filter(|frame| frame.pool.is_some() && frame.leases == 0)
+            .count()
+    }
+
+    /// Header slots that invalidation would return now.
+    pub(crate) fn slot_count(&self) -> usize {
+        usize::from(self.slot.is_some())
+    }
 }
 
 #[repr(align(128))]
 pub(crate) struct Stream {
     pub id: u64,
-    slot: u32,
     pool: Arc<Pool>,
     retention: Arc<Retention>,
     limits: Limits,
@@ -123,7 +139,6 @@ impl Stream {
     ) -> Self {
         Self {
             id,
-            slot,
             pool,
             retention,
             limits,
@@ -142,6 +157,7 @@ impl Stream {
                 scratch_frames: 0,
                 external_metadata: 0,
                 last_read: now,
+                slot: Some(slot),
             }),
         }
     }
@@ -179,10 +195,10 @@ impl Stream {
         }
         state.next_sequence = index.next_sequence;
         state.end = index.start + index.len;
-        self.pool
-            .header(self.slot)
-            .committed
-            .store(state.end, Ordering::Release);
+        // Callers publish only after checking invalidation under this lock, so the slot is held.
+        if let Some(slot) = state.slot {
+            self.pool.header(slot).committed.store(state.end, Ordering::Release);
+        }
     }
 
     pub(crate) fn finish(&self, terminal: Terminal) {
@@ -200,7 +216,8 @@ impl Stream {
     }
 
     pub(crate) fn invalidate(&self) {
-        self.invalidate_locked(&mut self.state.lock());
+        let (mut state, _fence) = self.retention.lock_stable(self);
+        self.invalidate_locked(&mut state);
     }
 
     pub(crate) fn invalidate_locked(&self, state: &mut State) -> u32 {
@@ -217,6 +234,9 @@ impl Stream {
             }
         }
         state.records.clear();
+        if let Some(slot) = state.slot.take() {
+            self.pool.release_slot(slot);
+        }
         self.notify.notify_waiters();
         self.stopped.notify_waiters();
         released
@@ -231,11 +251,14 @@ impl Drop for Stream {
                 self.pool.release(index);
             }
         }
-        self.pool.release_slot(self.slot);
+        if let Some(slot) = state.slot.take() {
+            self.pool.release_slot(slot);
+        }
     }
 }
 
 /// Exclusive stream producer. A disconnect must drop a reader, not this producer.
+/// Dropping it before a terminal publishes `ProducerLost`.
 pub struct Writer {
     inner: Arc<Inner>,
     stream: Arc<Stream>,
@@ -248,15 +271,9 @@ impl Writer {
     pub fn id(&self) -> u64 {
         self.stream.id
     }
+    /// The published end. It stays valid after invalidation, when the header slot may be reused.
     pub fn committed(&self) -> Position {
-        Position::at(
-            self.id(),
-            self.stream
-                .pool
-                .header(self.stream.slot)
-                .committed
-                .load(Ordering::Acquire),
-        )
+        Position::at(self.id(), self.stream.state.lock().end)
     }
 
     /// Wait for the producer to stop, including expiry, eviction, cancellation and shutdown.
@@ -384,10 +401,10 @@ impl Writer {
         if Stream::metadata(&state) > self.inner.limits.max_metadata_bytes {
             return Err(Error::StorageExhausted);
         }
-        for _ in 0..extra {
+        for taken in 0..extra {
             // Allocation may evict another stream. Never enter cache ownership with metadata locked.
             drop(state);
-            let frame = match self.inner.allocate(self.id()) {
+            let frame = match self.inner.allocate(self.id(), extra - taken) {
                 Ok(frame) => frame,
                 Err(error) => {
                     self.rollback(old_count);
@@ -411,7 +428,7 @@ impl Writer {
     }
 
     fn rollback(&self, old_count: usize) {
-        let mut state = self.stream.state.lock();
+        let (mut state, _fence) = self.stream.retention.lock_stable(&self.stream);
         while state.frames.len() > old_count {
             if let Some(frame) = state.frames.pop_back().unwrap().pool {
                 self.inner.pool.release(frame);
@@ -440,7 +457,7 @@ impl Writer {
     /// Independent scratch leases release on drop. Frame and record numbers are never recycled.
     pub fn release_before(&mut self, position: Position) -> Result<(), Error> {
         let end = position.byte(self.id())?;
-        let mut state = self.stream.state.lock();
+        let (mut state, _fence) = self.stream.retention.lock_stable(&self.stream);
         if end > state.end {
             return Err(Error::InvalidPosition);
         }
@@ -483,11 +500,13 @@ impl Writer {
 
 impl Drop for Writer {
     fn drop(&mut self) {
-        self.stream.finish(Terminal::Cancelled);
+        // A producer that ends without a terminal is lost, never a client cancel.
+        self.stream.finish(Terminal::ProducerLost);
     }
 }
 
 /// An unpublished reservation; drop rolls back its newly allocated frames.
+/// After a successful commit, further writes and commits return `Closed`.
 pub struct Reservation<'a> {
     writer: &'a mut Writer,
     record: Record,
@@ -499,6 +518,9 @@ pub struct Reservation<'a> {
 
 impl Reservation<'_> {
     pub fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        if self.committed {
+            return Err(Error::Closed);
+        }
         if bytes.len() > self.record.len() as usize - self.written {
             return Err(Error::InvalidPosition);
         }
@@ -519,7 +541,11 @@ impl Reservation<'_> {
         Ok(())
     }
 
-    pub fn commit(mut self) -> Result<Record, Error> {
+    /// `IncompleteRecord` leaves the reservation open, so the caller can finish writing it.
+    pub fn commit(&mut self) -> Result<Record, Error> {
+        if self.committed {
+            return Err(Error::Closed);
+        }
         if self.written != self.record.len() as usize {
             return Err(Error::IncompleteRecord);
         }
@@ -600,8 +626,10 @@ impl Reader {
                 return (Poll::Ready(Some(Read::Terminal(Terminal::Gone))), false);
             }
             // Cache only a prefix acquired from the mapped publication header under this lock.
-            if self.next >= self.available {
-                self.committed = stream.pool.header(stream.slot).committed.load(Ordering::Acquire);
+            if self.next >= self.available
+                && let Some(slot) = state.slot
+            {
+                self.committed = stream.pool.header(slot).committed.load(Ordering::Acquire);
                 self.available = state.next_sequence;
             }
             let index = state.records.partition_point(|run| run.next_sequence <= self.next);
