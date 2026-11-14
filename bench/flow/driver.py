@@ -747,6 +747,8 @@ def limit_position_failure(charged_frames):
     if charged_frames is None:
         return ("storage error position unverified: the gateway reports no frames charged to the "
                 "failed exchange, so the 5,369th-frame failure cannot be checked to one frame")
+    if type(charged_frames) is not int:
+        return f"frames charged must be an integer counter, not {charged_frames!r}"
     if charged_frames != STREAM_MAX_FRAMES:
         return f"storage error with {charged_frames} frames charged, not {STREAM_MAX_FRAMES}"
     return None
