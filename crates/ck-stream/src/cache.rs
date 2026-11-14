@@ -140,9 +140,13 @@ impl Retention {
         let (mut state, _fence) = self.lock_stable(stream);
         let (result, acquired) = read(&mut state);
         if acquired {
-            state.last_read = self.clock.now();
+            stream.touch(self.clock.now());
         }
         result
+    }
+
+    pub(crate) fn now(&self) -> Duration {
+        self.clock.now()
     }
 }
 
@@ -161,7 +165,7 @@ impl Inner {
     /// Invalidate the least recently read streams whose `gain` (what invalidation returns now)
     /// together covers `wanted`. Streams that would return nothing stay cached; if every
     /// candidate together cannot cover the request, nothing is invalidated and this returns false.
-    fn evict(&self, exclude: Option<u64>, wanted: usize, gain: fn(&State) -> usize) -> bool {
+    fn evict(&self, exclude: Option<u64>, wanted: usize, gain: fn(&Stream, &State) -> usize) -> bool {
         let _retention = self.retention.retain();
         let mut cache = self.cache.lock();
         let mut victims = Vec::new();
@@ -183,15 +187,17 @@ impl Inner {
             let stream = cache.streams[&key.1].clone();
             let state = stream.state.lock();
             // Queue timestamps are lower bounds. Once maintenance has observed a stream, the
-            // fence keeps its timestamp stable, so one requeue at the real value is exact.
-            if state.last_read != key.0 && refreshed.insert(key.1) {
-                let real = (state.last_read, key.1);
+            // fence holds off new leases, so one requeue at the real value is exact except for
+            // an acknowledgement racing this pass, which then counts as arriving after it.
+            let last_read = stream.last_read();
+            if last_read != key.0 && refreshed.insert(key.1) {
+                let real = (last_read, key.1);
                 drop(state);
                 cache.order.remove(&key);
                 cache.order.insert(real);
                 continue;
             }
-            let returned = gain(&state);
+            let returned = gain(&stream, &state);
             if returned > 0 {
                 found += returned;
                 victims.push(key);
@@ -226,10 +232,11 @@ impl Inner {
                 cache.order.remove(&(read, id));
                 // An outstanding wait is a read even without publication or another poll.
                 if state.readers > 0 {
-                    state.last_read = now;
+                    stream.touch(now);
                 }
-                if state.last_read != read {
-                    cache.order.insert((state.last_read, id));
+                let last_read = stream.last_read();
+                if last_read != read {
+                    cache.order.insert((last_read, id));
                     continue;
                 }
                 cache.streams.remove(&id);
@@ -275,7 +282,7 @@ impl Inner {
             match self.pool.allocate() {
                 Ok(frame) => return Ok(frame),
                 Err(error) if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() => {
-                    if !self.evict(Some(exclude), remaining, State::reclaimable) {
+                    if !self.evict(Some(exclude), remaining, Stream::reclaimable) {
                         return Err(Error::StorageExhausted);
                     }
                 }
@@ -284,7 +291,7 @@ impl Inner {
                 Err(error)
                     if !evicted_for_tmpfs
                         && matches!(error.raw_os_error(), Some(libc::ENOSPC | libc::EFAULT))
-                        && self.evict(Some(exclude), remaining, State::reclaimable) =>
+                        && self.evict(Some(exclude), remaining, Stream::reclaimable) =>
                 {
                     evicted_for_tmpfs = true;
                 }

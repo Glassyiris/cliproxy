@@ -113,7 +113,7 @@ impl Writer {
         if state.terminal.is_some() {
             return Err(Error::Closed);
         }
-        let live = state.frames.iter().filter(|frame| frame.pool.is_some()).count() + state.scratch_frames;
+        let live = self.stream.live_frames(&state);
         if count > (self.stream.limits.max_frames as usize).saturating_sub(live) {
             return Err(Error::StorageExhausted);
         }

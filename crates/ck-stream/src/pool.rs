@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::io;
 use std::path::Path;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
 use std::sync::{Mutex, MutexGuard};
 
 mod os;
@@ -70,6 +70,8 @@ pub(crate) struct Pool {
     reserve_frames: u32,
     slots: u32,
     free_slots: Mutex<Vec<u32>>,
+    /// References per frame: the owner's plus one per reader lease. Zero means free.
+    refs: Box<[AtomicU32]>,
     shards: Box<[Padded<Mutex<FreeList>>]>,
     slow: Padded<Mutex<Slow>>,
     used: Padded<AtomicU32>,
@@ -89,6 +91,13 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 fn invalid() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, "invalid pool capacity or layout")
+}
+
+fn zeroed_counters(len: usize) -> Box<[AtomicU32]> {
+    // Zeroed allocation leaves untouched pages unbacked, so idle frames cost no memory.
+    let counters = Box::into_raw(vec![0u32; len].into_boxed_slice()) as *mut [AtomicU32];
+    // SAFETY: AtomicU32 has the same size, alignment and bit validity as u32.
+    unsafe { Box::from_raw(counters) }
 }
 
 fn round_up(value: usize, page: usize) -> io::Result<usize> {
@@ -179,6 +188,7 @@ impl Pool {
             reserve_frames,
             slots,
             free_slots: Mutex::new((0..slots).rev().collect()),
+            refs: zeroed_counters(frames as usize),
             shards: shards.into_boxed_slice(),
             slow: Padded(Mutex::new(Slow {
                 backed: initial,
@@ -248,16 +258,41 @@ impl Pool {
                 old
             }
         };
+        self.refs[frame as usize].store(1, Ordering::Relaxed);
         self.used.0.fetch_add(1, Ordering::Relaxed);
         Ok(frame)
     }
 
-    /// Caller returns an owned frame exactly once, after every lease/retainer ends.
-    /// The stream layer enforces this invariant; no mapped borrow may survive release.
-    pub(crate) fn release(&self, frame: u32) {
+    pub(crate) fn references(&self, frame: u32) -> u32 {
+        self.refs[frame as usize].load(Ordering::Relaxed)
+    }
+
+    /// Whether another reference would overflow the frame's count.
+    pub(crate) fn saturated(&self, frame: u32) -> bool {
+        self.refs[frame as usize].load(Ordering::Relaxed) == u32::MAX
+    }
+
+    /// Add a reference to an allocated frame. The caller holds a reference that cannot be
+    /// released concurrently and has checked `saturated` since its last increment.
+    pub(crate) fn retain(&self, frame: u32) {
+        self.refs[frame as usize].fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Drop one reference, which the caller holds and gives up exactly once. The last one
+    /// returns the frame to this thread's free list; no mapped borrow may survive it.
+    /// Returns whether the frame became free.
+    pub(crate) fn release(&self, frame: u32) -> bool {
         assert!(frame < self.backed_frames());
+        let previous = self.refs[frame as usize].fetch_sub(1, Ordering::Release);
+        assert_ne!(previous, 0, "frame released without a reference");
+        if previous != 1 {
+            return false;
+        }
+        // Every earlier holder's reads happen before the frame is reused.
+        fence(Ordering::Acquire);
         self.used.0.fetch_sub(1, Ordering::Relaxed);
         lock(&self.shards[self.shard()].0).frames.push(frame);
+        true
     }
 
     fn frame_start(&self, frame: u32) -> usize {

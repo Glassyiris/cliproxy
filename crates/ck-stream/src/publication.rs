@@ -2,7 +2,7 @@ use std::{
     collections::VecDeque,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     task::Poll,
     time::Duration,
@@ -22,10 +22,9 @@ pub use scratch::{MetadataPermit, ScratchLease, ScratchReservation};
 
 pub(crate) const READER_BYTES: usize = std::mem::size_of::<Reader>();
 
+/// A stream's reference to a pool frame; readers' leases hold their own references.
 pub(crate) struct Frame {
     pool: Option<u32>,
-    leases: u32,
-    retained: bool,
 }
 
 // A run represents exact record boundaries, not a byte range including padding.
@@ -96,23 +95,14 @@ pub(crate) struct State {
     pub(crate) readers: usize,
     scratch_frames: usize,
     external_metadata: usize,
-    pub last_read: Duration,
     // Taken at invalidation, so an evicted stream frees its header before its last handle drops.
     slot: Option<u32>,
 }
 
 impl State {
-    /// Frames that invalidation would return to the pool now: owned and unleased.
-    pub(crate) fn reclaimable(&self) -> usize {
-        self.frames
-            .iter()
-            .filter(|frame| frame.pool.is_some() && frame.leases == 0)
-            .count()
-    }
-
     /// Header slots that invalidation would return now.
-    pub(crate) fn slot_count(&self) -> usize {
-        usize::from(self.slot.is_some())
+    pub(crate) fn slot_count(_: &Stream, state: &Self) -> usize {
+        usize::from(state.slot.is_some())
     }
 }
 
@@ -124,6 +114,10 @@ pub(crate) struct Stream {
     limits: Limits,
     pub state: Mutex<State>,
     invalidated: AtomicBool,
+    /// Clock nanoseconds of the last read. Acknowledgements store it without the state lock.
+    last_read: AtomicU64,
+    /// Frames the stream gave up while leases still pin them; they still count as live.
+    detached: AtomicU64,
     notify: Notify,
     stopped: Notify,
 }
@@ -145,6 +139,8 @@ impl Stream {
             notify: Notify::new(),
             stopped: Notify::new(),
             invalidated: AtomicBool::new(false),
+            last_read: AtomicU64::new(nanos(now)),
+            detached: AtomicU64::new(0),
             state: Mutex::new(State {
                 frames: VecDeque::new(),
                 base_frame: 0,
@@ -156,9 +152,66 @@ impl Stream {
                 readers: 0,
                 scratch_frames: 0,
                 external_metadata: 0,
-                last_read: now,
                 slot: Some(slot),
             }),
+        }
+    }
+
+    pub(crate) fn last_read(&self) -> Duration {
+        Duration::from_nanos(self.last_read.load(Ordering::Relaxed))
+    }
+
+    pub(crate) fn touch(&self, now: Duration) {
+        self.last_read.store(nanos(now), Ordering::Relaxed);
+    }
+
+    /// Frames that invalidation would return to the pool now: owned and unleased.
+    pub(crate) fn reclaimable(&self, state: &State) -> usize {
+        state
+            .frames
+            .iter()
+            .filter(|frame| frame.pool.is_some_and(|index| self.pool.references(index) == 1))
+            .count()
+    }
+
+    /// Frames charged to the stream quota: owned, detached but still leased, and scratch.
+    pub(super) fn live_frames(&self, state: &State) -> usize {
+        state.frames.iter().filter(|frame| frame.pool.is_some()).count()
+            + self.detached.load(Ordering::Acquire) as usize
+            + state.scratch_frames
+    }
+
+    /// Reference every frame of a published record for a new lease, or name the terminal
+    /// that ends the reader instead.
+    fn pin(&self, state: &State, record: Record) -> Result<Pinned, Terminal> {
+        let first = (record.start.frame - state.base_frame) as usize;
+        let last = (last_frame(record) - state.base_frame) as usize;
+        let frames = (first..=last).map(|index| state.frames[index].pool);
+        for frame in frames.clone() {
+            match frame {
+                None => return Err(Terminal::Gone),
+                Some(index) if self.pool.saturated(index) => return Err(Terminal::StorageExhausted),
+                Some(_) => {}
+            }
+        }
+        // The stream's own references keep every frame allocated while these are added.
+        let mut frames = frames.flatten();
+        frames.clone().for_each(|index| self.pool.retain(index));
+        Ok(if first == last {
+            Pinned::One(frames.next().unwrap())
+        } else {
+            Pinned::Many(frames.collect())
+        })
+    }
+
+    /// Give up the stream's reference to a frame; leases keep it pinned until they end.
+    fn detach(&self, frame: &mut Frame) {
+        if let Some(index) = frame.pool.take() {
+            // Count before releasing, so a racing last lease never decrements below zero.
+            self.detached.fetch_add(1, Ordering::AcqRel);
+            if self.pool.release(index) {
+                self.detached.fetch_sub(1, Ordering::AcqRel);
+            }
         }
     }
 
@@ -220,18 +273,11 @@ impl Stream {
         self.invalidate_locked(&mut state);
     }
 
-    pub(crate) fn invalidate_locked(&self, state: &mut State) -> u32 {
-        let mut released = 0;
+    pub(crate) fn invalidate_locked(&self, state: &mut State) {
         self.invalidated.store(true, Ordering::Release);
         state.terminal = Some(Terminal::Gone);
         for frame in &mut state.frames {
-            frame.retained = false;
-            if frame.leases == 0
-                && let Some(index) = frame.pool.take()
-            {
-                self.pool.release(index);
-                released += 1;
-            }
+            self.detach(frame);
         }
         state.records.clear();
         if let Some(slot) = state.slot.take() {
@@ -239,7 +285,6 @@ impl Stream {
         }
         self.notify.notify_waiters();
         self.stopped.notify_waiters();
-        released
     }
 }
 
@@ -361,10 +406,7 @@ impl Writer {
             .map_err(|_| Error::StorageExhausted)?;
         let old_count = state.frames.len();
         let extra = needed.saturating_sub(old_count);
-        if extra > 0
-            && state.frames.iter().filter(|frame| frame.pool.is_some()).count() + state.scratch_frames + extra
-                > self.inner.limits.max_frames as usize
-        {
+        if extra > 0 && self.stream.live_frames(&state) + extra > self.inner.limits.max_frames as usize {
             return Err(Error::StorageExhausted);
         }
         let record = Record {
@@ -418,11 +460,7 @@ impl Writer {
                 self.rollback(old_count);
                 return Err(Error::Gone);
             }
-            state.frames.push_back(Frame {
-                pool: Some(frame),
-                leases: 0,
-                retained: true,
-            });
+            state.frames.push_back(Frame { pool: Some(frame) });
         }
         Ok((record, index, old_count, state))
     }
@@ -483,12 +521,7 @@ impl Writer {
         });
         let count = boundary.saturating_sub(state.base_frame) as usize;
         for frame in state.frames.iter_mut().take(count) {
-            frame.retained = false;
-            if frame.leases == 0
-                && let Some(index) = frame.pool.take()
-            {
-                self.inner.pool.release(index);
-            }
+            self.stream.detach(frame);
         }
         while state.frames.front().is_some_and(|frame| frame.pool.is_none()) {
             state.frames.pop_front();
@@ -639,29 +672,19 @@ impl Reader {
                 .and_then(|run| run.record(stream.id, self.next))
                 && record.end.byte(stream.id).is_ok_and(|end| end <= self.committed)
             {
-                for number in record.start.frame..=last_frame(record) {
-                    let index = (number - state.base_frame) as usize;
-                    if state.frames[index].pool.is_none() {
+                let pinned = match stream.pin(state, record) {
+                    Ok(pinned) => pinned,
+                    Err(terminal) => {
                         self.terminal_seen = true;
-                        return (Poll::Ready(Some(Read::Terminal(Terminal::Gone))), false);
+                        return (Poll::Ready(Some(Read::Terminal(terminal))), false);
                     }
-                    if state.frames[index].leases == u32::MAX {
-                        self.terminal_seen = true;
-                        return (Poll::Ready(Some(Read::Terminal(Terminal::StorageExhausted))), false);
-                    }
-                }
-                for number in record.start.frame..=last_frame(record) {
-                    let index = (number - state.base_frame) as usize;
-                    state.frames[index].leases += 1;
-                }
+                };
                 self.next += 1;
                 return (
                     Poll::Ready(Some(Read::Record(Lease {
                         stream: stream.clone(),
                         record,
-                        first_frame: state.frames[(record.start.frame - state.base_frame) as usize]
-                            .pool
-                            .unwrap(),
+                        pinned,
                         acknowledged: false,
                     }))),
                     true,
@@ -717,11 +740,26 @@ fn last_frame(record: Record) -> u64 {
     }
 }
 
+/// Pool frames a lease references, in record order. Most records fit one frame.
+enum Pinned {
+    One(u32),
+    Many(Box<[u32]>),
+}
+
+impl Pinned {
+    fn frames(&self) -> &[u32] {
+        match self {
+            Self::One(frame) => std::slice::from_ref(frame),
+            Self::Many(frames) => frames,
+        }
+    }
+}
+
 /// Pins immutable published frames, including after invalidation. New access then returns Gone.
 pub struct Lease {
     stream: Arc<Stream>,
     record: Record,
-    first_frame: u32,
+    pinned: Pinned,
     acknowledged: bool,
 }
 
@@ -741,14 +779,7 @@ impl Lease {
         if self.stream.invalidated.load(Ordering::Acquire) {
             return Err(Error::Gone);
         }
-        let frame = if position.frame == self.record.start.frame {
-            self.first_frame
-        } else {
-            let state = self.stream.state.lock();
-            state.frames[(position.frame - state.base_frame) as usize]
-                .pool
-                .ok_or(Error::Gone)?
-        };
+        let frame = self.pinned.frames()[(position.frame - self.record.start.frame) as usize];
         let len = (end - byte).min((FRAME_BYTES - position.offset as usize) as u64) as usize;
         // SAFETY: this lease pins all record frames until Drop. Publication made this span
         // immutable before lease registration; the pool Arc outlives the returned borrow.
@@ -769,31 +800,24 @@ impl Lease {
     pub fn acknowledge(mut self) {
         self.acknowledged = true;
     }
-
-    fn release(&self, state: &mut State) {
-        for number in self.record.start.frame..=last_frame(self.record) {
-            let index = (number - state.base_frame) as usize;
-            let frame = &mut state.frames[index];
-            frame.leases -= 1;
-            if frame.leases == 0
-                && !frame.retained
-                && let Some(index) = frame.pool.take()
-            {
-                self.stream.pool.release(index);
-            }
-        }
-    }
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
         if self.acknowledged {
-            self.stream.retention.reading(&self.stream, |state| {
-                self.release(state);
-                ((), true)
-            });
-        } else {
-            self.release(&mut self.stream.state.lock());
+            self.stream.touch(self.stream.retention.now());
+        }
+        // Releasing a reference only raises the stream's reclaimable count, so eviction's
+        // counted gain stays valid without the state lock or the retention fence.
+        for &frame in self.pinned.frames() {
+            if self.stream.pool.release(frame) {
+                // The stream had detached this frame; its last lease freed it.
+                self.stream.detached.fetch_sub(1, Ordering::AcqRel);
+            }
         }
     }
+}
+
+fn nanos(time: Duration) -> u64 {
+    u64::try_from(time.as_nanos()).unwrap_or(u64::MAX)
 }

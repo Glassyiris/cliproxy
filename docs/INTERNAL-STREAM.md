@@ -582,7 +582,7 @@ General records may span frames; readers parse across positions. A text SSE even
 A separate event index stores only start/end positions and type/correlation indexes; retained index metadata has a configured ceiling too.
 
 ### 6.2 Writer/reader publication
-**S1 choice:** a stream metadata lock implements the publication/lease protocol below; one synchronization mechanism makes complete-prefix visibility and safe reuse explicit. Those invariants, not the lock mechanism, are interoperability requirements.
+**S1 choice:** a stream metadata lock implements the publication/lease protocol below; one synchronization mechanism makes complete-prefix visibility and safe reuse explicit. Each lease holds a reference on every frame it pins, counted per frame next to the stream's own reference, so releasing a lease and refreshing the last-read time on acknowledgement take no lock; the last reference returns the frame to a free list. Those invariants, not the lock mechanism, are interoperability requirements.
 
 | Actor/step | Required operation |
 | --- | --- |
