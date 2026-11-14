@@ -307,47 +307,51 @@ impl Scanner {
                     node: None,
                 };
             }
-            _ => {
-                if !matches!(
-                    expect,
-                    None | Some(Expect::Value | Expect::ArrayFirst | Expect::ArrayValue)
-                ) || (expect.is_none() && !self.nodes.is_empty())
-                {
-                    return Err(Error::Json);
+            _ => self.start_value(at, byte, expect)?,
+        }
+        Ok(())
+    }
+
+    /// Open the value that `byte` begins at `at`: a container, a string or an atom.
+    fn start_value(&mut self, at: u64, byte: u8, expect: Option<Expect>) -> Result<()> {
+        if !matches!(
+            expect,
+            None | Some(Expect::Value | Expect::ArrayFirst | Expect::ArrayValue)
+        ) || (expect.is_none() && !self.nodes.is_empty())
+        {
+            return Err(Error::Json);
+        }
+        match byte {
+            b'{' | b'[' => {
+                if self.frames.len() >= 128 {
+                    return Err(Error::Limit);
                 }
-                match byte {
-                    b'{' | b'[' => {
-                        if self.frames.len() >= 128 {
-                            return Err(Error::Limit);
-                        }
-                        let kind = if byte == b'{' { Kind::Object } else { Kind::Array };
-                        let node = self.value(kind, Span { start: at, end: 0 })?;
-                        self.reserve(0, 1, 0)?;
-                        self.frames.push(Frame {
-                            node,
-                            expect: if byte == b'{' {
-                                Expect::ObjectFirst
-                            } else {
-                                Expect::ArrayFirst
-                            },
-                            key: None,
-                            last: None,
-                        });
-                    }
-                    b'"' => {
-                        let node = self.value(Kind::String, Span { start: at, end: 0 })?;
-                        self.nodes[node].validated_end = at + 1;
-                        self.string = StringDecoder::default();
-                        self.mode = Mode::String {
-                            start: at,
-                            key: false,
-                            node: Some(node),
-                        };
-                    }
-                    b'-' | b'0'..=b'9' | b't' | b'f' | b'n' => self.mode = Mode::Atom { start: at },
-                    _ => return Err(Error::Json),
-                }
+                let kind = if byte == b'{' { Kind::Object } else { Kind::Array };
+                let node = self.value(kind, Span { start: at, end: 0 })?;
+                self.reserve(0, 1, 0)?;
+                self.frames.push(Frame {
+                    node,
+                    expect: if byte == b'{' {
+                        Expect::ObjectFirst
+                    } else {
+                        Expect::ArrayFirst
+                    },
+                    key: None,
+                    last: None,
+                });
             }
+            b'"' => {
+                let node = self.value(Kind::String, Span { start: at, end: 0 })?;
+                self.nodes[node].validated_end = at + 1;
+                self.string = StringDecoder::default();
+                self.mode = Mode::String {
+                    start: at,
+                    key: false,
+                    node: Some(node),
+                };
+            }
+            b'-' | b'0'..=b'9' | b't' | b'f' | b'n' => self.mode = Mode::Atom { start: at },
+            _ => return Err(Error::Json),
         }
         Ok(())
     }
