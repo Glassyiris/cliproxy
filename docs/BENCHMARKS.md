@@ -90,11 +90,15 @@ After the stall, every content byte and the single usage snapshot must survive.
 The capacity case sends about 288 MB and requires a visible
 `stream.storage_exhausted` error, no successful terminal, no upstream retry and a
 surviving gateway. The content before the error must be a gap-free prefix of
-whole records, and the error must arrive at the 5,368-frame limit: the record
-count must fit 268,400,000 stored bytes at 40,966 to 41,990 bytes per record
-(content plus at most 1 KiB of stored framing), give or take one frame. Within
-3 s of the error the upstream write must fail with a broken pipe or reset before
-the whole body is sent; an upstream that completes normally fails the case. Raw
+whole records. Within 3 s of the error the upstream write must fail with a
+broken pipe or reset before the whole body is sent; an upstream that completes
+normally fails the case. The error must also fire exactly when the exchange
+holds all 5,368 frames that its request, response, scratch and replay share
+(§6.4). Client bytes cannot show that to one frame: each stored record adds
+§3.1 framing and an implementation-defined `x_ck` object, and 1 KiB of
+uncertainty per 41 KB record adds up to about 99 frames. No gateway interface reports the frames charged
+to the failed exchange, so the case fails as "position unverified" until one
+does. Raw
 media records the delay until the first byte reaches the client; an external
 HTTP clock does not directly prove the internal 100 ms collection bound.
 
@@ -146,8 +150,10 @@ since last read, evictions, expiries, allocation failures or outstanding leases,
 so those stay `null`.
 
 `bench/flow-gate.sh NEW OUT` is the acceptance run and fails closed: it exits
-nonzero when any scenario fails, any flow metric is missing or
-`FLOW_BUILD_PROVENANCE` is unset. It cannot pass until the gateway reports the internal counters. Add `--diagnostic` to see the remaining checks: the summary is
+nonzero when any scenario fails, any flow metric is missing,
+`FLOW_BUILD_PROVENANCE` is unset or the storage error's frame position is
+unverified. It cannot pass until the gateway reports the internal counters and
+that frame count. Add `--diagnostic` to see the remaining checks: the summary is
 marked "diagnostic, not acceptance", lists those gaps under `unverified`, never
 sets `"pass": true`, and its exit status covers only the scenarios' own checks.
 

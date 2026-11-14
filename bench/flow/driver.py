@@ -28,12 +28,10 @@ SIGNATURE = "opaque+/signature==do-not-change"
 ARGUMENTS = '{"path":"src/測試.rs","line":17}'
 MEDIA = bytes(range(256)) * 32768  # 8 MiB, including invalid textual UTF-8.
 TIMEOUT = 12
-# §6.4 per-stream limit: the 5,369th 50,000-byte frame fails.
-STREAM_LIMIT_BYTES = 5368 * 50000
+# §6.4: one exchange's request, response, scratch and replay frames share
+# max_frames = 5,368; the allocation of the 5,369th frame fails (§9.1 Bounds).
+STREAM_MAX_FRAMES = 5368
 BULK_CONTENT = 40966  # f"{i:05d}:" plus 40,960 bytes per bulk record
-# Stored framing allowed per bulk record when locating the storage error
-# (2.5% of BULK_CONTENT); the error must arrive within one frame of the limit.
-STREAM_LIMIT_FRAMING = 1024
 DIAGNOSTIC = "diagnostic, not acceptance"
 # §9.2 flow-limit metrics and how scenario values combine. The gateway exposes
 # no internal stream counters, so the second group stays missing until it does.
@@ -419,6 +417,11 @@ class RecordedResponse:
 class Gateway:
     resumes = gone = 0  # resume attaches and 410 Gone responses seen by request()
     diagnostic = False
+    # Frames charged to the stream-limit exchange when its storage error fired. No
+    # gateway interface reports them yet (open owner question with the §9.2 counters);
+    # client bytes cannot locate the error to one frame because the stored canonical
+    # record size (§3.1 framing plus x_ck identity) is implementation-defined.
+    charged_frames = None
 
     def __init__(self, binary, out, upstream):
         self.request_number = 0
@@ -718,22 +721,35 @@ def check_stream_limit(gateway, response):
         expected.update(f"{i:05d}:".encode() + b"x" * 40960)
     require(not partial and content.digest() == expected.digest(),
             "content before the storage error is not a gap-free prefix of whole records")
-    # Stored bytes per record lie in [BULK_CONTENT, BULK_CONTENT + STREAM_LIMIT_FRAMING]; the
-    # refused record must be the first that no longer fits, give or take one frame.
-    low = (STREAM_LIMIT_BYTES - 50000) // (BULK_CONTENT + STREAM_LIMIT_FRAMING) - 1
-    high = STREAM_LIMIT_BYTES // BULK_CONTENT
-    require(low <= count <= high,
-            f"storage error after {count} records ({length} content bytes), outside {low}..{high} for the 256 MiB limit")
     require(up.done.wait(3), "upstream still running 3 s after the storage error")
     total = sum(len(record) for record in bulk_records(7000))
-    require(up.errno in (errno.EPIPE, errno.ECONNRESET) and up.sent < total,
-            f"upstream was not cancelled: error {up.error!r}, sent {up.sent} of {total} bytes")
+    require(up.errno is not None or up.sent < total,
+            f"upstream completed without cancellation: sent all {total} bytes after the storage error")
+    require(up.errno in (errno.EPIPE, errno.ECONNRESET),
+            f"upstream ended without a cancellation reset: error {up.error!r}, sent {up.sent} of {total} bytes")
     require(len(up.requests) == 1, "storage exhaustion retried another upstream")
     gateway.await_ready()
     end = next(p["time"] for p in reversed(up.progress) if p["kind"] == "end")
-    return {"delivered_bytes": delivered, "content_records": count, "upstream_bytes": up.sent,
-            "upstream_total_bytes": total, "terminal": "stream.storage_exhausted",
-            "flow": {"cancelled_stream_cleanup_s": max(0.0, end - error_time)}}
+    result = {"delivered_bytes": delivered, "content_records": count, "upstream_bytes": up.sent,
+              "upstream_total_bytes": total, "terminal": "stream.storage_exhausted",
+              "charged_frames": gateway.charged_frames,
+              "flow": {"cancelled_stream_cleanup_s": max(0.0, end - error_time)}}
+    position = limit_position_failure(gateway.charged_frames)
+    if position and gateway.diagnostic:
+        result["position"] = f"{DIAGNOSTIC}: {position}"
+    else:
+        require(not position, position)
+    return result
+
+
+def limit_position_failure(charged_frames):
+    """The error must fire exactly when the exchange holds all 5,368 frames (§6.4, §9.1 Bounds)."""
+    if charged_frames is None:
+        return ("storage error position unverified: the gateway reports no frames charged to the "
+                "failed exchange, so the 5,369th-frame failure cannot be checked to one frame")
+    if charged_frames != STREAM_MAX_FRAMES:
+        return f"storage error with {charged_frames} frames charged, not {STREAM_MAX_FRAMES}"
+    return None
 
 
 def run_scenario(gateway, name):

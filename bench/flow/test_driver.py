@@ -549,10 +549,15 @@ class QueuedResponse:
 
 
 class LimitGateway:
-    """Relays `cutoff` upstream records, then the storage error; optionally cancels upstream."""
+    """Relays `cutoff` upstream records, then the storage error; optionally cancels upstream.
 
-    def __init__(self, up, cutoff, cancel):
+    Without cancellation it first collects the whole upstream body, so the driver
+    must reach its completed-without-cancellation check.
+    """
+
+    def __init__(self, up, cutoff, cancel, charged_frames, diagnostic=False):
         self.up, self.cutoff, self.cancel = up, cutoff, cancel
+        self.charged_frames, self.diagnostic = charged_frames, diagnostic
 
     def await_ready(self):
         pass
@@ -571,45 +576,57 @@ class LimitGateway:
                 if count < self.cutoff:
                     items.put(record)
                 count, record = count + 1, b""
-                if count == self.cutoff:
+                if count == self.cutoff and self.cancel:
                     items.put(STORAGE_ERROR)
                     items.put(None)
-                    if self.cancel:
-                        conn.sock.shutdown(socket.SHUT_RDWR)
-                        conn.close()
-                        return
+                    conn.sock.shutdown(socket.SHUT_RDWR)
+                    conn.close()
+                    return
+            self.up.done.wait(30)
+            items.put(STORAGE_ERROR)
+            items.put(None)
         threading.Thread(target=pump, daemon=True).start()
         return QueuedResponse(items)
 
 
 class StreamLimitChecks(unittest.TestCase):
-    LIMIT = 120 * 50000  # 140..146 bulk records with the driver's framing bound
-
-    def attempt(self, cutoff, cancel):
+    def attempt(self, cutoff, cancel=True, charged_frames=driver.STREAM_MAX_FRAMES, diagnostic=False):
         up = driver.Upstream("stream-limit", None)
         thread = threading.Thread(target=up.serve_forever, daemon=True)
         thread.start()
         try:
-            with mock.patch.object(driver, "STREAM_LIMIT_BYTES", self.LIMIT), \
-                    mock.patch.object(driver.time, "sleep", lambda _: None):
-                gateway = LimitGateway(up, cutoff, cancel)
+            with mock.patch.object(driver.time, "sleep", lambda _: None):
+                gateway = LimitGateway(up, cutoff, cancel, charged_frames, diagnostic)
                 return driver.check_stream_limit(gateway, gateway.response())
         finally:
             up.shutdown()
             up.server_close()
 
     def test_cancelled_error_at_the_limit_passes(self):
-        result = self.attempt(143, cancel=True)
+        result = self.attempt(143)
         self.assertEqual(result["content_records"], 143)
+        self.assertNotIn("position", result)
         self.assertLess(result["upstream_bytes"], result["upstream_total_bytes"])
 
     def test_completed_upstream_is_rejected(self):
-        with self.assertRaisesRegex(AssertionError, "upstream"):
+        with self.assertRaisesRegex(AssertionError, "upstream completed without cancellation"):
             self.attempt(143, cancel=False)
 
     def test_early_storage_error_is_rejected(self):
-        with self.assertRaisesRegex(AssertionError, "outside"):
-            self.attempt(10, cancel=True)
+        for cutoff, frames in ((10, 9), (143, driver.STREAM_MAX_FRAMES - 2)):
+            with self.subTest(frames=frames), self.assertRaisesRegex(AssertionError, f"with {frames} frames charged"):
+                self.attempt(cutoff, charged_frames=frames)
+
+    def test_unreported_position_fails_closed(self):
+        with self.assertRaisesRegex(AssertionError, "position unverified"):
+            self.attempt(143, charged_frames=None)
+
+    def test_diagnostic_reports_unverified_position_without_passing(self):
+        result = self.attempt(143, charged_frames=None, diagnostic=True)
+        self.assertTrue(result["position"].startswith(driver.DIAGNOSTIC))
+        summary = driver.summarize([{"scenario": "stream-limit", "status": "pass", **result}], "rev", True)
+        self.assertFalse(summary["pass"])
+        self.assertIn(f"stream-limit: {result['position']}", summary["unverified"])
 
 
 class FlowSummaryChecks(unittest.TestCase):
