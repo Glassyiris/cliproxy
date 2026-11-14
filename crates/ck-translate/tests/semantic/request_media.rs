@@ -18,6 +18,21 @@ fn data_uri_images_and_files_decode_bytes_and_restore_native_metadata() {
 }
 
 #[test]
+fn input_audio_format_selects_the_canonical_mime() {
+    for (format, mime) in [("wav", Some("audio/wav")), ("mp3", Some("audio/mpeg")), ("flac", None)] {
+        let input = serde_json::json!({"model":"m","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"BAUG","format":format}}]}]});
+        let (output, events) = request(input.to_string().as_bytes());
+        assert_eq!(output["messages"], input["messages"]);
+        let published: Vec<_> = events
+            .iter()
+            .filter(|e| e["pointer"] == "/messages/0/content/0/mime")
+            .map(|e| e["value"].as_str().unwrap())
+            .collect();
+        assert_eq!(published, Vec::from_iter(mime), "{format}");
+    }
+}
+
+#[test]
 fn unknown_content_kinds_and_refusals_keep_native_shapes() {
     let input = br#"{"model":"m","messages":[{"role":"assistant","content":[{"type":"refusal","refusal":"no","vendor":0},{"type":"video","source":{"kind":"future","x_ck":{"attempt":8}}}]}]}"#;
     let (output, events) = request(input);

@@ -90,3 +90,95 @@ fn incomplete_successful_tool_json_and_identity_contradictions_are_rejected() {
     let incomplete = serde_json::json!({"id":"r","model":"m","created":1,"choices":[{"index":0,"message":{"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{"}}]},"finish_reason":"tool_calls"}]});
     rejected(incomplete.to_string().as_bytes(), BodyMode::Buffered, false);
 }
+
+/// The data of the first `kind` event; frames carry an `id:` line before `data:`.
+fn event_data(text: &str, kind: &str) -> serde_json::Value {
+    let data = text
+        .lines()
+        .skip_while(|line| line.strip_prefix("event: ") != Some(kind))
+        .find_map(|line| line.strip_prefix("data: "))
+        .unwrap_or_else(|| panic!("no {kind} event in {text}"));
+    serde_json::from_str(data).unwrap()
+}
+
+fn error_status(text: &str) -> (u64, String) {
+    let error = event_data(text, "x_ck.error");
+    (
+        error["status"].as_u64().unwrap(),
+        error["scope"].as_str().unwrap().to_owned(),
+    )
+}
+
+#[test]
+fn invalid_input_status_follows_the_failing_side() {
+    use super::{ChatCapability, Ingress, RequestIngress};
+    let mut mapped = Mapped::new();
+    let mut ingress = Ingress::new(
+        &mut mapped.writer,
+        &mapped.store,
+        identity(Direction::Request),
+        Operation::Generate,
+        1024,
+    )
+    .unwrap();
+    assert!(ingress.advance(&mut mapped.writer, b"{]").is_err());
+    assert!(ingress.finish(&mut mapped.writer, &ChatCapability).is_err());
+    let published = mapped.output(&mapped.writer);
+    assert_eq!(
+        error_status(std::str::from_utf8(&published).unwrap()),
+        (400, "client".to_owned())
+    );
+
+    let mut mapped = Mapped::new();
+    let mut ingress = codec::chat::response::Ingress::new(
+        &mut mapped.writer,
+        &mapped.store,
+        identity(Direction::Response),
+        Operation::Generate,
+        BodyMode::Streaming,
+        1024 * 1024,
+    )
+    .unwrap();
+    assert!(
+        ingress
+            .advance(&mut mapped.writer, b"data: {\"choices\":[}\n\n")
+            .is_err()
+    );
+    let published = mapped.output(&mapped.writer);
+    assert_eq!(
+        error_status(std::str::from_utf8(&published).unwrap()),
+        (502, "upstream".to_owned())
+    );
+}
+
+#[test]
+fn length_and_content_filter_finish_tolerate_incomplete_tool_json() {
+    let start = "data: {\"id\":\"r\",\"model\":\"m\",\"created\":1,\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{\\\"a\\\":\"}}]},\"finish_reason\":null}]}\n\n";
+    for reason in ["length", "content_filter"] {
+        let finish = serde_json::json!({"id":"r","choices":[{"index":0,"delta":{},"finish_reason":reason}]});
+        let mut mapped = Mapped::new();
+        let mut ingress = codec::chat::response::Ingress::new(
+            &mut mapped.writer,
+            &mapped.store,
+            identity(Direction::Response),
+            Operation::Generate,
+            BodyMode::Streaming,
+            1024 * 1024,
+        )
+        .unwrap();
+        ingress
+            .advance(
+                &mut mapped.writer,
+                format!("{start}data: {finish}\n\ndata: [DONE]\n\n").as_bytes(),
+            )
+            .unwrap();
+        ingress.finish(&mut mapped.writer).unwrap();
+        let published = mapped.output(&mapped.writer);
+        let text = std::str::from_utf8(&published).unwrap();
+        assert_eq!(text.matches("event: x_ck.done\n").count(), 1, "{reason}");
+        assert!(!text.contains("event: x_ck.error\n"), "{reason}");
+        let end = event_data(text, "x_ck.tool.end");
+        assert_eq!(end["status"], "incomplete", "{reason}");
+        assert_eq!(end["valid_json"], false, "{reason}");
+    }
+}
