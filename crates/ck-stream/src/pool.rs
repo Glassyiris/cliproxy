@@ -1,0 +1,364 @@
+//! Process-private frame storage. Publication and lease ownership belong to streams.
+
+use crate::FRAME_BYTES;
+use std::cell::Cell;
+use std::io;
+use std::path::Path;
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
+
+mod os;
+#[cfg(test)]
+mod tests;
+
+const EXTENT: u32 = 21;
+const WARM: usize = 8;
+static NEXT_SHARD: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static THREAD_SHARD: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+#[repr(C, align(128))]
+pub(crate) struct Header {
+    pub committed: AtomicU64,
+}
+
+#[repr(align(128))]
+struct Padded<T>(T);
+
+struct FreeList {
+    frames: Vec<u32>,
+    // The bottom of a LIFO stack below this mark was never popped this interval.
+    low_water: usize,
+}
+
+impl FreeList {
+    fn pop(&mut self) -> Option<u32> {
+        let frame = self.frames.pop();
+        self.low_water = self.low_water.min(self.frames.len());
+        frame
+    }
+}
+
+struct Slow {
+    backed: u32,
+    cold: Vec<u32>,
+    candidates: Vec<u32>,
+}
+
+struct Mapping {
+    base: NonNull<u8>,
+    len: usize,
+}
+
+impl Drop for Mapping {
+    fn drop(&mut self) {
+        // SAFETY: this object owns the sole mapping; Pool's last owner has ended.
+        unsafe { libc::munmap(self.base.as_ptr().cast(), self.len) };
+    }
+}
+
+/// Owners retain this pool (normally via Arc) until all mapped leases end.
+#[repr(align(128))]
+pub(crate) struct Pool {
+    mapping: Mapping,
+    file: os::Backing,
+    header_bytes: usize,
+    page: usize,
+    capacity: u32,
+    reserve_frames: u32,
+    slots: u32,
+    free_slots: Mutex<Vec<u32>>,
+    shards: Box<[Padded<Mutex<FreeList>>]>,
+    slow: Padded<Mutex<Slow>>,
+    used: Padded<AtomicU32>,
+    backed: Padded<AtomicU32>,
+}
+
+// SAFETY: mapping address/lifetime never change. Locks exclusively own free frames;
+// streams enforce exclusive unpublished writes and pin immutable spans with leases.
+// All shared mapped metadata consists of initialized atomics.
+unsafe impl Send for Pool {}
+// SAFETY: the same ownership and publication contracts apply across shared references.
+unsafe impl Sync for Pool {}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+fn invalid() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, "invalid pool capacity or layout")
+}
+
+fn round_up(value: usize, page: usize) -> io::Result<usize> {
+    value.checked_add(page - 1).map(|n| n / page * page).ok_or_else(invalid)
+}
+
+impl Pool {
+    pub(crate) fn open(
+        directory: &Path,
+        frames: u32,
+        slots: u32,
+        workers: usize,
+        reserve_frames: u32,
+    ) -> io::Result<Self> {
+        if frames == 0 || slots == 0 || workers == 0 || reserve_frames > frames {
+            return Err(invalid());
+        }
+        // SAFETY: sysconf has no pointer arguments or process-state mutation.
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if page <= 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let page = page as usize;
+        let header_bytes = round_up((slots as usize).checked_mul(128).ok_or_else(invalid)?, page)?;
+        let len = round_up(
+            (frames as usize)
+                .checked_mul(FRAME_BYTES)
+                .and_then(|n| n.checked_add(header_bytes))
+                .ok_or_else(invalid)?,
+            page,
+        )?;
+        if len > isize::MAX as usize || len > i64::MAX as usize {
+            return Err(invalid());
+        }
+        let file = os::Backing::open(directory)?;
+        let initial = frames.min(EXTENT).max(reserve_frames);
+        let initial_bytes = round_up(header_bytes + initial as usize * FRAME_BYTES, page)?;
+        file.grow(0, initial_bytes)?;
+        // SAFETY: fd owns a writable regular file. The entire VA range is reserved
+        // once; only fallocate-backed extents are accessed before later growth.
+        let base = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                file.fd(),
+                0,
+            )
+        };
+        if base == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        let mapping = Mapping {
+            base: NonNull::new(base.cast()).ok_or_else(invalid)?,
+            len,
+        };
+        os::populate(mapping.base.as_ptr(), initial_bytes)?;
+        // SAFETY: fallocate/populate succeeded; the page-aligned header is private
+        // during construction. Initialize atomic objects, not references to zero bytes.
+        unsafe {
+            for slot in 0..slots {
+                mapping
+                    .base
+                    .as_ptr()
+                    .add(slot as usize * 128)
+                    .cast::<Header>()
+                    .write(Header {
+                        committed: AtomicU64::new(0),
+                    });
+            }
+        }
+        let mut shards = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            shards.push(Padded(Mutex::new(FreeList {
+                frames: Vec::new(),
+                low_water: 0,
+            })));
+        }
+        // Frames are distributed lazily; a worker steals resident frames before cold ones.
+        lock(&shards[0].0).frames.extend((0..initial).rev());
+        Ok(Self {
+            mapping,
+            file,
+            header_bytes,
+            page,
+            capacity: frames,
+            reserve_frames,
+            slots,
+            free_slots: Mutex::new((0..slots).rev().collect()),
+            shards: shards.into_boxed_slice(),
+            slow: Padded(Mutex::new(Slow {
+                backed: initial,
+                cold: Vec::new(),
+                candidates: Vec::new(),
+            })),
+            used: Padded(AtomicU32::new(0)),
+            backed: Padded(AtomicU32::new(initial)),
+        })
+    }
+
+    fn shard(&self) -> usize {
+        THREAD_SHARD.with(|assigned| {
+            let id = assigned.get().unwrap_or_else(|| {
+                let id = NEXT_SHARD.fetch_add(1, Ordering::Relaxed);
+                assigned.set(Some(id));
+                id
+            });
+            id % self.shards.len()
+        })
+    }
+
+    fn resident(&self, local: usize) -> Option<u32> {
+        for step in 0..self.shards.len() {
+            if let Some(frame) = lock(&self.shards[(local + step) % self.shards.len()].0).pop() {
+                return Some(frame);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn allocate(&self) -> io::Result<u32> {
+        let local = self.shard();
+        let frame = if let Some(frame) = self.resident(local) {
+            frame
+        } else {
+            // The reclaimer holds this lock until every candidate is on the cold
+            // list and its punch completes: allocation cannot see missing capacity.
+            let mut slow = lock(&self.slow.0);
+            if let Some(frame) = self.resident(local) {
+                frame
+            } else if let Some(&frame) = slow.cold.last() {
+                let start = self.frame_start(frame);
+                let page_start = start / self.page * self.page;
+                let end = round_up(start + FRAME_BYTES, self.page)?;
+                // Failure leaves ownership on the cold list; no writer sees holes.
+                os::populate(self.address(page_start), end - page_start)?;
+                slow.cold.pop();
+                frame
+            } else {
+                if slow.backed == self.capacity {
+                    return Err(io::Error::new(
+                        io::ErrorKind::OutOfMemory,
+                        "stream pool capacity exhausted",
+                    ));
+                }
+                let old = slow.backed;
+                let new = old.saturating_add(EXTENT).min(self.capacity);
+                let old_end = round_up(self.header_bytes + old as usize * FRAME_BYTES, self.page)?;
+                let new_end = round_up(self.header_bytes + new as usize * FRAME_BYTES, self.page)?;
+                self.file.grow(old_end, new_end - old_end)?;
+                os::populate(self.address(old_end), new_end - old_end)?;
+                slow.backed = new;
+                self.backed.0.store(new, Ordering::Release);
+                let mut free = lock(&self.shards[local].0);
+                free.frames.extend((old + 1..new).rev());
+                old
+            }
+        };
+        self.used.0.fetch_add(1, Ordering::Relaxed);
+        Ok(frame)
+    }
+
+    /// Caller returns an owned frame exactly once, after every lease/retainer ends.
+    /// The stream layer enforces this invariant; no mapped borrow may survive release.
+    pub(crate) fn release(&self, frame: u32) {
+        assert!(frame < self.backed_frames());
+        self.used.0.fetch_sub(1, Ordering::Relaxed);
+        lock(&self.shards[self.shard()].0).frames.push(frame);
+    }
+
+    fn frame_start(&self, frame: u32) -> usize {
+        self.header_bytes + frame as usize * FRAME_BYTES
+    }
+
+    fn address(&self, offset: usize) -> *mut u8 {
+        assert!(offset <= self.mapping.len);
+        // SAFETY: the checked offset is inside or one past the reserved mapping.
+        unsafe { self.mapping.base.as_ptr().add(offset) }
+    }
+
+    fn span(&self, frame: u32, offset: usize, len: usize) -> *mut u8 {
+        assert!(frame < self.backed_frames());
+        assert!(offset <= FRAME_BYTES && len <= FRAME_BYTES - offset);
+        self.address(self.frame_start(frame) + offset)
+    }
+
+    /// # Safety
+    /// The caller owns this allocated frame; the span is in bounds and unpublished.
+    /// No reader or other writer may access the span until publication synchronizes it.
+    pub(crate) unsafe fn write(&self, frame: u32, offset: usize, bytes: &[u8]) {
+        let target = self.span(frame, offset, bytes.len());
+        // SAFETY: caller owns the unpublished destination; copy permits a mapped
+        // source span to overlap, without creating an escaping mutable reference.
+        unsafe { std::ptr::copy(bytes.as_ptr(), target, bytes.len()) };
+    }
+
+    /// # Safety
+    /// The frame is allocated and held by a lease for the returned borrow's lifetime.
+    /// The span is in bounds, published with synchronization, and remains immutable.
+    pub(crate) unsafe fn slice(&self, frame: u32, offset: usize, len: usize) -> &[u8] {
+        let source = self.span(frame, offset, len);
+        // SAFETY: caller pins initialized immutable bytes until the borrow ends.
+        unsafe { std::slice::from_raw_parts(source, len) }
+    }
+
+    pub(crate) fn claim_slot(&self) -> Option<u32> {
+        let slot = lock(&self.free_slots).pop()?;
+        let header = self.header(slot);
+        header.committed.store(0, Ordering::Relaxed);
+        Some(slot)
+    }
+
+    /// Caller returns a slot exactly once, only when its stream object is dropped.
+    pub(crate) fn release_slot(&self, slot: u32) {
+        assert!(slot < self.slots);
+        lock(&self.free_slots).push(slot);
+    }
+
+    pub(crate) fn header(&self, slot: u32) -> &Header {
+        assert!(slot < self.slots);
+        // SAFETY: construction initialized each aligned slot; it remains mapped
+        // for self's lifetime, and shared access touches atomic fields only.
+        unsafe { &*self.address(slot as usize * 128).cast::<Header>() }
+    }
+
+    /// Called once per externally scheduled second. Returns reclamation failures.
+    pub(crate) fn decay(&self) -> io::Result<()> {
+        let mut slow = lock(&self.slow.0);
+        let Slow { cold, candidates, .. } = &mut *slow;
+        candidates.clear();
+        for shard in &self.shards {
+            let mut free = lock(&shard.0);
+            let count = free.low_water.min(free.frames.len()).saturating_sub(WARM);
+            // The startup prefix stays backed even while free; punch only the excess.
+            candidates.extend(free.frames.extract_if(..count, |frame| *frame >= self.reserve_frames));
+            free.low_water = free.frames.len();
+        }
+        candidates.sort_unstable();
+        // Publish cold ownership before any destructive syscall, even if a later
+        // run fails. Conservative prefault also covers partially successful punches.
+        cold.extend_from_slice(candidates);
+        let mut first_error = None;
+        let mut cursor = 0;
+        while cursor < candidates.len() {
+            let first = candidates[cursor];
+            let mut last = first;
+            cursor += 1;
+            while cursor < candidates.len() && candidates[cursor] == last + 1 {
+                last = candidates[cursor];
+                cursor += 1;
+            }
+            let start = round_up(self.frame_start(first), self.page)?;
+            let end = (self.frame_start(last) + FRAME_BYTES) / self.page * self.page;
+            if end > start
+                && let Err(error) = self.file.punch(start, end - start)
+            {
+                first_error.get_or_insert(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    pub(crate) fn capacity(&self) -> u32 {
+        self.capacity
+    }
+    pub(crate) fn used(&self) -> u32 {
+        self.used.0.load(Ordering::Relaxed)
+    }
+    pub(crate) fn backed_frames(&self) -> u32 {
+        self.backed.0.load(Ordering::Acquire)
+    }
+}
